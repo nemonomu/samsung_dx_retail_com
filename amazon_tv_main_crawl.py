@@ -293,42 +293,19 @@ class AmazonTVCrawler:
             # Use sequential_id (1-300) for collection order
             collection_order = self.sequential_id
 
-            # Save to raw_data table (session-level dedup already done above)
-            cursor.execute("""
-                INSERT INTO raw_data
-                ("order", mall_name, page_number, Retailer_SKU_Name, Number_of_units_purchased_past_month,
-                 Final_SKU_Price, Original_SKU_Price, Shipping_Info,
-                 Available_Quantity_for_Purchase, Discount_Type, Product_URL, ASIN)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-            """, (
-                collection_order,
-                data['mall_name'],
-                data['page_number'],
-                data['Retailer_SKU_Name'],
-                data['Number_of_units_purchased_past_month'],
-                data['Final_SKU_Price'],
-                data['Original_SKU_Price'],
-                data['Shipping_Info'],
-                data['Available_Quantity_for_Purchase'],
-                data['Discount_Type'],
-                data['Product_URL'],
-                data['ASIN']
-            ))
-
-            raw_data_result = cursor.fetchone()
-
-            # Insert to Amazon_tv_main_crawled
-            if raw_data_result:
+            # Try INSERT first, if fails due to duplicate ASIN, do UPDATE
+            try:
                 cursor.execute("""
-                    INSERT INTO Amazon_tv_main_crawled
-                    ("order", mall_name, Retailer_SKU_Name, Number_of_units_purchased_past_month,
+                    INSERT INTO raw_data
+                    ("order", mall_name, page_number, Retailer_SKU_Name, Number_of_units_purchased_past_month,
                      Final_SKU_Price, Original_SKU_Price, Shipping_Info,
-                     Available_Quantity_for_Purchase, Discount_Type, ASIN)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     Available_Quantity_for_Purchase, Discount_Type, Product_URL, ASIN)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
                 """, (
                     collection_order,
                     data['mall_name'],
+                    data['page_number'],
                     data['Retailer_SKU_Name'],
                     data['Number_of_units_purchased_past_month'],
                     data['Final_SKU_Price'],
@@ -336,8 +313,98 @@ class AmazonTVCrawler:
                     data['Shipping_Info'],
                     data['Available_Quantity_for_Purchase'],
                     data['Discount_Type'],
+                    data['Product_URL'],
                     data['ASIN']
                 ))
+                raw_data_result = cursor.fetchone()
+
+            except Exception as e:
+                # If duplicate, rollback and UPDATE instead
+                if 'duplicate key' in str(e):
+                    self.db_conn.rollback()
+                    cursor = self.db_conn.cursor()
+
+                    cursor.execute("""
+                        UPDATE raw_data SET
+                            "order" = %s,
+                            page_number = %s,
+                            Retailer_SKU_Name = %s,
+                            Number_of_units_purchased_past_month = %s,
+                            Final_SKU_Price = %s,
+                            Original_SKU_Price = %s,
+                            Shipping_Info = %s,
+                            Available_Quantity_for_Purchase = %s,
+                            Discount_Type = %s,
+                            Product_URL = %s
+                        WHERE mall_name = %s AND ASIN = %s
+                        RETURNING id
+                    """, (
+                        collection_order,
+                        data['page_number'],
+                        data['Retailer_SKU_Name'],
+                        data['Number_of_units_purchased_past_month'],
+                        data['Final_SKU_Price'],
+                        data['Original_SKU_Price'],
+                        data['Shipping_Info'],
+                        data['Available_Quantity_for_Purchase'],
+                        data['Discount_Type'],
+                        data['Product_URL'],
+                        data['mall_name'],
+                        data['ASIN']
+                    ))
+                    raw_data_result = cursor.fetchone()
+                else:
+                    raise
+
+            # Insert to Amazon_tv_main_crawled (or UPDATE if exists)
+            if raw_data_result:
+                try:
+                    cursor.execute("""
+                        INSERT INTO Amazon_tv_main_crawled
+                        ("order", mall_name, Retailer_SKU_Name, Number_of_units_purchased_past_month,
+                         Final_SKU_Price, Original_SKU_Price, Shipping_Info,
+                         Available_Quantity_for_Purchase, Discount_Type, ASIN)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        collection_order,
+                        data['mall_name'],
+                        data['Retailer_SKU_Name'],
+                        data['Number_of_units_purchased_past_month'],
+                        data['Final_SKU_Price'],
+                        data['Original_SKU_Price'],
+                        data['Shipping_Info'],
+                        data['Available_Quantity_for_Purchase'],
+                        data['Discount_Type'],
+                        data['ASIN']
+                    ))
+                except Exception as e:
+                    if 'duplicate key' in str(e):
+                        # UPDATE existing record
+                        cursor.execute("""
+                            UPDATE Amazon_tv_main_crawled SET
+                                "order" = %s,
+                                Retailer_SKU_Name = %s,
+                                Number_of_units_purchased_past_month = %s,
+                                Final_SKU_Price = %s,
+                                Original_SKU_Price = %s,
+                                Shipping_Info = %s,
+                                Available_Quantity_for_Purchase = %s,
+                                Discount_Type = %s
+                            WHERE mall_name = %s AND ASIN = %s
+                        """, (
+                            collection_order,
+                            data['Retailer_SKU_Name'],
+                            data['Number_of_units_purchased_past_month'],
+                            data['Final_SKU_Price'],
+                            data['Original_SKU_Price'],
+                            data['Shipping_Info'],
+                            data['Available_Quantity_for_Purchase'],
+                            data['Discount_Type'],
+                            data['mall_name'],
+                            data['ASIN']
+                        ))
+                    else:
+                        raise
 
                 # Add ASIN to session tracking set
                 if data['ASIN']:

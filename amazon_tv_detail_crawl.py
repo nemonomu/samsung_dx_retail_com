@@ -172,6 +172,24 @@ class AmazonDetailCrawler:
         cleaned = re.sub(r'\s*\([^)]*\)', '', rank_text)
         return cleaned.strip()
 
+    def clean_membership_discount(self, text):
+        """Extract Prime membership discount text (from 'Prime members get FREE delivery' to before 'Join Prime')"""
+        if not text:
+            return None
+
+        # Find "Prime members get FREE delivery" start
+        if "Prime members get FREE delivery" in text:
+            start_idx = text.find("Prime members get FREE delivery")
+            text = text[start_idx:]
+
+            # Remove "Join Prime" and everything after
+            if "Join Prime" in text:
+                text = text.split("Join Prime")[0].strip()
+
+            return text.strip()
+
+        return None
+
     def scrape_detail_page(self, url_data):
         """Scrape detail page and extract information"""
         try:
@@ -195,7 +213,10 @@ class AmazonDetailCrawler:
             sku_popularity_raw = self.extract_text_safe(tree, self.xpaths.get('sku_popularity'))
             sku_popularity = sku_popularity_raw if sku_popularity_raw and "Amazon's Choice" in sku_popularity_raw else None
 
-            membership_discount = self.extract_text_safe(tree, self.xpaths.get('membership_discount'))
+            # Retailer_Membership_Discounts - clean Prime text
+            membership_discount_raw = self.extract_text_safe(tree, self.xpaths.get('membership_discount'))
+            membership_discount = self.clean_membership_discount(membership_discount_raw)
+
             samsung_sku_name = self.extract_text_safe(tree, self.xpaths.get('samsung_sku_name'))
 
             # Ranks - remove parentheses

@@ -44,13 +44,13 @@ def insert_amazon_detail_xpath():
                 'xpath': '//*[@id="acBadge_feature_div"]/div/span[1]/span/span',
                 'description': 'SKU popularity badge (collect only if "Amazon\'s Choice")'
             },
-            # Retailer_Membership_Discounts (to be added later)
+            # Retailer_Membership_Discounts
             {
                 'mall_name': 'Amazon',
                 'page_type': 'detail_page',
                 'data_field': 'membership_discount',
-                'xpath': '',
-                'description': 'Prime membership discount info (XPath TBD)'
+                'xpath': '//*[@id="mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE"]/span',
+                'description': 'Prime membership discount info (from "Prime members get FREE delivery" to before "Join Prime")'
             },
             # Samsung_SKU_Name
             {

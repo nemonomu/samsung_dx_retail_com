@@ -297,6 +297,12 @@ class AmazonTVCrawler:
         """Save collected data with collection order (1-300)"""
         cursor = None
         try:
+            # Clean up any aborted transaction before starting
+            try:
+                self.db_conn.rollback()
+            except:
+                pass
+
             # Use sequential_id (1-300) for collection order
             collection_order = self.sequential_id
 

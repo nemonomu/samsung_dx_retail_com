@@ -294,6 +294,20 @@ class AmazonTVCrawler:
         """Save collected data with collection order (1-300)"""
         cursor = None
         try:
+            # Check current connection status
+            try:
+                cur_test = self.db_conn.cursor()
+                cur_test.execute("SELECT 1")
+                cur_test.close()
+            except Exception as conn_err:
+                print(f"[DEBUG] Connection test failed: {conn_err}")
+                print(f"[DEBUG] Attempting to reconnect...")
+                try:
+                    self.db_conn.close()
+                except:
+                    pass
+                self.connect_db()
+
             # Temporarily disable autocommit for transaction
             self.db_conn.autocommit = False
 

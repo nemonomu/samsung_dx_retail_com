@@ -311,8 +311,7 @@ class AmazonTVCrawler:
                     Shipping_Info = EXCLUDED.Shipping_Info,
                     Available_Quantity_for_Purchase = EXCLUDED.Available_Quantity_for_Purchase,
                     Discount_Type = EXCLUDED.Discount_Type,
-                    Product_URL = EXCLUDED.Product_URL,
-                    updated_at = CURRENT_TIMESTAMP
+                    Product_URL = EXCLUDED.Product_URL
                 RETURNING id
             """, (
                 collection_order,

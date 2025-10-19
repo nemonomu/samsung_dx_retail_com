@@ -100,8 +100,8 @@ class WalmartTVCrawler:
         }
         options.add_experimental_option("prefs", prefs)
 
-        # Use undetected_chromedriver
-        self.driver = uc.Chrome(options=options, version_main=131)
+        # Use undetected_chromedriver (auto-detect Chrome version)
+        self.driver = uc.Chrome(options=options)
         self.driver.set_page_load_timeout(60)
         self.wait = WebDriverWait(self.driver, 20)
 

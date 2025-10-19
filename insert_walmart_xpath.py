@@ -20,13 +20,13 @@ def insert_walmart_xpath():
 
         # Walmart XPath selectors from wmart_crawl_base.txt
         walmart_xpaths = [
-            # Base container
+            # Base container - More flexible to catch all products
             {
                 'mall_name': 'Walmart',
                 'page_type': 'main',
                 'data_field': 'base_container',
-                'xpath': '//div[contains(@class, "mb0 ph0-xl pt0-xl bb b--near-white w-25 pb3-m ph1")]',
-                'description': 'Main product container for each TV listing'
+                'xpath': '//div[contains(@class, "mb0") and contains(@class, "ph1") and .//span[@data-automation-id="product-title"]]',
+                'description': 'Main product container (more flexible class match + product title verification)'
             },
             # Retailer_SKU_Name
             {

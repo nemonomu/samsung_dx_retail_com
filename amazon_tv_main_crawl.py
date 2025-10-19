@@ -34,7 +34,8 @@ class AmazonTVCrawler:
         """Connect to PostgreSQL database"""
         try:
             self.db_conn = psycopg2.connect(**DB_CONFIG)
-            print("[OK] Database connected")
+            self.db_conn.autocommit = True  # Enable autocommit mode
+            print("[OK] Database connected (autocommit enabled)")
             return True
         except Exception as e:
             print(f"[ERROR] Database connection failed: {e}")
@@ -57,13 +58,11 @@ class AmazonTVCrawler:
                 }
 
             cursor.close()
-            self.db_conn.commit()  # Commit to close transaction
             print(f"[OK] Loaded {len(self.xpaths)} XPath selectors")
             return True
 
         except Exception as e:
             print(f"[ERROR] Failed to load XPaths: {e}")
-            self.db_conn.rollback()  # Rollback on error
             return False
 
     def load_page_urls(self):
@@ -79,13 +78,11 @@ class AmazonTVCrawler:
 
             urls = cursor.fetchall()
             cursor.close()
-            self.db_conn.commit()  # Commit to close transaction
             print(f"[OK] Loaded {len(urls)} page URLs")
             return urls
 
         except Exception as e:
             print(f"[ERROR] Failed to load page URLs: {e}")
-            self.db_conn.rollback()  # Rollback on error
             return []
 
     def setup_driver(self):
@@ -297,11 +294,8 @@ class AmazonTVCrawler:
         """Save collected data with collection order (1-300)"""
         cursor = None
         try:
-            # Clean up any aborted transaction before starting
-            try:
-                self.db_conn.rollback()
-            except Exception as rb_err:
-                print(f"[WARNING] Rollback failed: {rb_err}")
+            # Temporarily disable autocommit for transaction
+            self.db_conn.autocommit = False
 
             # Use sequential_id (1-300) for collection order
             collection_order = self.sequential_id
@@ -435,6 +429,10 @@ class AmazonTVCrawler:
                 self.sequential_id += 1
 
             cursor.close()
+
+            # Re-enable autocommit
+            self.db_conn.autocommit = True
+
             return raw_data_result is not None
 
         except Exception as e:
@@ -449,6 +447,10 @@ class AmazonTVCrawler:
                     cursor.close()
                 except:
                     pass
+
+            # Re-enable autocommit
+            self.db_conn.autocommit = True
+
             return False
 
     def run(self):
@@ -480,13 +482,6 @@ class AmazonTVCrawler:
             if not page_urls:
                 print("[ERROR] No page URLs found")
                 return
-
-            # Clean up any aborted transactions before starting crawl
-            try:
-                self.db_conn.rollback()
-                print("[OK] Transaction state reset")
-            except:
-                pass
 
             # Setup WebDriver
             self.setup_driver()

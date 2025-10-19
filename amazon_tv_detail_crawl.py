@@ -211,6 +211,7 @@ class AmazonDetailCrawler:
 
             # SKU_Popularity - only collect if "Amazon's Choice"
             sku_popularity_raw = self.extract_text_safe(tree, self.xpaths.get('sku_popularity'))
+            print(f"[DEBUG] sku_popularity_raw: [{sku_popularity_raw}]")
             sku_popularity = sku_popularity_raw if sku_popularity_raw and "Amazon's Choice" in sku_popularity_raw else None
 
             # Retailer_Membership_Discounts - clean Prime text

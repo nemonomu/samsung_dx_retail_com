@@ -108,29 +108,11 @@ class BFDEventCrawler:
             time.sleep(5)
             print("[OK] Wait completed")
 
-            # Scroll down to load all dynamic content
-            print("[INFO] Scrolling to load all retailers...")
-            last_height = self.driver.execute_script("return document.body.scrollHeight")
-            scroll_attempts = 0
-            max_scrolls = 5
-
-            while scroll_attempts < max_scrolls:
-                # Scroll to bottom
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(3)
-
-                # Calculate new scroll height
-                new_height = self.driver.execute_script("return document.body.scrollHeight")
-                print(f"[DEBUG] Scroll {scroll_attempts + 1}: Height {new_height}")
-
-                if new_height == last_height:
-                    break
-
-                last_height = new_height
-                scroll_attempts += 1
-
-            # Scroll back to top
-            self.driver.execute_script("window.scrollTo(0, 0);")
+            # Light scroll to trigger any lazy loading (15% of page)
+            print("[INFO] Scrolling 15% to trigger lazy load...")
+            page_height = self.driver.execute_script("return document.body.scrollHeight")
+            scroll_to = int(page_height * 0.15)
+            self.driver.execute_script(f"window.scrollTo(0, {scroll_to});")
             time.sleep(2)
 
             print("[INFO] Parsing page source...")

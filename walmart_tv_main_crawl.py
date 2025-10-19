@@ -1,24 +1,13 @@
 import time
 import random
 import psycopg2
-
-# Fix for Python 3.13 - install setuptools for distutils
-try:
-    import undetected_chromedriver as uc
-except (ImportError, ModuleNotFoundError) as e:
-    if "distutils" in str(e):
-        print("[WARNING] Installing setuptools for Python 3.13 compatibility...")
-        import subprocess
-        subprocess.check_call(['pip', 'install', 'setuptools'])
-    else:
-        print("[WARNING] undetected_chromedriver not installed. Installing...")
-        import subprocess
-        subprocess.check_call(['pip', 'install', 'undetected-chromedriver'])
-    import undetected_chromedriver as uc
-
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
 from lxml import html
 import re
 
@@ -96,34 +85,86 @@ class WalmartTVCrawler:
             return []
 
     def setup_driver(self):
-        """Setup undetected Chrome WebDriver"""
+        """Setup Chrome WebDriver with maximum stealth"""
+        chrome_options = Options()
+
+        # Core stealth arguments
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument('--start-maximized')
+        chrome_options.add_argument('--disable-infobars')
+        chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-popup-blocking')
+        chrome_options.add_argument('--disable-notifications')
+        chrome_options.add_argument('--lang=en-US,en;q=0.9')
+        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
+
+        # Experimental options
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+
+        # Preferences
+        prefs = {
+            "profile.default_content_setting_values.notifications": 2,
+            "credentials_enable_service": False,
+            "profile.password_manager_enabled": False,
+            "profile.default_content_settings.popups": 0,
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": True
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+
+        service = Service(ChromeDriverManager().install())
+        self.driver = webdriver.Chrome(service=service, options=chrome_options)
+        self.driver.set_page_load_timeout(60)
+        self.wait = WebDriverWait(self.driver, 20)
+
+        # Execute stealth scripts
+        self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+            "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+        })
+
+        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+        self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+            'source': '''
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+                Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+                Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+                window.chrome = {runtime: {}};
+                Object.defineProperty(navigator, 'permissions', {
+                    get: () => ({
+                        query: () => Promise.resolve({state: 'granted'})
+                    })
+                });
+            '''
+        })
+
+        print("[OK] WebDriver setup complete with stealth mode")
+
+    def add_random_mouse_movements(self):
+        """Add random mouse movements to appear more human"""
         try:
-            # Use undetected-chromedriver for better bot detection bypass
-            options = uc.ChromeOptions()
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--no-sandbox')
-            options.add_argument('--window-size=1920,1080')
-            options.add_argument('--start-maximized')
-            options.add_argument('--lang=en-US,en;q=0.9')
+            from selenium.webdriver.common.action_chains import ActionChains
+            actions = ActionChains(self.driver)
 
-            # Additional preferences
-            prefs = {
-                "profile.default_content_setting_values.notifications": 2,
-                "credentials_enable_service": False,
-                "profile.password_manager_enabled": False
-            }
-            options.add_experimental_option("prefs", prefs)
+            # Random small movements
+            for _ in range(random.randint(2, 4)):
+                x_offset = random.randint(-100, 100)
+                y_offset = random.randint(-100, 100)
+                actions.move_by_offset(x_offset, y_offset)
+                actions.pause(random.uniform(0.1, 0.3))
 
-            # Create undetected Chrome driver
-            self.driver = uc.Chrome(options=options, version_main=None)
-            self.driver.set_page_load_timeout(60)
-            self.wait = WebDriverWait(self.driver, 20)
-
-            print("[OK] Undetected WebDriver setup complete")
-
+            actions.perform()
         except Exception as e:
-            print(f"[ERROR] Failed to setup WebDriver: {e}")
-            raise
+            pass  # Silent fail if mouse movement doesn't work
 
     def extract_text_safe(self, element, xpath):
         """Safely extract text from element using xpath"""
@@ -397,10 +438,24 @@ class WalmartTVCrawler:
             self.driver.get("https://www.walmart.com")
             time.sleep(random.uniform(8, 12))
 
+            # Add random mouse movements
+            self.add_random_mouse_movements()
+            time.sleep(random.uniform(1, 3))
+
             # Check if we got the robot page on homepage
             if self.check_robot_page(self.driver.page_source):
-                print("[WARNING] Robot detection on homepage. Waiting longer...")
+                print("[WARNING] Robot detection on homepage. Trying recovery...")
+
+                # Try scrolling
+                for _ in range(3):
+                    self.driver.execute_script("window.scrollBy(0, 300);")
+                    time.sleep(random.uniform(0.5, 1))
+
                 time.sleep(20)
+
+                # Add more mouse movements
+                self.add_random_mouse_movements()
+
                 self.driver.refresh()
                 time.sleep(random.uniform(10, 15))
 

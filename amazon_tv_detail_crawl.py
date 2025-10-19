@@ -72,10 +72,10 @@ class AmazonDetailCrawler:
 
             # Load from amazon_tv_bsr (bsr)
             cursor.execute("""
-                SELECT "order", product_url
+                SELECT rank, product_url
                 FROM amazon_tv_bsr
                 WHERE product_url IS NOT NULL AND product_url != ''
-                ORDER BY "order"
+                ORDER BY rank
             """)
             bsr_urls = [{'mother': 'bsr', 'order': row[0], 'url': row[1]} for row in cursor.fetchall()]
 

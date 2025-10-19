@@ -293,25 +293,13 @@ class AmazonTVCrawler:
             # Use sequential_id (1-300) for collection order
             collection_order = self.sequential_id
 
-            # Save to raw_data table (update existing if same ASIN from previous session)
+            # Save to raw_data table (session-level dedup already done above)
             cursor.execute("""
                 INSERT INTO raw_data
                 ("order", mall_name, page_number, Retailer_SKU_Name, Number_of_units_purchased_past_month,
                  Final_SKU_Price, Original_SKU_Price, Shipping_Info,
                  Available_Quantity_for_Purchase, Discount_Type, Product_URL, ASIN)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (mall_name, ASIN)
-                DO UPDATE SET
-                    "order" = EXCLUDED."order",
-                    page_number = EXCLUDED.page_number,
-                    Retailer_SKU_Name = EXCLUDED.Retailer_SKU_Name,
-                    Number_of_units_purchased_past_month = EXCLUDED.Number_of_units_purchased_past_month,
-                    Final_SKU_Price = EXCLUDED.Final_SKU_Price,
-                    Original_SKU_Price = EXCLUDED.Original_SKU_Price,
-                    Shipping_Info = EXCLUDED.Shipping_Info,
-                    Available_Quantity_for_Purchase = EXCLUDED.Available_Quantity_for_Purchase,
-                    Discount_Type = EXCLUDED.Discount_Type,
-                    Product_URL = EXCLUDED.Product_URL
                 RETURNING id
             """, (
                 collection_order,
@@ -330,7 +318,7 @@ class AmazonTVCrawler:
 
             raw_data_result = cursor.fetchone()
 
-            # Insert to Amazon_tv_main_crawled (update if exists)
+            # Insert to Amazon_tv_main_crawled
             if raw_data_result:
                 cursor.execute("""
                     INSERT INTO Amazon_tv_main_crawled
@@ -338,16 +326,6 @@ class AmazonTVCrawler:
                      Final_SKU_Price, Original_SKU_Price, Shipping_Info,
                      Available_Quantity_for_Purchase, Discount_Type, ASIN)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (mall_name, ASIN)
-                    DO UPDATE SET
-                        "order" = EXCLUDED."order",
-                        Retailer_SKU_Name = EXCLUDED.Retailer_SKU_Name,
-                        Number_of_units_purchased_past_month = EXCLUDED.Number_of_units_purchased_past_month,
-                        Final_SKU_Price = EXCLUDED.Final_SKU_Price,
-                        Original_SKU_Price = EXCLUDED.Original_SKU_Price,
-                        Shipping_Info = EXCLUDED.Shipping_Info,
-                        Available_Quantity_for_Purchase = EXCLUDED.Available_Quantity_for_Purchase,
-                        Discount_Type = EXCLUDED.Discount_Type
                 """, (
                     collection_order,
                     data['mall_name'],

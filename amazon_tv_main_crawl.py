@@ -57,11 +57,13 @@ class AmazonTVCrawler:
                 }
 
             cursor.close()
+            self.db_conn.commit()  # Commit to close transaction
             print(f"[OK] Loaded {len(self.xpaths)} XPath selectors")
             return True
 
         except Exception as e:
             print(f"[ERROR] Failed to load XPaths: {e}")
+            self.db_conn.rollback()  # Rollback on error
             return False
 
     def load_page_urls(self):
@@ -77,11 +79,13 @@ class AmazonTVCrawler:
 
             urls = cursor.fetchall()
             cursor.close()
+            self.db_conn.commit()  # Commit to close transaction
             print(f"[OK] Loaded {len(urls)} page URLs")
             return urls
 
         except Exception as e:
             print(f"[ERROR] Failed to load page URLs: {e}")
+            self.db_conn.rollback()  # Rollback on error
             return []
 
     def setup_driver(self):

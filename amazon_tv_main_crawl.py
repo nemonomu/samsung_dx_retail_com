@@ -28,7 +28,7 @@ class AmazonTVCrawler:
         self.total_collected = 0
         self.max_skus = 300
         self.sequential_id = 1  # ID counter for 1-300
-        self.collected_asins = set()  # Track ASINs collected in THIS crawling session
+        self.collected_products = set()  # Track (ASIN, Price, Name) collected in THIS crawling session
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -251,9 +251,13 @@ class AmazonTVCrawler:
                 if not asin or asin.strip() == '':
                     asin = None
 
-                # Check if ASIN already collected in THIS session
-                if asin and asin in self.collected_asins:
-                    print(f"  [{idx}/16] DUPLICATE: {product_name[:40]}... (ASIN: {asin}) - already collected in this session")
+                # Extract price for duplicate check
+                final_price = self.extract_text_safe(product, self.xpaths['final_price']['xpath'])
+
+                # Check if (ASIN, Price, Name) already collected in THIS session
+                product_key = (asin, final_price, product_name)
+                if product_key in self.collected_products:
+                    print(f"  [{idx}/16] DUPLICATE: {product_name[:40]}... (ASIN: {asin}, Price: {final_price}) - already collected in this session")
                     continue
 
                 data = {
@@ -261,7 +265,7 @@ class AmazonTVCrawler:
                     'page_number': page_number,
                     'Retailer_SKU_Name': product_name,
                     'Number_of_units_purchased_past_month': self.extract_text_safe(product, self.xpaths['purchase_history']['xpath']),
-                    'Final_SKU_Price': self.extract_text_safe(product, self.xpaths['final_price']['xpath']),
+                    'Final_SKU_Price': final_price,
                     'Original_SKU_Price': self.extract_text_safe(product, self.xpaths['original_price']['xpath']),
                     'Shipping_Info': self.extract_text_safe(product, self.xpaths['shipping_info']['xpath']),
                     'Available_Quantity_for_Purchase': self.extract_text_safe(product, self.xpaths['stock_availability']['xpath']),
@@ -413,9 +417,9 @@ class AmazonTVCrawler:
                 # Commit this transaction
                 self.db_conn.commit()
 
-                # Add ASIN to session tracking set
-                if data['ASIN']:
-                    self.collected_asins.add(data['ASIN'])
+                # Add (ASIN, Price, Name) to session tracking set
+                product_key = (data['ASIN'], data['Final_SKU_Price'], data['Retailer_SKU_Name'])
+                self.collected_products.add(product_key)
 
                 # Increment sequential ID for next product
                 self.sequential_id += 1

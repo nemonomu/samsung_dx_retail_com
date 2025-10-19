@@ -194,29 +194,51 @@ class WalmartTVCrawler:
         try:
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
 
-            # Use search box navigation for more human-like behavior on first page
+            # For page 1, try different approach - go to simple URL first
             if page_number == 1 and retry_count == 0:
-                print("[INFO] Using search box for natural navigation...")
+                print("[INFO] Navigating to Walmart browse page first...")
                 try:
-                    search_box = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='search']")))
-                    search_box.clear()
-                    time.sleep(random.uniform(1, 2))
+                    # Try browse electronics category first
+                    self.driver.get("https://www.walmart.com/browse/electronics/tvs/3944_1060825")
+                    time.sleep(random.uniform(10, 15))
 
-                    # Type "TV" character by character
-                    for char in "TV":
-                        search_box.send_keys(char)
-                        time.sleep(random.uniform(0.1, 0.3))
+                    # Check for robot detection
+                    if not self.check_robot_page(self.driver.page_source):
+                        print("[OK] Browse page loaded successfully")
+                        # Add human-like behavior
+                        self.add_random_mouse_movements()
+                        time.sleep(random.uniform(2, 4))
 
-                    time.sleep(random.uniform(1, 2))
-                    search_box.submit()
-                    time.sleep(random.uniform(5, 8))
+                        # Scroll a bit
+                        for _ in range(2):
+                            self.driver.execute_script("window.scrollBy(0, 400);")
+                            time.sleep(random.uniform(1, 2))
+
+                        # Now try search
+                        print("[INFO] Now trying search for TV...")
+                        search_box = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='search']")))
+                        search_box.clear()
+                        time.sleep(random.uniform(1, 2))
+
+                        # Type "TV" character by character
+                        for char in "TV":
+                            search_box.send_keys(char)
+                            time.sleep(random.uniform(0.2, 0.5))
+
+                        time.sleep(random.uniform(1, 2))
+                        search_box.submit()
+                        time.sleep(random.uniform(8, 12))
+                    else:
+                        print("[WARNING] Robot detected on browse page, using direct URL...")
+                        self.driver.get(url)
+                        time.sleep(random.uniform(12, 18))
                 except Exception as e:
-                    print(f"[WARNING] Search box navigation failed: {e}, using direct URL...")
+                    print(f"[WARNING] Browse navigation failed: {e}, using direct URL...")
                     self.driver.get(url)
-                    time.sleep(random.uniform(8, 12))
+                    time.sleep(random.uniform(12, 18))
             else:
                 self.driver.get(url)
-                time.sleep(random.uniform(8, 12))
+                time.sleep(random.uniform(12, 18))
 
             # Check for robot detection
             page_source = self.driver.page_source
@@ -493,10 +515,12 @@ class WalmartTVCrawler:
             # Setup WebDriver
             self.setup_driver()
 
-            # Initialize session by visiting homepage first
+            # Try to initialize session, but continue even if it fails
+            print("[INFO] Attempting to initialize session...")
             if not self.initialize_session():
-                print("[ERROR] Session initialization failed")
-                return
+                print("[WARNING] Session initialization failed, proceeding anyway...")
+                print("[INFO] Will attempt direct access to search pages...")
+                time.sleep(random.uniform(5, 10))
 
             # Scrape each page
             for page_number, url in page_urls:

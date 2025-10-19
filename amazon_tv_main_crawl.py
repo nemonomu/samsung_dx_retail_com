@@ -465,6 +465,13 @@ class AmazonTVCrawler:
                 print("[ERROR] No page URLs found")
                 return
 
+            # Clean up any aborted transactions before starting crawl
+            try:
+                self.db_conn.rollback()
+                print("[OK] Transaction state reset")
+            except:
+                pass
+
             # Setup WebDriver
             self.setup_driver()
 

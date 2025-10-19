@@ -41,7 +41,7 @@ def insert_amazon_detail_xpath():
                 'mall_name': 'Amazon',
                 'page_type': 'detail_page',
                 'data_field': 'sku_popularity',
-                'xpath': '//*[@id="acBadge_feature_div"]/div/span[1]/span/span',
+                'xpath': '//*[@id="acBadge_feature_div"]/div/span[1]',
                 'description': 'SKU popularity badge (collect only if "Amazon\'s Choice")'
             },
             # Retailer_Membership_Discounts
@@ -57,8 +57,8 @@ def insert_amazon_detail_xpath():
                 'mall_name': 'Amazon',
                 'page_type': 'detail_page',
                 'data_field': 'samsung_sku_name',
-                'xpath': '//*[@id="productDetails_techSpec_section_1"]/tbody/tr[4]/td',
-                'description': 'Samsung model number from technical specifications'
+                'xpath': '//th[contains(text(), "Item model number")]/following-sibling::td',
+                'description': 'Item model number from technical specifications (dynamic position)'
             },
             # Rank_1
             {

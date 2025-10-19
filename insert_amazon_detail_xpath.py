@@ -41,7 +41,7 @@ def insert_amazon_detail_xpath():
                 'mall_name': 'Amazon',
                 'page_type': 'detail_page',
                 'data_field': 'sku_popularity',
-                'xpath': '//*[@id="acBadge_feature_div"]/div/span[1]',
+                'xpath': '//*[@id="acBadge_feature_div"]//span[contains(@class, "mvt-ac-badge-rectangle")]/span[@class="a-size-small"]',
                 'description': 'SKU popularity badge (collect only if "Amazon\'s Choice")'
             },
             # Retailer_Membership_Discounts

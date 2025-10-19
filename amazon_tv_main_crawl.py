@@ -28,6 +28,7 @@ class AmazonTVCrawler:
         self.total_collected = 0
         self.max_skus = 300
         self.sequential_id = 1  # ID counter for 1-300
+        self.collected_asins = set()  # Track ASINs collected in THIS crawling session
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -250,6 +251,11 @@ class AmazonTVCrawler:
                 if not asin or asin.strip() == '':
                     asin = None
 
+                # Check if ASIN already collected in THIS session
+                if asin and asin in self.collected_asins:
+                    print(f"  [{idx}/16] DUPLICATE: {product_name[:40]}... (ASIN: {asin}) - already collected in this session")
+                    continue
+
                 data = {
                     'mall_name': 'Amazon',
                     'page_number': page_number,
@@ -287,14 +293,13 @@ class AmazonTVCrawler:
             # Use sequential_id (1-300) for collection order
             collection_order = self.sequential_id
 
-            # Save to raw_data table with ASIN-based duplicate check
+            # Save to raw_data table (no ON CONFLICT - session-level dedup already done)
             cursor.execute("""
                 INSERT INTO raw_data
                 ("order", mall_name, page_number, Retailer_SKU_Name, Number_of_units_purchased_past_month,
                  Final_SKU_Price, Original_SKU_Price, Shipping_Info,
                  Available_Quantity_for_Purchase, Discount_Type, Product_URL, ASIN)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (mall_name, ASIN) DO NOTHING
                 RETURNING id
             """, (
                 collection_order,
@@ -311,10 +316,9 @@ class AmazonTVCrawler:
                 data['ASIN']
             ))
 
-            # Check if raw_data insert was successful (new row inserted)
             raw_data_result = cursor.fetchone()
 
-            # Only insert to Amazon_tv_main_crawled if raw_data insert was successful
+            # Insert to Amazon_tv_main_crawled
             if raw_data_result:
                 cursor.execute("""
                     INSERT INTO Amazon_tv_main_crawled
@@ -335,13 +339,16 @@ class AmazonTVCrawler:
                     data['ASIN']
                 ))
 
+                # Add ASIN to session tracking set
+                if data['ASIN']:
+                    self.collected_asins.add(data['ASIN'])
+
                 # Increment sequential ID for next product
                 self.sequential_id += 1
 
             self.db_conn.commit()
             cursor.close()
 
-            # Return True only if new data was inserted
             return raw_data_result is not None
 
         except Exception as e:
@@ -404,5 +411,5 @@ if __name__ == "__main__":
         print(f"\n[FATAL ERROR] {e}")
         import traceback
         traceback.print_exc()
-    finally:
-        input("\nPress Enter to exit...")
+
+    print("\n[INFO] Crawler completed. Window will close automatically...")

@@ -287,13 +287,14 @@ class AmazonTVCrawler:
 
     def save_to_db(self, data):
         """Save collected data with collection order (1-300)"""
+        cursor = None
         try:
-            cursor = self.db_conn.cursor()
-
             # Use sequential_id (1-300) for collection order
             collection_order = self.sequential_id
 
             # Try INSERT first, if fails due to duplicate ASIN, do UPDATE
+            cursor = self.db_conn.cursor()
+
             try:
                 cursor.execute("""
                     INSERT INTO raw_data
@@ -322,6 +323,7 @@ class AmazonTVCrawler:
                 # If duplicate, rollback and UPDATE instead
                 if 'duplicate key' in str(e):
                     self.db_conn.rollback()
+                    cursor.close()
                     cursor = self.db_conn.cursor()
 
                     cursor.execute("""
@@ -354,6 +356,7 @@ class AmazonTVCrawler:
                     ))
                     raw_data_result = cursor.fetchone()
                 else:
+                    self.db_conn.rollback()  # Rollback on any other error
                     raise
 
             # Insert to Amazon_tv_main_crawled (or UPDATE if exists)
@@ -404,7 +407,11 @@ class AmazonTVCrawler:
                             data['ASIN']
                         ))
                     else:
+                        self.db_conn.rollback()  # Rollback on any other error
                         raise
+
+                # Commit this transaction
+                self.db_conn.commit()
 
                 # Add ASIN to session tracking set
                 if data['ASIN']:
@@ -413,13 +420,21 @@ class AmazonTVCrawler:
                 # Increment sequential ID for next product
                 self.sequential_id += 1
 
-            self.db_conn.commit()
             cursor.close()
-
             return raw_data_result is not None
 
         except Exception as e:
             print(f"[ERROR] Failed to save to DB: {e}")
+            # Always rollback on error to reset transaction state
+            try:
+                self.db_conn.rollback()
+            except:
+                pass
+            if cursor:
+                try:
+                    cursor.close()
+                except:
+                    pass
             return False
 
     def run(self):

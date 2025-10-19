@@ -244,6 +244,11 @@ class AmazonTVCrawler:
                     print(f"  [{idx}/16] SKIP: No product name found (tried all XPath alternatives)")
                     continue
 
+                # Extract ASIN
+                asin = product.get('data-asin', None)
+                if not asin or asin.strip() == '':
+                    asin = None
+
                 data = {
                     'mall_name': 'Amazon',
                     'page_number': page_number,
@@ -254,18 +259,17 @@ class AmazonTVCrawler:
                     'Shipping_Info': self.extract_text_safe(product, self.xpaths['shipping_info']['xpath']),
                     'Available_Quantity_for_Purchase': self.extract_text_safe(product, self.xpaths['stock_availability']['xpath']),
                     'Discount_Type': discount_type,
-                    'Product_URL': product_url
+                    'Product_URL': product_url,
+                    'ASIN': asin
                 }
 
                 # Save to database
                 if self.save_to_db(data):
                     collected_count += 1
                     self.total_collected += 1
-                    print(f"  [{idx}/16] Collected: {data['Retailer_SKU_Name'][:50] if data['Retailer_SKU_Name'] else '[NO NAME]'}... | URL: {product_url[:60] if product_url else 'NULL'}...")
+                    print(f"  [{idx}/16] Collected: {data['Retailer_SKU_Name'][:50] if data['Retailer_SKU_Name'] else '[NO NAME]'}... | ASIN: {asin or 'N/A'} | URL: {product_url[:50] if product_url else 'NULL'}...")
                 else:
-                    # Get ASIN for debugging
-                    asin = product.get('data-asin', 'NO-ASIN')
-                    print(f"  [{idx}/16] FAILED to save: {data['Retailer_SKU_Name'][:40]}... (ASIN: {asin}) - likely duplicate")
+                    print(f"  [{idx}/16] DUPLICATE: {data['Retailer_SKU_Name'][:40]}... (ASIN: {asin or 'N/A'}) - already collected")
 
             print(f"[PAGE {page_number}] Collected {collected_count} products (Total: {self.total_collected}/{self.max_skus})")
             return True
@@ -279,14 +283,14 @@ class AmazonTVCrawler:
         try:
             cursor = self.db_conn.cursor()
 
-            # Save to raw_data table (모든 데이터 포함)
+            # Save to raw_data table with ASIN-based duplicate check
             cursor.execute("""
                 INSERT INTO raw_data
                 (mall_name, page_number, Retailer_SKU_Name, Number_of_units_purchased_past_month,
                  Final_SKU_Price, Original_SKU_Price, Shipping_Info,
-                 Available_Quantity_for_Purchase, Discount_Type, Product_URL)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (mall_name, Retailer_SKU_Name) DO NOTHING
+                 Available_Quantity_for_Purchase, Discount_Type, Product_URL, ASIN)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (mall_name, ASIN) DO NOTHING
                 RETURNING id
             """, (
                 data['mall_name'],
@@ -298,7 +302,8 @@ class AmazonTVCrawler:
                 data['Shipping_Info'],
                 data['Available_Quantity_for_Purchase'],
                 data['Discount_Type'],
-                data['Product_URL']
+                data['Product_URL'],
+                data['ASIN']
             ))
 
             # Check if raw_data insert was successful (new row inserted)
@@ -310,8 +315,8 @@ class AmazonTVCrawler:
                     INSERT INTO Amazon_tv_main_crawled
                     (mall_name, Retailer_SKU_Name, Number_of_units_purchased_past_month,
                      Final_SKU_Price, Original_SKU_Price, Shipping_Info,
-                     Available_Quantity_for_Purchase, Discount_Type)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                     Available_Quantity_for_Purchase, Discount_Type, ASIN)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     data['mall_name'],
                     data['Retailer_SKU_Name'],
@@ -320,7 +325,8 @@ class AmazonTVCrawler:
                     data['Original_SKU_Price'],
                     data['Shipping_Info'],
                     data['Available_Quantity_for_Purchase'],
-                    data['Discount_Type']
+                    data['Discount_Type'],
+                    data['ASIN']
                 ))
 
             self.db_conn.commit()

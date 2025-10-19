@@ -1,13 +1,17 @@
 import time
 import random
 import psycopg2
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
+try:
+    import undetected_chromedriver as uc
+except ImportError:
+    print("[WARNING] undetected_chromedriver not installed. Installing...")
+    import subprocess
+    subprocess.check_call(['pip', 'install', 'undetected-chromedriver'])
+    import undetected_chromedriver as uc
+
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 from lxml import html
 import re
 
@@ -85,51 +89,34 @@ class WalmartTVCrawler:
             return []
 
     def setup_driver(self):
-        """Setup Chrome WebDriver with enhanced anti-detection"""
-        chrome_options = Options()
-        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('--start-maximized')
-        chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--lang=en-US,en;q=0.9')
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        chrome_options.add_experimental_option('useAutomationExtension', False)
+        """Setup undetected Chrome WebDriver"""
+        try:
+            # Use undetected-chromedriver for better bot detection bypass
+            options = uc.ChromeOptions()
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--window-size=1920,1080')
+            options.add_argument('--start-maximized')
+            options.add_argument('--lang=en-US,en;q=0.9')
 
-        # Additional preferences to appear more human-like
-        prefs = {
-            "profile.default_content_setting_values.notifications": 2,
-            "credentials_enable_service": False,
-            "profile.password_manager_enabled": False
-        }
-        chrome_options.add_experimental_option("prefs", prefs)
+            # Additional preferences
+            prefs = {
+                "profile.default_content_setting_values.notifications": 2,
+                "credentials_enable_service": False,
+                "profile.password_manager_enabled": False
+            }
+            options.add_experimental_option("prefs", prefs)
 
-        service = Service(ChromeDriverManager().install())
-        self.driver = webdriver.Chrome(service=service, options=chrome_options)
-        self.driver.set_page_load_timeout(60)
-        self.wait = WebDriverWait(self.driver, 20)
+            # Create undetected Chrome driver
+            self.driver = uc.Chrome(options=options, version_main=None)
+            self.driver.set_page_load_timeout(60)
+            self.wait = WebDriverWait(self.driver, 20)
 
-        # Enhanced anti-detection scripts
-        self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-            'source': '''
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-                Object.defineProperty(navigator, 'plugins', {
-                    get: () => [1, 2, 3, 4, 5]
-                });
-                Object.defineProperty(navigator, 'languages', {
-                    get: () => ['en-US', 'en']
-                });
-                window.chrome = {
-                    runtime: {}
-                };
-            '''
-        })
+            print("[OK] Undetected WebDriver setup complete")
 
-        print("[OK] WebDriver setup complete")
+        except Exception as e:
+            print(f"[ERROR] Failed to setup WebDriver: {e}")
+            raise
 
     def extract_text_safe(self, element, xpath):
         """Safely extract text from element using xpath"""

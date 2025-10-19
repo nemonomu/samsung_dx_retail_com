@@ -300,8 +300,8 @@ class AmazonTVCrawler:
             # Clean up any aborted transaction before starting
             try:
                 self.db_conn.rollback()
-            except:
-                pass
+            except Exception as rb_err:
+                print(f"[WARNING] Rollback failed: {rb_err}")
 
             # Use sequential_id (1-300) for collection order
             collection_order = self.sequential_id
@@ -459,6 +459,16 @@ class AmazonTVCrawler:
             print("="*80)
 
             # Connect to database
+            if not self.connect_db():
+                return
+
+            # Close and reconnect to ensure clean connection state
+            try:
+                self.db_conn.close()
+                print("[INFO] Closed existing connection")
+            except:
+                pass
+
             if not self.connect_db():
                 return
 

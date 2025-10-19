@@ -85,22 +85,47 @@ class WalmartTVCrawler:
             return []
 
     def setup_driver(self):
-        """Setup Chrome WebDriver"""
+        """Setup Chrome WebDriver with enhanced anti-detection"""
         chrome_options = Options()
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument('--start-maximized')
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--lang=en-US,en;q=0.9')
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
 
+        # Additional preferences to appear more human-like
+        prefs = {
+            "profile.default_content_setting_values.notifications": 2,
+            "credentials_enable_service": False,
+            "profile.password_manager_enabled": False
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+
         service = Service(ChromeDriverManager().install())
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
-        self.wait = WebDriverWait(self.driver, 15)
+        self.driver.set_page_load_timeout(60)
+        self.wait = WebDriverWait(self.driver, 20)
 
+        # Enhanced anti-detection scripts
         self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
             'source': '''
                 Object.defineProperty(navigator, 'webdriver', {
                     get: () => undefined
-                })
+                });
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5]
+                });
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en']
+                });
+                window.chrome = {
+                    runtime: {}
+                };
             '''
         })
 
@@ -129,27 +154,38 @@ class WalmartTVCrawler:
 
     def scrape_page(self, url, page_number, retry_count=0):
         """Scrape a single page"""
-        max_retries = 3
+        max_retries = 5
 
         try:
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
             self.driver.get(url)
-            time.sleep(random.uniform(5, 8))
+            time.sleep(random.uniform(8, 12))
 
             # Check for robot detection
             page_source = self.driver.page_source
             if self.check_robot_page(page_source):
                 if retry_count < max_retries:
                     print(f"[WARNING] Robot detection page detected. Retry {retry_count + 1}/{max_retries}...")
-                    time.sleep(random.uniform(10, 15))
+                    print(f"[INFO] Waiting {15 + retry_count * 5} seconds before retry...")
+                    time.sleep(15 + retry_count * 5)
+
+                    # Try refreshing the page instead of reloading
+                    if retry_count >= 2:
+                        print("[INFO] Trying page refresh...")
+                        self.driver.refresh()
+                        time.sleep(random.uniform(10, 15))
+
                     return self.scrape_page(url, page_number, retry_count + 1)
                 else:
                     print(f"[ERROR] Failed to bypass robot detection after {max_retries} retries")
+                    print("[INFO] Saving page source for debugging...")
+                    with open(f'walmart_robot_page_{page_number}.html', 'w', encoding='utf-8') as f:
+                        f.write(page_source)
                     return False
 
             # Wait for page to load
             print("[INFO] Waiting for products to load...")
-            time.sleep(random.uniform(3, 5))
+            time.sleep(random.uniform(5, 8))
 
             # Scroll to load all products
             print("[INFO] Scrolling to load all products...")

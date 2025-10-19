@@ -27,6 +27,7 @@ class AmazonTVCrawler:
         self.xpaths = {}
         self.total_collected = 0
         self.max_skus = 300
+        self.sequential_id = 1  # ID counter for 1-300
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -279,20 +280,24 @@ class AmazonTVCrawler:
             return True  # Continue to next page
 
     def save_to_db(self, data):
-        """Save collected data to both raw_data and Amazon_tv_main_crawled tables"""
+        """Save collected data with collection order (1-300)"""
         try:
             cursor = self.db_conn.cursor()
+
+            # Use sequential_id (1-300) for collection order
+            collection_order = self.sequential_id
 
             # Save to raw_data table with ASIN-based duplicate check
             cursor.execute("""
                 INSERT INTO raw_data
-                (mall_name, page_number, Retailer_SKU_Name, Number_of_units_purchased_past_month,
+                ("order", mall_name, page_number, Retailer_SKU_Name, Number_of_units_purchased_past_month,
                  Final_SKU_Price, Original_SKU_Price, Shipping_Info,
                  Available_Quantity_for_Purchase, Discount_Type, Product_URL, ASIN)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (mall_name, ASIN) DO NOTHING
                 RETURNING id
             """, (
+                collection_order,
                 data['mall_name'],
                 data['page_number'],
                 data['Retailer_SKU_Name'],
@@ -313,11 +318,12 @@ class AmazonTVCrawler:
             if raw_data_result:
                 cursor.execute("""
                     INSERT INTO Amazon_tv_main_crawled
-                    (mall_name, Retailer_SKU_Name, Number_of_units_purchased_past_month,
+                    ("order", mall_name, Retailer_SKU_Name, Number_of_units_purchased_past_month,
                      Final_SKU_Price, Original_SKU_Price, Shipping_Info,
                      Available_Quantity_for_Purchase, Discount_Type, ASIN)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
+                    collection_order,
                     data['mall_name'],
                     data['Retailer_SKU_Name'],
                     data['Number_of_units_purchased_past_month'],
@@ -328,6 +334,9 @@ class AmazonTVCrawler:
                     data['Discount_Type'],
                     data['ASIN']
                 ))
+
+                # Increment sequential ID for next product
+                self.sequential_id += 1
 
             self.db_conn.commit()
             cursor.close()

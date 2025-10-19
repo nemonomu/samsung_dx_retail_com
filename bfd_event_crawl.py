@@ -44,8 +44,12 @@ class BFDEventCrawler:
             return False
 
     def setup_driver(self):
-        """Setup Chrome WebDriver"""
+        """Setup Chrome WebDriver with page load strategy"""
         chrome_options = Options()
+
+        # Set page load strategy to 'none' - don't wait for full page load
+        chrome_options.page_load_strategy = 'none'
+
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
         chrome_options.add_argument('--disable-dev-shm-usage')
@@ -67,10 +71,8 @@ class BFDEventCrawler:
         service = Service(ChromeDriverManager().install())
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
 
-        # Set page load timeout to prevent hanging
-        self.driver.set_page_load_timeout(30)
-
-        self.wait = WebDriverWait(self.driver, 20)
+        # With page_load_strategy='none', we control wait times manually
+        self.wait = WebDriverWait(self.driver, 30)
 
         self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
             'source': '''
@@ -89,7 +91,7 @@ class BFDEventCrawler:
             '''
         })
 
-        print("[OK] WebDriver setup complete")
+        print("[OK] WebDriver setup complete (page_load_strategy=none)")
 
     def get_retailer_containers(self):
         """Get retailer containers from main page"""
@@ -103,12 +105,33 @@ class BFDEventCrawler:
                 print("[INFO] Trying to continue anyway...")
 
             print("[INFO] Waiting for page to load...")
-            time.sleep(3)
+            time.sleep(5)
             print("[OK] Wait completed")
 
-            print("[INFO] Checking page height...")
-            page_height = self.driver.execute_script("return document.body.scrollHeight")
-            print(f"[DEBUG] Page height: {page_height}")
+            # Scroll down to load all dynamic content
+            print("[INFO] Scrolling to load all retailers...")
+            last_height = self.driver.execute_script("return document.body.scrollHeight")
+            scroll_attempts = 0
+            max_scrolls = 5
+
+            while scroll_attempts < max_scrolls:
+                # Scroll to bottom
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(3)
+
+                # Calculate new scroll height
+                new_height = self.driver.execute_script("return document.body.scrollHeight")
+                print(f"[DEBUG] Scroll {scroll_attempts + 1}: Height {new_height}")
+
+                if new_height == last_height:
+                    break
+
+                last_height = new_height
+                scroll_attempts += 1
+
+            # Scroll back to top
+            self.driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(2)
 
             print("[INFO] Parsing page source...")
             page_source = self.driver.page_source
@@ -161,18 +184,46 @@ class BFDEventCrawler:
 
     def scrape_retailer_events(self, retailer_name, url):
         """Scrape event schedules from retailer page"""
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                print(f"\n[{retailer_name}] Accessing: {url} (Attempt {attempt + 1}/{max_retries})")
+
+                try:
+                    self.driver.get(url)
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        print(f"[WARNING] Page load failed: {e}")
+                        print(f"[INFO] Retrying in 10 seconds...")
+                        time.sleep(10)
+                        continue
+                    else:
+                        raise
+
+                print(f"[{retailer_name}] Page loaded, waiting for content...")
+                time.sleep(random.uniform(8, 12))
+
+                # Wait for event containers to load
+                try:
+                    self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "ad-scan-nav-slide")))
+                except Exception as e:
+                    print(f"[WARNING] Event containers not found via wait, trying anyway...")
+
+                page_source = self.driver.page_source
+                tree = html.fromstring(page_source)
+                break  # Success, exit retry loop
+
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"[ERROR] Attempt {attempt + 1} failed: {e}")
+                    print(f"[INFO] Retrying...")
+                    time.sleep(10)
+                else:
+                    print(f"[ERROR] All {max_retries} attempts failed for {retailer_name}")
+                    return False
+
+        # Find all event containers
         try:
-            print(f"\n[{retailer_name}] Accessing: {url}")
-            self.driver.get(url)
-            time.sleep(random.uniform(5, 8))
-
-            # Wait for event containers to load
-            self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "ad-scan-nav-slide")))
-
-            page_source = self.driver.page_source
-            tree = html.fromstring(page_source)
-
-            # Find all event containers
             event_containers = tree.xpath('//li[contains(@class, "ad-scan-nav-slide")]')
             print(f"[{retailer_name}] Found {len(event_containers)} event containers")
 

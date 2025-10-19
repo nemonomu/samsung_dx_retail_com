@@ -1,12 +1,19 @@
 import time
 import random
 import psycopg2
+
+# Fix for Python 3.13 - install setuptools for distutils
 try:
     import undetected_chromedriver as uc
-except ImportError:
-    print("[WARNING] undetected_chromedriver not installed. Installing...")
-    import subprocess
-    subprocess.check_call(['pip', 'install', 'undetected-chromedriver'])
+except (ImportError, ModuleNotFoundError) as e:
+    if "distutils" in str(e):
+        print("[WARNING] Installing setuptools for Python 3.13 compatibility...")
+        import subprocess
+        subprocess.check_call(['pip', 'install', 'setuptools'])
+    else:
+        print("[WARNING] undetected_chromedriver not installed. Installing...")
+        import subprocess
+        subprocess.check_call(['pip', 'install', 'undetected-chromedriver'])
     import undetected_chromedriver as uc
 
 from selenium.webdriver.common.by import By

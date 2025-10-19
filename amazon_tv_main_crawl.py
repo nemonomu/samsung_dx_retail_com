@@ -294,168 +294,82 @@ class AmazonTVCrawler:
         """Save collected data with collection order (1-300)"""
         cursor = None
         try:
-            # Check current connection status
-            try:
-                cur_test = self.db_conn.cursor()
-                cur_test.execute("SELECT 1")
-                cur_test.close()
-            except Exception as conn_err:
-                print(f"[DEBUG] Connection test failed: {conn_err}")
-                print(f"[DEBUG] Attempting to reconnect...")
-                try:
-                    self.db_conn.close()
-                except:
-                    pass
-                self.connect_db()
-
             # Temporarily disable autocommit for transaction
             self.db_conn.autocommit = False
 
             # Use sequential_id (1-300) for collection order
             collection_order = self.sequential_id
 
-            # Try INSERT first, if fails due to duplicate ASIN, do UPDATE
             cursor = self.db_conn.cursor()
 
-            try:
-                cursor.execute("""
-                    INSERT INTO raw_data
-                    ("order", mall_name, page_number, Retailer_SKU_Name, Number_of_units_purchased_past_month,
-                     Final_SKU_Price, Original_SKU_Price, Shipping_Info,
-                     Available_Quantity_for_Purchase, Discount_Type, Product_URL, ASIN)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING id
-                """, (
-                    collection_order,
-                    data['mall_name'],
-                    data['page_number'],
-                    data['Retailer_SKU_Name'],
-                    data['Number_of_units_purchased_past_month'],
-                    data['Final_SKU_Price'],
-                    data['Original_SKU_Price'],
-                    data['Shipping_Info'],
-                    data['Available_Quantity_for_Purchase'],
-                    data['Discount_Type'],
-                    data['Product_URL'],
-                    data['ASIN']
-                ))
-                raw_data_result = cursor.fetchone()
+            # Try INSERT to raw_data
+            cursor.execute("""
+                INSERT INTO raw_data
+                ("order", mall_name, page_number, Retailer_SKU_Name, Number_of_units_purchased_past_month,
+                 Final_SKU_Price, Original_SKU_Price, Shipping_Info,
+                 Available_Quantity_for_Purchase, Discount_Type, Product_URL, ASIN)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (
+                collection_order,
+                data['mall_name'],
+                data['page_number'],
+                data['Retailer_SKU_Name'],
+                data['Number_of_units_purchased_past_month'],
+                data['Final_SKU_Price'],
+                data['Original_SKU_Price'],
+                data['Shipping_Info'],
+                data['Available_Quantity_for_Purchase'],
+                data['Discount_Type'],
+                data['Product_URL'],
+                data['ASIN']
+            ))
+            raw_data_result = cursor.fetchone()
 
-            except Exception as e:
-                # If duplicate, rollback and UPDATE instead
-                if 'duplicate key' in str(e):
-                    self.db_conn.rollback()
-                    cursor.close()
-                    cursor = self.db_conn.cursor()
+            # Try INSERT to Amazon_tv_main_crawled
+            cursor.execute("""
+                INSERT INTO Amazon_tv_main_crawled
+                ("order", mall_name, Retailer_SKU_Name, Number_of_units_purchased_past_month,
+                 Final_SKU_Price, Original_SKU_Price, Shipping_Info,
+                 Available_Quantity_for_Purchase, Discount_Type, ASIN)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                collection_order,
+                data['mall_name'],
+                data['Retailer_SKU_Name'],
+                data['Number_of_units_purchased_past_month'],
+                data['Final_SKU_Price'],
+                data['Original_SKU_Price'],
+                data['Shipping_Info'],
+                data['Available_Quantity_for_Purchase'],
+                data['Discount_Type'],
+                data['ASIN']
+            ))
 
-                    cursor.execute("""
-                        UPDATE raw_data SET
-                            "order" = %s,
-                            page_number = %s,
-                            Retailer_SKU_Name = %s,
-                            Number_of_units_purchased_past_month = %s,
-                            Final_SKU_Price = %s,
-                            Original_SKU_Price = %s,
-                            Shipping_Info = %s,
-                            Available_Quantity_for_Purchase = %s,
-                            Discount_Type = %s,
-                            Product_URL = %s
-                        WHERE mall_name = %s AND ASIN = %s
-                        RETURNING id
-                    """, (
-                        collection_order,
-                        data['page_number'],
-                        data['Retailer_SKU_Name'],
-                        data['Number_of_units_purchased_past_month'],
-                        data['Final_SKU_Price'],
-                        data['Original_SKU_Price'],
-                        data['Shipping_Info'],
-                        data['Available_Quantity_for_Purchase'],
-                        data['Discount_Type'],
-                        data['Product_URL'],
-                        data['mall_name'],
-                        data['ASIN']
-                    ))
-                    raw_data_result = cursor.fetchone()
-                else:
-                    self.db_conn.rollback()  # Rollback on any other error
-                    raise
+            # Commit transaction
+            self.db_conn.commit()
 
-            # Insert to Amazon_tv_main_crawled (or UPDATE if exists)
-            if raw_data_result:
-                try:
-                    cursor.execute("""
-                        INSERT INTO Amazon_tv_main_crawled
-                        ("order", mall_name, Retailer_SKU_Name, Number_of_units_purchased_past_month,
-                         Final_SKU_Price, Original_SKU_Price, Shipping_Info,
-                         Available_Quantity_for_Purchase, Discount_Type, ASIN)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """, (
-                        collection_order,
-                        data['mall_name'],
-                        data['Retailer_SKU_Name'],
-                        data['Number_of_units_purchased_past_month'],
-                        data['Final_SKU_Price'],
-                        data['Original_SKU_Price'],
-                        data['Shipping_Info'],
-                        data['Available_Quantity_for_Purchase'],
-                        data['Discount_Type'],
-                        data['ASIN']
-                    ))
-                except Exception as e:
-                    if 'duplicate key' in str(e):
-                        # UPDATE existing record
-                        cursor.execute("""
-                            UPDATE Amazon_tv_main_crawled SET
-                                "order" = %s,
-                                Retailer_SKU_Name = %s,
-                                Number_of_units_purchased_past_month = %s,
-                                Final_SKU_Price = %s,
-                                Original_SKU_Price = %s,
-                                Shipping_Info = %s,
-                                Available_Quantity_for_Purchase = %s,
-                                Discount_Type = %s
-                            WHERE mall_name = %s AND ASIN = %s
-                        """, (
-                            collection_order,
-                            data['Retailer_SKU_Name'],
-                            data['Number_of_units_purchased_past_month'],
-                            data['Final_SKU_Price'],
-                            data['Original_SKU_Price'],
-                            data['Shipping_Info'],
-                            data['Available_Quantity_for_Purchase'],
-                            data['Discount_Type'],
-                            data['mall_name'],
-                            data['ASIN']
-                        ))
-                    else:
-                        self.db_conn.rollback()  # Rollback on any other error
-                        raise
+            # Add (ASIN, Price, Name) to session tracking set
+            product_key = (data['ASIN'], data['Final_SKU_Price'], data['Retailer_SKU_Name'])
+            self.collected_products.add(product_key)
 
-                # Commit this transaction
-                self.db_conn.commit()
-
-                # Add (ASIN, Price, Name) to session tracking set
-                product_key = (data['ASIN'], data['Final_SKU_Price'], data['Retailer_SKU_Name'])
-                self.collected_products.add(product_key)
-
-                # Increment sequential ID for next product
-                self.sequential_id += 1
+            # Increment sequential ID for next product
+            self.sequential_id += 1
 
             cursor.close()
 
             # Re-enable autocommit
             self.db_conn.autocommit = True
 
-            return raw_data_result is not None
+            return True
 
         except Exception as e:
-            print(f"[ERROR] Failed to save to DB: {e}")
-            # Always rollback on error to reset transaction state
+            # Rollback on any error (including duplicate)
             try:
                 self.db_conn.rollback()
             except:
                 pass
+
             if cursor:
                 try:
                     cursor.close()
@@ -464,6 +378,10 @@ class AmazonTVCrawler:
 
             # Re-enable autocommit
             self.db_conn.autocommit = True
+
+            # Don't print error for duplicate keys (expected behavior)
+            if 'duplicate key' not in str(e):
+                print(f"[ERROR] Failed to save to DB: {e}")
 
             return False
 

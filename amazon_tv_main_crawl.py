@@ -1,6 +1,7 @@
 import time
 import random
 import psycopg2
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -29,6 +30,7 @@ class AmazonTVCrawler:
         self.max_skus = 300
         self.sequential_id = 1  # ID counter for 1-300
         self.collected_products = set()  # Track (ASIN, Price, Name) collected in THIS crawling session
+        self.batch_id = None  # Batch ID for this crawling session
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -307,8 +309,8 @@ class AmazonTVCrawler:
                 INSERT INTO raw_data
                 ("order", mall_name, page_number, Retailer_SKU_Name, Number_of_units_purchased_past_month,
                  Final_SKU_Price, Original_SKU_Price, Shipping_Info,
-                 Available_Quantity_for_Purchase, Discount_Type, Product_URL, ASIN)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 Available_Quantity_for_Purchase, Discount_Type, Product_URL, ASIN, batch_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
                 collection_order,
@@ -322,7 +324,8 @@ class AmazonTVCrawler:
                 data['Available_Quantity_for_Purchase'],
                 data['Discount_Type'],
                 data['Product_URL'],
-                data['ASIN']
+                data['ASIN'],
+                self.batch_id
             ))
             raw_data_result = cursor.fetchone()
 
@@ -405,6 +408,10 @@ class AmazonTVCrawler:
 
             if not self.connect_db():
                 return
+
+            # Generate batch_id for this session
+            self.batch_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+            print(f"[OK] Batch ID: {self.batch_id}")
 
             # Load XPaths and URLs
             if not self.load_xpaths():

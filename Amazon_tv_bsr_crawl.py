@@ -1,6 +1,7 @@
 import time
 import random
 import psycopg2
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -27,6 +28,7 @@ class AmazonBSRCrawler:
         self.xpaths = {}
         self.total_collected = 0
         self.error_messages = []
+        self.batch_id = None  # Batch ID for this crawling session
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -374,9 +376,9 @@ class AmazonBSRCrawler:
 
             cursor.execute("""
                 INSERT INTO amazon_tv_bsr
-                (Rank, Retailer_SKU_Name, product_url)
-                VALUES (%s, %s, %s)
-            """, (rank, product_name, product_url))
+                (Rank, Retailer_SKU_Name, product_url, batch_id)
+                VALUES (%s, %s, %s, %s)
+            """, (rank, product_name, product_url, self.batch_id))
 
             self.db_conn.commit()
             cursor.close()
@@ -398,6 +400,10 @@ class AmazonBSRCrawler:
             # Connect to database
             if not self.connect_db():
                 return
+
+            # Generate batch_id for this session
+            self.batch_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+            print(f"[OK] Batch ID: {self.batch_id}")
 
             # Load XPaths
             if not self.load_xpaths():

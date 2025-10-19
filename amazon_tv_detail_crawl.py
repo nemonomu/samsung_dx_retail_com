@@ -57,27 +57,60 @@ class AmazonDetailCrawler:
             return False
 
     def load_product_urls(self):
-        """Load product URLs from raw_data and amazon_tv_bsr tables"""
+        """Load product URLs from raw_data and amazon_tv_bsr tables (latest batch only)"""
         try:
             cursor = self.db_conn.cursor()
 
-            # Load from raw_data (main)
+            # Get latest batch_id from raw_data
             cursor.execute("""
-                SELECT "order", product_url
+                SELECT batch_id
                 FROM raw_data
-                WHERE mall_name = 'Amazon' AND product_url IS NOT NULL AND product_url != ''
-                ORDER BY "order"
+                WHERE mall_name = 'Amazon' AND batch_id IS NOT NULL
+                ORDER BY batch_id DESC
+                LIMIT 1
             """)
-            main_urls = [{'mother': 'main', 'order': row[0], 'url': row[1]} for row in cursor.fetchall()]
+            main_batch_result = cursor.fetchone()
+            main_batch_id = main_batch_result[0] if main_batch_result else None
 
-            # Load from amazon_tv_bsr (bsr)
+            # Get latest batch_id from amazon_tv_bsr
             cursor.execute("""
-                SELECT rank, product_url
+                SELECT batch_id
                 FROM amazon_tv_bsr
-                WHERE product_url IS NOT NULL AND product_url != ''
-                ORDER BY rank
+                WHERE batch_id IS NOT NULL
+                ORDER BY batch_id DESC
+                LIMIT 1
             """)
-            bsr_urls = [{'mother': 'bsr', 'order': row[0], 'url': row[1]} for row in cursor.fetchall()]
+            bsr_batch_result = cursor.fetchone()
+            bsr_batch_id = bsr_batch_result[0] if bsr_batch_result else None
+
+            print(f"[INFO] Latest batch_id - Main: {main_batch_id}, BSR: {bsr_batch_id}")
+
+            # Load from raw_data (main) - latest batch only
+            main_urls = []
+            if main_batch_id:
+                cursor.execute("""
+                    SELECT "order", product_url
+                    FROM raw_data
+                    WHERE mall_name = 'Amazon'
+                      AND batch_id = %s
+                      AND product_url IS NOT NULL
+                      AND product_url != ''
+                    ORDER BY "order"
+                """, (main_batch_id,))
+                main_urls = [{'mother': 'main', 'order': row[0], 'url': row[1]} for row in cursor.fetchall()]
+
+            # Load from amazon_tv_bsr (bsr) - latest batch only
+            bsr_urls = []
+            if bsr_batch_id:
+                cursor.execute("""
+                    SELECT rank, product_url
+                    FROM amazon_tv_bsr
+                    WHERE batch_id = %s
+                      AND product_url IS NOT NULL
+                      AND product_url != ''
+                    ORDER BY rank
+                """, (bsr_batch_id,))
+                bsr_urls = [{'mother': 'bsr', 'order': row[0], 'url': row[1]} for row in cursor.fetchall()]
 
             cursor.close()
 
@@ -87,6 +120,8 @@ class AmazonDetailCrawler:
 
         except Exception as e:
             print(f"[ERROR] Failed to load product URLs: {e}")
+            import traceback
+            traceback.print_exc()
             return []
 
     def setup_driver(self):

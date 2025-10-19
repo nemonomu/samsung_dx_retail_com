@@ -154,26 +154,47 @@ class WalmartTVCrawler:
 
     def scrape_page(self, url, page_number, retry_count=0):
         """Scrape a single page"""
-        max_retries = 5
+        max_retries = 2
 
         try:
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
-            self.driver.get(url)
-            time.sleep(random.uniform(8, 12))
+
+            # Use search box navigation for more human-like behavior on first page
+            if page_number == 1 and retry_count == 0:
+                print("[INFO] Using search box for natural navigation...")
+                try:
+                    search_box = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='search']")))
+                    search_box.clear()
+                    time.sleep(random.uniform(1, 2))
+
+                    # Type "TV" character by character
+                    for char in "TV":
+                        search_box.send_keys(char)
+                        time.sleep(random.uniform(0.1, 0.3))
+
+                    time.sleep(random.uniform(1, 2))
+                    search_box.submit()
+                    time.sleep(random.uniform(5, 8))
+                except Exception as e:
+                    print(f"[WARNING] Search box navigation failed: {e}, using direct URL...")
+                    self.driver.get(url)
+                    time.sleep(random.uniform(8, 12))
+            else:
+                self.driver.get(url)
+                time.sleep(random.uniform(8, 12))
 
             # Check for robot detection
             page_source = self.driver.page_source
             if self.check_robot_page(page_source):
                 if retry_count < max_retries:
                     print(f"[WARNING] Robot detection page detected. Retry {retry_count + 1}/{max_retries}...")
-                    print(f"[INFO] Waiting {15 + retry_count * 5} seconds before retry...")
-                    time.sleep(15 + retry_count * 5)
+                    wait_time = 30 + retry_count * 15
+                    print(f"[INFO] Waiting {wait_time} seconds before retry...")
+                    time.sleep(wait_time)
 
-                    # Try refreshing the page instead of reloading
-                    if retry_count >= 2:
-                        print("[INFO] Trying page refresh...")
-                        self.driver.refresh()
-                        time.sleep(random.uniform(10, 15))
+                    print("[INFO] Refreshing page...")
+                    self.driver.refresh()
+                    time.sleep(random.uniform(10, 15))
 
                     return self.scrape_page(url, page_number, retry_count + 1)
                 else:
@@ -375,6 +396,31 @@ class WalmartTVCrawler:
             print(f"[ERROR] Failed to save to DB: {e}")
             return False
 
+    def initialize_session(self):
+        """Initialize session by visiting Walmart homepage first"""
+        try:
+            print("[INFO] Initializing session - visiting Walmart homepage...")
+            self.driver.get("https://www.walmart.com")
+            time.sleep(random.uniform(8, 12))
+
+            # Check if we got the robot page on homepage
+            if self.check_robot_page(self.driver.page_source):
+                print("[WARNING] Robot detection on homepage. Waiting longer...")
+                time.sleep(20)
+                self.driver.refresh()
+                time.sleep(random.uniform(10, 15))
+
+                if self.check_robot_page(self.driver.page_source):
+                    print("[ERROR] Cannot bypass robot detection on homepage")
+                    return False
+
+            print("[OK] Session initialized successfully")
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Failed to initialize session: {e}")
+            return False
+
     def run(self):
         """Main execution"""
         try:
@@ -398,6 +444,11 @@ class WalmartTVCrawler:
             # Setup WebDriver
             self.setup_driver()
 
+            # Initialize session by visiting homepage first
+            if not self.initialize_session():
+                print("[ERROR] Session initialization failed")
+                return
+
             # Scrape each page
             for page_number, url in page_urls:
                 if self.total_collected >= self.max_skus:
@@ -407,7 +458,7 @@ class WalmartTVCrawler:
                     break
 
                 # Random delay between pages
-                time.sleep(random.uniform(5, 8))
+                time.sleep(random.uniform(8, 12))
 
             print("\n" + "="*80)
             print(f"Crawling completed! Total collected: {self.total_collected} SKUs")

@@ -7,6 +7,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from lxml import html
 import re
+from urllib.parse import urlparse, parse_qs, unquote
 
 # Database configuration
 DB_CONFIG = {
@@ -264,9 +265,9 @@ class WalmartTVCrawler:
                     print(f"  [{idx}/{len(products)}] SKIP: No product name found")
                     continue
 
-                # Extract product URL
+                # Extract product URL and normalize it
                 product_url_raw = self.extract_text_safe(product, self.xpaths['product_url']['xpath'])
-                product_url = product_url_raw if product_url_raw else None
+                product_url = self.normalize_product_url(product_url_raw) if product_url_raw else None
 
                 # Extract Final_SKU_Price
                 final_price_raw = self.extract_text_safe(product, self.xpaths['final_price']['xpath'])
@@ -342,6 +343,48 @@ class WalmartTVCrawler:
             import traceback
             traceback.print_exc()
             return True  # Continue to next page
+
+    def normalize_product_url(self, raw_url):
+        """Normalize product URL to clean format"""
+        if not raw_url:
+            return None
+
+        # Type 1: Tracking URL (/sp/track?...rd=encoded_url)
+        if '/sp/track?' in raw_url:
+            try:
+                parsed = urlparse(raw_url)
+                query_params = parse_qs(parsed.query)
+
+                # Extract 'rd' parameter (redirect URL)
+                if 'rd' in query_params:
+                    redirect_url = query_params['rd'][0]
+                    # Decode URL-encoded string
+                    decoded_url = unquote(redirect_url)
+
+                    # Extract clean /ip/... path from decoded URL
+                    if '/ip/' in decoded_url:
+                        ip_path = decoded_url.split('/ip/')[1]
+                        # Remove extra parameters after product ID
+                        clean_path = '/ip/' + ip_path.split('?')[0]
+                        return f"https://www.walmart.com{clean_path}"
+            except Exception as e:
+                pass  # Fall through to Type 2 handling
+
+        # Type 2: Relative path (/ip/...)
+        if raw_url.startswith('/ip/'):
+            # Remove query parameters after product ID
+            clean_path = raw_url.split('?')[0]
+            return f"https://www.walmart.com{clean_path}"
+
+        # Type 3: Already full URL
+        if raw_url.startswith('http'):
+            # Clean up query parameters if needed
+            if '/ip/' in raw_url:
+                base_url = raw_url.split('?')[0]
+                return base_url
+            return raw_url
+
+        return raw_url
 
     def clean_price_text(self, price_text):
         """Extract clean price from complex price HTML text"""

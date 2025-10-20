@@ -215,6 +215,47 @@ class DuplicateDetector:
 
             print(f"[INFO] Valid products: {len(valid_products)}")
 
+            # VALIDATION: Check if we're actually on the correct page
+            if len(valid_products) > 0:
+                print(f"\n[VALIDATION] Checking if we're on the correct page...")
+                expected_min_sr = (page_number - 1) * 16 + 1
+                expected_max_sr = page_number * 16
+
+                first_product = valid_products[0]
+                first_url = self.extract_text_safe(first_product, self.xpaths['product_url']['xpath'])
+
+                if first_url:
+                    import re
+                    sr_match = re.search(r'sr=8-(\d+)', first_url)
+                    if sr_match:
+                        actual_sr = int(sr_match.group(1))
+                        print(f"[VALIDATION] Expected sr range: {expected_min_sr}-{expected_max_sr}")
+                        print(f"[VALIDATION] Actual first product sr: {actual_sr}")
+
+                        if actual_sr < expected_min_sr or actual_sr > expected_max_sr:
+                            print(f"\n{'!'*80}")
+                            print(f"🚨 PAGE MISMATCH DETECTED! 🚨")
+                            print(f"{'!'*80}")
+                            print(f"We requested page {page_number} but got products from a different page!")
+                            print(f"Expected sr: {expected_min_sr}-{expected_max_sr}, Got: {actual_sr}")
+                            print(f"This indicates the browser didn't navigate to the new page.")
+                            print(f"{'!'*80}\n")
+
+                            # Take screenshot for evidence
+                            screenshot_path = f"page_mismatch_{page_number}_sr{actual_sr}.png"
+                            self.driver.save_screenshot(screenshot_path)
+                            print(f"[DEBUG] Screenshot saved: {screenshot_path}")
+
+                            # Skip this page
+                            print(f"[WARNING] Skipping page {page_number} due to mismatch.")
+                            return True
+                        else:
+                            print(f"[VALIDATION] ✓ Page verification passed - we're on the correct page")
+                    else:
+                        print(f"[VALIDATION] Could not extract sr number from URL")
+                else:
+                    print(f"[VALIDATION] Could not extract URL for validation")
+
             # If no valid products found, try going to Amazon home first
             if len(valid_products) == 0:
                 print(f"[WARNING] No valid products found. Trying workaround...")

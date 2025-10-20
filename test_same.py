@@ -204,6 +204,13 @@ class DuplicateDetector:
             # If no valid products found, try going to Amazon home first
             if len(valid_products) == 0:
                 print(f"[WARNING] No valid products found. Trying workaround...")
+
+                # Save screenshot for debugging
+                screenshot_path = f"debug_page_{page_number}_before.png"
+                self.driver.save_screenshot(screenshot_path)
+                print(f"[DEBUG] Screenshot saved: {screenshot_path}")
+                print(f"[DEBUG] Please share this screenshot to diagnose the issue")
+
                 print(f"[INFO] Going to Amazon homepage first...")
 
                 self.driver.get("https://www.amazon.com")
@@ -264,6 +271,12 @@ class DuplicateDetector:
 
                 if len(valid_products) == 0:
                     print(f"[ERROR] Still no products after workaround. Skipping page.")
+
+                    # Save screenshot after workaround failed
+                    screenshot_path_after = f"debug_page_{page_number}_after.png"
+                    self.driver.save_screenshot(screenshot_path_after)
+                    print(f"[DEBUG] Screenshot after workaround saved: {screenshot_path_after}")
+
                     return True  # Continue to next page
 
             # Check each product for duplicates

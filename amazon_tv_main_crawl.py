@@ -1,5 +1,6 @@
 import time
 import random
+import re
 import psycopg2
 from datetime import datetime
 from selenium import webdriver
@@ -121,6 +122,30 @@ class AmazonTVCrawler:
                 else:
                     return result[0].text_content().strip()
             return None
+        except Exception as e:
+            return None
+
+    def convert_purchase_count(self, text):
+        """Convert purchase count format: '10K+ bought in past month' -> '10,000'"""
+        if not text:
+            return None
+
+        try:
+            # Extract number part (e.g., "10K+" from "10K+ bought in past month")
+            match = re.search(r'([\d.]+)K?\+?', text, re.IGNORECASE)
+            if not match:
+                return None
+
+            number_str = match.group(1)
+            number = float(number_str)
+
+            # Check if K/k is present
+            if 'K' in text.upper():
+                number = number * 1000
+
+            # Convert to integer and format with comma
+            return f"{int(number):,}"
+
         except Exception as e:
             return None
 
@@ -263,11 +288,15 @@ class AmazonTVCrawler:
                     print(f"  [{idx}/16] DUPLICATE: {product_name[:40]}... (ASIN: {asin}, Price: {final_price}) - already collected in this session")
                     continue
 
+                # Extract and convert purchase count
+                purchase_count_raw = self.extract_text_safe(product, self.xpaths['purchase_history']['xpath'])
+                purchase_count = self.convert_purchase_count(purchase_count_raw)
+
                 data = {
                     'mall_name': 'Amazon',
                     'page_number': page_number,
                     'Retailer_SKU_Name': product_name,
-                    'Number_of_units_purchased_past_month': self.extract_text_safe(product, self.xpaths['purchase_history']['xpath']),
+                    'Number_of_units_purchased_past_month': purchase_count,
                     'Final_SKU_Price': final_price,
                     'Original_SKU_Price': self.extract_text_safe(product, self.xpaths['original_price']['xpath']),
                     'Shipping_Info': self.extract_text_safe(product, self.xpaths['shipping_info']['xpath']),

@@ -130,35 +130,72 @@ def test_review_page_access():
         else:
             print("    ✓ SUCCESS - Accessed with login!")
 
-            # Try to extract reviews (up to 20)
-            print(f"\n[6] Extracting reviews from page (target: 20)...")
-            tree = html.fromstring(driver.page_source)
+            # Extract reviews from multiple pages (target: 20)
+            print(f"\n[6] Extracting reviews from pages (target: 20)...")
 
-            # Try to find review elements
-            review_xpaths = [
-                '//div[@data-hook="review"]//span[@data-hook="review-body"]/span',
-                '//div[@data-hook="review-collapsed"]//span[@data-hook="review-body"]/span',
-                '//div[contains(@class, "review")]//span[@data-hook="review-body"]//span'
-            ]
+            all_reviews = []
+            page_num = 1
+            max_pages = 3  # Collect from max 3 pages to get 20+ reviews
 
-            reviews_found = []
-            for idx, xpath in enumerate(review_xpaths, 1):
-                review_elements = tree.xpath(xpath)
+            while len(all_reviews) < 20 and page_num <= max_pages:
+                print(f"\n    --- Page {page_num} ---")
+                tree = html.fromstring(driver.page_source)
+
+                # Extract reviews from current page
+                # Using the XPath pattern: //span[@data-hook="review-body"]/span
+                review_xpath = '//span[@data-hook="review-body"]/span'
+                review_elements = tree.xpath(review_xpath)
+
+                page_reviews = []
                 if review_elements:
                     for elem in review_elements:
                         review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
                         if review_text and len(review_text) > 10:  # Filter out empty/short texts
-                            reviews_found.append(review_text)
+                            page_reviews.append(review_text)
 
-                    if reviews_found:
-                        print(f"    ✓ Found {len(reviews_found)} reviews using XPath #{idx}")
-                        break
+                    print(f"    ✓ Found {len(page_reviews)} reviews on page {page_num}")
+                    all_reviews.extend(page_reviews)
                 else:
-                    print(f"    ✗ No reviews found using XPath #{idx}")
+                    print(f"    ✗ No reviews found on page {page_num}")
+                    break
+
+                # Check if we have enough reviews
+                if len(all_reviews) >= 20:
+                    print(f"    ✓ Collected {len(all_reviews)} reviews (target reached)")
+                    break
+
+                # Find and click "Next page" button
+                next_button_xpaths = [
+                    '//a[contains(text(), "Next page")]',
+                    '//*[@id="cm_cr-pagination_bar"]//li[@class="a-last"]/a',
+                    '//ul[@class="a-pagination"]//li[@class="a-last"]/a'
+                ]
+
+                next_link = None
+                for xpath in next_button_xpaths:
+                    result = tree.xpath(xpath + '/@href')
+                    if result:
+                        next_link = result[0]
+                        break
+
+                if next_link:
+                    # Navigate to next page
+                    if next_link.startswith('http'):
+                        next_url = next_link
+                    else:
+                        next_url = "https://www.amazon.com" + next_link
+
+                    print(f"    → Moving to page {page_num + 1}...")
+                    driver.get(next_url)
+                    time.sleep(random.uniform(2, 4))
+                    page_num += 1
+                else:
+                    print(f"    ✓ No more pages available")
+                    break
+
+            reviews_found = all_reviews[:20]  # Limit to exactly 20
 
             if reviews_found:
-                # Limit to 20 reviews
-                reviews_found = reviews_found[:20]
                 print(f"\n    Total reviews extracted: {len(reviews_found)}")
                 print(f"\n    Sample reviews:")
                 for i, review in enumerate(reviews_found[:3], 1):

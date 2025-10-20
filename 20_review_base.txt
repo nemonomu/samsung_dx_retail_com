@@ -1,0 +1,59 @@
+base container html 은 <div id="R1BFCX39NH21NH-review-card" class="a-row a-spacing-none"><div id="customer_review-R1BFCX39NH21NH" class="a-section celwidget" data-csa-c-id="nb9xvm-xsjvae-dbg7b1-vpmsso" data-cel-widget="customer_review-R1BFCX39NH21NH">
+
+  <div data-hook="genome-widget" class="a-row a-spacing-mini"><a href="/gp/profile/amzn1.account.AHN476MU2KJ5OOLCTXWZJXKDQJQA/ref=cm_cr_getr_d_gw_btm?ie=UTF8" class="a-profile" data-a-size="small"><div aria-hidden="true" class="a-profile-avatar-wrapper"><div class="a-profile-avatar"><img src="https://m.media-amazon.com/images/S/amazon-avatars-global/default._CR0,0,1024,1024_SX48_.png" class="" data-src="https://m.media-amazon.com/images/S/amazon-avatars-global/default._CR0,0,1024,1024_SX48_.png"><noscript><img src="https://m.media-amazon.com/images/S/amazon-avatars-global/default._CR0,0,1024,1024_SX48_.png"/></noscript></div></div><div class="a-profile-content"><span class="a-profile-name">Joy</span></div></a></div><div class="a-row"><h5><a data-hook="review-title" class="a-size-base a-link-normal review-title a-color-base review-title-content a-text-bold" href="/gp/customer-reviews/R1BFCX39NH21NH/ref=cm_cr_getr_d_rvw_ttl?ie=UTF8"><i data-hook="review-star-rating" class="a-icon a-icon-star a-star-5 review-rating"><span class="a-icon-alt">5.0 out of 5 stars</span></i><span class="a-letter-space"></span>
+
+
+
+
+
+
+
+  
+  
+    <span>Crisp 4K visuals and vibrant colors!</span>
+  
+</a></h5></div><span data-hook="review-date" aria-level="6" class="a-size-base a-color-secondary review-date" role="heading">Reviewed in the United States on October 17, 2025</span><div class="a-row a-spacing-mini review-data review-format-strip"><a aria-label="Verified Purchase: Learn more how customers reviews work on Amazon" class="a-link-normal" target="_blank" rel="noopener" href="/gp/help/customer/display.html/ref=cm_cr_dp_d_rvw_avp?nodeId=G8UYX7LALQC8V9KA"><span data-hook="avp-badge" class="a-size-mini a-color-state a-text-bold">Verified Purchase</span></a></div><div class="a-row a-spacing-small review-data"><span data-hook="review-body" class="a-size-base review-text review-text-content">
+
+
+
+
+
+
+
+  
+  
+    <span>Provides sharp visuals and improved contrast for an enhanced viewing experience. Effortless access to streaming platforms like Netflix, Prime Video, Disney+, and more without requiring an external device. Comes with Alexa Voice Remote for hands-free control to search content, adjust volume, and manage smart home devices. DTS Virtual:X Audio creates a surround sound experience for more immersive audio. Features impressive smart TV capabilities at a budget-friendly price compared to other 4K TVs.<br><br>Simple to set up and exceeded expectations. Absolutely thrilled with this TV. Highly recommended and budget-friendly!</span>
+  
+</span></div><div class="a-row review-comments comments-for-R1BFCX39NH21NH"><div data-reftag="cm_cr_getr_d_cmt_opn" data-a-expander-name="review_comment_expander" class="a-row a-expander-container a-expander-inline-container cr-vote-action-bar"><span class="cr-vote" data-hook="review-voting-widget">
+  <div class="a-row a-spacing-small"><span data-hook="helpful-vote-statement" class="a-size-base a-color-tertiary cr-vote-text">One person found this helpful</span></div><!-- Components for Reactions C -->
+    <div class="cr-helpful-icon-button cr-vote-component">
+          <span class="a-declarative" data-action="reviews:vote-action" data-reviews:vote-action="{&quot;ajaxUrl&quot;:&quot;/hz/reviews-render/ajax/helpful-vote/submit/ref=cm_cr_getr_d_vote_lft?ie=UTF8&quot;,&quot;cssSelectors&quot;:{&quot;voteCountComponent&quot;:&quot;.cr-helpful-icon-count&quot;,&quot;loadingVoteComponent&quot;:&quot;.cr-vote-loading-component&quot;,&quot;onError&quot;:&quot;.cr-vote-error&quot;,&quot;removeVoteComponent&quot;:&quot;.cr-remove-vote-component&quot;,&quot;submitVoteComponent&quot;:&quot;.cr-submit-vote-component&quot;,&quot;inFlight&quot;:&quot;.cr-vote-feedback&quot;,&quot;hideVoteComponents&quot;:&quot;.cr-vote-component&quot;,&quot;onSuccess&quot;:&quot;.cr-vote-success&quot;},&quot;csrfT&quot;:&quot;hOuBD56tcPyGLFcd6LWmQcpnhMArtUWD/Ll0z0qYK6iXAAAAAGj2GWAAAAAB&quot;,&quot;isReviewLocal&quot;:true,&quot;reviewId&quot;:&quot;R1BFCX39NH21NH&quot;,&quot;allowLinkDefault&quot;:&quot;1&quot;}"><div class="cr-helpful-button aok-float-left">
+              <span class="a-button a-button-base" id="a-autoid-31"><span class="a-button-inner"><input data-hook="vote-helpful-button" aria-label="Mark Review As Helpful" class="a-button-input" type="submit" value="Mark this review as helpful BUTTON"><span class="a-button-text" aria-hidden="true" id="a-autoid-31-announce"><div class="cr-helpful-text">
+                  Helpful</div>
+              </span></span></span></div>
+          </span></div>
+      <span tabindex="-1" class="cr-vote-focusable cr-vote-focusable-feedback">
+        <span class="cr-vote-feedback cr-vote-component aok-hidden">Sending feedback...</span></span>
+
+      <span tabindex="-1" class="cr-vote-focusable cr-vote-focusable-success">
+        <span data-hook="vote-success-message" class="cr-vote-success cr-vote-component aok-hidden"><div class="a-box a-alert-inline a-alert-inline-success cr-vote-helpful-yes" aria-live="polite" aria-atomic="true"><div class="a-box-inner a-alert-container"><i class="a-icon a-icon-alert" aria-hidden="true"></i><div class="a-alert-content">Thank you for your feedback.</div></div></div></span></span>
+
+      <span tabindex="-1" class="cr-vote-focusable cr-vote-focusable-error">
+        <span class="cr-vote-error cr-vote-component aok-hidden"><div class="a-box a-alert-inline a-alert-inline-error" role="alert"><div class="a-box-inner a-alert-container"><i class="a-icon a-icon-alert" aria-hidden="true"></i><div class="a-alert-content">Sorry, we failed to record your vote. Please try again</div></div></div></span></span>
+    </span><span class="cr-footer-line-height">
+          <span><i aria-hidden="true" class="a-icon a-icon-text-separator" role="img" aria-label="|"></i><span class="a-declarative" data-action="reviews:report-abusive-review-modal-button" data-reviews:report-abusive-review-modal-button="{&quot;closeButton&quot;:&quot;true&quot;,&quot;name&quot;:&quot;report-abusive-review-modal-popover-R1BFCX39NH21NH&quot;,&quot;width&quot;:&quot;350&quot;,&quot;header&quot;:&quot;Report this review&quot;,&quot;url&quot;:&quot;/hz/reviews-render/report-review?ie=UTF8&amp;ref=cm_cr_getr_d_rvw_hlp&amp;csrfT=hOuBD56tcPyGLFcd6LWmQcpnhMArtUWD%2FLl0z0qYK6iXAAAAAGj2GWAAAAAB&amp;reviewId=R1BFCX39NH21NH&quot;}" id="report-abusive-review-modal-popover-R1BFCX39NH21NH"><a aria-label="Report review by Joy" class="a-size-base a-link-normal a-color-secondary report-abuse-link a-text-normal" href="/hz/reviews-render/report-review?ie=UTF8&amp;ref=cm_cr_getr_d_rvw_hlp&amp;csrfT=hOuBD56tcPyGLFcd6LWmQcpnhMArtUWD%2FLl0z0qYK6iXAAAAAGj2GWAAAAAB&amp;reviewId=R1BFCX39NH21NH">Report</a></span></span></span>
+
+        <div data-expanded="false" class="a-expander-content a-spacing-top-base a-spacing-large a-expander-inline-content a-expander-inner" style="display:none"><div class="a-row a-spacing-mini review-comments-header aok-hidden"><ul class="a-viewoptions-list a-viewoptions-section a-span12">
+    <div class="a-row a-spacing-none a-grid-vertical-align a-grid-center"><div class="a-column a-span6"><span class="a-size-base a-viewoptions-list-label">Showing <span class="review-comment-count">0</span> comments</span></div></div></ul>
+</div><div class="a-section a-spacing-extra-large a-spacing-top-medium a-text-center comment-load-error aok-hidden"><div class="a-box a-alert a-alert-error cr-error" role="alert"><div class="a-box-inner a-alert-container"><h4 class="a-alert-heading">There was a problem loading comments right now. Please try again later.</h4><i class="a-icon a-icon-alert" aria-hidden="true"></i><div class="a-alert-content"></div></div></div></div><div class="a-section a-spacing-none review-comments"></div><div class="a-spinner-wrapper comment-loading aok-hidden a-spacing-top-medium a-spacing-extra-large"><span class="a-spinner a-spinner-medium"></span></div><hr aria-hidden="true" class="a-spacing-none a-spacing-top-large a-divider-normal"></div></div></div></div></div>
+
+여기서 수집할 것은 리뷰 내용 뿐이야. 
+
+xpath는 //*[@id="customer_review-R1BFCX39NH21NH"]/div[4]/span/span
+
+read more 등 축약형은 없네. 
+
+다음 페이지 html은 <a href="/INSIGNIA-50-inch-4K-UHD-Fire-TV/product-reviews/B0F19KLHG3/ref=cm_cr_getr_d_paging_btm_2?ie=UTF8&amp;pageNumber=2&amp;reviewerType=all_reviews&amp;pageSize=10">Next page<span class="a-letter-space"></span><span class="a-letter-space"></span><span class="larr">→</span></a>
+
+xpath 는  //*[@id="cm_cr-pagination_bar"]/ul/li[2]/a
+

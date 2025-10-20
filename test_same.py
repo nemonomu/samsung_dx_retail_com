@@ -5,13 +5,10 @@ Does not save to DB - only logs duplicate information
 import time
 import random
 import psycopg2
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
+import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 from lxml import html
 
 # Database configuration
@@ -86,26 +83,18 @@ class DuplicateDetector:
             return []
 
     def setup_driver(self):
-        """Setup Chrome WebDriver"""
-        chrome_options = Options()
-        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        chrome_options.add_experimental_option('useAutomationExtension', False)
+        """Setup Chrome WebDriver with undetected_chromedriver"""
+        print("[INFO] Setting up undetected Chrome driver...")
 
-        service = Service(ChromeDriverManager().install())
-        self.driver = webdriver.Chrome(service=service, options=chrome_options)
+        options = uc.ChromeOptions()
+        options.add_argument('--disable-blink-features=AutomationControlled')
+
+        # Use undetected_chromedriver
+        self.driver = uc.Chrome(options=options, version_main=None)
+        self.driver.maximize_window()
         self.wait = WebDriverWait(self.driver, 10)
 
-        self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-            'source': '''
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                })
-            '''
-        })
-
-        print("[OK] WebDriver setup complete")
+        print("[OK] Undetected WebDriver setup complete")
 
     def extract_text_safe(self, element, xpath):
         """Safely extract text from element using xpath"""

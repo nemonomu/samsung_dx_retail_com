@@ -104,9 +104,39 @@ def login_to_amazon(driver, email, password):
 
         # Enter email
         print("\n[3] Entering email...")
-        email_input = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.ID, "ap_email"))
-        )
+        print(f"    Current URL: {driver.current_url}")
+
+        # Save page source for debugging
+        with open('login_page_debug.html', 'w', encoding='utf-8') as f:
+            f.write(driver.page_source)
+        print("    [DEBUG] Saved page source to login_page_debug.html")
+
+        # Try multiple selectors for email field
+        email_selectors = [
+            (By.ID, "ap_email"),
+            (By.NAME, "email"),
+            (By.CSS_SELECTOR, "input[type='email']"),
+            (By.CSS_SELECTOR, "input[name='email']"),
+            (By.XPATH, "//input[@type='email']")
+        ]
+
+        email_input = None
+        for idx, (by, selector) in enumerate(email_selectors, 1):
+            try:
+                email_input = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((by, selector))
+                )
+                print(f"    ✓ Found email input using selector #{idx}: {selector}")
+                break
+            except:
+                print(f"    ✗ Not found using selector #{idx}: {selector}")
+                continue
+
+        if not email_input:
+            print("\n[ERROR] Could not find email input field!")
+            print("Please check login_page_debug.html for page structure")
+            raise Exception("Email input field not found")
+
         email_input.clear()
         email_input.send_keys(email)
         print("    ✓ Email entered")
@@ -114,15 +144,50 @@ def login_to_amazon(driver, email, password):
 
         # Click Continue
         print("\n[4] Clicking 'Continue' button...")
-        continue_button = driver.find_element(By.ID, "continue")
-        continue_button.click()
-        time.sleep(2)
+        continue_selectors = [
+            (By.ID, "continue"),
+            (By.CSS_SELECTOR, "input[type='submit']"),
+            (By.CSS_SELECTOR, "input.a-button-input"),
+            (By.XPATH, "//input[@id='continue']")
+        ]
+
+        for idx, (by, selector) in enumerate(continue_selectors, 1):
+            try:
+                continue_button = driver.find_element(by, selector)
+                continue_button.click()
+                print(f"    ✓ Clicked continue button using selector #{idx}")
+                break
+            except:
+                continue
+
+        time.sleep(3)
 
         # Enter password
         print("\n[5] Entering password...")
-        password_input = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.ID, "ap_password"))
-        )
+        password_selectors = [
+            (By.ID, "ap_password"),
+            (By.NAME, "password"),
+            (By.CSS_SELECTOR, "input[type='password']"),
+            (By.CSS_SELECTOR, "input[name='password']"),
+            (By.XPATH, "//input[@type='password']")
+        ]
+
+        password_input = None
+        for idx, (by, selector) in enumerate(password_selectors, 1):
+            try:
+                password_input = WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((by, selector))
+                )
+                print(f"    ✓ Found password input using selector #{idx}: {selector}")
+                break
+            except:
+                print(f"    ✗ Not found using selector #{idx}: {selector}")
+                continue
+
+        if not password_input:
+            print("\n[ERROR] Could not find password input field!")
+            raise Exception("Password input field not found")
+
         password_input.clear()
         password_input.send_keys(password)
         print("    ✓ Password entered")
@@ -130,9 +195,23 @@ def login_to_amazon(driver, email, password):
 
         # Click Sign-In
         print("\n[6] Clicking 'Sign-In' button...")
-        sign_in_button = driver.find_element(By.ID, "signInSubmit")
-        sign_in_button.click()
-        time.sleep(3)
+        signin_selectors = [
+            (By.ID, "signInSubmit"),
+            (By.CSS_SELECTOR, "input[type='submit']"),
+            (By.CSS_SELECTOR, "input.a-button-input"),
+            (By.XPATH, "//input[@id='signInSubmit']")
+        ]
+
+        for idx, (by, selector) in enumerate(signin_selectors, 1):
+            try:
+                sign_in_button = driver.find_element(by, selector)
+                sign_in_button.click()
+                print(f"    ✓ Clicked sign-in button using selector #{idx}")
+                break
+            except:
+                continue
+
+        time.sleep(5)
 
         # Check for CAPTCHA or OTP
         print("\n[7] Checking for CAPTCHA or OTP...")

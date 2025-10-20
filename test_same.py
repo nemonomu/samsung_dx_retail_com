@@ -96,6 +96,27 @@ class DuplicateDetector:
 
         print("[OK] Undetected WebDriver setup complete")
 
+    def establish_session(self):
+        """Establish Amazon session naturally"""
+        print("\n" + "="*80)
+        print("[INFO] Establishing Amazon session...")
+        print("="*80)
+
+        # Visit Amazon homepage first
+        self.driver.get("https://www.amazon.com")
+        time.sleep(5)
+
+        print("\n[ACTION REQUIRED] Please check the browser window:")
+        print("  1. If you see CAPTCHA, please solve it manually")
+        print("  2. If you see 'Sorry! something went wrong!', refresh the page")
+        print("  3. If page looks normal (Amazon homepage), you're good")
+        print("  4. Press ENTER when ready to continue...")
+        print("="*80 + "\n")
+
+        input("Press ENTER to continue...")
+
+        print("[OK] Session established, starting crawl...")
+
     def extract_text_safe(self, element, xpath):
         """Safely extract text from element using xpath"""
         try:
@@ -136,14 +157,18 @@ class DuplicateDetector:
 
             self.driver.get(url)
 
+            # Longer initial wait
+            print(f"[INFO] Initial page load wait...")
+            time.sleep(8)
+
             # Wait for search results to load
             print(f"[INFO] Waiting for search results to load...")
             try:
-                WebDriverWait(self.driver, 15).until(
+                WebDriverWait(self.driver, 20).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, "[data-component-type='s-search-result']"))
                 )
                 print(f"[OK] Search results detected")
-                time.sleep(random.uniform(4, 6))
+                time.sleep(random.uniform(5, 7))
             except Exception as e:
                 print(f"[WARNING] Timeout waiting for search results: {e}")
                 time.sleep(3)
@@ -339,6 +364,9 @@ class DuplicateDetector:
                 return
 
             self.setup_driver()
+
+            # Establish session with manual verification
+            self.establish_session()
 
             # Check each page until duplicate found
             for page_number, url in page_urls:

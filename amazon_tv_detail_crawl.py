@@ -323,11 +323,15 @@ class AmazonDetailCrawler:
 
                 if review_elements:
                     for elem in review_elements:
+                        # Check if we already have 20 reviews
+                        if len(all_reviews) >= 20:
+                            break
+
                         review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
                         if review_text and len(review_text) > 10:
                             all_reviews.append(review_text)
 
-                # Check if we have enough reviews
+                # Check if we have enough reviews after this page
                 if len(all_reviews) >= 20:
                     break
 

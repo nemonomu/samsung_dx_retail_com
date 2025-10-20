@@ -205,15 +205,15 @@ class AmazonDetailCrawler:
 
             total_count = int(total_match.group(1).replace(',', ''))
 
-            # Extract percentages for each star rating (5 to 1)
+            # Extract percentages for each star rating (5 to 1) from aria-label
             star_counts = []
             for i in range(1, 6):  # li[1] to li[5]
-                xpath = f'//*[@id="histogramTable"]/li[{i}]'
-                li_text = self.extract_text_safe(tree, xpath)
+                xpath = f'//*[@id="histogramTable"]/li[{i}]/span/a/@aria-label'
+                aria_label = self.extract_text_safe(tree, xpath)
 
-                if li_text:
-                    # Extract percentage (e.g., "73%")
-                    percent_match = re.search(r'(\d+)%', li_text)
+                if aria_label:
+                    # Extract percentage from "73 percent of reviews have 5 stars"
+                    percent_match = re.search(r'(\d+)\s*percent', aria_label)
                     if percent_match:
                         percentage = int(percent_match.group(1))
                         count = int(total_count * percentage / 100)

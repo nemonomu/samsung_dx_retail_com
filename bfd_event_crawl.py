@@ -227,15 +227,15 @@ class BFDEventCrawler:
                         print(f"  [{retailer_name}][{idx}] Incomplete date info for {event_name}")
                         continue
 
-                    start_date = time_elements[0].strip()
-                    end_date = time_elements[1].strip()
+                    start_date_raw = time_elements[0].strip()
+                    end_date_raw = time_elements[1].strip()
 
-                    # Format dates (e.g., "2024-11-25 00:00:00" -> "Nov 25")
-                    start_formatted = self.format_date(start_date)
-                    end_formatted = self.format_date(end_date)
+                    # Extract date only (e.g., "2024-11-25 00:00:00" -> "2024-11-25")
+                    start_date = start_date_raw.split()[0] if ' ' in start_date_raw else start_date_raw
+                    end_date = end_date_raw.split()[0] if ' ' in end_date_raw else end_date_raw
 
-                    # Combine into final format: "Event Name: MMM DD-MMM DD"
-                    event_schedule = f"{event_name}: {start_formatted}-{end_formatted}"
+                    # Combine into final format: "Event Name, event start date: YYYY-MM-DD, event end date: YYYY-MM-DD"
+                    event_schedule = f"{event_name}, event start date: {start_date}, event end date: {end_date}"
                     events.append(event_schedule)
 
                     print(f"  [{retailer_name}][{idx}] {event_schedule}")

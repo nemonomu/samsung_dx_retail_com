@@ -357,10 +357,13 @@ class AmazonDetailCrawler:
                 else:
                     break
 
-            # Limit to 20 reviews and convert to JSON
+            # Limit to 20 reviews and format as "1-review, 2-review, ..."
             reviews = all_reviews[:20]
             if reviews:
-                return json.dumps(reviews, ensure_ascii=False)
+                formatted_reviews = []
+                for idx, review in enumerate(reviews, 1):
+                    formatted_reviews.append(f"{idx}-{review}")
+                return ", ".join(formatted_reviews)
             else:
                 return None
 
@@ -395,13 +398,23 @@ class AmazonDetailCrawler:
             membership_discount_raw = self.extract_text_safe(tree, self.xpaths.get('membership_discount'))
             membership_discount = self.clean_membership_discount(membership_discount_raw)
 
+            # Samsung SKU Name - try multiple XPaths
             samsung_sku_name = self.extract_text_safe(tree, self.xpaths.get('samsung_sku_name'))
+            if not samsung_sku_name:
+                # Fallback XPath for different page structure
+                samsung_sku_name = self.extract_text_safe(tree, '//*[@id="detailBullets_feature_div"]/ul/li[2]/span/span[2]')
 
-            # Ranks - remove parentheses
+            # Ranks - remove parentheses, try multiple XPaths
             rank_1_raw = self.extract_text_safe(tree, self.xpaths.get('rank_1'))
+            if not rank_1_raw:
+                # Fallback XPath for different page structure
+                rank_1_raw = self.extract_text_safe(tree, '//*[@id="detailBullets_feature_div"]/ul/li[7]/span/text()[1]')
             rank_1 = self.clean_rank(rank_1_raw)
 
             rank_2_raw = self.extract_text_safe(tree, self.xpaths.get('rank_2'))
+            if not rank_2_raw:
+                # Fallback XPath for different page structure
+                rank_2_raw = self.extract_text_safe(tree, '//*[@id="detailBullets_feature_div"]/ul/li[7]/span/ul')
             rank_2 = self.clean_rank(rank_2_raw)
 
             # Extract count of star ratings
@@ -441,7 +454,8 @@ class AmazonDetailCrawler:
                 # Show detailed review count
                 if detailed_review_content:
                     try:
-                        review_count = len(json.loads(detailed_review_content))
+                        # Count reviews by counting "N-" patterns
+                        review_count = len([r for r in detailed_review_content.split(', ') if r and '-' in r])
                         print(f"       Detailed Reviews: {review_count} collected")
                     except:
                         print(f"       Detailed Reviews: N/A")

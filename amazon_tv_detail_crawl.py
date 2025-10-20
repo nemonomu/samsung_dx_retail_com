@@ -190,6 +190,58 @@ class AmazonDetailCrawler:
 
         return None
 
+    def extract_count_of_star_ratings(self, tree):
+        """Extract star ratings count (format: 5star:1788, 4star:318, ...)"""
+        try:
+            # Get total count from "2,449 global ratings"
+            total_text = self.extract_text_safe(tree, '//*[@id="cm_cr_dp_d_rating_histogram"]/div[3]')
+            if not total_text:
+                return None
+
+            # Extract number from "2,449 global ratings"
+            total_match = re.search(r'([\d,]+)\s*global ratings', total_text)
+            if not total_match:
+                return None
+
+            total_count = int(total_match.group(1).replace(',', ''))
+
+            # Extract percentages for each star rating (5 to 1)
+            star_counts = []
+            for i in range(1, 6):  # li[1] to li[5]
+                xpath = f'//*[@id="histogramTable"]/li[{i}]'
+                li_text = self.extract_text_safe(tree, xpath)
+
+                if li_text:
+                    # Extract percentage (e.g., "73%")
+                    percent_match = re.search(r'(\d+)%', li_text)
+                    if percent_match:
+                        percentage = int(percent_match.group(1))
+                        count = int(total_count * percentage / 100)
+                        star_counts.append(count)
+                    else:
+                        star_counts.append(0)
+                else:
+                    star_counts.append(0)
+
+            # Format: 5star:count, 4star:count, ...
+            if len(star_counts) == 5:
+                result = f"5star:{star_counts[0]}, 4star:{star_counts[1]}, 3star:{star_counts[2]}, 2star:{star_counts[3]}, 1star:{star_counts[4]}"
+                return result
+
+            return None
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract star ratings count: {e}")
+            return None
+
+    def extract_summarized_review(self, tree):
+        """Extract AI-generated review summary (may not exist on all pages)"""
+        try:
+            summary = self.extract_text_safe(tree, '//*[@id="product-summary"]/p[1]/span')
+            return summary if summary else None
+        except Exception as e:
+            return None
+
     def scrape_detail_page(self, url_data):
         """Scrape detail page and extract information"""
         try:
@@ -226,6 +278,12 @@ class AmazonDetailCrawler:
             rank_2_raw = self.extract_text_safe(tree, self.xpaths.get('rank_2'))
             rank_2 = self.clean_rank(rank_2_raw)
 
+            # Extract count of star ratings
+            count_of_star_ratings = self.extract_count_of_star_ratings(tree)
+
+            # Extract summarized review content
+            summarized_review_content = self.extract_summarized_review(tree)
+
             data = {
                 'mother': mother,
                 'order': order,
@@ -237,8 +295,8 @@ class AmazonDetailCrawler:
                 'Samsung_SKU_Name': samsung_sku_name,
                 'Rank_1': rank_1,
                 'Rank_2': rank_2,
-                'Count_of_Star_Ratings': None,  # Not collecting yet
-                'Summarized_Review_Content': None,  # Not collecting yet
+                'Count_of_Star_Ratings': count_of_star_ratings,
+                'Summarized_Review_Content': summarized_review_content,
                 'Detailed_Review_Content': None  # Not collecting yet
             }
 
@@ -248,6 +306,8 @@ class AmazonDetailCrawler:
                 print(f"  [OK] Collected: {retailer_sku_name[:50] if retailer_sku_name else '[NO NAME]'}...")
                 print(f"       Star: {star_rating or 'N/A'} | Popularity: {sku_popularity or 'N/A'}")
                 print(f"       Rank1: {rank_1 or 'N/A'} | Rank2: {rank_2 or 'N/A'}")
+                print(f"       Star Counts: {count_of_star_ratings or 'N/A'}")
+                print(f"       Review Summary: {summarized_review_content[:80] + '...' if summarized_review_content and len(summarized_review_content) > 80 else summarized_review_content or 'N/A'}")
                 return True
             else:
                 print(f"  [FAILED] Could not save data")

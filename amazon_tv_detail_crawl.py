@@ -1,12 +1,18 @@
 import time
 import random
 import psycopg2
+import pickle
+import json
+import os
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from lxml import html
 import re
+
+# Cookie file path
+COOKIE_FILE = 'amazon_cookies.pkl'
 
 # Database configuration
 DB_CONFIG = {
@@ -149,6 +155,34 @@ class AmazonDetailCrawler:
 
         print("[OK] WebDriver setup complete")
 
+        # Load cookies for login
+        self.load_cookies()
+
+    def load_cookies(self):
+        """Load cookies from file for authenticated access"""
+        if not os.path.exists(COOKIE_FILE):
+            print(f"[WARNING] Cookie file not found: {COOKIE_FILE}")
+            print("[WARNING] Review collection may fail without login. Run amazon_login.py first.")
+            return False
+
+        try:
+            self.driver.get("https://www.amazon.com")
+            time.sleep(2)
+
+            with open(COOKIE_FILE, 'rb') as f:
+                cookies = pickle.load(f)
+                for cookie in cookies:
+                    self.driver.add_cookie(cookie)
+
+            self.driver.refresh()
+            time.sleep(2)
+            print(f"[OK] Cookies loaded - logged in")
+            return True
+
+        except Exception as e:
+            print(f"[WARNING] Failed to load cookies: {e}")
+            return False
+
     def extract_text_safe(self, tree, xpath):
         """Safely extract text from XPath"""
         if not xpath:
@@ -242,6 +276,98 @@ class AmazonDetailCrawler:
         except Exception as e:
             return None
 
+    def extract_detailed_reviews(self, product_url):
+        """Extract up to 20 detailed reviews from review pages"""
+        try:
+            # Get current page HTML
+            tree = html.fromstring(self.driver.page_source)
+
+            # Extract "See more reviews" link
+            review_link_xpaths = [
+                '//*[@id="reviews-medley-footer"]/div[2]/a/@href',
+                '//a[@data-hook="see-all-reviews-link-foot"]/@href',
+                '//a[contains(text(), "See more reviews")]/@href'
+            ]
+
+            review_link = None
+            for xpath in review_link_xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    review_link = result[0]
+                    break
+
+            if not review_link:
+                print("  [WARNING] Could not find review page link")
+                return None
+
+            # Navigate to review page
+            if review_link.startswith('http'):
+                review_url = review_link
+            else:
+                review_url = "https://www.amazon.com" + review_link
+
+            self.driver.get(review_url)
+            time.sleep(random.uniform(3, 4))
+
+            # Collect reviews from multiple pages
+            all_reviews = []
+            page_num = 1
+            max_pages = 3  # Max 3 pages to get 20+ reviews
+
+            while len(all_reviews) < 20 and page_num <= max_pages:
+                tree = html.fromstring(self.driver.page_source)
+
+                # Extract reviews from current page
+                review_xpath = '//span[@data-hook="review-body"]/span'
+                review_elements = tree.xpath(review_xpath)
+
+                if review_elements:
+                    for elem in review_elements:
+                        review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
+                        if review_text and len(review_text) > 10:
+                            all_reviews.append(review_text)
+
+                # Check if we have enough reviews
+                if len(all_reviews) >= 20:
+                    break
+
+                # Find next page link
+                next_button_xpaths = [
+                    '//a[contains(text(), "Next page")]/@href',
+                    '//*[@id="cm_cr-pagination_bar"]//li[@class="a-last"]/a/@href',
+                    '//ul[@class="a-pagination"]//li[@class="a-last"]/a/@href'
+                ]
+
+                next_link = None
+                for xpath in next_button_xpaths:
+                    result = tree.xpath(xpath)
+                    if result:
+                        next_link = result[0]
+                        break
+
+                if next_link:
+                    if next_link.startswith('http'):
+                        next_url = next_link
+                    else:
+                        next_url = "https://www.amazon.com" + next_link
+
+                    self.driver.get(next_url)
+                    time.sleep(random.uniform(2, 3))
+                    page_num += 1
+                else:
+                    break
+
+            # Limit to 20 reviews and convert to JSON
+            reviews = all_reviews[:20]
+            if reviews:
+                return json.dumps(reviews, ensure_ascii=False)
+            else:
+                return None
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract detailed reviews: {e}")
+            return None
+
     def scrape_detail_page(self, url_data):
         """Scrape detail page and extract information"""
         try:
@@ -284,6 +410,9 @@ class AmazonDetailCrawler:
             # Extract summarized review content
             summarized_review_content = self.extract_summarized_review(tree)
 
+            # Extract detailed review content (20 reviews in JSON format)
+            detailed_review_content = self.extract_detailed_reviews(url)
+
             data = {
                 'mother': mother,
                 'order': order,
@@ -297,7 +426,7 @@ class AmazonDetailCrawler:
                 'Rank_2': rank_2,
                 'Count_of_Star_Ratings': count_of_star_ratings,
                 'Summarized_Review_Content': summarized_review_content,
-                'Detailed_Review_Content': None  # Not collecting yet
+                'Detailed_Review_Content': detailed_review_content
             }
 
             # Save to database
@@ -308,6 +437,17 @@ class AmazonDetailCrawler:
                 print(f"       Rank1: {rank_1 or 'N/A'} | Rank2: {rank_2 or 'N/A'}")
                 print(f"       Star Counts: {count_of_star_ratings or 'N/A'}")
                 print(f"       Review Summary: {summarized_review_content[:80] + '...' if summarized_review_content and len(summarized_review_content) > 80 else summarized_review_content or 'N/A'}")
+
+                # Show detailed review count
+                if detailed_review_content:
+                    try:
+                        review_count = len(json.loads(detailed_review_content))
+                        print(f"       Detailed Reviews: {review_count} collected")
+                    except:
+                        print(f"       Detailed Reviews: N/A")
+                else:
+                    print(f"       Detailed Reviews: N/A")
+
                 return True
             else:
                 print(f"  [FAILED] Could not save data")

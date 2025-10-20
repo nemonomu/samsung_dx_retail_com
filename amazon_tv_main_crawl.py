@@ -177,9 +177,18 @@ class AmazonTVCrawler:
             self.driver.get(url)
             time.sleep(random.uniform(3, 5))
 
+            # DEBUG: Verify current URL after load
+            current_url = self.driver.current_url
+            print(f"[DEBUG] Current URL after load: {current_url[:100]}...")
+            if current_url != url:
+                print(f"[WARNING] URL changed! Expected: {url[:50]}, Got: {current_url[:50]}")
+
             # Get page source and parse with lxml
             page_source = self.driver.page_source
             tree = html.fromstring(page_source)
+
+            # DEBUG: Check page source size
+            print(f"[DEBUG] Page source size: {len(page_source)} bytes")
 
             # Find all product containers (excluding ads/widgets)
             base_xpath = self.xpaths['base_container']['xpath']
@@ -239,6 +248,14 @@ class AmazonTVCrawler:
                 print(f"[WARNING] Only {len(valid_products)} valid products found on page {page_number}")
                 print(f"[DEBUG] Total containers: {len(products)}, Excluded: {excluded_count}, Valid: {len(valid_products)}")
 
+            # DEBUG: Show first 3 products on this page
+            print(f"\n[DEBUG] First 3 products on page {page_number}:")
+            for debug_idx, debug_product in enumerate(valid_products[:3], 1):
+                debug_asin = debug_product.get('data-asin', 'N/A')
+                debug_name = self.extract_product_name(debug_product)
+                debug_url_path = self.extract_text_safe(debug_product, self.xpaths['product_url']['xpath'])
+                print(f"  {debug_idx}. ASIN: {debug_asin} | Name: {debug_name[:50] if debug_name else 'NULL'}... | URL: {debug_url_path[:50] if debug_url_path else 'NULL'}...")
+
             # Process up to 16 products per page
             collected_count = 0
             for idx, product in enumerate(valid_products[:16], 1):
@@ -278,6 +295,15 @@ class AmazonTVCrawler:
                 if not asin or asin.strip() == '':
                     asin = None
 
+                # DEBUG: Check if we've seen this ASIN before (on different page)
+                if asin and hasattr(self, '_seen_asins'):
+                    if asin in self._seen_asins:
+                        prev_page = self._seen_asins[asin]
+                        print(f"  [DEBUG] DUPLICATE ASIN DETECTED! {asin} was already collected on page {prev_page}")
+                else:
+                    if not hasattr(self, '_seen_asins'):
+                        self._seen_asins = {}
+
                 # Extract price
                 final_price = self.extract_text_safe(product, self.xpaths['final_price']['xpath'])
 
@@ -303,15 +329,31 @@ class AmazonTVCrawler:
                 if self.save_to_db(data):
                     collected_count += 1
                     self.total_collected += 1
-                    print(f"  [{idx}/16] Collected: {data['Retailer_SKU_Name'][:50] if data['Retailer_SKU_Name'] else '[NO NAME]'}... | ASIN: {asin or 'N/A'} | URL: {product_url[:50] if product_url else 'NULL'}...")
-                else:
-                    print(f"  [{idx}/16] FAILED: {data['Retailer_SKU_Name'][:40]}... (ASIN: {asin or 'N/A'}) - DB save error")
 
-            print(f"[PAGE {page_number}] Collected {collected_count} products (Total: {self.total_collected}/{self.max_skus})")
+                    # Track this ASIN
+                    if asin:
+                        self._seen_asins[asin] = page_number
+
+                    # DEBUG: Show detailed saved data
+                    print(f"  [{idx}/16] ✓ SAVED (Order #{self.sequential_id - 1}):")
+                    print(f"           Name: {data['Retailer_SKU_Name'][:60] if data['Retailer_SKU_Name'] else '[NO NAME]'}...")
+                    print(f"           ASIN: {asin or 'N/A'}")
+                    print(f"           Price: {final_price or 'N/A'}")
+                    print(f"           URL: {product_url[:60] if product_url else 'NULL'}...")
+                else:
+                    print(f"  [{idx}/16] ✗ FAILED: {data['Retailer_SKU_Name'][:40]}... (ASIN: {asin or 'N/A'}) - DB save error")
+
+            print(f"\n[PAGE {page_number}] Summary:")
+            print(f"  - Collected: {collected_count} products")
+            print(f"  - Total progress: {self.total_collected}/{self.max_skus}")
+            print(f"  - Next sequential ID: {self.sequential_id}")
+
             return True
 
         except Exception as e:
             print(f"[ERROR] Failed to scrape page {page_number}: {e}")
+            import traceback
+            print(traceback.format_exc())
             return True  # Continue to next page
 
     def save_to_db(self, data):
@@ -456,6 +498,14 @@ class AmazonTVCrawler:
 
             print("\n" + "="*80)
             print(f"Crawling completed! Total collected: {self.total_collected} SKUs")
+
+            # DEBUG: Show duplicate statistics
+            if hasattr(self, '_seen_asins'):
+                print(f"[DEBUG] Unique ASINs collected: {len(self._seen_asins)}")
+                if len(self._seen_asins) != self.total_collected:
+                    print(f"[WARNING] Mismatch! Total collected ({self.total_collected}) != Unique ASINs ({len(self._seen_asins)})")
+                    print(f"[WARNING] This suggests duplicate products were collected!")
+
             print("="*80)
 
         except Exception as e:

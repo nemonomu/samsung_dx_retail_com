@@ -299,7 +299,18 @@ class AmazonTVCrawler:
                 if asin and hasattr(self, '_seen_asins'):
                     if asin in self._seen_asins:
                         prev_page = self._seen_asins[asin]
-                        print(f"  [DEBUG] DUPLICATE ASIN DETECTED! {asin} was already collected on page {prev_page}")
+                        cel_widget = product.get('cel_widget_id', 'NONE')
+                        component_type = product.get('data-component-type', 'NONE')
+                        component_id = product.get('data-component-id', 'NONE')
+                        data_index = product.get('data-index', 'NONE')
+
+                        print(f"  [DEBUG] DUPLICATE ASIN DETECTED! {asin} (originally from page {prev_page})")
+                        print(f"         Product Name: {product_name[:60]}...")
+                        print(f"         cel_widget_id: {cel_widget}")
+                        print(f"         data-component-type: {component_type}")
+                        print(f"         data-component-id: {component_id}")
+                        print(f"         data-index: {data_index}")
+                        print(f"         → Is this a sponsored/ad product that should be excluded?")
                 else:
                     if not hasattr(self, '_seen_asins'):
                         self._seen_asins = {}

@@ -175,7 +175,23 @@ class AmazonTVCrawler:
         try:
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
             self.driver.get(url)
-            time.sleep(random.uniform(3, 5))
+
+            # Wait for search results to actually load
+            print(f"[INFO] Waiting for search results to load...")
+            try:
+                # Wait up to 15 seconds for search result containers to appear
+                WebDriverWait(self.driver, 15).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "[data-component-type='s-search-result']"))
+                )
+                print(f"[OK] Search results detected")
+
+                # Additional wait for all elements to render
+                time.sleep(random.uniform(4, 6))
+
+            except Exception as e:
+                print(f"[WARNING] Timeout waiting for search results: {e}")
+                # Still try to parse, might be blocked or error page
+                time.sleep(3)
 
             # DEBUG: Verify current URL after load
             current_url = self.driver.current_url

@@ -201,6 +201,71 @@ class DuplicateDetector:
 
             print(f"[INFO] Valid products: {len(valid_products)}")
 
+            # If no valid products found, try going to Amazon home first
+            if len(valid_products) == 0:
+                print(f"[WARNING] No valid products found. Trying workaround...")
+                print(f"[INFO] Going to Amazon homepage first...")
+
+                self.driver.get("https://www.amazon.com")
+                time.sleep(random.uniform(2, 3))
+
+                print(f"[INFO] Returning to search page...")
+                self.driver.get(url)
+
+                # Wait for search results again
+                try:
+                    WebDriverWait(self.driver, 15).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "[data-component-type='s-search-result']"))
+                    )
+                    print(f"[OK] Search results detected after workaround")
+                    time.sleep(random.uniform(4, 6))
+                except Exception as e:
+                    print(f"[ERROR] Still no results after workaround: {e}")
+                    return True  # Continue to next page
+
+                # Re-parse page
+                page_source = self.driver.page_source
+                tree = html.fromstring(page_source)
+                products = tree.xpath(base_xpath)
+
+                print(f"[INFO] Found {len(products)} containers after workaround")
+
+                # Re-filter
+                valid_products = []
+                for product in products:
+                    cel_widget = product.get('cel_widget_id', '')
+                    component_type = product.get('data-component-type', '')
+                    data_component_id = product.get('data-component-id', '')
+
+                    is_excluded = False
+                    if 'loom-desktop' in cel_widget:
+                        is_excluded = True
+                    elif 'sb-themed' in cel_widget:
+                        is_excluded = True
+                    elif 'multi-brand' in cel_widget:
+                        is_excluded = True
+                    elif component_type == 's-messaging-widget':
+                        is_excluded = True
+                    elif 'VideoLandscapeCarouselWidget' in data_component_id:
+                        is_excluded = True
+
+                    if not is_excluded:
+                        data_index = product.get('data-index', '999')
+                        try:
+                            data_index = int(data_index)
+                        except:
+                            data_index = 999
+                        valid_products.append((data_index, product))
+
+                valid_products.sort(key=lambda x: x[0])
+                valid_products = [product for _, product in valid_products]
+
+                print(f"[INFO] Valid products after workaround: {len(valid_products)}")
+
+                if len(valid_products) == 0:
+                    print(f"[ERROR] Still no products after workaround. Skipping page.")
+                    return True  # Continue to next page
+
             # Check each product for duplicates
             for idx, product in enumerate(valid_products, 1):
                 asin = product.get('data-asin', None)

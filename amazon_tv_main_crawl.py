@@ -30,7 +30,6 @@ class AmazonTVCrawler:
         self.total_collected = 0
         self.max_skus = 300
         self.sequential_id = 1  # ID counter for 1-300
-        self.collected_products = set()  # Track (ASIN, Price, Name) collected in THIS crawling session
         self.batch_id = None  # Batch ID for this crawling session
 
     def connect_db(self):
@@ -279,14 +278,8 @@ class AmazonTVCrawler:
                 if not asin or asin.strip() == '':
                     asin = None
 
-                # Extract price for duplicate check
+                # Extract price
                 final_price = self.extract_text_safe(product, self.xpaths['final_price']['xpath'])
-
-                # Check if (ASIN, Price, Name) already collected in THIS session
-                product_key = (asin, final_price, product_name)
-                if product_key in self.collected_products:
-                    print(f"  [{idx}/16] DUPLICATE: {product_name[:40]}... (ASIN: {asin}, Price: {final_price}) - already collected in this session")
-                    continue
 
                 # Extract and convert purchase count
                 purchase_count_raw = self.extract_text_safe(product, self.xpaths['purchase_history']['xpath'])
@@ -312,7 +305,7 @@ class AmazonTVCrawler:
                     self.total_collected += 1
                     print(f"  [{idx}/16] Collected: {data['Retailer_SKU_Name'][:50] if data['Retailer_SKU_Name'] else '[NO NAME]'}... | ASIN: {asin or 'N/A'} | URL: {product_url[:50] if product_url else 'NULL'}...")
                 else:
-                    print(f"  [{idx}/16] DUPLICATE: {data['Retailer_SKU_Name'][:40]}... (ASIN: {asin or 'N/A'}) - already collected")
+                    print(f"  [{idx}/16] FAILED: {data['Retailer_SKU_Name'][:40]}... (ASIN: {asin or 'N/A'}) - DB save error")
 
             print(f"[PAGE {page_number}] Collected {collected_count} products (Total: {self.total_collected}/{self.max_skus})")
             return True
@@ -380,10 +373,6 @@ class AmazonTVCrawler:
 
             # Commit transaction
             self.db_conn.commit()
-
-            # Add (ASIN, Price, Name) to session tracking set
-            product_key = (data['ASIN'], data['Final_SKU_Price'], data['Retailer_SKU_Name'])
-            self.collected_products.add(product_key)
 
             # Increment sequential ID for next product
             self.sequential_id += 1

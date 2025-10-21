@@ -231,6 +231,8 @@ class AmazonTVCrawler:
                     is_excluded = True
                 elif 'multi-brand' in cel_widget:
                     is_excluded = True
+                elif 'FEATURED_ASINS_LIST' in cel_widget:
+                    is_excluded = True  # Exclude "4 stars and above" recommendation sections
                 # Only exclude messaging/video widgets, not video products
                 elif component_type == 's-messaging-widget':
                     is_excluded = True

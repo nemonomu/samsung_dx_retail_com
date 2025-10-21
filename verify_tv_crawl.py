@@ -149,7 +149,7 @@ class TVCrawlerVerifier:
             time.sleep(8)
 
             try:
-                WebDriverWait(self.driver, 20).until(
+                WebDriverWait(driver, 20).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, "[data-component-type='s-search-result']"))
                 )
                 print(f"[OK] Search results detected")
@@ -159,7 +159,7 @@ class TVCrawlerVerifier:
                 time.sleep(3)
 
             # Parse page
-            page_source = self.driver.page_source
+            page_source = driver.page_source
             tree = html.fromstring(page_source)
 
             # Find all product containers

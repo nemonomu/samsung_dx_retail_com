@@ -264,6 +264,15 @@ class TVCrawlerVerifier:
             print(f"Total products that would be collected: {len(valid_products)}")
             print(f"{'='*80}\n")
 
+            # Keep browser open for manual verification
+            print("\n" + "="*80)
+            print("[INFO] Verification complete!")
+            print("[INFO] Browser will stay open for manual verification.")
+            print("[INFO] Compare the products above with what you see in the browser.")
+            print("[INFO] Press ENTER to close the browser and exit...")
+            print("="*80 + "\n")
+            input()
+
         except Exception as e:
             print(f"[ERROR] Failed to verify page: {e}")
             import traceback

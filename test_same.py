@@ -27,6 +27,8 @@ class DuplicateDetector:
         self.db_conn = None
         self.xpaths = {}
         self.seen_asins = {}  # ASIN -> (page_number, page_url, product_name)
+        self.duplicates_found = []  # List of duplicate info
+        self.max_duplicates = 10  # Stop after finding 10 duplicates
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -348,8 +350,19 @@ class DuplicateDetector:
                 if asin in self.seen_asins:
                     prev_page, prev_url, prev_name = self.seen_asins[asin]
 
+                    duplicate_info = {
+                        'asin': asin,
+                        'first_page': prev_page,
+                        'first_url': prev_url,
+                        'first_name': prev_name,
+                        'duplicate_page': page_number,
+                        'duplicate_url': url,
+                        'duplicate_name': product_name
+                    }
+                    self.duplicates_found.append(duplicate_info)
+
                     print(f"\n{'#'*80}")
-                    print(f"🚨 DUPLICATE DETECTED! 🚨")
+                    print(f"🚨 DUPLICATE #{len(self.duplicates_found)} DETECTED! 🚨")
                     print(f"{'#'*80}")
                     print(f"\n[FIRST OCCURRENCE]")
                     print(f"  Page Number: {prev_page}")
@@ -367,12 +380,18 @@ class DuplicateDetector:
                     print(f"  Same ASIN: {asin}")
                     print(f"  Same Product Name: {prev_name == product_name}")
                     print(f"  Pages Apart: {page_number - prev_page}")
-
-                    print(f"\n{'#'*80}")
-                    print(f"First duplicate found! Stopping crawler.")
                     print(f"{'#'*80}\n")
 
-                    return False  # Stop crawling
+                    # Check if we've found enough duplicates
+                    if len(self.duplicates_found) >= self.max_duplicates:
+                        print(f"\n{'='*80}")
+                        print(f"Found {self.max_duplicates} duplicates. Stopping crawler.")
+                        print(f"{'='*80}\n")
+                        return False  # Stop crawling
+
+                    # Continue to find more duplicates
+                    print(f"[INFO] Continuing to find more duplicates... ({len(self.duplicates_found)}/{self.max_duplicates})\n")
+                    continue  # Skip storing, but continue crawling
 
                 # Store this ASIN
                 self.seen_asins[asin] = (page_number, url, product_name)
@@ -419,7 +438,21 @@ class DuplicateDetector:
             print("\n" + "="*80)
             print("Test completed!")
             print(f"Total unique products seen: {len(self.seen_asins)}")
+            print(f"Total duplicates found: {len(self.duplicates_found)}")
             print("="*80)
+
+            if self.duplicates_found:
+                print("\n" + "="*80)
+                print("DUPLICATE SUMMARY")
+                print("="*80)
+                for i, dup in enumerate(self.duplicates_found, 1):
+                    print(f"\n[DUPLICATE {i}]")
+                    print(f"  ASIN: {dup['asin']}")
+                    print(f"  Product: {dup['first_name'][:70]}...")
+                    print(f"  First seen: Page {dup['first_page']}")
+                    print(f"  Duplicated on: Page {dup['duplicate_page']}")
+                    print(f"  Pages apart: {dup['duplicate_page'] - dup['first_page']}")
+                print("="*80)
 
         except Exception as e:
             print(f"[ERROR] Test failed: {e}")

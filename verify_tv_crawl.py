@@ -22,8 +22,7 @@ DB_CONFIG = {
 
 class TVCrawlerVerifier:
     def __init__(self):
-        self.driver = None
-        self.wait = None
+        self.drivers = []  # Store all driver instances
         self.db_conn = None
         self.xpaths = {}
 
@@ -61,61 +60,49 @@ class TVCrawlerVerifier:
             print(f"[ERROR] Failed to load XPaths: {e}")
             return False
 
-    def load_page_url(self):
-        """Load page 1 URL from database"""
+    def load_page_urls(self):
+        """Load URLs for pages 1-20 from database"""
         try:
             cursor = self.db_conn.cursor()
             cursor.execute("""
-                SELECT url
+                SELECT page_number, url
                 FROM page_urls
-                WHERE mall_name = 'Amazon' AND page_number = 1 AND is_active = TRUE
+                WHERE mall_name = 'Amazon' AND page_number <= 20 AND is_active = TRUE
+                ORDER BY page_number
             """)
 
-            result = cursor.fetchone()
+            results = cursor.fetchall()
             cursor.close()
 
-            if result:
-                print(f"[OK] Loaded page 1 URL")
-                return result[0]
+            if results:
+                print(f"[OK] Loaded {len(results)} page URLs")
+                return results
             else:
-                print("[ERROR] No URL found for page 1")
-                return None
+                print("[ERROR] No URLs found")
+                return []
 
         except Exception as e:
-            print(f"[ERROR] Failed to load page URL: {e}")
-            return None
+            print(f"[ERROR] Failed to load page URLs: {e}")
+            return []
 
-    def setup_driver(self):
-        """Setup Chrome WebDriver with undetected_chromedriver"""
-        print("[INFO] Setting up undetected Chrome driver...")
-
+    def create_new_driver(self):
+        """Create a new Chrome WebDriver instance"""
         options = uc.ChromeOptions()
         options.add_argument('--disable-blink-features=AutomationControlled')
 
-        self.driver = uc.Chrome(options=options, version_main=None)
-        self.driver.maximize_window()
-        self.wait = WebDriverWait(self.driver, 10)
+        driver = uc.Chrome(options=options, version_main=None)
+        driver.maximize_window()
 
-        print("[OK] Undetected WebDriver setup complete")
+        return driver
 
-    def establish_session(self):
-        """Establish Amazon session"""
-        print("\n" + "="*80)
-        print("[INFO] Establishing Amazon session...")
-        print("="*80)
+    def establish_session(self, driver, page_num):
+        """Establish Amazon session for a specific driver"""
+        print(f"\n[PAGE {page_num}] Establishing session...")
 
-        self.driver.get("https://www.amazon.com")
-        time.sleep(5)
+        driver.get("https://www.amazon.com")
+        time.sleep(3)
 
-        print("\n[ACTION REQUIRED] Please check the browser window:")
-        print("  1. If you see CAPTCHA, please solve it manually")
-        print("  2. If page looks normal (Amazon homepage), you're good")
-        print("  3. Press ENTER when ready to continue...")
-        print("="*80 + "\n")
-
-        input("Press ENTER to continue...")
-
-        print("[OK] Session established")
+        print(f"[PAGE {page_num}] Session established")
 
     def extract_text_safe(self, element, xpath):
         """Safely extract text from element using xpath"""
@@ -148,14 +135,14 @@ class TVCrawlerVerifier:
 
         return None
 
-    def verify_page_1(self, url):
-        """Verify what products are collected from page 1"""
+    def verify_page(self, driver, url, page_number):
+        """Verify what products are collected from a page"""
         try:
             print(f"\n{'='*80}")
-            print(f"[PAGE 1] Accessing: {url}")
+            print(f"[PAGE {page_number}] Accessing: {url}")
             print(f"{'='*80}")
 
-            self.driver.get(url)
+            driver.get(url)
 
             # Wait for page load
             print(f"[INFO] Waiting for search results to load...")
@@ -247,7 +234,7 @@ class TVCrawlerVerifier:
 
             # Print valid products
             print(f"\n{'='*80}")
-            print(f"COLLECTED PRODUCTS FROM PAGE 1 ({len(valid_products)})")
+            print(f"COLLECTED PRODUCTS FROM PAGE {page_number} ({len(valid_products)})")
             print(f"{'='*80}")
 
             for idx, product in enumerate(valid_products, 1):
@@ -261,17 +248,8 @@ class TVCrawlerVerifier:
                     print(f"\n[{idx}] ASIN: {asin} - [NO NAME EXTRACTED]")
 
             print(f"\n{'='*80}")
-            print(f"Total products that would be collected: {len(valid_products)}")
+            print(f"Page {page_number} - Total products: {len(valid_products)}")
             print(f"{'='*80}\n")
-
-            # Keep browser open for manual verification
-            print("\n" + "="*80)
-            print("[INFO] Verification complete!")
-            print("[INFO] Browser will stay open for manual verification.")
-            print("[INFO] Compare the products above with what you see in the browser.")
-            print("[INFO] Press ENTER to close the browser and exit...")
-            print("="*80 + "\n")
-            input()
 
         except Exception as e:
             print(f"[ERROR] Failed to verify page: {e}")
@@ -282,7 +260,7 @@ class TVCrawlerVerifier:
         """Main execution"""
         try:
             print("="*80)
-            print("TV Crawler Verifier - Page 1 Check")
+            print("TV Crawler Verifier - Pages 1-20 Check")
             print("="*80)
 
             if not self.connect_db():
@@ -291,13 +269,48 @@ class TVCrawlerVerifier:
             if not self.load_xpaths():
                 return
 
-            page_url = self.load_page_url()
-            if not page_url:
+            page_urls = self.load_page_urls()
+            if not page_urls:
                 return
 
-            self.setup_driver()
-            self.establish_session()
-            self.verify_page_1(page_url)
+            print(f"\n[INFO] Will verify {len(page_urls)} pages")
+            print(f"[INFO] Each page will open in a new Chrome window")
+            print(f"[INFO] Please solve CAPTCHA on first window if needed")
+
+            input("\nPress ENTER to start verification...")
+
+            # Process each page in a new browser window
+            for page_number, url in page_urls:
+                print(f"\n{'#'*80}")
+                print(f"Opening new Chrome window for PAGE {page_number}")
+                print(f"{'#'*80}")
+
+                # Create new driver for this page
+                driver = self.create_new_driver()
+                self.drivers.append(driver)
+
+                # Establish session (only prompt for CAPTCHA on first page)
+                if page_number == 1:
+                    print("\n[ACTION REQUIRED] Solve CAPTCHA on first window if needed")
+                    self.establish_session(driver, page_number)
+                    input(f"\nPress ENTER when ready to crawl page {page_number}...")
+                else:
+                    self.establish_session(driver, page_number)
+
+                # Verify this page
+                self.verify_page(driver, url, page_number)
+
+                # Small delay between opening windows
+                time.sleep(2)
+
+            # All pages done
+            print("\n" + "="*80)
+            print(f"[INFO] Verification complete!")
+            print(f"[INFO] {len(self.drivers)} Chrome windows are open")
+            print(f"[INFO] Review each window to verify the collected products")
+            print(f"[INFO] Press ENTER to close all browsers and exit...")
+            print("="*80 + "\n")
+            input()
 
         except Exception as e:
             print(f"[ERROR] Verification failed: {e}")
@@ -305,8 +318,13 @@ class TVCrawlerVerifier:
             traceback.print_exc()
 
         finally:
-            if self.driver:
-                self.driver.quit()
+            # Close all drivers
+            for driver in self.drivers:
+                try:
+                    driver.quit()
+                except:
+                    pass
+
             if self.db_conn:
                 self.db_conn.close()
 

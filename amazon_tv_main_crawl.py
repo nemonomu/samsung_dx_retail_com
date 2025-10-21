@@ -274,9 +274,9 @@ class AmazonTVCrawler:
                 debug_url_path = self.extract_text_safe(debug_product, self.xpaths['product_url']['xpath'])
                 print(f"  {debug_idx}. ASIN: {debug_asin} | Name: {debug_name[:50] if debug_name else 'NULL'}... | URL: {debug_url_path[:50] if debug_url_path else 'NULL'}...")
 
-            # Process up to 16 products per page
+            # Process all valid products per page
             collected_count = 0
-            for idx, product in enumerate(valid_products[:16], 1):
+            for idx, product in enumerate(valid_products, 1):
                 if self.total_collected >= self.max_skus:
                     print(f"[INFO] Reached maximum SKU limit ({self.max_skus})")
                     return False
@@ -305,7 +305,18 @@ class AmazonTVCrawler:
 
                 # Skip if no product name (critical field)
                 if not product_name:
-                    print(f"  [{idx}/16] SKIP: No product name found (tried all XPath alternatives)")
+                    print(f"  [{idx}] SKIP: No product name found (tried all XPath alternatives)")
+                    continue
+
+                # Skip Prime Video products
+                if "Prime Video" in product_name or "prime video" in product_name.lower():
+                    print(f"  [{idx}] SKIP: Prime Video product - {product_name[:60]}...")
+                    continue
+
+                # Skip book products (Paperback, Kindle, Audible, etc.)
+                book_keywords = ["Paperback", "Kindle", "Audible", "Hardcover", "Audio CD", "audiobook"]
+                if any(keyword.lower() in product_name.lower() for keyword in book_keywords):
+                    print(f"  [{idx}] SKIP: Book product - {product_name[:60]}...")
                     continue
 
                 # Extract ASIN
@@ -364,13 +375,13 @@ class AmazonTVCrawler:
                         self._seen_asins[asin] = page_number
 
                     # DEBUG: Show detailed saved data
-                    print(f"  [{idx}/16] ✓ SAVED (Order #{self.sequential_id - 1}):")
+                    print(f"  [{idx}] ✓ SAVED (Order #{self.sequential_id - 1}):")
                     print(f"           Name: {data['Retailer_SKU_Name'][:60] if data['Retailer_SKU_Name'] else '[NO NAME]'}...")
                     print(f"           ASIN: {asin or 'N/A'}")
                     print(f"           Price: {final_price or 'N/A'}")
                     print(f"           URL: {product_url[:60] if product_url else 'NULL'}...")
                 else:
-                    print(f"  [{idx}/16] ✗ FAILED: {data['Retailer_SKU_Name'][:40]}... (ASIN: {asin or 'N/A'}) - DB save error")
+                    print(f"  [{idx}] ✗ FAILED: {data['Retailer_SKU_Name'][:40]}... (ASIN: {asin or 'N/A'}) - DB save error")
 
             print(f"\n[PAGE {page_number}] Summary:")
             print(f"  - Collected: {collected_count} products")

@@ -232,12 +232,43 @@ class TVCrawlerVerifier:
                     print(f"  cel_widget_id: {excluded['cel_widget']}")
                     print(f"  Name: {excluded['name'][:70] if excluded['name'] else 'N/A'}...")
 
-            # Print valid products
+            # Filter out Prime Video and Book products
+            final_products = []
+            skipped_products = []
+
+            for product in valid_products:
+                product_name = self.extract_product_name(product)
+
+                if not product_name:
+                    continue
+
+                # Check Prime Video
+                if "Prime Video" in product_name or "prime video" in product_name.lower():
+                    skipped_products.append(('Prime Video', product_name))
+                    continue
+
+                # Check Book products
+                book_keywords = ["Paperback", "Kindle", "Audible", "Hardcover", "Audio CD", "audiobook"]
+                if any(keyword.lower() in product_name.lower() for keyword in book_keywords):
+                    skipped_products.append(('Book', product_name))
+                    continue
+
+                final_products.append(product)
+
+            # Print skipped products
+            if skipped_products:
+                print(f"\n{'='*80}")
+                print(f"SKIPPED PRODUCTS ({len(skipped_products)})")
+                print(f"{'='*80}")
+                for reason, name in skipped_products:
+                    print(f"  [{reason}] {name[:70]}...")
+
+            # Print final products
             print(f"\n{'='*80}")
-            print(f"COLLECTED PRODUCTS FROM PAGE {page_number} ({len(valid_products)})")
+            print(f"COLLECTED PRODUCTS FROM PAGE {page_number} ({len(final_products)})")
             print(f"{'='*80}")
 
-            for idx, product in enumerate(valid_products, 1):
+            for idx, product in enumerate(final_products, 1):
                 asin = product.get('data-asin', 'N/A')
                 product_name = self.extract_product_name(product)
 
@@ -248,7 +279,7 @@ class TVCrawlerVerifier:
                     print(f"\n[{idx}] ASIN: {asin} - [NO NAME EXTRACTED]")
 
             print(f"\n{'='*80}")
-            print(f"Page {page_number} - Total products: {len(valid_products)}")
+            print(f"Page {page_number} - Total products: {len(final_products)}")
             print(f"{'='*80}\n")
 
         except Exception as e:

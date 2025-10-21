@@ -61,13 +61,13 @@ class TVCrawlerVerifier:
             return False
 
     def load_page_urls(self):
-        """Load URLs for pages 1-10 from database"""
+        """Load URLs for pages 11-20 from database"""
         try:
             cursor = self.db_conn.cursor()
             cursor.execute("""
                 SELECT page_number, url
                 FROM page_urls
-                WHERE mall_name = 'Amazon' AND page_number <= 10 AND is_active = TRUE
+                WHERE mall_name = 'Amazon' AND page_number >= 11 AND page_number <= 20 AND is_active = TRUE
                 ORDER BY page_number
             """)
 
@@ -260,7 +260,7 @@ class TVCrawlerVerifier:
         """Main execution"""
         try:
             print("="*80)
-            print("TV Crawler Verifier - Pages 1-10 Check")
+            print("TV Crawler Verifier - Pages 11-20 Check")
             print("="*80)
 
             if not self.connect_db():

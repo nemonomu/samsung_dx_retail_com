@@ -19,8 +19,6 @@ class WalmartTVBSRCrawler:
     def __init__(self):
         self.playwright = None
         self.browser = None
-        self.contexts = []  # Store all context instances for manual verification
-        self.pages = []  # Store all page instances
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
@@ -88,12 +86,14 @@ class WalmartTVBSRCrawler:
             self.playwright = sync_playwright().start()
 
             # Launch browser with anti-detection settings
+            # headless=True for AWS, headless=False for local testing
             self.browser = self.playwright.chromium.launch(
-                headless=False,
+                headless=True,
                 args=[
                     '--disable-blink-features=AutomationControlled',
                     '--no-sandbox',
-                    '--disable-dev-shm-usage'
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu'
                 ]
             )
 
@@ -207,6 +207,11 @@ class WalmartTVBSRCrawler:
             # Scroll back to top
             page.evaluate("window.scrollTo(0, 0)")
             time.sleep(2)
+
+            # Save screenshot for verification
+            screenshot_path = f"walmart_bsr_page_{page_number}_screenshot.png"
+            page.screenshot(path=screenshot_path, full_page=True)
+            print(f"[INFO] Screenshot saved: {screenshot_path}")
 
             # Get page source and parse with lxml
             page_source = page.content()
@@ -486,53 +491,55 @@ class WalmartTVBSRCrawler:
                 return
 
             print(f"\n[INFO] Will crawl {len(page_urls)} pages")
-            print(f"[INFO] Each page will open in a new browser window")
-            print(f"[INFO] All windows will remain open for verification")
+            print(f"[INFO] Screenshots will be saved for each page")
+            print(f"[INFO] Starting crawler...")
 
-            input("\nPress ENTER to start crawling...")
-
-            # Process each page in a new browser context
+            # Process each page
             for page_number, url in page_urls:
                 if self.total_collected >= self.max_skus:
                     print(f"[INFO] Reached maximum SKU limit ({self.max_skus}), stopping...")
                     break
 
                 print(f"\n{'#'*80}")
-                print(f"Opening new browser window for PAGE {page_number}")
+                print(f"Processing PAGE {page_number}")
                 print(f"{'#'*80}")
 
                 # Create new context and page for this page
                 context, page = self.create_new_context()
-                self.contexts.append(context)
-                self.pages.append(page)
 
-                # Initialize session (only prompt for first page)
+                # Initialize session (only for first page)
                 if page_number == 1:
-                    print("\n[ACTION REQUIRED] Solve CAPTCHA on first window if needed")
                     if not self.initialize_session(page):
                         print("[WARNING] Session initialization failed, proceeding anyway...")
                         print("[INFO] Will attempt direct access to search pages...")
                         time.sleep(random.uniform(5, 10))
-                    input(f"\nPress ENTER when ready to crawl page {page_number}...")
                 else:
-                    self.initialize_session(page)
+                    # For subsequent pages, just a quick homepage visit
+                    try:
+                        page.goto("https://www.walmart.com", wait_until='domcontentloaded', timeout=30000)
+                        time.sleep(random.uniform(3, 5))
+                    except:
+                        pass
 
                 # Scrape this page
                 if not self.scrape_page(page, url, page_number):
                     print(f"[WARNING] Failed to scrape page {page_number}")
 
-                # Small delay between opening windows
-                time.sleep(2)
+                # Close context after scraping (don't keep windows open)
+                try:
+                    context.close()
+                except:
+                    pass
+
+                # Delay between pages
+                time.sleep(random.uniform(5, 8))
 
             # All pages done
             print("\n" + "="*80)
             print(f"[INFO] Crawling complete!")
             print(f"[INFO] Total collected: {self.total_collected} SKUs")
-            print(f"[INFO] {len(self.pages)} browser windows are open")
-            print(f"[INFO] Review each window to verify the collected products")
-            print(f"[INFO] Press ENTER to close all browsers and exit...")
-            print("="*80 + "\n")
-            input()
+            print(f"[INFO] Screenshots saved in current directory")
+            print("="*80)
 
         except Exception as e:
             print(f"[ERROR] Crawler failed: {e}")
@@ -540,13 +547,6 @@ class WalmartTVBSRCrawler:
             traceback.print_exc()
 
         finally:
-            # Close all contexts
-            for context in self.contexts:
-                try:
-                    context.close()
-                except:
-                    pass
-
             # Close browser
             if self.browser:
                 try:

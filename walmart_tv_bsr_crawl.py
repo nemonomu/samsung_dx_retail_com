@@ -2,12 +2,19 @@ import time
 import random
 import psycopg2
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-from playwright_stealth import stealth_sync
 from lxml import html
 import re
 from urllib.parse import urlparse, parse_qs, unquote
 import json
 import os
+
+# Try to import playwright_stealth (optional)
+try:
+    from playwright_stealth import stealth_sync
+    HAS_STEALTH = True
+except ImportError:
+    print("[WARNING] playwright_stealth not installed, running without stealth")
+    HAS_STEALTH = False
 
 # Database configuration
 DB_CONFIG = {
@@ -133,8 +140,12 @@ class WalmartTVBSRCrawler:
         # Create a new page in this context
         page = context.new_page()
 
-        # Apply playwright-stealth for better bot detection bypass
-        stealth_sync(page)
+        # Apply playwright-stealth for better bot detection bypass (if available)
+        if HAS_STEALTH:
+            try:
+                stealth_sync(page)
+            except Exception as e:
+                print(f"[WARNING] Failed to apply stealth: {e}")
 
         # Add additional anti-detection scripts
         page.add_init_script("""

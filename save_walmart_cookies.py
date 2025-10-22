@@ -4,8 +4,18 @@ Run this locally with headless=False to manually bypass bot detection
 """
 import time
 from playwright.sync_api import sync_playwright
-from playwright_stealth import stealth_sync
 import json
+
+try:
+    from playwright_stealth import stealth_sync
+    HAS_STEALTH = True
+except ImportError:
+    try:
+        from playwright_stealth import StealthConfig
+        HAS_STEALTH = True
+    except ImportError:
+        print("[WARNING] playwright_stealth not installed, running without stealth")
+        HAS_STEALTH = False
 
 def save_cookies():
     """Open browser, let user bypass bot detection, then save cookies"""
@@ -41,8 +51,29 @@ def save_cookies():
 
         page = context.new_page()
 
-        # Apply stealth
-        stealth_sync(page)
+        # Apply stealth if available
+        if HAS_STEALTH:
+            try:
+                stealth_sync(page)
+                print("[OK] Stealth mode enabled")
+            except:
+                print("[WARNING] Failed to enable stealth mode")
+
+        # Add anti-detection scripts
+        page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5]
+            });
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['en-US', 'en']
+            });
+            window.chrome = {
+                runtime: {}
+            };
+        """)
 
         print("[INFO] Opening Walmart homepage...")
         page.goto("https://www.walmart.com", wait_until='domcontentloaded')

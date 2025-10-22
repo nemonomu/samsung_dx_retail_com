@@ -6,6 +6,8 @@ from playwright_stealth import stealth_sync
 from lxml import html
 import re
 from urllib.parse import urlparse, parse_qs, unquote
+import json
+import os
 
 # Database configuration
 DB_CONFIG = {
@@ -107,12 +109,26 @@ class WalmartTVBSRCrawler:
 
     def create_new_context(self):
         """Create a new browser context (like a new incognito window)"""
-        context = self.browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-            locale='en-US',
-            timezone_id='America/New_York'
-        )
+        # Check if storage state file exists (includes cookies + localStorage)
+        storage_state_file = 'walmart_storage_state.json'
+
+        if os.path.exists(storage_state_file):
+            print(f"[INFO] Loading saved session from {storage_state_file}")
+            context = self.browser.new_context(
+                storage_state=storage_state_file,
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                locale='en-US',
+                timezone_id='America/New_York'
+            )
+        else:
+            print(f"[WARNING] {storage_state_file} not found, creating context without cookies")
+            context = self.browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                locale='en-US',
+                timezone_id='America/New_York'
+            )
 
         # Create a new page in this context
         page = context.new_page()
@@ -511,19 +527,23 @@ class WalmartTVBSRCrawler:
                 # Create new context and page for this page
                 context, page = self.create_new_context()
 
-                # Initialize session (only for first page)
+                # Initialize session (only for first page, and only if no cookies loaded)
                 if page_number == 1:
-                    if not self.initialize_session(page):
-                        print("[WARNING] Session initialization failed, proceeding anyway...")
-                        print("[INFO] Will attempt direct access to search pages...")
-                        time.sleep(random.uniform(5, 10))
+                    if os.path.exists('walmart_storage_state.json'):
+                        print("[INFO] Using saved session, skipping initialization")
+                    else:
+                        if not self.initialize_session(page):
+                            print("[WARNING] Session initialization failed, proceeding anyway...")
+                            print("[INFO] Will attempt direct access to search pages...")
+                            time.sleep(random.uniform(5, 10))
                 else:
-                    # For subsequent pages, just a quick homepage visit
-                    try:
-                        page.goto("https://www.walmart.com", wait_until='domcontentloaded', timeout=30000)
-                        time.sleep(random.uniform(3, 5))
-                    except:
-                        pass
+                    # For subsequent pages, just a quick homepage visit (if no cookies)
+                    if not os.path.exists('walmart_storage_state.json'):
+                        try:
+                            page.goto("https://www.walmart.com", wait_until='domcontentloaded', timeout=30000)
+                            time.sleep(random.uniform(3, 5))
+                        except:
+                            pass
 
                 # Scrape this page
                 if not self.scrape_page(page, url, page_number):

@@ -76,7 +76,7 @@ class AmazonBSRCrawler:
             cursor = self.db_conn.cursor()
             cursor.execute("""
                 SELECT page_number, url
-                FROM bsr_page_urls
+                FROM amazon_tv_bsr_page_url
                 WHERE is_active = TRUE
                 ORDER BY page_number
             """)

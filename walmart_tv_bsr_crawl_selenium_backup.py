@@ -1,7 +1,10 @@
 import time
 import random
 import psycopg2
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+import undetected_chromedriver as uc
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from lxml import html
 import re
 from urllib.parse import urlparse, parse_qs, unquote
@@ -17,10 +20,7 @@ DB_CONFIG = {
 
 class WalmartTVBSRCrawler:
     def __init__(self):
-        self.playwright = None
-        self.browser = None
-        self.contexts = []  # Store all context instances for manual verification
-        self.pages = []  # Store all page instances
+        self.drivers = []  # Store all driver instances for manual verification
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
@@ -81,58 +81,48 @@ class WalmartTVBSRCrawler:
             print(f"[ERROR] Failed to load page URLs: {e}")
             return []
 
-    def setup_browser(self):
-        """Setup Playwright browser"""
+    def create_new_driver(self):
+        """Create a new Chrome WebDriver instance for each page"""
+        options = uc.ChromeOptions()
+
+        # Basic options
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--window-size=1920,1080')
+        options.add_argument('--lang=en-US,en;q=0.9')
+
+        # Preferences
+        prefs = {
+            "profile.default_content_setting_values.notifications": 2,
+            "credentials_enable_service": False,
+            "profile.password_manager_enabled": False,
+        }
+        options.add_experimental_option("prefs", prefs)
+
+        # Use undetected_chromedriver (auto-detect Chrome version)
+        driver = uc.Chrome(options=options)
+        driver.set_page_load_timeout(60)
+
+        print("[OK] New Chrome instance created")
+        return driver
+
+    def add_random_mouse_movements(self, driver):
+        """Add random mouse movements to appear more human"""
         try:
-            print("[INFO] Setting up Playwright browser...")
-            self.playwright = sync_playwright().start()
+            from selenium.webdriver.common.action_chains import ActionChains
+            actions = ActionChains(driver)
 
-            # Launch browser with anti-detection settings
-            self.browser = self.playwright.chromium.launch(
-                headless=False,
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage'
-                ]
-            )
+            # Random small movements
+            for _ in range(random.randint(2, 4)):
+                x_offset = random.randint(-100, 100)
+                y_offset = random.randint(-100, 100)
+                actions.move_by_offset(x_offset, y_offset)
+                actions.pause(random.uniform(0.1, 0.3))
 
-            print("[OK] Playwright browser setup complete")
-            return True
-
+            actions.perform()
         except Exception as e:
-            print(f"[ERROR] Failed to setup browser: {e}")
-            return False
-
-    def create_new_context(self):
-        """Create a new browser context (like a new incognito window)"""
-        context = self.browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-            locale='en-US',
-            timezone_id='America/New_York'
-        )
-
-        # Create a new page in this context
-        page = context.new_page()
-
-        # Add anti-detection scripts
-        page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => [1, 2, 3, 4, 5]
-            });
-            Object.defineProperty(navigator, 'languages', {
-                get: () => ['en-US', 'en']
-            });
-            window.chrome = {
-                runtime: {}
-            };
-        """)
-
-        return context, page
+            pass  # Silent fail if mouse movement doesn't work
 
     def extract_text_safe(self, element, xpath):
         """Safely extract text from element using xpath"""
@@ -155,7 +145,7 @@ class WalmartTVBSRCrawler:
             return True
         return False
 
-    def scrape_page(self, page, url, page_number, retry_count=0):
+    def scrape_page(self, driver, wait, url, page_number, retry_count=0):
         """Scrape a single page"""
         max_retries = 2
 
@@ -163,11 +153,11 @@ class WalmartTVBSRCrawler:
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
 
             # Directly access the best_seller URL
-            page.goto(url, wait_until='domcontentloaded', timeout=60000)
+            driver.get(url)
             time.sleep(random.uniform(12, 18))
 
             # Check for robot detection
-            page_source = page.content()
+            page_source = driver.page_source
             if self.check_robot_page(page_source):
                 if retry_count < max_retries:
                     print(f"[WARNING] Robot detection page detected. Retry {retry_count + 1}/{max_retries}...")
@@ -176,10 +166,10 @@ class WalmartTVBSRCrawler:
                     time.sleep(wait_time)
 
                     print("[INFO] Refreshing page...")
-                    page.reload(wait_until='domcontentloaded')
+                    driver.refresh()
                     time.sleep(random.uniform(10, 15))
 
-                    return self.scrape_page(page, url, page_number, retry_count + 1)
+                    return self.scrape_page(driver, wait, url, page_number, retry_count + 1)
                 else:
                     print(f"[ERROR] Failed to bypass robot detection after {max_retries} retries")
                     print("[INFO] Saving page source for debugging...")
@@ -193,23 +183,23 @@ class WalmartTVBSRCrawler:
 
             # Scroll to load all products
             print("[INFO] Scrolling to load all products...")
-            last_height = page.evaluate("document.body.scrollHeight")
+            last_height = driver.execute_script("return document.body.scrollHeight")
 
             for scroll_round in range(2):
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(3)
 
-                new_height = page.evaluate("document.body.scrollHeight")
+                new_height = driver.execute_script("return document.body.scrollHeight")
                 if new_height == last_height:
                     break
                 last_height = new_height
 
             # Scroll back to top
-            page.evaluate("window.scrollTo(0, 0)")
+            driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(2)
 
             # Get page source and parse with lxml
-            page_source = page.content()
+            page_source = driver.page_source
             tree = html.fromstring(page_source)
 
             # Find all product containers
@@ -280,7 +270,7 @@ class WalmartTVBSRCrawler:
                 inventory_status = self.extract_text_safe(product, self.xpaths['inventory_status']['xpath'])
 
                 data = {
-                    'page_type': 'bsr',
+                    'page_type': 'main',
                     'Retailer_SKU_Name': product_name,
                     'Final_SKU_Price': final_price,
                     'Original_SKU_Price': original_price,
@@ -373,11 +363,11 @@ class WalmartTVBSRCrawler:
         return price_text
 
     def save_to_db(self, data):
-        """Save collected data with collection order (1-100)"""
+        """Save collected data with collection order (1-300)"""
         try:
             cursor = self.db_conn.cursor()
 
-            # Use sequential_id (1-100) for collection order
+            # Use sequential_id (1-300) for collection order
             collection_order = self.sequential_id
 
             cursor.execute("""
@@ -421,35 +411,35 @@ class WalmartTVBSRCrawler:
             print(f"[ERROR] Failed to save to DB: {e}")
             return False
 
-    def initialize_session(self, page):
+    def initialize_session(self, driver):
         """Initialize session by visiting Walmart homepage first"""
         try:
             print("[INFO] Initializing session - visiting Walmart homepage...")
-            page.goto("https://www.walmart.com", wait_until='domcontentloaded')
+            driver.get("https://www.walmart.com")
             time.sleep(random.uniform(8, 12))
 
-            # Random mouse movements
-            page.mouse.move(random.randint(100, 500), random.randint(100, 500))
+            # Add random mouse movements
+            self.add_random_mouse_movements(driver)
             time.sleep(random.uniform(1, 3))
 
             # Check if we got the robot page on homepage
-            if self.check_robot_page(page.content()):
+            if self.check_robot_page(driver.page_source):
                 print("[WARNING] Robot detection on homepage. Trying recovery...")
 
                 # Try scrolling
                 for _ in range(3):
-                    page.evaluate("window.scrollBy(0, 300)")
+                    driver.execute_script("window.scrollBy(0, 300);")
                     time.sleep(random.uniform(0.5, 1))
 
                 time.sleep(20)
 
                 # Add more mouse movements
-                page.mouse.move(random.randint(100, 500), random.randint(100, 500))
+                self.add_random_mouse_movements(driver)
 
-                page.reload(wait_until='domcontentloaded')
+                driver.refresh()
                 time.sleep(random.uniform(10, 15))
 
-                if self.check_robot_page(page.content()):
+                if self.check_robot_page(driver.page_source):
                     print("[ERROR] Cannot bypass robot detection on homepage")
                     return False
 
@@ -464,8 +454,7 @@ class WalmartTVBSRCrawler:
         """Main execution"""
         try:
             print("="*80)
-            print("Walmart TV BSR Crawler - Playwright Version")
-            print("Pages will remain open for verification")
+            print("Walmart TV BSR Crawler - Pages will remain open for verification")
             print("="*80)
 
             # Connect to database
@@ -481,44 +470,40 @@ class WalmartTVBSRCrawler:
                 print("[ERROR] No page URLs found")
                 return
 
-            # Setup browser
-            if not self.setup_browser():
-                return
-
             print(f"\n[INFO] Will crawl {len(page_urls)} pages")
-            print(f"[INFO] Each page will open in a new browser window")
+            print(f"[INFO] Each page will open in a new Chrome window")
             print(f"[INFO] All windows will remain open for verification")
 
             input("\nPress ENTER to start crawling...")
 
-            # Process each page in a new browser context
+            # Process each page in a new browser window
             for page_number, url in page_urls:
                 if self.total_collected >= self.max_skus:
                     print(f"[INFO] Reached maximum SKU limit ({self.max_skus}), stopping...")
                     break
 
                 print(f"\n{'#'*80}")
-                print(f"Opening new browser window for PAGE {page_number}")
+                print(f"Opening new Chrome window for PAGE {page_number}")
                 print(f"{'#'*80}")
 
-                # Create new context and page for this page
-                context, page = self.create_new_context()
-                self.contexts.append(context)
-                self.pages.append(page)
+                # Create new driver for this page
+                driver = self.create_new_driver()
+                wait = WebDriverWait(driver, 20)
+                self.drivers.append(driver)
 
                 # Initialize session (only prompt for first page)
                 if page_number == 1:
                     print("\n[ACTION REQUIRED] Solve CAPTCHA on first window if needed")
-                    if not self.initialize_session(page):
+                    if not self.initialize_session(driver):
                         print("[WARNING] Session initialization failed, proceeding anyway...")
                         print("[INFO] Will attempt direct access to search pages...")
                         time.sleep(random.uniform(5, 10))
                     input(f"\nPress ENTER when ready to crawl page {page_number}...")
                 else:
-                    self.initialize_session(page)
+                    self.initialize_session(driver)
 
                 # Scrape this page
-                if not self.scrape_page(page, url, page_number):
+                if not self.scrape_page(driver, wait, url, page_number):
                     print(f"[WARNING] Failed to scrape page {page_number}")
 
                 # Small delay between opening windows
@@ -528,7 +513,7 @@ class WalmartTVBSRCrawler:
             print("\n" + "="*80)
             print(f"[INFO] Crawling complete!")
             print(f"[INFO] Total collected: {self.total_collected} SKUs")
-            print(f"[INFO] {len(self.pages)} browser windows are open")
+            print(f"[INFO] {len(self.drivers)} Chrome windows are open")
             print(f"[INFO] Review each window to verify the collected products")
             print(f"[INFO] Press ENTER to close all browsers and exit...")
             print("="*80 + "\n")
@@ -540,24 +525,10 @@ class WalmartTVBSRCrawler:
             traceback.print_exc()
 
         finally:
-            # Close all contexts
-            for context in self.contexts:
+            # Close all drivers
+            for driver in self.drivers:
                 try:
-                    context.close()
-                except:
-                    pass
-
-            # Close browser
-            if self.browser:
-                try:
-                    self.browser.close()
-                except:
-                    pass
-
-            # Stop playwright
-            if self.playwright:
-                try:
-                    self.playwright.stop()
+                    driver.quit()
                 except:
                     pass
 

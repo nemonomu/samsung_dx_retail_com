@@ -1,7 +1,10 @@
 import time
 import random
 import psycopg2
-from playwright.sync_api import sync_playwright
+import undetected_chromedriver as uc
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from lxml import html
 import re
 from urllib.parse import urlparse, parse_qs, unquote
@@ -17,8 +20,8 @@ DB_CONFIG = {
 
 class WalmartTVBSRCrawler:
     def __init__(self):
-        self.playwright = None
-        self.browser = None
+        self.driver = None
+        self.wait = None
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
@@ -79,17 +82,31 @@ class WalmartTVBSRCrawler:
             print(f"[ERROR] Failed to load page URLs: {e}")
             return []
 
-    def setup_browser(self):
-        """Setup Playwright browser"""
-        try:
-            print("[INFO] Setting up Playwright browser...")
-            self.playwright = sync_playwright().start()
-            self.browser = self.playwright.chromium.launch(headless=False)
-            print("[OK] Playwright browser setup complete")
-            return True
-        except Exception as e:
-            print(f"[ERROR] Failed to setup browser: {e}")
-            return False
+    def setup_driver(self):
+        """Setup Chrome WebDriver with undetected-chromedriver"""
+        options = uc.ChromeOptions()
+
+        # Basic options
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--window-size=1920,1080')
+        options.add_argument('--lang=en-US,en;q=0.9')
+
+        # Preferences
+        prefs = {
+            "profile.default_content_setting_values.notifications": 2,
+            "credentials_enable_service": False,
+            "profile.password_manager_enabled": False,
+        }
+        options.add_experimental_option("prefs", prefs)
+
+        # Use undetected_chromedriver (auto-detect Chrome version)
+        self.driver = uc.Chrome(options=options)
+        self.driver.set_page_load_timeout(60)
+        self.wait = WebDriverWait(self.driver, 10)
+
+        print("[OK] WebDriver setup complete")
 
     def extract_text_safe(self, element, xpath):
         """Safely extract text from element using xpath"""
@@ -109,27 +126,20 @@ class WalmartTVBSRCrawler:
         try:
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
 
-            # Create new context and page
-            context = self.browser.new_context(
-                viewport={'width': 1920, 'height': 1080},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-            )
-            page = context.new_page()
-
             # Access URL
-            page.goto(url, wait_until='domcontentloaded', timeout=60000)
-            time.sleep(random.uniform(5, 8))
+            self.driver.get(url)
+            time.sleep(random.uniform(8, 12))
 
             # Scroll to load all products
             print("[INFO] Scrolling to load products...")
             for _ in range(2):
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(2)
-            page.evaluate("window.scrollTo(0, 0)")
+            self.driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(2)
 
             # Get page source and parse
-            page_source = page.content()
+            page_source = self.driver.page_source
             tree = html.fromstring(page_source)
 
             # Find all product containers
@@ -142,7 +152,6 @@ class WalmartTVBSRCrawler:
             for idx, product in enumerate(products, 1):
                 if self.total_collected >= self.max_skus:
                     print(f"[INFO] Reached maximum SKU limit ({self.max_skus})")
-                    context.close()
                     return False
 
                 # Extract product name
@@ -204,7 +213,6 @@ class WalmartTVBSRCrawler:
                     print(f"  [{idx}/{len(products)}] Collected: {product_name[:50]}... | Price: {final_price or 'N/A'}")
 
             print(f"[PAGE {page_number}] Collected {collected_count} products (Total: {self.total_collected}/{self.max_skus})")
-            context.close()
             return True
 
         except Exception as e:
@@ -319,8 +327,7 @@ class WalmartTVBSRCrawler:
                 print("[ERROR] No page URLs found")
                 return
 
-            if not self.setup_browser():
-                return
+            self.setup_driver()
 
             # Scrape each page
             for page_number, url in page_urls:
@@ -330,7 +337,7 @@ class WalmartTVBSRCrawler:
                 if not self.scrape_page(url, page_number):
                     break
 
-                time.sleep(random.uniform(3, 5))
+                time.sleep(random.uniform(5, 8))
 
             print("\n" + "="*80)
             print(f"Crawling completed! Total collected: {self.total_collected} SKUs")
@@ -342,18 +349,8 @@ class WalmartTVBSRCrawler:
             traceback.print_exc()
 
         finally:
-            if self.browser:
-                try:
-                    self.browser.close()
-                except:
-                    pass
-
-            if self.playwright:
-                try:
-                    self.playwright.stop()
-                except:
-                    pass
-
+            if self.driver:
+                self.driver.quit()
             if self.db_conn:
                 self.db_conn.close()
 

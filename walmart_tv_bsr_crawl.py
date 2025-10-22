@@ -42,7 +42,7 @@ class WalmartTVBSRCrawler:
             cursor.execute("""
                 SELECT data_field, xpath, css_selector
                 FROM xpath_selectors
-                WHERE mall_name = 'Walmart' AND page_type = 'bsr' AND is_active = TRUE
+                WHERE mall_name = 'Walmart' AND page_type = 'main' AND is_active = TRUE
             """)
 
             for row in cursor.fetchall():
@@ -84,7 +84,7 @@ class WalmartTVBSRCrawler:
         try:
             print("[INFO] Setting up Playwright browser...")
             self.playwright = sync_playwright().start()
-            self.browser = self.playwright.chromium.launch(headless=True)
+            self.browser = self.playwright.chromium.launch(headless=False)
             print("[OK] Playwright browser setup complete")
             return True
         except Exception as e:

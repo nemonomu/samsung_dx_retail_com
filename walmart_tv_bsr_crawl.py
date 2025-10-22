@@ -186,37 +186,23 @@ class WalmartTVBSRCrawler:
             return True
         return False
 
-    def scrape_page(self, page, url, page_number, retry_count=0):
+    def scrape_page(self, page, url, page_number):
         """Scrape a single page"""
-        max_retries = 2
-
         try:
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
 
             # Directly access the best_seller URL
             page.goto(url, wait_until='domcontentloaded', timeout=60000)
-            time.sleep(random.uniform(12, 18))
+            time.sleep(random.uniform(8, 12))
 
-            # Check for robot detection
+            # Check for robot detection (just log, don't stop)
             page_source = page.content()
             if self.check_robot_page(page_source):
-                if retry_count < max_retries:
-                    print(f"[WARNING] Robot detection page detected. Retry {retry_count + 1}/{max_retries}...")
-                    wait_time = 30 + retry_count * 15
-                    print(f"[INFO] Waiting {wait_time} seconds before retry...")
-                    time.sleep(wait_time)
-
-                    print("[INFO] Refreshing page...")
-                    page.reload(wait_until='domcontentloaded')
-                    time.sleep(random.uniform(10, 15))
-
-                    return self.scrape_page(page, url, page_number, retry_count + 1)
-                else:
-                    print(f"[ERROR] Failed to bypass robot detection after {max_retries} retries")
-                    print("[INFO] Saving page source for debugging...")
-                    with open(f'walmart_robot_page_{page_number}.html', 'w', encoding='utf-8') as f:
-                        f.write(page_source)
-                    return False
+                print(f"[WARNING] Robot detection on page {page_number}, but continuing anyway...")
+                # Save debug info
+                with open(f'walmart_robot_page_{page_number}.html', 'w', encoding='utf-8') as f:
+                    f.write(page_source)
+                # Continue anyway - maybe we can still extract some data
 
             # Wait for page to load
             print("[INFO] Waiting for products to load...")
@@ -458,43 +444,16 @@ class WalmartTVBSRCrawler:
             return False
 
     def initialize_session(self, page):
-        """Initialize session by visiting Walmart homepage first"""
+        """Initialize session by visiting Walmart homepage first (optional)"""
         try:
-            print("[INFO] Initializing session - visiting Walmart homepage...")
-            page.goto("https://www.walmart.com", wait_until='domcontentloaded')
-            time.sleep(random.uniform(8, 12))
-
-            # Random mouse movements
-            page.mouse.move(random.randint(100, 500), random.randint(100, 500))
-            time.sleep(random.uniform(1, 3))
-
-            # Check if we got the robot page on homepage
-            if self.check_robot_page(page.content()):
-                print("[WARNING] Robot detection on homepage. Trying recovery...")
-
-                # Try scrolling
-                for _ in range(3):
-                    page.evaluate("window.scrollBy(0, 300)")
-                    time.sleep(random.uniform(0.5, 1))
-
-                time.sleep(20)
-
-                # Add more mouse movements
-                page.mouse.move(random.randint(100, 500), random.randint(100, 500))
-
-                page.reload(wait_until='domcontentloaded')
-                time.sleep(random.uniform(10, 15))
-
-                if self.check_robot_page(page.content()):
-                    print("[ERROR] Cannot bypass robot detection on homepage")
-                    return False
-
-            print("[OK] Session initialized successfully")
+            print("[INFO] Warming up session...")
+            page.goto("https://www.walmart.com", wait_until='domcontentloaded', timeout=30000)
+            time.sleep(random.uniform(3, 5))
+            print("[OK] Session warmed up")
             return True
-
         except Exception as e:
-            print(f"[ERROR] Failed to initialize session: {e}")
-            return False
+            print(f"[WARNING] Session warmup failed: {e}, continuing anyway...")
+            return True  # Don't fail, just continue
 
     def run(self):
         """Main execution"""
@@ -538,27 +497,12 @@ class WalmartTVBSRCrawler:
                 # Create new context and page for this page
                 context, page = self.create_new_context()
 
-                # Initialize session (only for first page, and only if no cookies loaded)
+                # Warm up session only for first page
                 if page_number == 1:
-                    if os.path.exists('walmart_storage_state.json'):
-                        print("[INFO] Using saved session, skipping initialization")
-                    else:
-                        if not self.initialize_session(page):
-                            print("[WARNING] Session initialization failed, proceeding anyway...")
-                            print("[INFO] Will attempt direct access to search pages...")
-                            time.sleep(random.uniform(5, 10))
-                else:
-                    # For subsequent pages, just a quick homepage visit (if no cookies)
-                    if not os.path.exists('walmart_storage_state.json'):
-                        try:
-                            page.goto("https://www.walmart.com", wait_until='domcontentloaded', timeout=30000)
-                            time.sleep(random.uniform(3, 5))
-                        except:
-                            pass
+                    self.initialize_session(page)
 
                 # Scrape this page
-                if not self.scrape_page(page, url, page_number):
-                    print(f"[WARNING] Failed to scrape page {page_number}")
+                self.scrape_page(page, url, page_number)
 
                 # Close context after scraping (don't keep windows open)
                 try:

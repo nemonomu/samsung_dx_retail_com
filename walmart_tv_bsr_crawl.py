@@ -2,6 +2,7 @@ import time
 import random
 import psycopg2
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright_stealth import stealth_sync
 from lxml import html
 import re
 from urllib.parse import urlparse, parse_qs, unquote
@@ -116,7 +117,10 @@ class WalmartTVBSRCrawler:
         # Create a new page in this context
         page = context.new_page()
 
-        # Add anti-detection scripts
+        # Apply playwright-stealth for better bot detection bypass
+        stealth_sync(page)
+
+        # Add additional anti-detection scripts
         page.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', {
                 get: () => undefined

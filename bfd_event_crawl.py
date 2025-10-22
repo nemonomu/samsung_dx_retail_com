@@ -267,7 +267,7 @@ class BFDEventCrawler:
             return datetime_str[:10]  # Return raw date if format fails
 
     def save_to_db(self):
-        """Save event schedules to database"""
+        """Save event schedules to database (with crawl timestamp)"""
         try:
             cursor = self.db_conn.cursor()
 
@@ -276,19 +276,20 @@ class BFDEventCrawler:
             walmart_schedule = " | ".join(self.events_data.get('Walmart', []))
             amazon_schedule = " | ".join(self.events_data.get('Amazon', []))
 
+            # Insert with current timestamp
             cursor.execute("""
                 INSERT INTO bfd_event_crawl
-                (Bestbuy_event_schedule, Walmart_event_schedule, Amazon_event_schedule)
-                VALUES (%s, %s, %s)
+                (Bestbuy_event_schedule, Walmart_event_schedule, Amazon_event_schedule, crawl_at_local_time)
+                VALUES (%s, %s, %s, NOW())
             """, (bestbuy_schedule, walmart_schedule, amazon_schedule))
 
             self.db_conn.commit()
             cursor.close()
 
-            print("\n[OK] Data saved to database")
-            print(f"  - Best Buy: {bestbuy_schedule or 'N/A'}")
-            print(f"  - Walmart: {walmart_schedule or 'N/A'}")
-            print(f"  - Amazon: {amazon_schedule or 'N/A'}")
+            print("\n[OK] Data saved to database with timestamp")
+            print(f"  - Best Buy: {bestbuy_schedule or 'No data collected'}")
+            print(f"  - Walmart: {walmart_schedule or 'No data collected'}")
+            print(f"  - Amazon: {amazon_schedule or 'No data collected'}")
 
             return True
 
@@ -316,15 +317,15 @@ class BFDEventCrawler:
             retailer_urls = self.get_retailer_containers()
 
             if not retailer_urls:
-                print("[ERROR] No target retailers found")
-                return
+                print("[WARNING] No target retailers found")
+                print("[INFO] Saving timestamp to database anyway...")
+            else:
+                # Scrape events for each retailer
+                for retailer_name, url in retailer_urls.items():
+                    self.scrape_retailer_events(retailer_name, url)
+                    time.sleep(random.uniform(3, 5))
 
-            # Scrape events for each retailer
-            for retailer_name, url in retailer_urls.items():
-                self.scrape_retailer_events(retailer_name, url)
-                time.sleep(random.uniform(3, 5))
-
-            # Save to database
+            # Save to database (even if no data collected)
             self.save_to_db()
 
             print("\n" + "="*80)

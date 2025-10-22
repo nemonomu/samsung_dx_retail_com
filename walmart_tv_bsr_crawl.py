@@ -104,9 +104,26 @@ class WalmartTVBSRCrawler:
         # Use undetected_chromedriver (auto-detect Chrome version)
         self.driver = uc.Chrome(options=options)
         self.driver.set_page_load_timeout(60)
-        self.wait = WebDriverWait(self.driver, 10)
+        self.wait = WebDriverWait(self.driver, 20)
 
         print("[OK] WebDriver setup complete")
+
+    def add_random_mouse_movements(self):
+        """Add random mouse movements to appear more human"""
+        try:
+            from selenium.webdriver.common.action_chains import ActionChains
+            actions = ActionChains(self.driver)
+
+            # Random small movements
+            for _ in range(random.randint(2, 4)):
+                x_offset = random.randint(-100, 100)
+                y_offset = random.randint(-100, 100)
+                actions.move_by_offset(x_offset, y_offset)
+                actions.pause(random.uniform(0.1, 0.3))
+
+            actions.perform()
+        except Exception as e:
+            pass  # Silent fail if mouse movement doesn't work
 
     def extract_text_safe(self, element, xpath):
         """Safely extract text from element using xpath"""
@@ -126,9 +143,36 @@ class WalmartTVBSRCrawler:
         try:
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
 
-            # Access URL
-            self.driver.get(url)
-            time.sleep(random.uniform(8, 12))
+            # For page 1, navigate naturally through browse page
+            if page_number == 1:
+                print("[INFO] Navigating to Walmart browse page first...")
+                try:
+                    # Try browse electronics category first
+                    self.driver.get("https://www.walmart.com/browse/electronics/tvs/3944_1060825")
+                    time.sleep(random.uniform(10, 15))
+
+                    print("[OK] Browse page loaded successfully")
+                    # Add human-like behavior
+                    self.add_random_mouse_movements()
+                    time.sleep(random.uniform(2, 4))
+
+                    # Scroll a bit
+                    for _ in range(2):
+                        self.driver.execute_script("window.scrollBy(0, 400);")
+                        time.sleep(random.uniform(1, 2))
+
+                    # Now access the best seller URL directly
+                    print("[INFO] Now navigating to best seller page...")
+                    self.driver.get(url)
+                    time.sleep(random.uniform(8, 12))
+                except Exception as e:
+                    print(f"[WARNING] Browse navigation failed: {e}, using direct URL...")
+                    self.driver.get(url)
+                    time.sleep(random.uniform(12, 18))
+            else:
+                # For other pages, direct access
+                self.driver.get(url)
+                time.sleep(random.uniform(8, 12))
 
             # Scroll to load all products
             print("[INFO] Scrolling to load products...")

@@ -152,51 +152,9 @@ class WalmartTVBSRCrawler:
         try:
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
 
-            # For page 1, try different approach - go to simple URL first
-            if page_number == 1 and retry_count == 0:
-                print("[INFO] Navigating to Walmart browse page first...")
-                try:
-                    # Try browse electronics category first
-                    driver.get("https://www.walmart.com/browse/electronics/tvs/3944_1060825")
-                    time.sleep(random.uniform(10, 15))
-
-                    # Check for robot detection
-                    if not self.check_robot_page(driver.page_source):
-                        print("[OK] Browse page loaded successfully")
-                        # Add human-like behavior
-                        self.add_random_mouse_movements(driver)
-                        time.sleep(random.uniform(2, 4))
-
-                        # Scroll a bit
-                        for _ in range(2):
-                            driver.execute_script("window.scrollBy(0, 400);")
-                            time.sleep(random.uniform(1, 2))
-
-                        # Now try search
-                        print("[INFO] Now trying search for TV...")
-                        search_box = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='search']")))
-                        search_box.clear()
-                        time.sleep(random.uniform(1, 2))
-
-                        # Type "TV" character by character
-                        for char in "TV":
-                            search_box.send_keys(char)
-                            time.sleep(random.uniform(0.2, 0.5))
-
-                        time.sleep(random.uniform(1, 2))
-                        search_box.submit()
-                        time.sleep(random.uniform(8, 12))
-                    else:
-                        print("[WARNING] Robot detected on browse page, using direct URL...")
-                        driver.get(url)
-                        time.sleep(random.uniform(12, 18))
-                except Exception as e:
-                    print(f"[WARNING] Browse navigation failed: {e}, using direct URL...")
-                    driver.get(url)
-                    time.sleep(random.uniform(12, 18))
-            else:
-                driver.get(url)
-                time.sleep(random.uniform(12, 18))
+            # Directly access the best_seller URL
+            driver.get(url)
+            time.sleep(random.uniform(12, 18))
 
             # Check for robot detection
             page_source = driver.page_source

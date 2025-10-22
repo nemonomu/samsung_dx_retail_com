@@ -66,7 +66,7 @@ class TVCrawlerVerifier:
             cursor = self.db_conn.cursor()
             cursor.execute("""
                 SELECT page_number, url
-                FROM page_urls
+                FROM amazon_tv_main_page_url
                 WHERE mall_name = 'Amazon' AND page_number >= 11 AND page_number <= 20 AND is_active = TRUE
                 ORDER BY page_number
             """)

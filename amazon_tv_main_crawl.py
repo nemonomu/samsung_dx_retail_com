@@ -73,7 +73,7 @@ class AmazonTVCrawler:
             cursor = self.db_conn.cursor()
             cursor.execute("""
                 SELECT page_number, url
-                FROM page_urls
+                FROM amazon_tv_main_page_url
                 WHERE mall_name = 'Amazon' AND is_active = TRUE
                 ORDER BY page_number
             """)
@@ -399,9 +399,9 @@ class AmazonTVCrawler:
 
             cursor = self.db_conn.cursor()
 
-            # Try INSERT to raw_data
+            # Try INSERT to amazon_tv_main_raw_data
             cursor.execute("""
-                INSERT INTO raw_data
+                INSERT INTO amazon_tv_main_raw_data
                 ("order", mall_name, page_number, Retailer_SKU_Name, Number_of_units_purchased_past_month,
                  Final_SKU_Price, Original_SKU_Price, Shipping_Info,
                  Available_Quantity_for_Purchase, Discount_Type, Product_URL, ASIN, batch_id)

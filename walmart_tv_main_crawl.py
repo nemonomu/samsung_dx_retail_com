@@ -68,7 +68,7 @@ class WalmartTVCrawler:
             cursor = self.db_conn.cursor()
             cursor.execute("""
                 SELECT page_number, url
-                FROM wmart_page_url
+                FROM wmart_tv_main_page_url
                 WHERE page_type = 'main' AND is_active = TRUE
                 ORDER BY page_number
             """)

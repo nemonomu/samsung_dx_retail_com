@@ -88,7 +88,7 @@ class BestBuyTVCrawler:
             cursor = self.db_conn.cursor()
             cursor.execute("""
                 SELECT page_number, url
-                FROM bby_page_url
+                FROM bby_tv_main_page_url
                 WHERE is_active = TRUE
                 ORDER BY page_number
             """)

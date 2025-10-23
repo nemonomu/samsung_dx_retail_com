@@ -235,7 +235,6 @@ class WalmartTVBSRCrawler:
 
                 data = {
                     'page_type': 'bsr',
-                    'Rank': self.sequential_id,  # BSR 1-100
                     'Retailer_SKU_Name': product_name,
                     'Final_SKU_Price': final_price,
                     'Original_SKU_Price': original_price,
@@ -317,16 +316,15 @@ class WalmartTVBSRCrawler:
 
             cursor.execute("""
                 INSERT INTO wmart_tv_bsr_crawl
-                ("order", page_type, Rank, Retailer_SKU_Name, Final_SKU_Price, Original_SKU_Price,
+                ("order", page_type, Retailer_SKU_Name, Final_SKU_Price, Original_SKU_Price,
                  Offer, Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
                  SKU_Status, Retailer_Membership_Discounts, Available_Quantity_for_Purchase,
                  Inventory_Status, Product_url)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
                 collection_order,
                 data['page_type'],
-                data['Rank'],
                 data['Retailer_SKU_Name'],
                 data['Final_SKU_Price'],
                 data['Original_SKU_Price'],

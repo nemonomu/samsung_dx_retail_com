@@ -265,6 +265,69 @@ class WalmartDetailCrawler:
         except Exception as e:
             return None
 
+    def extract_badges(self, tree):
+        """
+        Extract all badges and classify them:
+        - "bought since yesterday" -> purchased_yesterday (number only)
+        - "people's carts" -> added_to_carts (number only)
+        - Others ("Best seller", "Popular pick", etc.) -> sku_popularity (text)
+        """
+        try:
+            # Find all badge elements - try multiple approaches
+            # Look for the badge container first
+            badge_xpaths = [
+                '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[1]/div/span',
+                '//div[@data-testid="module-2-badges"]//span[@data-testid="badgeTagComponent"]//span',
+                '//div[contains(@class, "flex items-start")]//span[contains(@class, "w_yTSq")]'
+            ]
+
+            all_badges = []
+            for xpath in badge_xpaths:
+                badges = tree.xpath(xpath)
+                if badges:
+                    for badge in badges:
+                        text = badge.text_content().strip() if hasattr(badge, 'text_content') else str(badge).strip()
+                        if text and text not in all_badges:
+                            all_badges.append(text)
+
+            # Classify badges
+            purchased_yesterday = None
+            added_to_carts = None
+            sku_popularity = None
+
+            for badge_text in all_badges:
+                badge_lower = badge_text.lower()
+
+                # Check for "bought since yesterday"
+                if 'bought since yesterday' in badge_lower:
+                    purchased_yesterday = self.parse_number_format(badge_text)
+
+                # Check for "people's carts"
+                elif "people's carts" in badge_lower or 'peoples carts' in badge_lower:
+                    added_to_carts = self.parse_number_format(badge_text)
+
+                # Everything else is sku_popularity
+                else:
+                    # Collect popularity badges (Best seller, Popular pick, etc.)
+                    if not sku_popularity:
+                        sku_popularity = badge_text
+                    else:
+                        sku_popularity += f", {badge_text}"
+
+            return {
+                'purchased_yesterday': purchased_yesterday,
+                'added_to_carts': added_to_carts,
+                'sku_popularity': sku_popularity
+            }
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract badges: {e}")
+            return {
+                'purchased_yesterday': None,
+                'added_to_carts': None,
+                'sku_popularity': None
+            }
+
     def extract_similar_products(self, tree):
         """Extract all similar product names and join with comma"""
         try:
@@ -298,40 +361,87 @@ class WalmartDetailCrawler:
     def click_specifications_and_get_model(self):
         """Click Specifications > More details > Extract Model"""
         try:
-            # Find and click "Specifications" section
-            # This might require scrolling and clicking
+            print(f"  [INFO] Attempting to extract Model from Specifications...")
 
-            # Scroll to specifications section
+            # Scroll down to load Specifications section
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 2);")
+            time.sleep(2)
+
+            # Find Specifications section - try multiple ways
+            specs_found = False
             try:
+                # Try to find by h2 text
                 specs_button = self.driver.find_element(By.XPATH, "//h2[contains(text(), 'Specifications')]")
-                self.driver.execute_script("arguments[0].scrollIntoView(true);", specs_button)
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", specs_button)
                 time.sleep(1)
-
-                # Check if section is already expanded
-                # Look for "More details" button
+                specs_found = True
+                print(f"  [OK] Found Specifications section")
+            except:
                 try:
-                    more_details_btn = self.driver.find_element(By.XPATH, "//button[contains(text(), 'More details')]")
-                    self.driver.execute_script("arguments[0].scrollIntoView(true);", more_details_btn)
+                    # Try alternative: find by button text
+                    specs_button = self.driver.find_element(By.XPATH, "//button[contains(., 'Specifications')]")
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", specs_button)
                     time.sleep(1)
-                    more_details_btn.click()
-                    time.sleep(2)
-
-                    # Now extract Model
-                    page_source = self.driver.page_source
-                    tree = html.fromstring(page_source)
-                    model = self.extract_text_safe(tree, self.xpaths.get('sku_model'))
-                    return model
-
+                    specs_found = True
+                    print(f"  [OK] Found Specifications button")
                 except Exception as e:
-                    print(f"  [WARNING] Could not find More details button: {e}")
+                    print(f"  [WARNING] Could not find Specifications section: {e}")
                     return None
 
-            except Exception as e:
-                print(f"  [WARNING] Could not find Specifications section: {e}")
+            if not specs_found:
                 return None
 
+            # Look for "More details" button - try multiple XPaths
+            more_details_clicked = False
+            more_details_xpaths = [
+                "//button[contains(text(), 'More details')]",
+                "//button[contains(., 'More details')]",
+                "//button[@aria-label='More details']"
+            ]
+
+            for xpath in more_details_xpaths:
+                try:
+                    more_details_btn = self.driver.find_element(By.XPATH, xpath)
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", more_details_btn)
+                    time.sleep(1)
+                    more_details_btn.click()
+                    time.sleep(3)  # Increased wait time
+                    more_details_clicked = True
+                    print(f"  [OK] Clicked More details button")
+                    break
+                except:
+                    continue
+
+            if not more_details_clicked:
+                print(f"  [WARNING] Could not find or click More details button")
+                # Try to extract Model anyway (might be visible without clicking)
+
+            # Extract Model - try multiple XPaths
+            page_source = self.driver.page_source
+            tree = html.fromstring(page_source)
+
+            model_xpaths = [
+                self.xpaths.get('sku_model'),  # From database
+                "//h3[contains(text(), 'Model')]/following-sibling::div//span",
+                "//div[contains(@class, 'pb2')]//h3[text()='Model']/following-sibling::div/span",
+                "//div[contains(., 'Model')]/following-sibling::div//span",
+                "//*[contains(text(), 'Model')]/parent::*/following-sibling::*//span"
+            ]
+
+            for xpath in model_xpaths:
+                if xpath:
+                    model = self.extract_text_safe(tree, xpath)
+                    if model and len(model) > 0:
+                        print(f"  [OK] Extracted Model: {model}")
+                        return model
+
+            print(f"  [WARNING] Could not extract Model from any XPath")
+            return None
+
         except Exception as e:
-            print(f"  [WARNING] Failed to extract model: {e}")
+            print(f"  [ERROR] Failed to extract model: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def extract_detailed_reviews(self):
@@ -412,15 +522,13 @@ class WalmartDetailCrawler:
             retailer_sku_name = self.extract_text_safe(tree, self.xpaths.get('product_name'))
             star_rating = self.extract_star_rating(tree)
             discount_type = self.extract_text_safe(tree, self.xpaths.get('discount_type'))
-            sku_popularity = self.extract_text_safe(tree, self.xpaths.get('sku_popularity'))
             savings = self.extract_text_safe(tree, self.xpaths.get('savings'))
 
-            # Extract numbers with parsing
-            purchased_yesterday_raw = self.extract_text_safe(tree, self.xpaths.get('purchased_yesterday'))
-            purchased_yesterday = self.parse_number_format(purchased_yesterday_raw) if purchased_yesterday_raw else None
-
-            added_to_carts_raw = self.extract_text_safe(tree, self.xpaths.get('added_to_carts'))
-            added_to_carts = self.parse_number_format(added_to_carts_raw) if added_to_carts_raw else None
+            # Extract and classify all badges
+            badges = self.extract_badges(tree)
+            purchased_yesterday = badges['purchased_yesterday']
+            added_to_carts = badges['added_to_carts']
+            sku_popularity = badges['sku_popularity']
 
             # Extract shipping info (combine 2 parts)
             shipping_info = self.extract_shipping_info(tree)

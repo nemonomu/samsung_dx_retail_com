@@ -556,27 +556,26 @@ class WalmartDetailCrawler:
             tree = html.fromstring(page_source)
 
             # Get review containers
-            review_container_xpath = self.xpaths.get('review_container')
-            if not review_container_xpath:
+            # Find all review containers using data-testid attribute
+            # Each review has a div with data-testid="enhanced-review-content"
+            # We need to go up to the parent div that contains the full review
+            review_content_divs = tree.xpath('//div[@data-testid="enhanced-review-content"]')
+
+            if not review_content_divs:
+                print(f"  [WARNING] No review content divs found")
                 return None
 
-            review_containers = tree.xpath(review_container_xpath + '/div')
-
-            if not review_containers:
-                print(f"  [WARNING] No review containers found")
-                return None
-
-            print(f"  [DEBUG] Found {len(review_containers)} review containers")
+            print(f"  [DEBUG] Found {len(review_content_divs)} review content divs")
 
             reviews = []
-            for idx, container in enumerate(review_containers):
+            for idx, content_div in enumerate(review_content_divs):
                 if len(reviews) >= 20:
                     break
 
                 # Extract review text - looking for the actual review content
-                # Based on HTML structure: find <p> with review text
-                review_xpath = './/div[@data-testid="enhanced-review-content"]//p/span'
-                review_elem = container.xpath(review_xpath)
+                # Based on HTML structure: find <p> with review text inside enhanced-review-content
+                review_xpath = './/p/span[@class="tl-m db-m"]'
+                review_elem = content_div.xpath(review_xpath)
 
                 if review_elem:
                     review_text = review_elem[0].text_content().strip() if hasattr(review_elem[0], 'text_content') else str(review_elem[0]).strip()

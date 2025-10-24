@@ -433,7 +433,7 @@ class WalmartDetailCrawler:
 
                     # Click to open dialog
                     self.driver.execute_script("arguments[0].click();", more_details_btn)
-                    time.sleep(3)  # Wait for dialog to open
+                    time.sleep(5)  # Wait for dialog to fully load and render
                     more_details_clicked = True
                     print(f"  [OK] Clicked More details button - Dialog opened")
                     break
@@ -551,45 +551,71 @@ class WalmartDetailCrawler:
                 print(f"  [WARNING] Could not click View all reviews: {e}")
                 return None
 
-            # Extract reviews from the reviews page
-            page_source = self.driver.page_source
-            tree = html.fromstring(page_source)
-
-            # Get review containers
-            # Find all review containers using data-testid attribute
-            # Each review has a div with data-testid="enhanced-review-content"
-            # We need to go up to the parent div that contains the full review
-            review_content_divs = tree.xpath('//div[@data-testid="enhanced-review-content"]')
-
-            if not review_content_divs:
-                print(f"  [WARNING] No review content divs found")
-                return None
-
-            print(f"  [DEBUG] Found {len(review_content_divs)} review content divs")
-
+            # Extract reviews from multiple pages (up to 20 reviews)
             reviews = []
-            for idx, content_div in enumerate(review_content_divs):
-                if len(reviews) >= 20:
+            page_num = 1
+            max_pages = 2  # We'll collect from 2 pages to get 20 reviews
+
+            while len(reviews) < 20 and page_num <= max_pages:
+                # Get current page HTML
+                page_source = self.driver.page_source
+                tree = html.fromstring(page_source)
+
+                # Get review containers
+                # Find all review containers using data-testid attribute
+                review_content_divs = tree.xpath('//div[@data-testid="enhanced-review-content"]')
+
+                if not review_content_divs:
+                    print(f"  [WARNING] No review content divs found on page {page_num}")
                     break
 
-                # Extract review text - looking for the actual review content
-                # Based on HTML structure: find <p> with review text inside enhanced-review-content
-                review_xpath = './/p/span[@class="tl-m db-m"]'
-                review_elem = content_div.xpath(review_xpath)
+                print(f"  [DEBUG] Page {page_num}: Found {len(review_content_divs)} review content divs")
 
-                if review_elem:
-                    review_text = review_elem[0].text_content().strip() if hasattr(review_elem[0], 'text_content') else str(review_elem[0]).strip()
-                    if review_text and len(review_text) > 10:
-                        reviews.append(review_text)
-                        print(f"  [DEBUG] Extracted review {len(reviews)}: {review_text[:50]}...")
+                # Extract reviews from current page
+                for idx, content_div in enumerate(review_content_divs):
+                    if len(reviews) >= 20:
+                        break
+
+                    # Extract review text
+                    review_xpath = './/p/span[@class="tl-m db-m"]'
+                    review_elem = content_div.xpath(review_xpath)
+
+                    if review_elem:
+                        review_text = review_elem[0].text_content().strip() if hasattr(review_elem[0], 'text_content') else str(review_elem[0]).strip()
+                        if review_text and len(review_text) > 10:
+                            reviews.append(review_text)
+                            print(f"  [DEBUG] Extracted review {len(reviews)}: {review_text[:50]}...")
+                        else:
+                            print(f"  [DEBUG] Page {page_num}, Container {idx+1}: Review text too short or empty")
                     else:
-                        print(f"  [DEBUG] Container {idx+1}: Review text too short or empty")
+                        print(f"  [DEBUG] Page {page_num}, Container {idx+1}: No review element found with XPath")
+
+                # If we need more reviews and haven't reached max pages, click Next Page
+                if len(reviews) < 20 and page_num < max_pages:
+                    try:
+                        # Find Next Page button using data-testid
+                        next_page_btn = self.driver.find_element(By.XPATH, "//a[@data-testid='NextPage']")
+
+                        # Scroll to button
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_page_btn)
+                        time.sleep(1)
+
+                        # Click Next Page
+                        self.driver.execute_script("arguments[0].click();", next_page_btn)
+                        print(f"  [DEBUG] Clicked Next Page button (page {page_num} -> {page_num + 1})")
+
+                        # Wait for next page to load
+                        time.sleep(random.uniform(3, 4))
+                        page_num += 1
+                    except Exception as e:
+                        print(f"  [WARNING] Could not find or click Next Page button: {e}")
+                        break
                 else:
-                    print(f"  [DEBUG] Container {idx+1}: No review element found with XPath")
+                    break
 
             # Format as "review1-content, review2-content, ..."
             if reviews:
-                print(f"  [DEBUG] Total reviews extracted: {len(reviews)}")
+                print(f"  [DEBUG] Total reviews extracted: {len(reviews)} from {page_num} page(s)")
                 formatted = []
                 for idx, review in enumerate(reviews[:20], 1):
                     formatted.append(f"review{idx}-{review}")

@@ -713,6 +713,9 @@ class WalmartDetailCrawler:
             traceback.print_exc()
 
         finally:
+            print("\n[INFO] Press ENTER to close browser and exit...")
+            input()
+
             if self.driver:
                 self.driver.quit()
             if self.db_conn:

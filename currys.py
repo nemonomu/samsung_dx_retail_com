@@ -111,6 +111,7 @@ class CurrysScraper:
             ]
 
             self.XPATHS['imageurl'] = [
+                '//*[starts-with(@id, "pdpCarousel-")]/div[1]/div/div/div[1]/div/div/a/img',  # 최우선순위 - 범용 ID 기반
                 '/html/body/div[1]/div[4]/div[3]/div[4]/div[1]/div[2]/div[1]/div/div[5]/div/div/div[1]/div[1]/div/div/div[1]/div/div/a/img',
                 '/html/body/div[1]/div[3]/div[3]/div[4]/div[1]/div[2]/div[1]/div/div[5]/div/div/div[1]/div[1]/div/div/div[1]/div/div/a/img',
                 '/html/body/div[7]/div[3]/div[3]/div[4]/div[1]/div[2]/div[1]/div/div[5]/div/div/div[1]/div[1]/div/div/div[1]/div/div/a/img',

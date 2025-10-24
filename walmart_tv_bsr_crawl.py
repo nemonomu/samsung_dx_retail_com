@@ -27,6 +27,7 @@ class WalmartTVBSRCrawler:
         self.total_collected = 0
         self.max_skus = 100  # BSR 1-100
         self.sequential_id = 1  # ID counter for 1-100
+        self.batch_id = int(time.time())  # Batch ID for this session
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -319,8 +320,8 @@ class WalmartTVBSRCrawler:
                 ("order", page_type, Retailer_SKU_Name, Final_SKU_Price, Original_SKU_Price,
                  Offer, Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
                  SKU_Status, Retailer_Membership_Discounts, Available_Quantity_for_Purchase,
-                 Inventory_Status, Product_url)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 Inventory_Status, Product_url, batch_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
                 collection_order,
@@ -336,7 +337,8 @@ class WalmartTVBSRCrawler:
                 data['Retailer_Membership_Discounts'],
                 data['Available_Quantity_for_Purchase'],
                 data['Inventory_Status'],
-                data['Product_url']
+                data['Product_url'],
+                self.batch_id
             ))
 
             result = cursor.fetchone()
@@ -356,6 +358,7 @@ class WalmartTVBSRCrawler:
         try:
             print("="*80)
             print("Walmart TV BSR Crawler")
+            print(f"Batch ID: {self.batch_id}")
             print("="*80)
 
             if not self.connect_db():

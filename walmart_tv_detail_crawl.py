@@ -421,21 +421,25 @@ class WalmartDetailCrawler:
             tree = html.fromstring(page_source)
 
             model_xpaths = [
-                self.xpaths.get('sku_model'),  # From database
+                "//h3[text()='Model']/following-sibling::div//span",
                 "//h3[contains(text(), 'Model')]/following-sibling::div//span",
                 "//div[contains(@class, 'pb2')]//h3[text()='Model']/following-sibling::div/span",
-                "//div[contains(., 'Model')]/following-sibling::div//span",
-                "//*[contains(text(), 'Model')]/parent::*/following-sibling::*//span"
+                "//h3[normalize-space()='Model']/parent::div/following-sibling::div//span",
+                self.xpaths.get('sku_model'),  # From database (last resort)
             ]
 
             for xpath in model_xpaths:
                 if xpath:
                     model = self.extract_text_safe(tree, xpath)
-                    if model and len(model) > 0:
-                        print(f"  [OK] Extracted Model: {model}")
-                        return model
+                    # Validate: Model should be relatively short (< 50 chars typically)
+                    if model and len(model) > 0 and len(model) < 100:
+                        # Check it doesn't contain common page elements
+                        model_lower = model.lower()
+                        if not any(keyword in model_lower for keyword in ['skip to main', 'sign in', 'pickup', 'delivery', 'department']):
+                            print(f"  [OK] Extracted Model: {model}")
+                            return model
 
-            print(f"  [WARNING] Could not extract Model from any XPath")
+            print(f"  [WARNING] Could not extract valid Model from any XPath")
             return None
 
         except Exception as e:
@@ -449,10 +453,18 @@ class WalmartDetailCrawler:
         try:
             # Find and click "View all reviews" button
             try:
+                # Scroll to reviews section first
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(2)
+
                 view_all_btn = self.driver.find_element(By.XPATH, self.xpaths.get('view_all_reviews_button'))
-                self.driver.execute_script("arguments[0].scrollIntoView(true);", view_all_btn)
+
+                # Scroll to button with offset to avoid header
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", view_all_btn)
                 time.sleep(1)
-                view_all_btn.click()
+
+                # Use JavaScript click to avoid interception
+                self.driver.execute_script("arguments[0].click();", view_all_btn)
                 time.sleep(random.uniform(3, 4))
             except Exception as e:
                 print(f"  [WARNING] Could not click View all reviews: {e}")
@@ -524,6 +536,9 @@ class WalmartDetailCrawler:
             discount_type = self.extract_text_safe(tree, self.xpaths.get('discount_type'))
             savings = self.extract_text_safe(tree, self.xpaths.get('savings'))
 
+            # Click Specifications and get Model - FIRST (before other interactions)
+            sku_model = self.click_specifications_and_get_model()
+
             # Extract and classify all badges
             badges = self.extract_badges(tree)
             purchased_yesterday = badges['purchased_yesterday']
@@ -539,15 +554,7 @@ class WalmartDetailCrawler:
             # Extract similar products
             similar_products = self.extract_similar_products(tree)
 
-            # Click Specifications and get Model
-            sku_model = self.click_specifications_and_get_model()
-
-            # Go back to product page for reviews (if we navigated away)
-            if sku_model:
-                self.driver.get(url)
-                time.sleep(random.uniform(2, 3))
-
-            # Extract detailed reviews (this will navigate to reviews page)
+            # Extract detailed reviews (this will navigate to reviews page) - LAST
             detailed_review_content = self.extract_detailed_reviews()
 
             data = {
@@ -678,6 +685,10 @@ class WalmartDetailCrawler:
             if not product_urls:
                 print("[ERROR] No product URLs found")
                 return
+
+            # TEST MODE: Only process first product
+            product_urls = product_urls[:1]
+            print(f"[TEST MODE] Processing only first product")
 
             # Setup WebDriver
             self.setup_driver()

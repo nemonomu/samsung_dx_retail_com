@@ -18,7 +18,7 @@ def insert_walmart_detail_xpath():
         print("Inserting Walmart Detail Page XPath Selectors")
         print("="*80)
 
-        # Walmart detail page XPath selectors (placeholders - need actual XPaths)
+        # Walmart detail page XPath selectors
         walmart_detail_xpaths = [
             # Retailer_SKU_Name
             {
@@ -28,77 +28,109 @@ def insert_walmart_detail_xpath():
                 'xpath': '//*[@id="main-title"]',
                 'description': 'Product title/name on detail page'
             },
+            # Sku (Model)
+            {
+                'mall_name': 'Walmart',
+                'page_type': 'detail_page',
+                'data_field': 'sku_model',
+                'xpath': '/html/body/div[2]/div/div[2]/div[1]/div/div[2]/div/div/div[8]/div/span',
+                'description': 'Model number from Specifications > More details > Model'
+            },
             # Star_Rating
             {
                 'mall_name': 'Walmart',
                 'page_type': 'detail_page',
                 'data_field': 'star_rating',
-                'xpath': '',
-                'description': 'Product star rating (e.g., "4.5 out of 5")'
+                'xpath': '//*[@id="item-review-section"]/div[2]/div[1]/div[1]/span[1]',
+                'description': 'Product star rating (extract number from "4.4 out of 5")'
             },
             # Number_of_ppl_purchased_yesterday
             {
                 'mall_name': 'Walmart',
                 'page_type': 'detail_page',
                 'data_field': 'purchased_yesterday',
-                'xpath': '',
-                'description': 'Number of people who purchased yesterday'
+                'xpath': '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[1]/div/span[1]/span',
+                'description': 'Number of people who purchased yesterday (extract number from "100+ bought since yesterday")'
             },
             # Number_of_ppl_added_to_carts
             {
                 'mall_name': 'Walmart',
                 'page_type': 'detail_page',
                 'data_field': 'added_to_carts',
-                'xpath': '',
-                'description': 'Number of people who added to carts'
+                'xpath': '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[1]/div/span/span',
+                'description': 'Number of people who added to carts (extract number from "In 200+ people\'s carts")'
             },
             # SKU_Popularity
             {
                 'mall_name': 'Walmart',
                 'page_type': 'detail_page',
                 'data_field': 'sku_popularity',
-                'xpath': '',
-                'description': 'SKU popularity badge or indicator'
+                'xpath': '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[1]/div/span/span',
+                'description': 'SKU popularity badge (Best seller, Popular pick, Reduced price, etc.)'
             },
             # Savings
             {
                 'mall_name': 'Walmart',
                 'page_type': 'detail_page',
                 'data_field': 'savings',
-                'xpath': '',
-                'description': 'Savings amount (discount price)'
+                'xpath': '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/div[1]/div[2]/span[2]',
+                'description': 'Savings amount (e.g., "$700.00")'
             },
             # Discount_Type
             {
                 'mall_name': 'Walmart',
                 'page_type': 'detail_page',
                 'data_field': 'discount_type',
-                'xpath': '',
-                'description': 'Type of discount (rollback, clearance, etc.)'
+                'xpath': '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/div[2]/span[1]',
+                'description': 'Type of discount (Price when purchased online, etc.)'
             },
-            # Shipping_Info
+            # Shipping_Info (first part)
             {
                 'mall_name': 'Walmart',
                 'page_type': 'detail_page',
-                'data_field': 'shipping_info',
-                'xpath': '',
-                'description': 'Shipping availability and delivery info'
+                'data_field': 'shipping_info_1',
+                'xpath': '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/div[6]/section/div/div/section[1]/div/fieldset/div/div[1]/span/label/div[3]',
+                'description': 'Shipping info part 1 (Arrives by tomorrow)'
             },
-            # Count_of_Star_Ratings
+            # Shipping_Info (second part)
             {
                 'mall_name': 'Walmart',
                 'page_type': 'detail_page',
-                'data_field': 'count_of_star_ratings',
-                'xpath': '',
-                'description': 'Total number of customer ratings'
+                'data_field': 'shipping_info_2',
+                'xpath': '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/div[6]/section/div/div/section[1]/div/fieldset/div/div[1]/span/label/div[4]',
+                'description': 'Shipping info part 2 (order within 12hr 49min)'
             },
-            # Detailed_Review_Content
+            # Count_of_Star_Ratings (total ratings)
             {
                 'mall_name': 'Walmart',
                 'page_type': 'detail_page',
-                'data_field': 'detailed_review',
-                'xpath': '',
-                'description': 'Detailed review content (up to 20 reviews)'
+                'data_field': 'total_ratings',
+                'xpath': '//*[@id="item-review-section"]/div[2]/div[1]/div[1]/div/span[2]',
+                'description': 'Total number of ratings (e.g., "685 ratings")'
+            },
+            # Retailer_SKU_Name_similar (base container)
+            {
+                'mall_name': 'Walmart',
+                'page_type': 'detail_page',
+                'data_field': 'similar_products',
+                'xpath': '//*[@id="ip-carousel-Similar items you might like"]/section/section/div/ul/li',
+                'description': 'Similar product container (collect all product names)'
+            },
+            # View all reviews button
+            {
+                'mall_name': 'Walmart',
+                'page_type': 'detail_page',
+                'data_field': 'view_all_reviews_button',
+                'xpath': '//*[@id="item-review-section"]/div[8]/button',
+                'description': 'View all reviews button'
+            },
+            # Review content (base container)
+            {
+                'mall_name': 'Walmart',
+                'page_type': 'detail_page',
+                'data_field': 'review_container',
+                'xpath': '//*[@id="maincontent"]/main/section/div[3]/section[2]/div[1]/div',
+                'description': 'Review container on reviews page'
             }
         ]
 

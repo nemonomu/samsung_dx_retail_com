@@ -395,9 +395,22 @@ class WalmartTVBSRCrawler:
 
         finally:
             if self.driver:
-                self.driver.quit()
+                try:
+                    self.driver.quit()
+                except Exception as e:
+                    print(f"[WARNING] Error closing driver: {e}")
+                    try:
+                        # Force kill chrome processes
+                        import os
+                        os.system("taskkill /F /IM chrome.exe /T 2>nul")
+                        os.system("taskkill /F /IM chromedriver.exe /T 2>nul")
+                    except:
+                        pass
             if self.db_conn:
-                self.db_conn.close()
+                try:
+                    self.db_conn.close()
+                except:
+                    pass
 
 
 if __name__ == "__main__":

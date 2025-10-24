@@ -277,12 +277,15 @@ class WalmartDetailCrawler:
         - Others ("Best seller", "Popular pick", etc.) -> sku_popularity (text)
         """
         try:
-            # Find all badge elements - try multiple approaches
-            # Look for the badge container first
+            # Find all badge elements - ONLY from main product info section
+            # Restrict to the top product info area to avoid similar products section
             badge_xpaths = [
-                '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[1]/div/span',
-                '//div[@data-testid="module-2-badges"]//span[@data-testid="badgeTagComponent"]//span',
-                '//div[contains(@class, "flex items-start")]//span[contains(@class, "w_yTSq")]'
+                # Main product badges section (restrict to main content area before "Similar items")
+                '//main//div[@data-testid="module-2-badges"]//span[@data-testid="badgeTagComponent"]//span',
+                # Fallback: limit to top section by position
+                '(//*[@id="maincontent"]/section/main/div[2]//div[@data-testid="badgeTagComponent"]//span)[position() <= 5]',
+                # Another approach: get badges from the first encountered badge container only
+                '(//div[contains(@class, "flex items-start")]//span[contains(@class, "w_yTSq")])[position() <= 5]'
             ]
 
             all_badges = []
@@ -293,6 +296,9 @@ class WalmartDetailCrawler:
                         text = badge.text_content().strip() if hasattr(badge, 'text_content') else str(badge).strip()
                         if text and text not in all_badges:
                             all_badges.append(text)
+                    # If we found badges with this xpath, stop searching (don't accumulate from other xpaths)
+                    if all_badges:
+                        break
 
             # DEBUG: Print all found badges
             print(f"  [DEBUG] Found badges: {all_badges}")
@@ -502,7 +508,37 @@ class WalmartDetailCrawler:
                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(2)
 
-                view_all_btn = self.driver.find_element(By.XPATH, self.xpaths.get('view_all_reviews_button'))
+                # Try multiple XPaths to find the button (there might be 2 on the page)
+                view_all_xpaths = [
+                    # Button with review count in text
+                    "//button[contains(text(), 'View all reviews') and @data-dca-intent='select']",
+                    # Any button with "View all reviews" text
+                    "//button[contains(text(), 'View all reviews')]",
+                    # Database XPath as fallback
+                    self.xpaths.get('view_all_reviews_button')
+                ]
+
+                view_all_btn = None
+                for xpath in view_all_xpaths:
+                    if xpath:
+                        try:
+                            buttons = self.driver.find_elements(By.XPATH, xpath)
+                            # If multiple buttons found, prefer the one with number in parentheses
+                            for btn in buttons:
+                                if '(' in btn.text and ')' in btn.text:
+                                    view_all_btn = btn
+                                    break
+                            # If no button with number, use the first one found
+                            if not view_all_btn and buttons:
+                                view_all_btn = buttons[0]
+                            if view_all_btn:
+                                break
+                        except:
+                            continue
+
+                if not view_all_btn:
+                    print(f"  [WARNING] Could not find View all reviews button")
+                    return None
 
                 # Scroll to button with offset to avoid header
                 self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", view_all_btn)

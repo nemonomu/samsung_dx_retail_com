@@ -611,16 +611,13 @@ class WalmartDetailCrawler:
             page_source = self.driver.page_source
             tree = html.fromstring(page_source)
 
-            # Extract basic data using XPaths
+            # Extract basic data using XPaths (from initial page load)
             retailer_sku_name = self.extract_text_safe(tree, self.xpaths.get('product_name'))
             star_rating = self.extract_star_rating(tree)
             discount_type = self.extract_text_safe(tree, self.xpaths.get('discount_type'))
             savings = self.extract_text_safe(tree, self.xpaths.get('savings'))
 
-            # Click Specifications and get Model - FIRST (before other interactions)
-            sku_model = self.click_specifications_and_get_model()
-
-            # Extract and classify all badges
+            # Extract and classify all badges (BEFORE Model extraction)
             badges = self.extract_badges(tree)
             purchased_yesterday = badges['purchased_yesterday']
             added_to_carts = badges['added_to_carts']
@@ -634,6 +631,9 @@ class WalmartDetailCrawler:
 
             # Extract similar products
             similar_products = self.extract_similar_products(tree)
+
+            # Click Specifications and get Model (after static content extraction)
+            sku_model = self.click_specifications_and_get_model()
 
             # Extract detailed reviews (this will navigate to reviews page) - LAST
             detailed_review_content = self.extract_detailed_reviews()

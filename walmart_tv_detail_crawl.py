@@ -186,26 +186,30 @@ class WalmartDetailCrawler:
             return None
 
     def parse_number_format(self, text):
-        """Parse numbers like '100+', '10k', '200+' to integer"""
+        """Parse numbers like '100+', '10k', '1,000+', '1000+' to integer"""
         if not text:
             return None
         try:
             # Remove any non-numeric characters except 'k' and '+'
             text = text.strip().lower()
 
+            # Remove commas for easier parsing
+            text_no_comma = text.replace(',', '')
+
             # Handle 'k' (thousands)
-            if 'k' in text:
-                number = re.search(r'([\d.]+)k', text)
+            if 'k' in text_no_comma:
+                number = re.search(r'([\d.]+)k', text_no_comma)
                 if number:
                     return int(float(number.group(1)) * 1000)
 
-            # Handle '+' or regular numbers
-            number = re.search(r'(\d+)', text)
+            # Handle '+' or regular numbers (now without commas)
+            number = re.search(r'(\d+)', text_no_comma)
             if number:
                 return int(number.group(1))
 
             return None
         except Exception as e:
+            print(f"  [DEBUG] parse_number_format error for '{text}': {e}")
             return None
 
     def extract_count_of_star_ratings(self, tree):
@@ -290,6 +294,9 @@ class WalmartDetailCrawler:
                         if text and text not in all_badges:
                             all_badges.append(text)
 
+            # DEBUG: Print all found badges
+            print(f"  [DEBUG] Found badges: {all_badges}")
+
             # Classify badges
             purchased_yesterday = None
             added_to_carts = None
@@ -297,22 +304,32 @@ class WalmartDetailCrawler:
 
             for badge_text in all_badges:
                 badge_lower = badge_text.lower()
+                print(f"  [DEBUG] Processing badge: '{badge_text}'")
 
                 # Check for "bought since yesterday"
                 if 'bought since yesterday' in badge_lower:
                     purchased_yesterday = self.parse_number_format(badge_text)
+                    print(f"  [DEBUG]   -> Classified as 'Purchased yesterday': {purchased_yesterday}")
 
                 # Check for "people's carts"
                 elif "people's carts" in badge_lower or 'peoples carts' in badge_lower:
                     added_to_carts = self.parse_number_format(badge_text)
+                    print(f"  [DEBUG]   -> Classified as 'Added to carts': {added_to_carts}")
 
                 # Everything else is sku_popularity
                 else:
                     # Collect popularity badges (Best seller, Popular pick, etc.)
+                    print(f"  [DEBUG]   -> Classified as 'Popularity badge'")
                     if not sku_popularity:
                         sku_popularity = badge_text
                     else:
                         sku_popularity += f", {badge_text}"
+
+            # DEBUG: Show final extracted values
+            print(f"  [DEBUG] Final badge extraction results:")
+            print(f"  [DEBUG]   - Purchased yesterday: {purchased_yesterday}")
+            print(f"  [DEBUG]   - Added to carts: {added_to_carts}")
+            print(f"  [DEBUG]   - SKU popularity: {sku_popularity}")
 
             return {
                 'purchased_yesterday': purchased_yesterday,

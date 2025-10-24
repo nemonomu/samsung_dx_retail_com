@@ -209,7 +209,6 @@ class WalmartDetailCrawler:
 
             return None
         except Exception as e:
-            print(f"  [DEBUG] parse_number_format error for '{text}': {e}")
             return None
 
     def extract_count_of_star_ratings(self, tree):
@@ -300,9 +299,6 @@ class WalmartDetailCrawler:
                     if all_badges:
                         break
 
-            # DEBUG: Print all found badges
-            print(f"  [DEBUG] Found badges: {all_badges}")
-
             # Classify badges
             purchased_yesterday = None
             added_to_carts = None
@@ -310,32 +306,22 @@ class WalmartDetailCrawler:
 
             for badge_text in all_badges:
                 badge_lower = badge_text.lower()
-                print(f"  [DEBUG] Processing badge: '{badge_text}'")
 
                 # Check for "bought since yesterday"
                 if 'bought since yesterday' in badge_lower:
                     purchased_yesterday = self.parse_number_format(badge_text)
-                    print(f"  [DEBUG]   -> Classified as 'Purchased yesterday': {purchased_yesterday}")
 
                 # Check for "people's carts"
                 elif "people's carts" in badge_lower or 'peoples carts' in badge_lower:
                     added_to_carts = self.parse_number_format(badge_text)
-                    print(f"  [DEBUG]   -> Classified as 'Added to carts': {added_to_carts}")
 
                 # Everything else is sku_popularity
                 else:
                     # Collect popularity badges (Best seller, Popular pick, etc.)
-                    print(f"  [DEBUG]   -> Classified as 'Popularity badge'")
                     if not sku_popularity:
                         sku_popularity = badge_text
                     else:
                         sku_popularity += f", {badge_text}"
-
-            # DEBUG: Show final extracted values
-            print(f"  [DEBUG] Final badge extraction results:")
-            print(f"  [DEBUG]   - Purchased yesterday: {purchased_yesterday}")
-            print(f"  [DEBUG]   - Added to carts: {added_to_carts}")
-            print(f"  [DEBUG]   - SKU popularity: {sku_popularity}")
 
             return {
                 'purchased_yesterday': purchased_yesterday,
@@ -569,8 +555,6 @@ class WalmartDetailCrawler:
                     print(f"  [WARNING] No review content divs found on page {page_num}")
                     break
 
-                print(f"  [DEBUG] Page {page_num}: Found {len(review_content_divs)} review content divs")
-
                 # Extract reviews from current page
                 for idx, content_div in enumerate(review_content_divs):
                     if len(reviews) >= 20:
@@ -584,11 +568,6 @@ class WalmartDetailCrawler:
                         review_text = review_elem[0].text_content().strip() if hasattr(review_elem[0], 'text_content') else str(review_elem[0]).strip()
                         if review_text and len(review_text) > 10:
                             reviews.append(review_text)
-                            print(f"  [DEBUG] Extracted review {len(reviews)}: {review_text[:50]}...")
-                        else:
-                            print(f"  [DEBUG] Page {page_num}, Container {idx+1}: Review text too short or empty")
-                    else:
-                        print(f"  [DEBUG] Page {page_num}, Container {idx+1}: No review element found with XPath")
 
                 # If we need more reviews and haven't reached max pages, click Next Page
                 if len(reviews) < 20 and page_num < max_pages:
@@ -602,7 +581,6 @@ class WalmartDetailCrawler:
 
                         # Click Next Page
                         self.driver.execute_script("arguments[0].click();", next_page_btn)
-                        print(f"  [DEBUG] Clicked Next Page button (page {page_num} -> {page_num + 1})")
 
                         # Wait for next page to load
                         time.sleep(random.uniform(3, 4))
@@ -615,13 +593,13 @@ class WalmartDetailCrawler:
 
             # Format as "review1-content, review2-content, ..."
             if reviews:
-                print(f"  [DEBUG] Total reviews extracted: {len(reviews)} from {page_num} page(s)")
+                print(f"  [INFO] Extracted {len(reviews)} reviews from {page_num} page(s)")
                 formatted = []
                 for idx, review in enumerate(reviews[:20], 1):
                     formatted.append(f"review{idx}-{review}")
                 return ', '.join(formatted)
 
-            print(f"  [DEBUG] No valid reviews extracted")
+            print(f"  [WARNING] No reviews extracted")
             return None
 
         except Exception as e:
@@ -801,9 +779,7 @@ class WalmartDetailCrawler:
                 print("[ERROR] No product URLs found")
                 return
 
-            # TEST MODE: Only process first product
-            product_urls = product_urls[:1]
-            print(f"[TEST MODE] Processing only first product")
+            print(f"[INFO] Loaded {len(product_urls)} product URLs to process")
 
             # Setup WebDriver
             self.setup_driver()
@@ -828,13 +804,11 @@ class WalmartDetailCrawler:
             traceback.print_exc()
 
         finally:
-            print("\n[INFO] Press ENTER to close browser and exit...")
-            input()
-
             if self.driver:
                 self.driver.quit()
             if self.db_conn:
                 self.db_conn.close()
+            print("\n[INFO] Crawler terminated")
 
 
 if __name__ == "__main__":

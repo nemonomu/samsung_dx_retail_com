@@ -566,6 +566,8 @@ class WalmartDetailCrawler:
                 print(f"  [WARNING] No review containers found")
                 return None
 
+            print(f"  [DEBUG] Found {len(review_containers)} review containers")
+
             reviews = []
             for idx, container in enumerate(review_containers):
                 if len(reviews) >= 20:
@@ -580,14 +582,21 @@ class WalmartDetailCrawler:
                     review_text = review_elem[0].text_content().strip() if hasattr(review_elem[0], 'text_content') else str(review_elem[0]).strip()
                     if review_text and len(review_text) > 10:
                         reviews.append(review_text)
+                        print(f"  [DEBUG] Extracted review {len(reviews)}: {review_text[:50]}...")
+                    else:
+                        print(f"  [DEBUG] Container {idx+1}: Review text too short or empty")
+                else:
+                    print(f"  [DEBUG] Container {idx+1}: No review element found with XPath")
 
             # Format as "review1-content, review2-content, ..."
             if reviews:
+                print(f"  [DEBUG] Total reviews extracted: {len(reviews)}")
                 formatted = []
                 for idx, review in enumerate(reviews[:20], 1):
                     formatted.append(f"review{idx}-{review}")
                 return ', '.join(formatted)
 
+            print(f"  [DEBUG] No valid reviews extracted")
             return None
 
         except Exception as e:

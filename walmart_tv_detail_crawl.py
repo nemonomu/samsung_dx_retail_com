@@ -212,38 +212,89 @@ class WalmartDetailCrawler:
             return None
 
     def extract_count_of_star_ratings(self, tree):
-        """Extract star rating counts in format '5star:516, 4star:94, ...'"""
+        """Extract star rating counts in format '5star:489, 4star:102, 3star:28, 2star:19, 1star:47'"""
         try:
-            # Get total ratings count
+            # Get total ratings count for fallback calculation
             total_text = self.extract_text_safe(tree, self.xpaths.get('total_ratings'))
-            if not total_text:
-                return None
+            total_count = None
+            if total_text:
+                total_match = re.search(r'(\d+)', total_text.replace(',', ''))
+                if total_match:
+                    total_count = int(total_match.group(1))
 
-            # Extract number from "685 ratings"
-            total_match = re.search(r'(\d+)', total_text.replace(',', ''))
-            if not total_match:
-                return None
-
-            total_count = int(total_match.group(1))
-
-            # Try to extract percentage for each star (5 to 1)
-            # Looking for pattern like "71% (489)"
             star_counts = {}
 
-            # Try to find star rating buttons with percentage info
-            for star in range(5, 0, -1):
-                # Look for pattern "X% (Y)" where X is percentage and Y is count
-                # This is a simplified approach - may need adjustment based on actual HTML
+            # Extract count for each star (5 to 1)
+            for star_num in range(5, 0, -1):
+                count = None
+
+                # Method 1: Extract from "X% (Y)" pattern in span text
+                # Example: <span>71% (489)</span>
                 try:
-                    # Try to extract from aria-label or visible text
-                    # Format: "489 ratings are rated 5 stars, 71% of all ratings"
-                    pass
+                    # Find the button for this star rating
+                    star_button_xpath = f"//button[@aria-label[contains(., '{star_num} star')]]"
+                    star_buttons = tree.xpath(star_button_xpath)
+
+                    if star_buttons:
+                        # Look for pattern "X% (Y)" inside this button
+                        percentage_spans = star_buttons[0].xpath(".//span[contains(text(), '% (')]")
+                        if percentage_spans:
+                            text = percentage_spans[0].text_content().strip()
+                            # Extract number from "71% (489)"
+                            match = re.search(r'\((\d+)\)', text)
+                            if match:
+                                count = int(match.group(1))
                 except:
                     pass
 
-            # If we can't find individual counts, calculate from percentages
-            # This is placeholder - might need to scroll or click to see the breakdown
-            # For now, return None if detailed breakdown not available
+                # Method 2: Extract from aria-label
+                # Example: "489 ratings are rated 5 stars, 71% of all ratings"
+                if count is None:
+                    try:
+                        aria_xpath = f"//button[@aria-label[contains(., '{star_num} star')]]/@aria-label"
+                        aria_labels = tree.xpath(aria_xpath)
+                        if aria_labels:
+                            aria_text = aria_labels[0]
+                            # Extract first number (which is the count)
+                            match = re.search(r'(\d+)\s+ratings?\s+are\s+rated', aria_text)
+                            if match:
+                                count = int(match.group(1))
+                    except:
+                        pass
+
+                # Method 3: Calculate from percentage if total_count available
+                if count is None and total_count:
+                    try:
+                        star_button_xpath = f"//button[@aria-label[contains(., '{star_num} star')]]"
+                        star_buttons = tree.xpath(star_button_xpath)
+
+                        if star_buttons:
+                            # Look for percentage in span text
+                            percentage_spans = star_buttons[0].xpath(".//span[contains(text(), '%')]")
+                            if percentage_spans:
+                                text = percentage_spans[0].text_content().strip()
+                                # Extract percentage from "71% (489)" or just "71%"
+                                match = re.search(r'(\d+)%', text)
+                                if match:
+                                    percentage = int(match.group(1))
+                                    count = round(total_count * percentage / 100.0)
+                    except:
+                        pass
+
+                # Store the count
+                if count is not None:
+                    star_counts[star_num] = count
+
+            # Format as "5star:X, 4star:X, ..."
+            if star_counts:
+                result_parts = []
+                for star_num in range(5, 0, -1):
+                    if star_num in star_counts:
+                        result_parts.append(f"{star_num}star:{star_counts[star_num]}")
+
+                if result_parts:
+                    return ', '.join(result_parts)
+
             return None
 
         except Exception as e:

@@ -330,12 +330,14 @@ class WalmartDetailCrawler:
             # Find all badge elements - ONLY from main product info section
             # Restrict to the top product info area to avoid similar products section
             badge_xpaths = [
-                # Main product badges section (restrict to main content area before "Similar items")
+                # Main product badges section (most reliable)
                 '//main//div[@data-testid="module-2-badges"]//span[@data-testid="badgeTagComponent"]//span',
-                # Fallback: limit to top section by position
-                '(//*[@id="maincontent"]/section/main/div[2]//div[@data-testid="badgeTagComponent"]//span)[position() <= 5]',
-                # Another approach: get badges from the first encountered badge container only
-                '(//div[contains(@class, "flex items-start")]//span[contains(@class, "w_yTSq")])[position() <= 5]'
+                # Fallback 1: Restrict to main product div (before similar products)
+                '//main/div[1]//div[@data-testid="badgeTagComponent"]//span',
+                # Fallback 2: Only badges in the product title/info area (not in similar items grid)
+                '//section[@data-testid="product-info-section"]//span[@data-testid="badgeTagComponent"]//span',
+                # Fallback 3: Exclude similar items by using ancestor check
+                '//main/section[1]//div[@data-testid="badgeTagComponent"]//span'
             ]
 
             all_badges = []
@@ -348,6 +350,7 @@ class WalmartDetailCrawler:
                             all_badges.append(text)
                     # If we found badges with this xpath, stop searching (don't accumulate from other xpaths)
                     if all_badges:
+                        print(f"  [INFO] Found {len(all_badges)} badges: {all_badges}")
                         break
 
             # Classify badges

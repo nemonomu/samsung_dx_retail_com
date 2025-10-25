@@ -24,11 +24,11 @@ DB_CONFIG = {
 }
 
 class BestBuyDetailCrawler:
-    def __init__(self, batch_id=None):
+    def __init__(self):
         self.driver = None
         self.db_conn = None
         self.korea_tz = pytz.timezone('Asia/Seoul')
-        self.batch_id = batch_id or datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
+        self.batch_id = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
         self.order = 0
 
     def connect_db(self):
@@ -55,46 +55,81 @@ class BestBuyDetailCrawler:
             return False
 
     def get_recent_urls(self):
-        """최근 세션의 product URLs 가져오기"""
+        """최신 batch_id의 product URLs 가져오기"""
         try:
             cursor = self.db_conn.cursor()
             urls = []
 
-            # bestbuy_tv_main_crawl에서 가져오기
+            # bestbuy_tv_main_crawl에서 최신 batch_id 가져오기
             cursor.execute("""
-                SELECT DISTINCT product_url
+                SELECT batch_id
                 FROM bestbuy_tv_main_crawl
-                WHERE crawl_datetime >= NOW() - INTERVAL '1 day'
-                AND product_url IS NOT NULL
-                ORDER BY crawl_datetime DESC
+                WHERE batch_id IS NOT NULL
+                ORDER BY batch_id DESC
+                LIMIT 1
             """)
-            main_urls = cursor.fetchall()
-            urls.extend([('main', url[0]) for url in main_urls])
-            print(f"[OK] Main URLs: {len(main_urls)}개")
+            main_batch_result = cursor.fetchone()
+            main_batch_id = main_batch_result[0] if main_batch_result else None
 
-            # bby_tv_trend_crawl에서 가져오기
+            # bby_tv_Trend_crawl에서 최신 batch_id 가져오기
             cursor.execute("""
-                SELECT DISTINCT product_url
+                SELECT batch_id
                 FROM bby_tv_Trend_crawl
-                WHERE crawl_datetime >= NOW() - INTERVAL '1 day'
-                AND product_url IS NOT NULL
-                ORDER BY crawl_datetime DESC
+                WHERE batch_id IS NOT NULL
+                ORDER BY batch_id DESC
+                LIMIT 1
             """)
-            trend_urls = cursor.fetchall()
-            urls.extend([('Trend', url[0]) for url in trend_urls])
-            print(f"[OK] Trend URLs: {len(trend_urls)}개")
+            trend_batch_result = cursor.fetchone()
+            trend_batch_id = trend_batch_result[0] if trend_batch_result else None
 
-            # bby_tv_promotion_crawl에서 가져오기
+            # bby_tv_promotion_crawl에서 최신 batch_id 가져오기
             cursor.execute("""
-                SELECT DISTINCT product_url
+                SELECT batch_id
                 FROM bby_tv_promotion_crawl
-                WHERE crawl_datetime >= NOW() - INTERVAL '1 day'
-                AND product_url IS NOT NULL
-                ORDER BY crawl_datetime DESC
+                WHERE batch_id IS NOT NULL
+                ORDER BY batch_id DESC
+                LIMIT 1
             """)
-            promo_urls = cursor.fetchall()
-            urls.extend([('promotion', url[0]) for url in promo_urls])
-            print(f"[OK] Promotion URLs: {len(promo_urls)}개")
+            promo_batch_result = cursor.fetchone()
+            promo_batch_id = promo_batch_result[0] if promo_batch_result else None
+
+            print(f"[INFO] Latest batch_id - Main: {main_batch_id}, Trend: {trend_batch_id}, Promotion: {promo_batch_id}")
+
+            # bestbuy_tv_main_crawl에서 해당 batch의 URLs 가져오기
+            if main_batch_id:
+                cursor.execute("""
+                    SELECT DISTINCT product_url
+                    FROM bestbuy_tv_main_crawl
+                    WHERE batch_id = %s
+                    AND product_url IS NOT NULL
+                """, (main_batch_id,))
+                main_urls = cursor.fetchall()
+                urls.extend([('main', url[0]) for url in main_urls])
+                print(f"[OK] Main URLs (batch {main_batch_id}): {len(main_urls)}개")
+
+            # bby_tv_Trend_crawl에서 해당 batch의 URLs 가져오기
+            if trend_batch_id:
+                cursor.execute("""
+                    SELECT DISTINCT product_url
+                    FROM bby_tv_Trend_crawl
+                    WHERE batch_id = %s
+                    AND product_url IS NOT NULL
+                """, (trend_batch_id,))
+                trend_urls = cursor.fetchall()
+                urls.extend([('Trend', url[0]) for url in trend_urls])
+                print(f"[OK] Trend URLs (batch {trend_batch_id}): {len(trend_urls)}개")
+
+            # bby_tv_promotion_crawl에서 해당 batch의 URLs 가져오기
+            if promo_batch_id:
+                cursor.execute("""
+                    SELECT DISTINCT product_url
+                    FROM bby_tv_promotion_crawl
+                    WHERE batch_id = %s
+                    AND product_url IS NOT NULL
+                """, (promo_batch_id,))
+                promo_urls = cursor.fetchall()
+                urls.extend([('promotion', url[0]) for url in promo_urls])
+                print(f"[OK] Promotion URLs (batch {promo_batch_id}): {len(promo_urls)}개")
 
             cursor.close()
             print(f"[OK] 총 {len(urls)}개 URLs 로드 완료")
@@ -598,9 +633,7 @@ class BestBuyDetailCrawler:
                 print("🔧 DB 연결 종료")
 
 def main():
-    import sys
-    batch_id = sys.argv[1] if len(sys.argv) > 1 else None
-    crawler = BestBuyDetailCrawler(batch_id=batch_id)
+    crawler = BestBuyDetailCrawler()
     crawler.run()
 
 if __name__ == "__main__":

@@ -1,6 +1,8 @@
 import time
 import random
 import psycopg2
+from datetime import datetime
+import pytz
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -26,6 +28,8 @@ class BestBuyTVCrawler:
         self.db_conn = None
         self.total_collected = 0
         self.error_messages = []
+        self.korea_tz = pytz.timezone('Asia/Seoul')
+        self.batch_id = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -313,11 +317,11 @@ class BestBuyTVCrawler:
 
             cursor.execute("""
                 INSERT INTO bestbuy_tv_main_crawl
-                (page_type, Retailer_SKU_Name, Final_SKU_Price, Savings, Comparable_Pricing,
+                (batch_id, page_type, Retailer_SKU_Name, Final_SKU_Price, Savings, Comparable_Pricing,
                  Offer, Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
                  Star_Rating, SKU_Status, Product_url)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (page_type, product_name, final_price, savings, comp_pricing,
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (self.batch_id, page_type, product_name, final_price, savings, comp_pricing,
                   offer, pickup, shipping, delivery, star_rating, sku_status, product_url))
 
             self.db_conn.commit()
@@ -334,7 +338,7 @@ class BestBuyTVCrawler:
         """Main execution"""
         try:
             print("="*80)
-            print("Best Buy TV Main Page Crawler")
+            print(f"Best Buy TV Main Page Crawler (Batch ID: {self.batch_id})")
             print("="*80)
 
             # Connect to database

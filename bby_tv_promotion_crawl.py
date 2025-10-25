@@ -29,6 +29,7 @@ class BestBuyPromotionCrawler:
         self.driver = None
         self.db_conn = None
         self.korea_tz = pytz.timezone('Asia/Seoul')
+        self.batch_id = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
         self.url = "https://www.bestbuy.com/site/all-tv-home-theater-on-sale/tvs-on-sale/pcmcat1720647543741.c?id=pcmcat1720647543741"
 
     def connect_db(self):
@@ -222,14 +223,15 @@ class BestBuyPromotionCrawler:
             # 데이터 삽입
             insert_query = """
                 INSERT INTO bby_tv_promotion_crawl
-                (page_type, rank, promotion_Type, Retailer_SKU_Name, product_url)
-                VALUES (%s, %s, %s, %s, %s)
+                (batch_id, page_type, rank, promotion_Type, Retailer_SKU_Name, product_url)
+                VALUES (%s, %s, %s, %s, %s, %s)
             """
 
             success_count = 0
             for product in products:
                 try:
                     cursor.execute(insert_query, (
+                        self.batch_id,
                         product['page_type'],
                         product['rank'],
                         product['promotion_Type'],
@@ -254,7 +256,7 @@ class BestBuyPromotionCrawler:
         """메인 실행"""
         try:
             print("="*80)
-            print("Best Buy TV Promotion Crawler")
+            print(f"Best Buy TV Promotion Crawler (Batch ID: {self.batch_id})")
             print("="*80)
 
             # DB 연결

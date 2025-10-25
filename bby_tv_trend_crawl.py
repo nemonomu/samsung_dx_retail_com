@@ -29,6 +29,7 @@ class BestBuyTrendCrawler:
         self.driver = None
         self.db_conn = None
         self.korea_tz = pytz.timezone('Asia/Seoul')
+        self.batch_id = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
 
     def connect_db(self):
         """DB 연결"""
@@ -199,14 +200,15 @@ class BestBuyTrendCrawler:
 
             # 데이터 삽입
             insert_query = """
-                INSERT INTO bby_tv_Trend_crawl (page_type, rank, product_name, product_url)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO bby_tv_Trend_crawl (batch_id, page_type, rank, product_name, product_url)
+                VALUES (%s, %s, %s, %s, %s)
             """
 
             success_count = 0
             for product in products:
                 try:
                     cursor.execute(insert_query, (
+                        self.batch_id,
                         product['page_type'],
                         product['rank'],
                         product['product_name'],
@@ -230,7 +232,7 @@ class BestBuyTrendCrawler:
         """메인 실행"""
         try:
             print("="*80)
-            print("Best Buy Trending Deals - TVs Crawler")
+            print(f"Best Buy Trending Deals - TVs Crawler (Batch ID: {self.batch_id})")
             print("="*80)
 
             # DB 연결

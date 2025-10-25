@@ -239,6 +239,19 @@ class BestBuyTrendCrawler:
             if not self.connect_db():
                 return
 
+            # Add batch_id column if not exists
+            try:
+                cursor = self.db_conn.cursor()
+                cursor.execute("""
+                    ALTER TABLE bby_tv_Trend_crawl
+                    ADD COLUMN IF NOT EXISTS batch_id VARCHAR(50)
+                """)
+                self.db_conn.commit()
+                cursor.close()
+                print("[OK] Table schema updated (batch_id column added if needed)")
+            except Exception as e:
+                print(f"[WARNING] Could not add batch_id column: {e}")
+
             # 드라이버 설정
             if not self.setup_driver():
                 return

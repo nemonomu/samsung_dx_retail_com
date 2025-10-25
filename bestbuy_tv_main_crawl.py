@@ -207,7 +207,13 @@ class BestBuyTVCrawler:
 
                     # Extract product URL
                     product_url_elem = container.xpath('.//a[@class="product-list-item-link"]/@href')
-                    product_url = f"https://www.bestbuy.com{product_url_elem[0]}" if product_url_elem else None
+                    if product_url_elem:
+                        product_url = product_url_elem[0]
+                        # 상대 경로인 경우에만 도메인 추가
+                        if product_url.startswith('/'):
+                            product_url = f"https://www.bestbuy.com{product_url}"
+                    else:
+                        product_url = None
 
                     # Extract Final_SKU_Price
                     # Try multiple possible price locations

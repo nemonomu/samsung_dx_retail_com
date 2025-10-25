@@ -45,20 +45,20 @@ class BestBuyTrendCrawler:
     def setup_driver(self):
         """Chrome 드라이버 설정"""
         try:
-            print("🔧 Chrome 드라이버 설정 중...")
+            print("[INFO] Chrome 드라이버 설정 중...")
             self.driver = uc.Chrome()
             self.driver.maximize_window()
-            print("✅ 드라이버 설정 완료")
+            print("[OK] 드라이버 설정 완료")
             return True
         except Exception as e:
-            print(f"❌ 드라이버 설정 실패: {e}")
+            print(f"[ERROR] 드라이버 설정 실패: {e}")
             return False
 
     def click_tvs_category(self):
         """Trending deals에서 TVs 카테고리 클릭"""
         try:
             # 홈페이지 접속
-            print(f"🌐 Best Buy 홈페이지 접속...")
+            print(f"[INFO] Best Buy 홈페이지 접속...")
             self.driver.get("https://www.bestbuy.com/")
             time.sleep(random.uniform(3, 5))
 
@@ -83,7 +83,7 @@ class BestBuyTrendCrawler:
 
                     # 클릭
                     tvs_button.click()
-                    print("✅ TVs 카테고리 클릭 완료")
+                    print("[OK] TVs 카테고리 클릭 완료")
                     clicked = True
                     time.sleep(random.uniform(2, 3))
                     break
@@ -96,13 +96,13 @@ class BestBuyTrendCrawler:
             return True
 
         except Exception as e:
-            print(f"❌ TVs 카테고리 클릭 실패: {e}")
+            print(f"[ERROR] TVs 카테고리 클릭 실패: {e}")
             return False
 
     def extract_trending_products(self):
         """Trending deals TVs 제품 정보 추출"""
         try:
-            print("\n📊 제품 정보 추출 시작...")
+            print("\n[INFO] 제품 정보 추출 시작...")
 
             # 페이지 소스 가져오기
             page_source = self.driver.page_source
@@ -114,7 +114,7 @@ class BestBuyTrendCrawler:
             # 제품들은 ul > li 구조로 되어있음
             product_items = tree.xpath('//div[@id="Trending-Deals-TVs"]//ul[@class="c-carousel-list"]/li')
 
-            print(f"✅ 총 {len(product_items)}개 제품 발견")
+            print(f"[OK] 총 {len(product_items)}개 제품 발견")
 
             for idx, item in enumerate(product_items, 1):
                 try:
@@ -168,11 +168,11 @@ class BestBuyTrendCrawler:
                     print(f"  [WARNING] 제품 {idx} 추출 실패: {e}")
                     continue
 
-            print(f"\n✅ 총 {len(products)}개 제품 추출 완료")
+            print(f"\n[OK] 총 {len(products)}개 제품 추출 완료")
             return products
 
         except Exception as e:
-            print(f"❌ 제품 정보 추출 실패: {e}")
+            print(f"[ERROR] 제품 정보 추출 실패: {e}")
             import traceback
             traceback.print_exc()
             return []
@@ -219,11 +219,11 @@ class BestBuyTrendCrawler:
                     print(f"[ERROR] 저장 실패 - Rank {product['rank']}: {e}")
 
             cursor.close()
-            print(f"✅ DB 저장 완료: {success_count}/{len(products)}개")
+            print(f"[OK] DB 저장 완료: {success_count}/{len(products)}개")
             return True
 
         except Exception as e:
-            print(f"❌ DB 저장 실패: {e}")
+            print(f"[ERROR] DB 저장 실패: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -273,20 +273,20 @@ class BestBuyTrendCrawler:
                 print(f"총 {len(products)}개 제품 수집")
                 print("="*80)
             else:
-                print("\n❌ 수집된 제품이 없습니다.")
+                print("\n[ERROR] 수집된 제품이 없습니다.")
 
         except Exception as e:
-            print(f"❌ 크롤러 실행 오류: {e}")
+            print(f"[ERROR] 크롤러 실행 오류: {e}")
             import traceback
             traceback.print_exc()
 
         finally:
             if self.driver:
                 self.driver.quit()
-                print("\n🔧 드라이버 종료")
+                print("\n[INFO] 드라이버 종료")
             if self.db_conn:
                 self.db_conn.close()
-                print("🔧 DB 연결 종료")
+                print("[INFO] DB 연결 종료")
 
 def main():
     crawler = BestBuyTrendCrawler()

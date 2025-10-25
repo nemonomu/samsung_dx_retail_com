@@ -45,13 +45,13 @@ class BestBuyDetailCrawler:
     def setup_driver(self):
         """Chrome 드라이버 설정"""
         try:
-            print("🔧 Chrome 드라이버 설정 중...")
+            print("[INFO] Chrome 드라이버 설정 중...")
             self.driver = uc.Chrome()
             self.driver.maximize_window()
-            print("✅ 드라이버 설정 완료")
+            print("[OK] 드라이버 설정 완료")
             return True
         except Exception as e:
-            print(f"❌ 드라이버 설정 실패: {e}")
+            print(f"[ERROR] 드라이버 설정 실패: {e}")
             return False
 
     def get_recent_urls(self):
@@ -620,17 +620,17 @@ class BestBuyDetailCrawler:
             print("="*80)
 
         except Exception as e:
-            print(f"❌ 크롤러 실행 오류: {e}")
+            print(f"[ERROR] 크롤러 실행 오류: {e}")
             import traceback
             traceback.print_exc()
 
         finally:
             if self.driver:
                 self.driver.quit()
-                print("\n🔧 드라이버 종료")
+                print("\n[INFO] 드라이버 종료")
             if self.db_conn:
                 self.db_conn.close()
-                print("🔧 DB 연결 종료")
+                print("[INFO] DB 연결 종료")
 
 def main():
     crawler = BestBuyDetailCrawler()

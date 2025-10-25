@@ -46,29 +46,29 @@ class BestBuyPromotionCrawler:
     def setup_driver(self):
         """Chrome 드라이버 설정"""
         try:
-            print("🔧 Chrome 드라이버 설정 중...")
+            print("[INFO] Chrome 드라이버 설정 중...")
             self.driver = uc.Chrome()
             self.driver.maximize_window()
-            print("✅ 드라이버 설정 완료")
+            print("[OK] 드라이버 설정 완료")
             return True
         except Exception as e:
-            print(f"❌ 드라이버 설정 실패: {e}")
+            print(f"[ERROR] 드라이버 설정 실패: {e}")
             return False
 
     def navigate_to_page(self):
         """프로모션 페이지 접속"""
         try:
-            print(f"🌐 Best Buy TV Promotion 페이지 접속...")
+            print(f"[INFO] Best Buy TV Promotion 페이지 접속...")
             self.driver.get(self.url)
             time.sleep(random.uniform(3, 5))
 
             # 페이지 로드 대기
             wait = WebDriverWait(self.driver, 20)
-            print("✅ 페이지 접속 완료")
+            print("[OK] 페이지 접속 완료")
             return True
 
         except Exception as e:
-            print(f"❌ 페이지 접속 실패: {e}")
+            print(f"[ERROR] 페이지 접속 실패: {e}")
             return False
 
     def extract_promotion_type(self, tree):
@@ -105,10 +105,10 @@ class BestBuyPromotionCrawler:
             # 결합
             if h2_text and p_text:
                 promotion_type = f"{h2_text} {p_text}"
-                print(f"✅ Promotion Type: {promotion_type}")
+                print(f"[OK] Promotion Type: {promotion_type}")
                 return promotion_type
             elif h2_text:
-                print(f"✅ Promotion Type: {h2_text} (p 텍스트 없음)")
+                print(f"[OK] Promotion Type: {h2_text} (p 텍스트 없음)")
                 return h2_text
             else:
                 print("[WARNING] Promotion Type을 찾을 수 없습니다.")
@@ -121,7 +121,7 @@ class BestBuyPromotionCrawler:
     def extract_products(self):
         """제품 정보 추출"""
         try:
-            print("\n📊 제품 정보 추출 시작...")
+            print("\n[INFO] 제품 정보 추출 시작...")
 
             # 페이지 소스 가져오기
             page_source = self.driver.page_source
@@ -135,7 +135,7 @@ class BestBuyPromotionCrawler:
             # 모든 제품 아이템 찾기 (li 요소, 최대 6개)
             product_items = tree.xpath('//ul[@class="c-carousel-list"]//li[@class="item c-carousel-item "]')[:6]
 
-            print(f"✅ 총 {len(product_items)}개 제품 발견 (최대 6개)")
+            print(f"[OK] 총 {len(product_items)}개 제품 발견 (최대 6개)")
 
             for idx, item in enumerate(product_items, 1):
                 try:
@@ -189,11 +189,11 @@ class BestBuyPromotionCrawler:
                     print(f"  [WARNING] 제품 {idx} 추출 실패: {e}")
                     continue
 
-            print(f"\n✅ 총 {len(products)}개 제품 추출 완료")
+            print(f"\n[OK] 총 {len(products)}개 제품 추출 완료")
             return products
 
         except Exception as e:
-            print(f"❌ 제품 정보 추출 실패: {e}")
+            print(f"[ERROR] 제품 정보 추출 실패: {e}")
             import traceback
             traceback.print_exc()
             return []
@@ -243,11 +243,11 @@ class BestBuyPromotionCrawler:
                     print(f"[ERROR] 저장 실패 - Rank {product['rank']}: {e}")
 
             cursor.close()
-            print(f"✅ DB 저장 완료: {success_count}/{len(products)}개")
+            print(f"[OK] DB 저장 완료: {success_count}/{len(products)}개")
             return True
 
         except Exception as e:
-            print(f"❌ DB 저장 실패: {e}")
+            print(f"[ERROR] DB 저장 실패: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -297,20 +297,20 @@ class BestBuyPromotionCrawler:
                 print(f"총 {len(products)}개 제품 수집")
                 print("="*80)
             else:
-                print("\n❌ 수집된 제품이 없습니다.")
+                print("\n[ERROR] 수집된 제품이 없습니다.")
 
         except Exception as e:
-            print(f"❌ 크롤러 실행 오류: {e}")
+            print(f"[ERROR] 크롤러 실행 오류: {e}")
             import traceback
             traceback.print_exc()
 
         finally:
             if self.driver:
                 self.driver.quit()
-                print("\n🔧 드라이버 종료")
+                print("\n[INFO] 드라이버 종료")
             if self.db_conn:
                 self.db_conn.close()
-                print("🔧 DB 연결 종료")
+                print("[INFO] DB 연결 종료")
 
 def main():
     crawler = BestBuyPromotionCrawler()

@@ -60,43 +60,85 @@ class BestBuyTrendCrawler:
             # 홈페이지 접속
             print(f"[INFO] Best Buy 홈페이지 접속...")
             self.driver.get("https://www.bestbuy.com/")
-            time.sleep(random.uniform(3, 5))
+            time.sleep(random.uniform(5, 8))  # 대기 시간 증가
+
+            print("[INFO] 페이지 로딩 대기 중...")
+            time.sleep(3)
+
+            # 페이지 소스 저장 (디버깅용)
+            try:
+                page_source = self.driver.page_source
+                with open('bby_homepage_debug.html', 'w', encoding='utf-8') as f:
+                    f.write(page_source)
+                print("[DEBUG] 홈페이지 소스 저장: bby_homepage_debug.html")
+            except Exception as e:
+                print(f"[WARNING] 페이지 소스 저장 실패: {e}")
+
+            # Trending Deals 섹션으로 스크롤
+            print("[INFO] Trending Deals 섹션 찾는 중...")
+
+            # 먼저 페이지를 아래로 천천히 스크롤하여 Trending Deals 섹션 로드
+            scroll_height = self.driver.execute_script("return document.body.scrollHeight")
+            current_position = 0
+            step = 500
+
+            while current_position < scroll_height:
+                current_position += step
+                self.driver.execute_script(f"window.scrollTo(0, {current_position});")
+                time.sleep(1)
+
+                # Trending Deals 섹션이 나타났는지 확인
+                try:
+                    trending_section = self.driver.find_element(By.XPATH, "//div[contains(@id, 'Trending-Deals') or contains(@class, 'trending-deals')]")
+                    print("[OK] Trending Deals 섹션 발견")
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", trending_section)
+                    time.sleep(2)
+                    break
+                except:
+                    pass
 
             # 페이지 로드 대기
-            wait = WebDriverWait(self.driver, 20)
+            wait = WebDriverWait(self.driver, 30)  # 대기 시간 증가
 
             # TVs 버튼 찾기 및 클릭
             tvs_button_xpaths = [
                 "//button[@data-testid='Trending-Deals-TVs']",
                 "//button[contains(text(), 'TVs')]",
-                "//button[@aria-controls='Trending-Deals-TVs']"
+                "//button[@aria-controls='Trending-Deals-TVs']",
+                "//div[@id='Trending-Deals']//button[contains(., 'TVs')]"
             ]
 
             clicked = False
-            for xpath in tvs_button_xpaths:
+            for idx, xpath in enumerate(tvs_button_xpaths, 1):
                 try:
+                    print(f"[INFO] TVs 버튼 찾기 시도 {idx}/{len(tvs_button_xpaths)}...")
                     tvs_button = wait.until(EC.presence_of_element_located((By.XPATH, xpath)))
 
                     # 버튼이 보일 때까지 스크롤
                     self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", tvs_button)
-                    time.sleep(1)
+                    time.sleep(2)
 
                     # 클릭
                     tvs_button.click()
                     print("[OK] TVs 카테고리 클릭 완료")
                     clicked = True
-                    time.sleep(random.uniform(2, 3))
+                    time.sleep(random.uniform(3, 5))
                     break
                 except Exception as e:
+                    print(f"[DEBUG] XPath {idx} 실패: {e}")
                     continue
 
             if not clicked:
-                print("[WARNING] TVs 버튼을 찾을 수 없습니다. 이미 선택되어 있을 수 있습니다.")
+                print("[ERROR] TVs 버튼을 찾을 수 없습니다.")
+                print("[INFO] bby_homepage_debug.html 파일을 확인하세요.")
+                return False
 
             return True
 
         except Exception as e:
             print(f"[ERROR] TVs 카테고리 클릭 실패: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def extract_trending_products(self):
@@ -104,17 +146,41 @@ class BestBuyTrendCrawler:
         try:
             print("\n[INFO] 제품 정보 추출 시작...")
 
+            # 추가 대기 시간
+            time.sleep(3)
+
             # 페이지 소스 가져오기
             page_source = self.driver.page_source
             tree = html.fromstring(page_source)
 
+            # 디버깅용 HTML 저장
+            try:
+                with open('bby_trending_tvs_debug.html', 'w', encoding='utf-8') as f:
+                    f.write(page_source)
+                print("[DEBUG] Trending TVs 페이지 소스 저장: bby_trending_tvs_debug.html")
+            except Exception as e:
+                print(f"[WARNING] 페이지 소스 저장 실패: {e}")
+
             products = []
 
-            # 모든 제품 아이템 찾기 (li 요소)
-            # 제품들은 ul > li 구조로 되어있음
-            product_items = tree.xpath('//div[@id="Trending-Deals-TVs"]//ul[@class="c-carousel-list"]/li')
+            # 모든 제품 아이템 찾기 (여러 XPath 패턴 시도)
+            product_items_xpaths = [
+                '//div[@id="Trending-Deals-TVs"]//ul[@class="c-carousel-list"]/li',
+                '//div[@id="Trending-Deals-TVs"]//li',
+                '//div[contains(@id, "Trending-Deals-TVs")]//li'
+            ]
 
-            print(f"[OK] 총 {len(product_items)}개 제품 발견")
+            product_items = []
+            for xpath in product_items_xpaths:
+                product_items = tree.xpath(xpath)
+                if product_items:
+                    print(f"[OK] XPath로 총 {len(product_items)}개 제품 발견")
+                    break
+
+            if not product_items:
+                print("[ERROR] 제품 아이템을 찾을 수 없습니다.")
+                print("[INFO] bby_trending_tvs_debug.html 파일을 확인하세요.")
+                return []
 
             for idx, item in enumerate(product_items, 1):
                 try:
@@ -127,7 +193,8 @@ class BestBuyTrendCrawler:
                     name_xpaths = [
                         './/span[contains(@class, "BxIuyHdYvE_KO21sTHqZ")]',
                         './/div[@data-testid="product-card-title"]//span',
-                        './/a[@data-testid="product-card-title-link"]//span'
+                        './/a[@data-testid="product-card-title-link"]//span',
+                        './/a//span'
                     ]
 
                     product_name = None
@@ -135,13 +202,15 @@ class BestBuyTrendCrawler:
                         name_elem = item.xpath(name_xpath)
                         if name_elem:
                             product_name = name_elem[0].text_content().strip()
-                            break
+                            if product_name:  # 빈 문자열이 아닌지 확인
+                                break
 
                     # URL 추출
                     url_xpaths = [
                         './/a[@data-testid="trending-deals-card-test-id"]/@href',
                         './/a[@data-testid="product-card-title-link"]/@href',
-                        './/div[@class="content-wrapper"]//a/@href'
+                        './/div[@class="content-wrapper"]//a/@href',
+                        './/a/@href'
                     ]
 
                     product_url = None
@@ -163,9 +232,13 @@ class BestBuyTrendCrawler:
                         }
                         products.append(product)
                         print(f"  [{rank}] {product_name[:50]}...")
+                    else:
+                        print(f"  [WARNING] 제품 {idx} - 이름 또는 URL 누락 (Name: {product_name is not None}, URL: {product_url is not None})")
 
                 except Exception as e:
                     print(f"  [WARNING] 제품 {idx} 추출 실패: {e}")
+                    import traceback
+                    traceback.print_exc()
                     continue
 
             print(f"\n[OK] 총 {len(products)}개 제품 추출 완료")

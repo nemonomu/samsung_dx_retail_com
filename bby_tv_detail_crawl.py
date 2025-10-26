@@ -173,7 +173,7 @@ class BestBuyDetailCrawler:
                     time.sleep(1)
                     spec_button.click()
                     print("  [OK] Specification 클릭 성공")
-                    time.sleep(3)  # 다이얼로그 로딩 대기
+                    time.sleep(5)  # 다이얼로그 로딩 대기 (3초 -> 5초)
                     return True
                 except:
                     continue
@@ -188,15 +188,23 @@ class BestBuyDetailCrawler:
     def extract_samsung_sku_name(self, tree):
         """Samsung_SKU_Name (Model Number) 추출"""
         try:
-            # General 섹션에서 Model Number 찾기
+            # 다이얼로그에서 Model Number 찾기 (여러 패턴 시도)
             xpaths = [
+                # 새로운 패턴
+                '//div[contains(@class, "dB7j8sHUbncyf79K")]//div[contains(text(), "Model Number")]/following-sibling::div[@class="grow basis-none pl-300"]',
+                # 기존 패턴
                 '//li[.//h4[text()="General"]]//div[.//div[text()="Model Number"]]//div[@class="grow basis-none pl-300"]',
-                '//div[contains(text(), "Model Number")]/following-sibling::div[@class="grow basis-none pl-300"]'
+                '//div[contains(text(), "Model Number")]/following-sibling::div[@class="grow basis-none pl-300"]',
+                # 더 넓은 패턴
+                '//div[text()="Model Number"]/..//div[@class="grow basis-none pl-300"]',
+                '//div[contains(., "Model Number")]//div[contains(@class, "pl-300")]'
             ]
             for xpath in xpaths:
                 elem = tree.xpath(xpath)
                 if elem:
-                    return elem[0].text_content().strip()
+                    model_number = elem[0].text_content().strip()
+                    if model_number:
+                        return model_number
             return None
         except Exception as e:
             print(f"  [ERROR] Samsung_SKU_Name 추출 실패: {e}")
@@ -205,15 +213,23 @@ class BestBuyDetailCrawler:
     def extract_electricity_use(self, tree):
         """Estimated_Annual_Electricity_Use 추출"""
         try:
-            # Power 섹션에서 Estimated Annual Electricity Use 찾기
+            # 다이얼로그에서 Estimated Annual Electricity Use 찾기 (여러 패턴 시도)
             xpaths = [
+                # 새로운 패턴
+                '//div[contains(@class, "dB7j8sHUbncyf79K")]//div[contains(text(), "Estimated Annual Electricity Use")]/following-sibling::div[@class="grow basis-none pl-300"]',
+                # 기존 패턴
                 '//li[.//h4[text()="Power"]]//div[.//div[contains(text(), "Estimated Annual Electricity Use")]]//div[@class="grow basis-none pl-300"]',
-                '//div[contains(text(), "Estimated Annual Electricity Use")]/following-sibling::div[@class="grow basis-none pl-300"]'
+                '//div[contains(text(), "Estimated Annual Electricity Use")]/following-sibling::div[@class="grow basis-none pl-300"]',
+                # 더 넓은 패턴
+                '//div[contains(text(), "Estimated Annual Electricity Use")]/..//div[@class="grow basis-none pl-300"]',
+                '//div[contains(., "Estimated Annual Electricity Use")]//div[contains(@class, "pl-300")]'
             ]
             for xpath in xpaths:
                 elem = tree.xpath(xpath)
                 if elem:
-                    return elem[0].text_content().strip()
+                    electricity = elem[0].text_content().strip()
+                    if electricity:
+                        return electricity
             return None
         except Exception as e:
             print(f"  [ERROR] Estimated_Annual_Electricity_Use 추출 실패: {e}")
@@ -290,18 +306,29 @@ class BestBuyDetailCrawler:
         """Count_of_Star_Ratings 추출"""
         try:
             ratings = {}
-            # 별점별 개수 추출
-            for star in range(1, 6):
-                xpath = f'//a[contains(@href, "rating={star}")]//span[@class="uq0khJy2NYfr1ydM text-left v-text-tech-black"]'
-                elem = tree.xpath(xpath)
-                if elem:
-                    count = elem[0].text_content().strip()
-                    ratings[f"{star}stars"] = count
-                else:
-                    ratings[f"{star}stars"] = "0"
+            # 별점별 개수 추출 (5 -> 1 순서로)
+            for star in range(5, 0, -1):
+                # 여러 XPath 패턴 시도
+                xpaths = [
+                    f'//a[contains(@href, "rating={star}")]//span[@class="uq0khJy2NYfr1ydM text-left v-text-tech-black" and @aria-hidden="true"]',
+                    f'//a[contains(@href, "rating={star}")]//span[@class="uq0khJy2NYfr1ydM text-left v-text-tech-black"]',
+                    f'//a[contains(@href, "rating={star}")]//span[contains(@class, "uq0khJy2NYfr1ydM")]',
+                    f'//a[contains(@href, "rating={star}")]//span[contains(@class, "text-left") and contains(@class, "v-text-tech-black")]'
+                ]
 
-            # 형식: "5stars:776, 4stars:156, 3stars:29, 2stars:14, 1star:30"
-            rating_str = ", ".join([f"{k}:{v}" for k, v in ratings.items()])
+                count = "0"
+                for xpath in xpaths:
+                    elem = tree.xpath(xpath)
+                    if elem:
+                        count = elem[0].text_content().strip()
+                        break
+
+                # 1star는 단수형, 나머지는 복수형
+                key = f"{star}star" if star == 1 else f"{star}stars"
+                ratings[key] = count
+
+            # 형식: "5stars:9 4stars:1 3stars:0 2stars:0 1star:2" (공백으로 구분)
+            rating_str = " ".join([f"{k}:{v}" for k, v in ratings.items()])
             return rating_str if rating_str else None
 
         except Exception as e:
@@ -312,10 +339,25 @@ class BestBuyDetailCrawler:
         """Top_Mentions 추출"""
         try:
             mentions = []
-            mention_elements = tree.xpath('//li[contains(@class, "inline-block")]//a[contains(@class, "pPqRKazD1ugrkdAf")]')
-            for elem in mention_elements[:10]:  # 최대 10개
-                text = elem.text_content().strip()
-                mentions.append(text)
+            # 여러 XPath 패턴 시도
+            xpaths = [
+                '//li[contains(@class, "inline-block")]//a[contains(@class, "pPqRKazD1ugrkdAf")]',
+                '//a[contains(@class, "pPqRKazD1ugrkdAf")]',
+                '//ul[@class="list-unstyled"]//a[contains(@href, "feature=")]'
+            ]
+
+            for xpath in xpaths:
+                mention_elements = tree.xpath(xpath)
+                if mention_elements:
+                    for elem in mention_elements[:10]:  # 최대 10개
+                        text = elem.text_content().strip()
+                        # svg 아이콘 텍스트 제거 (예: "Advantage Icon")
+                        text = text.replace("Advantage Icon", "").replace("Disadvantage Icon", "").strip()
+                        # 여러 공백을 하나로
+                        text = ' '.join(text.split())
+                        if text:
+                            mentions.append(text)
+                    break
 
             return ", ".join(mentions) if mentions else None
 
@@ -326,23 +368,40 @@ class BestBuyDetailCrawler:
     def click_see_all_reviews(self):
         """See All Customer Reviews 버튼 클릭"""
         try:
-            print("  [INFO] See All Customer Reviews 버튼 클릭...")
+            print("  [INFO] See All Customer Reviews 버튼 찾는 중...")
+
+            # 페이지를 천천히 스크롤하면서 버튼이 나타날 때까지 대기
+            print("  [INFO] 페이지 스크롤 시작...")
+            scroll_height = self.driver.execute_script("return document.body.scrollHeight")
+            current_position = 0
+            step = 500  # 500px씩 스크롤
+
             xpaths = [
                 '//button[contains(., "See All Customer Reviews")]',
-                '//button[@class="relative border-xs border-solid rounded-lg justify-center items-center self-start flex flex-col cursor-pointer px-300 py-100 border-comp-outline-primary-emphasis bg-comp-surface-primary-emphasis mr-200 Op9coqeII1kYHR9Q"]'
+                '//button[@class="relative border-xs border-solid rounded-lg justify-center items-center self-start flex flex-col cursor-pointer px-300 py-100 border-comp-outline-primary-emphasis bg-comp-surface-primary-emphasis mr-200 Op9coqeII1kYHR9Q"]',
+                '//button[contains(@class, "Op9coqeII1kYHR9Q")]'
             ]
 
-            for xpath in xpaths:
-                try:
-                    button = self.driver.find_element(By.XPATH, xpath)
-                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
-                    time.sleep(1)
-                    button.click()
-                    print("  [OK] See All Customer Reviews 클릭 성공")
-                    time.sleep(3)
-                    return True
-                except:
-                    continue
+            # 스크롤하면서 버튼 찾기
+            while current_position < scroll_height:
+                # 각 스크롤 위치에서 버튼 찾기 시도
+                for xpath in xpaths:
+                    try:
+                        button = self.driver.find_element(By.XPATH, xpath)
+                        print("  [OK] See All Customer Reviews 버튼 발견")
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
+                        time.sleep(2)
+                        button.click()
+                        print("  [OK] See All Customer Reviews 클릭 성공")
+                        time.sleep(3)
+                        return True
+                    except:
+                        continue
+
+                # 버튼을 못 찾으면 계속 스크롤
+                current_position += step
+                self.driver.execute_script(f"window.scrollTo(0, {current_position});")
+                time.sleep(0.5)
 
             print("  [WARNING] See All Customer Reviews 버튼을 찾을 수 없습니다.")
             return False
@@ -402,18 +461,23 @@ class BestBuyDetailCrawler:
     def extract_recommendation_intent(self, tree):
         """Recommendation_Intent 추출"""
         try:
+            # 여러 XPath 패턴 시도
             xpaths = [
+                # 새로운 패턴: svg와 span이 있는 div
+                '//div[.//svg[contains(@class, "mr-50")] and .//span[@class="font-weight-bold"]]',
+                # 기존 패턴
                 '//div[contains(@class, "v-text-dark-gray") and contains(., "would recommend")]',
-                '//div[.//svg[contains(@class, "mr-50")]]//span[@class="font-weight-bold"]/parent::*/text()'
+                # 더 넓은 패턴
+                '//div[contains(., "would recommend to a friend")]'
             ]
 
-            # 전체 텍스트 추출
-            elem = tree.xpath('//div[contains(@class, "v-text-dark-gray") and contains(., "would recommend")]')
-            if elem:
-                text = elem[0].text_content().strip()
-                # "93% would recommend to a friend" 형식으로 추출
-                text = ' '.join(text.split())  # 여러 공백을 하나로
-                return text
+            for xpath in xpaths:
+                elem = tree.xpath(xpath)
+                if elem:
+                    text = elem[0].text_content().strip()
+                    # "83% would recommend to a friend" 형식으로 추출
+                    text = ' '.join(text.split())  # 여러 공백을 하나로
+                    return text
 
             return None
 

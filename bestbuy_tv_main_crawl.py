@@ -315,6 +315,19 @@ class BestBuyTVCrawler:
         try:
             cursor = self.db_conn.cursor()
 
+            # Check for duplicate product_url in the same batch
+            cursor.execute("""
+                SELECT COUNT(*) FROM bestbuy_tv_main_crawl
+                WHERE batch_id = %s AND product_url = %s
+            """, (self.batch_id, product_url))
+
+            count = cursor.fetchone()[0]
+
+            if count > 0:
+                cursor.close()
+                print(f"  [SKIP] Duplicate URL already saved in this batch")
+                return False
+
             cursor.execute("""
                 INSERT INTO bestbuy_tv_main_crawl
                 (batch_id, page_type, Retailer_SKU_Name, Final_SKU_Price, Savings, Comparable_Pricing,

@@ -152,11 +152,11 @@ class AmazonDetailCrawler:
             if main_batch_id:
                 print(f"[INFO] Loading main URLs from batch {main_batch_id}...")
                 cursor.execute("""
-                    SELECT "order", Product_URL
+                    SELECT "order", product_url
                     FROM amazon_tv_main_crawled
                     WHERE batch_id = %s
-                      AND Product_URL IS NOT NULL
-                      AND Product_URL != ''
+                      AND product_url IS NOT NULL
+                      AND product_url != ''
                     ORDER BY "order"
                 """, (main_batch_id,))
                 main_urls = [{'mother': 'main', 'order': row[0], 'url': row[1]} for row in cursor.fetchall()]

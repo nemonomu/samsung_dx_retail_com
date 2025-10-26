@@ -94,20 +94,20 @@ class AmazonDetailCrawler:
             return False
 
     def load_product_urls(self):
-        """Load product URLs from raw_data and amazon_tv_bsr tables (latest batch only)"""
+        """Load product URLs from amazon_tv_main_crawled and amazon_tv_bsr tables (latest batch only)"""
         try:
             print("[INFO] Loading product URLs from database...")
             cursor = self.db_conn.cursor()
 
-            # Check if raw_data table exists
+            # Check if amazon_tv_main_crawled table exists
             cursor.execute("""
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables
-                    WHERE table_name = 'raw_data'
+                    WHERE table_name = 'amazon_tv_main_crawled'
                 )
             """)
-            raw_data_exists = cursor.fetchone()[0]
-            print(f"[DEBUG] Table 'raw_data' exists: {raw_data_exists}")
+            main_crawled_exists = cursor.fetchone()[0]
+            print(f"[DEBUG] Table 'amazon_tv_main_crawled' exists: {main_crawled_exists}")
 
             # Check if amazon_tv_bsr table exists
             cursor.execute("""
@@ -119,13 +119,13 @@ class AmazonDetailCrawler:
             bsr_exists = cursor.fetchone()[0]
             print(f"[DEBUG] Table 'amazon_tv_bsr' exists: {bsr_exists}")
 
-            # Get latest batch_id from raw_data
+            # Get latest batch_id from amazon_tv_main_crawled
             main_batch_id = None
-            if raw_data_exists:
+            if main_crawled_exists:
                 cursor.execute("""
                     SELECT batch_id
-                    FROM raw_data
-                    WHERE mall_name = 'Amazon' AND batch_id IS NOT NULL
+                    FROM amazon_tv_main_crawled
+                    WHERE batch_id IS NOT NULL
                     ORDER BY batch_id DESC
                     LIMIT 1
                 """)
@@ -147,23 +147,22 @@ class AmazonDetailCrawler:
 
             print(f"[INFO] Latest batch_id - Main: {main_batch_id}, BSR: {bsr_batch_id}")
 
-            # Load from raw_data (main) - latest batch only
+            # Load from amazon_tv_main_crawled (main) - latest batch only
             main_urls = []
             if main_batch_id:
                 print(f"[INFO] Loading main URLs from batch {main_batch_id}...")
                 cursor.execute("""
-                    SELECT "order", product_url
-                    FROM raw_data
-                    WHERE mall_name = 'Amazon'
-                      AND batch_id = %s
-                      AND product_url IS NOT NULL
-                      AND product_url != ''
-                    ORDER BY "order"
+                    SELECT "Order", Product_URL
+                    FROM amazon_tv_main_crawled
+                    WHERE batch_id = %s
+                      AND Product_URL IS NOT NULL
+                      AND Product_URL != ''
+                    ORDER BY "Order"
                 """, (main_batch_id,))
                 main_urls = [{'mother': 'main', 'order': row[0], 'url': row[1]} for row in cursor.fetchall()]
                 print(f"[OK] Loaded {len(main_urls)} main URLs")
             else:
-                print("[WARNING] No main batch_id found in raw_data")
+                print("[WARNING] No main batch_id found in amazon_tv_main_crawled")
 
             # Load from amazon_tv_bsr (bsr) - latest batch only
             bsr_urls = []
@@ -189,9 +188,9 @@ class AmazonDetailCrawler:
 
             if len(all_urls) == 0:
                 print("[ERROR] No product URLs found! Please check:")
-                print("  1. raw_data table has Amazon data with valid batch_id")
+                print("  1. amazon_tv_main_crawled table has data with valid batch_id")
                 print("  2. amazon_tv_bsr table has data with valid batch_id")
-                print("  3. product_url columns are not empty")
+                print("  3. Product_URL/product_url columns are not empty")
 
             return all_urls
 

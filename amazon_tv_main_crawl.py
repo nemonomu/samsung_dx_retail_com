@@ -3,6 +3,7 @@ import random
 import re
 import psycopg2
 from datetime import datetime
+import pytz
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -500,8 +501,9 @@ class AmazonTVCrawler:
             if not self.connect_db():
                 return
 
-            # Generate batch_id for this session
-            self.batch_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+            # Generate batch_id for this session (Korea timezone)
+            korea_tz = pytz.timezone('Asia/Seoul')
+            self.batch_id = datetime.now(korea_tz).strftime('%Y%m%d_%H%M%S')
             print(f"[OK] Batch ID: {self.batch_id}")
 
             # Load XPaths and URLs

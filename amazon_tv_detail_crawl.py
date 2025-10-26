@@ -4,6 +4,8 @@ import psycopg2
 import pickle
 import json
 import os
+from datetime import datetime
+import pytz
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -29,6 +31,9 @@ class AmazonDetailCrawler:
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
+        # Generate batch_id using Korea timezone
+        korea_tz = pytz.timezone('Asia/Seoul')
+        self.batch_id = datetime.now(korea_tz).strftime('%Y%m%d_%H%M%S')
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -574,12 +579,13 @@ class AmazonDetailCrawler:
             # Insert to Amazon_tv_detail_crawled
             cursor.execute("""
                 INSERT INTO Amazon_tv_detail_crawled
-                (mother, "order", product_url, Retailer_SKU_Name, Star_Rating,
+                (batch_id, mother, "order", product_url, Retailer_SKU_Name, Star_Rating,
                  SKU_Popularity, Retailer_Membership_Discounts, Samsung_SKU_Name,
                  Rank_1, Rank_2, Count_of_Star_Ratings, Summarized_Review_Content,
                  Detailed_Review_Content)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
+                self.batch_id,
                 data['mother'],
                 data['order'],
                 data['product_url'],
@@ -630,7 +636,7 @@ class AmazonDetailCrawler:
         """Main execution"""
         try:
             print("="*80)
-            print("Amazon TV Detail Page Crawler - Starting")
+            print(f"Amazon TV Detail Page Crawler - Starting (Batch ID: {self.batch_id})")
             print("="*80)
 
             # Step 1: Connect to database
@@ -638,6 +644,19 @@ class AmazonDetailCrawler:
             if not self.connect_db():
                 print("[ERROR] Failed to connect to database. Stopping.")
                 return
+
+            # Add batch_id column if not exists
+            try:
+                cursor = self.db_conn.cursor()
+                cursor.execute("""
+                    ALTER TABLE Amazon_tv_detail_crawled
+                    ADD COLUMN IF NOT EXISTS batch_id VARCHAR(50)
+                """)
+                self.db_conn.commit()
+                cursor.close()
+                print("[OK] Table schema updated (batch_id column added if needed)")
+            except Exception as e:
+                print(f"[WARNING] Could not add batch_id column: {e}")
 
             # Step 2: Load XPaths
             print("\n[STEP 2/5] Loading XPath selectors...")

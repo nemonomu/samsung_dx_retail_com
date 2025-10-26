@@ -430,8 +430,8 @@ class AmazonTVCrawler:
                 INSERT INTO Amazon_tv_main_crawled
                 ("order", mall_name, Retailer_SKU_Name, Number_of_units_purchased_past_month,
                  Final_SKU_Price, Original_SKU_Price, Shipping_Info,
-                 Available_Quantity_for_Purchase, Discount_Type, ASIN)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 Available_Quantity_for_Purchase, Discount_Type, ASIN, batch_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 collection_order,
                 data['mall_name'],
@@ -442,7 +442,8 @@ class AmazonTVCrawler:
                 data['Shipping_Info'],
                 data['Available_Quantity_for_Purchase'],
                 data['Discount_Type'],
-                data['ASIN']
+                data['ASIN'],
+                self.batch_id
             ))
 
             # Commit transaction

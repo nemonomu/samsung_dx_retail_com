@@ -44,56 +44,108 @@ class AmazonDetailCrawler:
     def load_xpaths(self):
         """Load XPath selectors from database"""
         try:
+            print("[INFO] Loading XPath selectors from database...")
             cursor = self.db_conn.cursor()
+
+            # Check if table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'xpath_selectors'
+                )
+            """)
+            table_exists = cursor.fetchone()[0]
+
+            if not table_exists:
+                print("[ERROR] Table 'xpath_selectors' does not exist")
+                cursor.close()
+                return False
+
             cursor.execute("""
                 SELECT data_field, xpath
                 FROM xpath_selectors
                 WHERE mall_name = 'Amazon' AND page_type = 'detail_page' AND is_active = TRUE
             """)
 
-            for row in cursor.fetchall():
+            rows = cursor.fetchall()
+            for row in rows:
                 self.xpaths[row[0]] = row[1]
+                print(f"  [DEBUG] Loaded XPath: {row[0]} = {row[1][:50]}...")
 
             cursor.close()
-            print(f"[OK] Loaded {len(self.xpaths)} XPath selectors")
+
+            if len(self.xpaths) == 0:
+                print("[WARNING] No XPath selectors found for Amazon detail_page")
+                print("[INFO] You may need to populate xpath_selectors table first")
+            else:
+                print(f"[OK] Loaded {len(self.xpaths)} XPath selectors")
+
             return True
 
         except Exception as e:
             print(f"[ERROR] Failed to load XPaths: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def load_product_urls(self):
         """Load product URLs from raw_data and amazon_tv_bsr tables (latest batch only)"""
         try:
+            print("[INFO] Loading product URLs from database...")
             cursor = self.db_conn.cursor()
 
-            # Get latest batch_id from raw_data
+            # Check if raw_data table exists
             cursor.execute("""
-                SELECT batch_id
-                FROM raw_data
-                WHERE mall_name = 'Amazon' AND batch_id IS NOT NULL
-                ORDER BY batch_id DESC
-                LIMIT 1
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'raw_data'
+                )
             """)
-            main_batch_result = cursor.fetchone()
-            main_batch_id = main_batch_result[0] if main_batch_result else None
+            raw_data_exists = cursor.fetchone()[0]
+            print(f"[DEBUG] Table 'raw_data' exists: {raw_data_exists}")
+
+            # Check if amazon_tv_bsr table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'amazon_tv_bsr'
+                )
+            """)
+            bsr_exists = cursor.fetchone()[0]
+            print(f"[DEBUG] Table 'amazon_tv_bsr' exists: {bsr_exists}")
+
+            # Get latest batch_id from raw_data
+            main_batch_id = None
+            if raw_data_exists:
+                cursor.execute("""
+                    SELECT batch_id
+                    FROM raw_data
+                    WHERE mall_name = 'Amazon' AND batch_id IS NOT NULL
+                    ORDER BY batch_id DESC
+                    LIMIT 1
+                """)
+                main_batch_result = cursor.fetchone()
+                main_batch_id = main_batch_result[0] if main_batch_result else None
 
             # Get latest batch_id from amazon_tv_bsr
-            cursor.execute("""
-                SELECT batch_id
-                FROM amazon_tv_bsr
-                WHERE batch_id IS NOT NULL
-                ORDER BY batch_id DESC
-                LIMIT 1
-            """)
-            bsr_batch_result = cursor.fetchone()
-            bsr_batch_id = bsr_batch_result[0] if bsr_batch_result else None
+            bsr_batch_id = None
+            if bsr_exists:
+                cursor.execute("""
+                    SELECT batch_id
+                    FROM amazon_tv_bsr
+                    WHERE batch_id IS NOT NULL
+                    ORDER BY batch_id DESC
+                    LIMIT 1
+                """)
+                bsr_batch_result = cursor.fetchone()
+                bsr_batch_id = bsr_batch_result[0] if bsr_batch_result else None
 
             print(f"[INFO] Latest batch_id - Main: {main_batch_id}, BSR: {bsr_batch_id}")
 
             # Load from raw_data (main) - latest batch only
             main_urls = []
             if main_batch_id:
+                print(f"[INFO] Loading main URLs from batch {main_batch_id}...")
                 cursor.execute("""
                     SELECT "order", product_url
                     FROM raw_data
@@ -104,10 +156,14 @@ class AmazonDetailCrawler:
                     ORDER BY "order"
                 """, (main_batch_id,))
                 main_urls = [{'mother': 'main', 'order': row[0], 'url': row[1]} for row in cursor.fetchall()]
+                print(f"[OK] Loaded {len(main_urls)} main URLs")
+            else:
+                print("[WARNING] No main batch_id found in raw_data")
 
             # Load from amazon_tv_bsr (bsr) - latest batch only
             bsr_urls = []
             if bsr_batch_id:
+                print(f"[INFO] Loading BSR URLs from batch {bsr_batch_id}...")
                 cursor.execute("""
                     SELECT rank, product_url
                     FROM amazon_tv_bsr
@@ -117,11 +173,21 @@ class AmazonDetailCrawler:
                     ORDER BY rank
                 """, (bsr_batch_id,))
                 bsr_urls = [{'mother': 'bsr', 'order': row[0], 'url': row[1]} for row in cursor.fetchall()]
+                print(f"[OK] Loaded {len(bsr_urls)} BSR URLs")
+            else:
+                print("[WARNING] No BSR batch_id found in amazon_tv_bsr")
 
             cursor.close()
 
             all_urls = main_urls + bsr_urls
-            print(f"[OK] Loaded {len(main_urls)} main URLs + {len(bsr_urls)} bsr URLs = {len(all_urls)} total")
+            print(f"[OK] Total URLs loaded: {len(all_urls)}")
+
+            if len(all_urls) == 0:
+                print("[ERROR] No product URLs found! Please check:")
+                print("  1. raw_data table has Amazon data with valid batch_id")
+                print("  2. amazon_tv_bsr table has data with valid batch_id")
+                print("  3. product_url columns are not empty")
+
             return all_urls
 
         except Exception as e:
@@ -132,55 +198,76 @@ class AmazonDetailCrawler:
 
     def setup_driver(self):
         """Setup Chrome WebDriver"""
-        chrome_options = Options()
-        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        chrome_options.add_experimental_option('useAutomationExtension', False)
+        try:
+            print("[INFO] Setting up Chrome WebDriver...")
+            chrome_options = Options()
+            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--window-size=1920,1080')
+            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            chrome_options.add_experimental_option('useAutomationExtension', False)
 
-        service = Service(ChromeDriverManager().install())
-        self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            print("[INFO] Installing ChromeDriver...")
+            service = Service(ChromeDriverManager().install())
+            self.driver = webdriver.Chrome(service=service, options=chrome_options)
 
-        # Anti-detection scripts
-        self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-            'source': '''
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-            '''
-        })
+            # Anti-detection scripts
+            print("[INFO] Applying anti-detection scripts...")
+            self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+                'source': '''
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined
+                    });
+                '''
+            })
 
-        print("[OK] WebDriver setup complete")
+            print("[OK] WebDriver setup complete")
 
-        # Load cookies for login
-        self.load_cookies()
+            # Load cookies for login
+            self.load_cookies()
+
+        except Exception as e:
+            print(f"[ERROR] Failed to setup WebDriver: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
 
     def load_cookies(self):
         """Load cookies from file for authenticated access"""
+        print(f"[INFO] Loading cookies from {COOKIE_FILE}...")
+
         if not os.path.exists(COOKIE_FILE):
             print(f"[WARNING] Cookie file not found: {COOKIE_FILE}")
-            print("[WARNING] Review collection may fail without login. Run amazon_login.py first.")
+            print("[WARNING] Review collection may fail without login.")
+            print("[INFO] To create cookie file, run amazon_login.py first")
             return False
 
         try:
+            print("[INFO] Accessing Amazon.com to set cookies...")
             self.driver.get("https://www.amazon.com")
             time.sleep(2)
 
             with open(COOKIE_FILE, 'rb') as f:
                 cookies = pickle.load(f)
+                print(f"[DEBUG] Found {len(cookies)} cookies in file")
                 for cookie in cookies:
-                    self.driver.add_cookie(cookie)
+                    try:
+                        self.driver.add_cookie(cookie)
+                    except Exception as e:
+                        print(f"[DEBUG] Failed to add cookie: {e}")
 
+            print("[INFO] Refreshing page with cookies...")
             self.driver.refresh()
             time.sleep(2)
-            print(f"[OK] Cookies loaded - logged in")
+            print(f"[OK] Cookies loaded successfully")
             return True
 
         except Exception as e:
             print(f"[WARNING] Failed to load cookies: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def extract_text_safe(self, tree, xpath):
@@ -546,24 +633,34 @@ class AmazonDetailCrawler:
             print("Amazon TV Detail Page Crawler - Starting")
             print("="*80)
 
-            # Connect to database
+            # Step 1: Connect to database
+            print("\n[STEP 1/5] Connecting to database...")
             if not self.connect_db():
+                print("[ERROR] Failed to connect to database. Stopping.")
                 return
 
-            # Load XPaths
+            # Step 2: Load XPaths
+            print("\n[STEP 2/5] Loading XPath selectors...")
             if not self.load_xpaths():
+                print("[ERROR] Failed to load XPath selectors. Stopping.")
                 return
 
-            # Load product URLs
+            # Step 3: Load product URLs
+            print("\n[STEP 3/5] Loading product URLs...")
             product_urls = self.load_product_urls()
             if not product_urls:
-                print("[ERROR] No product URLs found")
+                print("[ERROR] No product URLs found. Stopping.")
                 return
 
-            # Setup WebDriver
+            # Step 4: Setup WebDriver
+            print("\n[STEP 4/5] Setting up WebDriver...")
             self.setup_driver()
+            print("[OK] WebDriver ready")
 
-            # Scrape each detail page
+            # Step 5: Scrape each detail page
+            print("\n[STEP 5/5] Starting to scrape detail pages...")
+            print(f"[INFO] Total pages to scrape: {len(product_urls)}")
+
             for idx, url_data in enumerate(product_urls, 1):
                 print(f"\n{'='*80}")
                 print(f"Processing {idx}/{len(product_urls)}")
@@ -571,22 +668,33 @@ class AmazonDetailCrawler:
                 self.scrape_detail_page(url_data)
 
                 # Random delay between requests
-                time.sleep(random.uniform(2, 4))
+                delay = random.uniform(2, 4)
+                print(f"[INFO] Waiting {delay:.1f} seconds before next request...")
+                time.sleep(delay)
 
             print("\n" + "="*80)
             print(f"Detail Crawling completed! Total collected: {self.total_collected}/{len(product_urls)}")
             print("="*80)
 
         except Exception as e:
-            print(f"[ERROR] Crawler failed: {e}")
+            print(f"\n[ERROR] Crawler failed: {e}")
             import traceback
             traceback.print_exc()
 
         finally:
+            print("\n[INFO] Cleaning up...")
             if self.driver:
-                self.driver.quit()
+                try:
+                    self.driver.quit()
+                    print("[OK] WebDriver closed")
+                except:
+                    pass
             if self.db_conn:
-                self.db_conn.close()
+                try:
+                    self.db_conn.close()
+                    print("[OK] Database connection closed")
+                except:
+                    pass
 
 
 if __name__ == "__main__":

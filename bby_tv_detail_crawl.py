@@ -849,6 +849,65 @@ class BestBuyDetailCrawler:
             traceback.print_exc()
             return False
 
+    def fill_missing_skus(self):
+        """빈 SKU를 이전 세션 데이터로 채우기"""
+        try:
+            print("\n[INFO] 빈 SKU 채우는 중...")
+            cursor = self.db_conn.cursor()
+
+            # 현재 세션에서 sku가 NULL인 레코드 찾기
+            cursor.execute("""
+                SELECT id, product_name
+                FROM bby_tv_mst
+                WHERE sku IS NULL
+                AND product_name IS NOT NULL
+            """)
+
+            empty_skus = cursor.fetchall()
+
+            if not empty_skus:
+                print("[OK] 빈 SKU 없음")
+                cursor.close()
+                return
+
+            print(f"[INFO] 빈 SKU {len(empty_skus)}개 발견")
+
+            updated_count = 0
+            for record_id, product_name in empty_skus:
+                # 이전 세션에서 같은 product_name을 가진 레코드의 sku 찾기
+                cursor.execute("""
+                    SELECT sku
+                    FROM bby_tv_mst
+                    WHERE product_name = %s
+                    AND sku IS NOT NULL
+                    ORDER BY id DESC
+                    LIMIT 1
+                """, (product_name,))
+
+                result = cursor.fetchone()
+                if result:
+                    sku = result[0]
+                    # UPDATE
+                    cursor.execute("""
+                        UPDATE bby_tv_mst
+                        SET sku = %s
+                        WHERE id = %s
+                    """, (sku, record_id))
+                    updated_count += 1
+                    print(f"  [✓] Updated: {product_name[:50]}... → SKU: {sku}")
+
+            self.db_conn.commit()
+            cursor.close()
+
+            print(f"[OK] {updated_count}/{len(empty_skus)}개 SKU 채움 완료")
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] SKU 채우기 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
     def run(self):
         """메인 실행"""
         try:
@@ -882,6 +941,9 @@ class BestBuyDetailCrawler:
             print("\n" + "="*80)
             print(f"크롤링 완료! 성공: {success_count}/{len(urls)}개")
             print("="*80)
+
+            # 빈 SKU 채우기
+            self.fill_missing_skus()
 
         except Exception as e:
             print(f"[ERROR] 크롤러 실행 오류: {e}")

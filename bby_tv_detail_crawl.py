@@ -174,10 +174,10 @@ class BestBuyDetailCrawler:
                 try:
                     spec_button = self.driver.find_element(By.XPATH, xpath)
                     self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", spec_button)
-                    time.sleep(1)
+                    time.sleep(2)
                     spec_button.click()
                     print("  [OK] Specification 클릭 성공")
-                    time.sleep(5)  # 다이얼로그 로딩 대기 (3초 -> 5초)
+                    time.sleep(7)  # 다이얼로그 로딩 대기 증가
                     return True
                 except:
                     continue
@@ -531,14 +531,14 @@ class BestBuyDetailCrawler:
             if self.click_specifications():
                 # 다이얼로그가 완전히 로드될 때까지 대기
                 try:
-                    # Model Number 요소가 나타날 때까지 최대 10초 대기
-                    wait = WebDriverWait(self.driver, 10)
+                    # Model Number 요소가 나타날 때까지 최대 15초 대기
+                    wait = WebDriverWait(self.driver, 15)
                     wait.until(EC.presence_of_element_located((By.XPATH, '//div[contains(text(), "Model Number")]')))
                     print("  [OK] 다이얼로그 로드 완료")
                 except Exception as e:
                     print(f"  [WARNING] 다이얼로그 로딩 대기 타임아웃: {e}")
 
-                time.sleep(2)
+                time.sleep(3)
                 # 다이얼로그 소스 가져오기
                 dialog_source = self.driver.page_source
                 dialog_tree = html.fromstring(dialog_source)

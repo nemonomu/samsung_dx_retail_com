@@ -454,33 +454,30 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] 리뷰 수집 실패: {e}")
             return None
 
-    def extract_recommendation_intent(self, tree):
-        """Recommendation_Intent 추출 (메인 페이지의 Reviews 섹션에서)"""
+    def extract_recommendation_intent_from_reviews_page(self):
+        """Recommendation_Intent 추출 (See All Customer Reviews 페이지에서)"""
         try:
-            # 여러 XPath 패턴 시도
+            # XPath 패턴
             xpaths = [
-                # 가장 구체적인 패턴 (제공된 HTML 기준)
-                '//aside[contains(@class, "col-sm-4")]//div[contains(@class, "v-text-dark-gray") and contains(@class, "v-m-top-s") and .//span[@class="font-weight-bold"] and contains(., "would recommend")]',
-                # svg와 span.font-weight-bold를 포함하는 div
-                '//div[contains(@class, "v-text-dark-gray") and .//svg[contains(@class, "mr-50")] and .//span[@class="font-weight-bold"]]',
-                # svg와 span이 있는 div
-                '//div[.//svg[contains(@class, "mr-50")] and .//span[@class="font-weight-bold"]]',
-                # "would recommend" 텍스트를 포함하는 div
-                '//div[contains(@class, "v-text-dark-gray") and contains(., "would recommend")]',
+                # 제공된 HTML 기준
+                '//div[contains(@class, "recommendation-card-no-donut")]//span[@class="recommendation-percent v-fw-medium"]',
                 # 더 넓은 패턴
-                '//div[contains(., "would recommend to a friend")]'
+                '//span[contains(@class, "recommendation-percent")]'
             ]
 
+            percent = None
             for xpath in xpaths:
-                elem = tree.xpath(xpath)
-                if elem:
-                    text = elem[0].text_content().strip()
-                    # "100% would recommend to a friend" 형식으로 추출
-                    text = ' '.join(text.split())  # 여러 공백을 하나로
-                    # 불필요한 줄바꿈 제거
-                    text = text.replace('\n', ' ').replace('\r', ' ')
-                    text = ' '.join(text.split())
-                    return text
+                try:
+                    elem = self.driver.find_element(By.XPATH, xpath)
+                    percent = elem.text.strip()
+                    if percent:
+                        break
+                except Exception:
+                    continue
+
+            if percent:
+                # "100% would recommend to a friend" 형식으로 반환
+                return f"{percent} would recommend to a friend"
 
             return None
 
@@ -536,32 +533,26 @@ class BestBuyDetailCrawler:
                 # 5. 다이얼로그 닫기
                 self.close_specifications_dialog()
 
-            # 6. Reviews 섹션으로 스크롤
-            print("  [INFO] Reviews 섹션으로 스크롤 중...")
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 2);")
-            time.sleep(2)
-
-            # 7. Recommendation intent 추출 (메인 페이지의 Reviews 섹션에서)
-            page_source = self.driver.page_source
-            tree = html.fromstring(page_source)
-            recommendation_intent = self.extract_recommendation_intent(tree)
-            print(f"  [✓] Recommendation_Intent: {recommendation_intent}")
-
-            # 8. See All Customer Reviews 클릭 및 데이터 수집
+            # 6. See All Customer Reviews 클릭 및 데이터 수집
             star_ratings = None
             top_mentions = None
             detailed_reviews = None
+            recommendation_intent = None
 
             if self.click_see_all_reviews():
-                # 8-1. Star ratings 수집 (리뷰 페이지에서)
+                # 6-1. Star ratings 수집 (리뷰 페이지에서)
                 star_ratings = self.extract_star_ratings_from_reviews_page()
                 print(f"  [✓] Star_Ratings: {star_ratings}")
 
-                # 8-2. Top mentions 수집 (리뷰 페이지에서)
+                # 6-2. Top mentions 수집 (리뷰 페이지에서)
                 top_mentions = self.extract_top_mentions_from_reviews_page()
                 print(f"  [✓] Top_Mentions: {top_mentions}")
 
-                # 8-3. Detailed reviews 수집
+                # 6-3. Recommendation intent 수집 (리뷰 페이지에서)
+                recommendation_intent = self.extract_recommendation_intent_from_reviews_page()
+                print(f"  [✓] Recommendation_Intent: {recommendation_intent}")
+
+                # 6-4. Detailed reviews 수집
                 detailed_reviews = self.extract_reviews()
                 print(f"  [✓] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
 

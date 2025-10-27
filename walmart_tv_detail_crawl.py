@@ -755,14 +755,17 @@ class WalmartDetailCrawler:
 
             cursor = self.db_conn.cursor()
 
+            # Calculate calendar week
+            calendar_week = f"w{datetime.now().isocalendar().week}"
+
             # Insert to Walmart_tv_detail_crawled
             cursor.execute("""
                 INSERT INTO Walmart_tv_detail_crawled
                 (mother, "order", product_url, Retailer_SKU_Name, Sku, Star_Rating,
                  Number_of_ppl_purchased_yesterday, Number_of_ppl_added_to_carts,
                  SKU_Popularity, Savings, Discount_Type, Shipping_Info,
-                 Count_of_Star_Ratings, Retailer_SKU_Name_similar, Detailed_Review_Content)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 Count_of_Star_Ratings, Retailer_SKU_Name_similar, Detailed_Review_Content, calendar_week)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 data['mother'],
                 data['order'],
@@ -778,7 +781,8 @@ class WalmartDetailCrawler:
                 data['Shipping_Info'],
                 data['Count_of_Star_Ratings'],
                 data['Retailer_SKU_Name_similar'],
-                data['Detailed_Review_Content']
+                data['Detailed_Review_Content'],
+                calendar_week
             ))
 
             # Commit transaction

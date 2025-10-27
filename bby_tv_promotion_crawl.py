@@ -220,11 +220,14 @@ class BestBuyPromotionCrawler:
                 )
             """)
 
+            # Calculate calendar week
+            calendar_week = f"w{datetime.now().isocalendar().week}"
+
             # 데이터 삽입
             insert_query = """
                 INSERT INTO bby_tv_promotion_crawl
-                (batch_id, page_type, rank, promotion_Type, Retailer_SKU_Name, product_url)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                (batch_id, page_type, rank, promotion_Type, Retailer_SKU_Name, product_url, calendar_week)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
             """
 
             success_count = 0
@@ -236,7 +239,8 @@ class BestBuyPromotionCrawler:
                         product['rank'],
                         product['promotion_Type'],
                         product['Retailer_SKU_Name'],
-                        product['product_url']
+                        product['product_url'],
+                        calendar_week
                     ))
                     success_count += 1
                 except Exception as e:

@@ -374,11 +374,14 @@ class AmazonBSRCrawler:
         try:
             cursor = self.db_conn.cursor()
 
+            # Calculate calendar week
+            calendar_week = f"w{datetime.now().isocalendar().week}"
+
             cursor.execute("""
                 INSERT INTO amazon_tv_bsr
-                (Rank, Retailer_SKU_Name, product_url, batch_id)
-                VALUES (%s, %s, %s, %s)
-            """, (rank, product_name, product_url, self.batch_id))
+                (Rank, Retailer_SKU_Name, product_url, batch_id, calendar_week)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (rank, product_name, product_url, self.batch_id, calendar_week))
 
             self.db_conn.commit()
             cursor.close()

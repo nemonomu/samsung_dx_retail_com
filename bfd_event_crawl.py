@@ -276,12 +276,15 @@ class BFDEventCrawler:
             walmart_schedule = " | ".join(self.events_data.get('Walmart', []))
             amazon_schedule = " | ".join(self.events_data.get('Amazon', []))
 
+            # Calculate calendar week
+            calendar_week = f"w{datetime.now().isocalendar().week}"
+
             # Insert with current timestamp
             cursor.execute("""
                 INSERT INTO bfd_event_crawl
-                (Bestbuy_event_schedule, Walmart_event_schedule, Amazon_event_schedule, crawl_at_local_time)
-                VALUES (%s, %s, %s, NOW())
-            """, (bestbuy_schedule, walmart_schedule, amazon_schedule))
+                (Bestbuy_event_schedule, Walmart_event_schedule, Amazon_event_schedule, crawl_at_local_time, calendar_week)
+                VALUES (%s, %s, %s, NOW(), %s)
+            """, (bestbuy_schedule, walmart_schedule, amazon_schedule, calendar_week))
 
             self.db_conn.commit()
             cursor.close()

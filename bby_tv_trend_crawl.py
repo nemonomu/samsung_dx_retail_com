@@ -271,10 +271,13 @@ class BestBuyTrendCrawler:
                 )
             """)
 
+            # Calculate calendar week
+            calendar_week = f"w{datetime.now().isocalendar().week}"
+
             # 데이터 삽입
             insert_query = """
-                INSERT INTO bby_tv_Trend_crawl (batch_id, page_type, rank, product_name, product_url)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO bby_tv_Trend_crawl (batch_id, page_type, rank, product_name, product_url, calendar_week)
+                VALUES (%s, %s, %s, %s, %s, %s)
             """
 
             success_count = 0
@@ -285,7 +288,8 @@ class BestBuyTrendCrawler:
                         product['page_type'],
                         product['rank'],
                         product['product_name'],
-                        product['product_url']
+                        product['product_url'],
+                        calendar_week
                     ))
                     success_count += 1
                 except Exception as e:

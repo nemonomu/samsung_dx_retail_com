@@ -315,13 +315,16 @@ class WalmartTVBSRCrawler:
             cursor = self.db_conn.cursor()
             collection_order = self.sequential_id
 
+            # Calculate calendar week
+            calendar_week = f"w{datetime.now().isocalendar().week}"
+
             cursor.execute("""
                 INSERT INTO wmart_tv_bsr_crawl
                 ("order", page_type, Retailer_SKU_Name, Final_SKU_Price, Original_SKU_Price,
                  Offer, Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
                  SKU_Status, Retailer_Membership_Discounts, Available_Quantity_for_Purchase,
-                 Inventory_Status, Product_url, batch_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 Inventory_Status, Product_url, batch_id, calendar_week)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
                 collection_order,
@@ -338,7 +341,8 @@ class WalmartTVBSRCrawler:
                 data['Available_Quantity_for_Purchase'],
                 data['Inventory_Status'],
                 data['Product_url'],
-                self.batch_id
+                self.batch_id,
+                calendar_week
             ))
 
             result = cursor.fetchone()

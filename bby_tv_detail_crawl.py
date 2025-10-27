@@ -644,6 +644,9 @@ class BestBuyDetailCrawler:
             # current timestamp
             update_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+            # Calculate calendar week
+            calendar_week = f"w{datetime.now().isocalendar().week}"
+
             # 각 제품 저장
             for idx, product in enumerate(products):
                 # SKU 결정
@@ -657,8 +660,8 @@ class BestBuyDetailCrawler:
                 # 데이터 삽입
                 insert_query = """
                     INSERT INTO bby_tv_mst
-                    (sku, product_url, pros, cons, product_name, update_date)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    (sku, product_url, pros, cons, product_name, update_date, calendar_week)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """
 
                 cursor.execute(insert_query, (
@@ -667,7 +670,8 @@ class BestBuyDetailCrawler:
                     product['pros'],
                     product['cons'],
                     product['product_name'],
-                    update_date
+                    update_date,
+                    calendar_week
                 ))
 
                 print(f"    [MST {idx+1}/4] {product['product_name'][:50]}... (SKU: {sku})")
@@ -789,6 +793,9 @@ class BestBuyDetailCrawler:
         try:
             cursor = self.db_conn.cursor()
 
+            # Calculate calendar week
+            calendar_week = f"w{datetime.now().isocalendar().week}"
+
             # 테이블 존재 확인 및 생성
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bby_tv_detail_crawled (
@@ -813,8 +820,8 @@ class BestBuyDetailCrawler:
                 INSERT INTO bby_tv_detail_crawled
                 (batch_id, page_type, "order", Retailer_SKU_Name, Samsung_SKU_Name,
                  Estimated_Annual_Electricity_Use, Count_of_Star_Ratings, Top_Mentions,
-                 Detailed_Review_Content, Recommendation_Intent, product_url)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 Detailed_Review_Content, Recommendation_Intent, product_url, calendar_week)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
 
             cursor.execute(insert_query, (
@@ -828,7 +835,8 @@ class BestBuyDetailCrawler:
                 top_mentions,
                 detailed_reviews,
                 recommendation_intent,
-                product_url
+                product_url,
+                calendar_week
             ))
 
             cursor.close()

@@ -398,6 +398,9 @@ class AmazonTVCrawler:
             # Use sequential_id (1-300) for collection order
             collection_order = self.sequential_id
 
+            # Calculate calendar week
+            calendar_week = f"w{datetime.now().isocalendar().week}"
+
             cursor = self.db_conn.cursor()
 
             # Try INSERT to amazon_tv_main_raw_data
@@ -405,8 +408,8 @@ class AmazonTVCrawler:
                 INSERT INTO amazon_tv_main_raw_data
                 ("order", mall_name, page_number, Retailer_SKU_Name, Number_of_units_purchased_past_month,
                  Final_SKU_Price, Original_SKU_Price, Shipping_Info,
-                 Available_Quantity_for_Purchase, Discount_Type, Product_URL, ASIN, batch_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 Available_Quantity_for_Purchase, Discount_Type, Product_URL, ASIN, batch_id, calendar_week)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
                 collection_order,
@@ -421,7 +424,8 @@ class AmazonTVCrawler:
                 data['Discount_Type'],
                 data['Product_URL'],
                 data['ASIN'],
-                self.batch_id
+                self.batch_id,
+                calendar_week
             ))
             raw_data_result = cursor.fetchone()
 
@@ -430,8 +434,8 @@ class AmazonTVCrawler:
                 INSERT INTO Amazon_tv_main_crawled
                 ("order", mall_name, Retailer_SKU_Name, Number_of_units_purchased_past_month,
                  Final_SKU_Price, Original_SKU_Price, Shipping_Info,
-                 Available_Quantity_for_Purchase, Discount_Type, Product_URL, ASIN, batch_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 Available_Quantity_for_Purchase, Discount_Type, Product_URL, ASIN, batch_id, calendar_week)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 collection_order,
                 data['mall_name'],
@@ -444,7 +448,8 @@ class AmazonTVCrawler:
                 data['Discount_Type'],
                 data['Product_URL'],
                 data['ASIN'],
-                self.batch_id
+                self.batch_id,
+                calendar_week
             ))
 
             # Commit transaction

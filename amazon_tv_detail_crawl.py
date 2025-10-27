@@ -623,14 +623,17 @@ class AmazonDetailCrawler:
 
             cursor = self.db_conn.cursor()
 
+            # Calculate calendar week
+            calendar_week = f"w{datetime.now().isocalendar().week}"
+
             # Insert to Amazon_tv_detail_crawled
             cursor.execute("""
                 INSERT INTO Amazon_tv_detail_crawled
                 (batch_id, mother, "order", product_url, Retailer_SKU_Name, Star_Rating,
                  SKU_Popularity, Retailer_Membership_Discounts, Samsung_SKU_Name,
                  Rank_1, Rank_2, Count_of_Star_Ratings, Summarized_Review_Content,
-                 Detailed_Review_Content)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 Detailed_Review_Content, calendar_week)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 self.batch_id,
                 data['mother'],
@@ -645,7 +648,8 @@ class AmazonDetailCrawler:
                 data['Rank_2'],
                 data['Count_of_Star_Ratings'],
                 data['Summarized_Review_Content'],
-                data['Detailed_Review_Content']
+                data['Detailed_Review_Content'],
+                calendar_week
             ))
 
             # Commit transaction

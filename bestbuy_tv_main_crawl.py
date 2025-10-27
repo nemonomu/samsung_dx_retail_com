@@ -328,14 +328,17 @@ class BestBuyTVCrawler:
                 print(f"  [SKIP] Duplicate URL already saved in this batch")
                 return False
 
+            # Calculate calendar week
+            calendar_week = f"w{datetime.now().isocalendar().week}"
+
             cursor.execute("""
                 INSERT INTO bestbuy_tv_main_crawl
                 (batch_id, page_type, Retailer_SKU_Name, Final_SKU_Price, Savings, Comparable_Pricing,
                  Offer, Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
-                 Star_Rating, SKU_Status, Product_url)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 Star_Rating, SKU_Status, Product_url, calendar_week)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (self.batch_id, page_type, product_name, final_price, savings, comp_pricing,
-                  offer, pickup, shipping, delivery, star_rating, sku_status, product_url))
+                  offer, pickup, shipping, delivery, star_rating, sku_status, product_url, calendar_week))
 
             self.db_conn.commit()
             cursor.close()

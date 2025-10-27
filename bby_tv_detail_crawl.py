@@ -536,27 +536,32 @@ class BestBuyDetailCrawler:
                 # 5. 다이얼로그 닫기
                 self.close_specifications_dialog()
 
-            # 6. Recommendation intent 추출 (메인 페이지의 Reviews 섹션에서)
+            # 6. Reviews 섹션으로 스크롤
+            print("  [INFO] Reviews 섹션으로 스크롤 중...")
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 2);")
+            time.sleep(2)
+
+            # 7. Recommendation intent 추출 (메인 페이지의 Reviews 섹션에서)
             page_source = self.driver.page_source
             tree = html.fromstring(page_source)
             recommendation_intent = self.extract_recommendation_intent(tree)
             print(f"  [✓] Recommendation_Intent: {recommendation_intent}")
 
-            # 7. See All Customer Reviews 클릭 및 데이터 수집
+            # 8. See All Customer Reviews 클릭 및 데이터 수집
             star_ratings = None
             top_mentions = None
             detailed_reviews = None
 
             if self.click_see_all_reviews():
-                # 7-1. Star ratings 수집 (리뷰 페이지에서)
+                # 8-1. Star ratings 수집 (리뷰 페이지에서)
                 star_ratings = self.extract_star_ratings_from_reviews_page()
                 print(f"  [✓] Star_Ratings: {star_ratings}")
 
-                # 7-2. Top mentions 수집 (리뷰 페이지에서)
+                # 8-2. Top mentions 수집 (리뷰 페이지에서)
                 top_mentions = self.extract_top_mentions_from_reviews_page()
                 print(f"  [✓] Top_Mentions: {top_mentions}")
 
-                # 7-3. Detailed reviews 수집
+                # 8-3. Detailed reviews 수집
                 detailed_reviews = self.extract_reviews()
                 print(f"  [✓] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
 

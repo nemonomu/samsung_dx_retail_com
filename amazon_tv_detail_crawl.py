@@ -480,13 +480,19 @@ class AmazonDetailCrawler:
 
             # Click "Item details" section to expand it (needed for samsung_sku_name, rank_1, rank_2)
             try:
-                item_details_button = self.driver.find_element("xpath", '//span[@data-action="voyager-expander-heading-toggle"]//a[contains(@class, "a-expander-header")]')
+                # Find "Item details" button specifically (not "Display")
+                item_details_button = self.driver.find_element("xpath", '//span[contains(text(), "Item details")]/ancestor::a[contains(@class, "a-expander-header")]')
                 if item_details_button:
-                    self.driver.execute_script("arguments[0].click();", item_details_button)
-                    time.sleep(1)
-                    print("  [INFO] Expanded 'Item details' section")
+                    # Check if already expanded
+                    aria_expanded = item_details_button.get_attribute("aria-expanded")
+                    if aria_expanded != "true":
+                        self.driver.execute_script("arguments[0].click();", item_details_button)
+                        time.sleep(1)
+                        print("  [INFO] Expanded 'Item details' section")
+                    else:
+                        print("  [INFO] 'Item details' already expanded")
             except Exception as e:
-                print(f"  [WARNING] Could not click 'Item details': {e}")
+                print(f"  [WARNING] Could not find/click 'Item details': {e}")
 
             page_source = self.driver.page_source
             tree = html.fromstring(page_source)
@@ -503,20 +509,26 @@ class AmazonDetailCrawler:
             membership_discount_raw = self.extract_text_safe(tree, self.xpaths.get('membership_discount'))
             membership_discount = self.clean_membership_discount(membership_discount_raw)
 
-            # Samsung SKU Name - try new XPath first, then fallback
+            # Samsung SKU Name - try multiple approaches
             samsung_sku_name = self.extract_text_safe(tree, self.xpaths.get('samsung_sku_name'))
             if not samsung_sku_name:
-                # New XPath for expanded Item details section
-                samsung_sku_name = self.extract_text_safe(tree, '//*[@id="productDetails_expanderTables_depthRightSections"]/div[1]/div/div/table/tbody/tr[5]/td')
+                # Find by th text "Model Number" in Item details section
+                samsung_sku_name = self.extract_text_safe(tree, '//th[contains(text(), "Model Number")]/following-sibling::td')
+            if not samsung_sku_name:
+                # Try fixed XPath for Item details section
+                samsung_sku_name = self.extract_text_safe(tree, '//*[@id="productDetails_expanderTables_depthRightSections"]//th[contains(text(), "Model Number")]/following-sibling::td')
             if not samsung_sku_name:
                 # Old fallback XPath for different page structure
                 samsung_sku_name = self.extract_text_safe(tree, '//*[@id="detailBullets_feature_div"]/ul/li[2]/span/span[2]')
 
-            # Ranks - try new XPath first, then fallback
+            # Ranks - try multiple approaches
             rank_1_raw = self.extract_text_safe(tree, self.xpaths.get('rank_1'))
             if not rank_1_raw:
-                # New XPath for expanded Item details section
-                rank_1_raw = self.extract_text_safe(tree, '//*[@id="productDetails_expanderTables_depthRightSections"]/div[1]/div/div/table/tbody/tr[13]/td/span/ul/li[1]/span/span')
+                # Find by th text "Best Sellers Rank" - first rank
+                rank_1_raw = self.extract_text_safe(tree, '//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[1]//span[@class="a-list-item"]/span')
+            if not rank_1_raw:
+                # Alternative: look in Item details section
+                rank_1_raw = self.extract_text_safe(tree, '//*[@id="productDetails_expanderTables_depthRightSections"]//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[1]')
             if not rank_1_raw:
                 # Old fallback XPath for different page structure
                 rank_1_raw = self.extract_text_safe(tree, '//*[@id="detailBullets_feature_div"]/ul/li[7]/span/text()[1]')
@@ -524,8 +536,11 @@ class AmazonDetailCrawler:
 
             rank_2_raw = self.extract_text_safe(tree, self.xpaths.get('rank_2'))
             if not rank_2_raw:
-                # New XPath for expanded Item details section
-                rank_2_raw = self.extract_text_safe(tree, '//*[@id="productDetails_expanderTables_depthRightSections"]/div[1]/div/div/table/tbody/tr[13]/td/span/ul/li[2]')
+                # Find by th text "Best Sellers Rank" - second rank
+                rank_2_raw = self.extract_text_safe(tree, '//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[2]//span[@class="a-list-item"]/span')
+            if not rank_2_raw:
+                # Alternative: look in Item details section
+                rank_2_raw = self.extract_text_safe(tree, '//*[@id="productDetails_expanderTables_depthRightSections"]//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[2]')
             if not rank_2_raw:
                 # Old fallback XPath for different page structure
                 rank_2_raw = self.extract_text_safe(tree, '//*[@id="detailBullets_feature_div"]/ul/li[7]/span/ul')

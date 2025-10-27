@@ -103,6 +103,7 @@ class BestBuyDetailCrawler:
                     FROM bestbuy_tv_main_crawl
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
+                    ORDER BY product_url
                 """, (main_batch_id,))
                 main_urls = cursor.fetchall()
                 urls.extend([('main', url[0]) for url in main_urls])
@@ -115,6 +116,7 @@ class BestBuyDetailCrawler:
                     FROM bby_tv_Trend_crawl
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
+                    ORDER BY product_url
                 """, (trend_batch_id,))
                 trend_urls = cursor.fetchall()
                 urls.extend([('Trend', url[0]) for url in trend_urls])
@@ -127,6 +129,7 @@ class BestBuyDetailCrawler:
                     FROM bby_tv_promotion_crawl
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
+                    ORDER BY product_url
                 """, (promo_batch_id,))
                 promo_urls = cursor.fetchall()
                 urls.extend([('promotion', url[0]) for url in promo_urls])

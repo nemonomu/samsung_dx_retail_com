@@ -303,44 +303,32 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Similar products 추출 실패: {e}")
             return [None]*4, [None]*4, [None]*4
 
-    def extract_star_ratings(self, tree):
-        """Count_of_Star_Ratings 추출"""
+    def extract_star_ratings_from_reviews_page(self):
+        """Count_of_Star_Ratings 추출 (See All Customer Reviews 페이지에서)"""
         try:
             ratings = {}
-            # 별점별 개수 추출 (5 -> 1 순서로)
-            for star in range(5, 0, -1):
-                # 여러 XPath 패턴 시도
-                xpaths = [
-                    # 가장 구체적인 패턴 (HTML 예시와 일치)
-                    f'//a[contains(@href, "rating={star}")]//span[contains(@class, "uq0khJy2NYfr1ydM") and contains(@class, "text-left") and contains(@class, "v-text-tech-black") and @aria-hidden="true"]',
-                    # 조금 더 넓은 패턴
-                    f'//a[contains(@href, "rating={star}")]//span[@class="uq0khJy2NYfr1ydM text-left v-text-tech-black" and @aria-hidden="true"]',
-                    f'//a[contains(@href, "rating={star}")]//span[@class="uq0khJy2NYfr1ydM text-left v-text-tech-black"]',
-                    # 더 넓은 패턴
-                    f'//a[contains(@href, "rating={star}")]//span[contains(@class, "uq0khJy2NYfr1ydM")]',
-                    f'//a[contains(@href, "rating={star}")]//span[contains(@class, "text-left") and contains(@class, "v-text-tech-black")]',
-                    # sr-only에서 추출하는 fallback
-                    f'//a[contains(@href, "rating={star}")]//span[@class="sr-only"]'
-                ]
+            # XPath 패턴 (5점부터 1점까지)
+            xpaths = [
+                '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[1]/div/label/span[5]',  # 5점
+                '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[2]/div/label/span[5]',  # 4점
+                '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[3]/div/label/span[5]',  # 3점
+                '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[4]/div/label/span[5]',  # 2점
+                '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[5]/div/label/span[5]'   # 1점
+            ]
 
-                count = "0"
-                for xpath in xpaths:
-                    elem = tree.xpath(xpath)
-                    if elem:
-                        text = elem[0].text_content().strip()
-                        # sr-only인 경우 "5 star rating. 9 reviews"에서 숫자 추출
-                        if "reviews" in text or "review" in text:
-                            match = re.search(r'(\d+)\s+review', text)
-                            if match:
-                                count = match.group(1)
-                                break
-                        else:
-                            count = text
-                            break
-
-                # 1star는 단수형, 나머지는 복수형
-                key = f"{star}star" if star == 1 else f"{star}stars"
-                ratings[key] = count
+            # 5점부터 1점까지 순서로 추출
+            for idx, xpath in enumerate(xpaths):
+                star = 5 - idx  # 5, 4, 3, 2, 1
+                try:
+                    elem = self.driver.find_element(By.XPATH, xpath)
+                    count = elem.text.strip()
+                    # 1star는 단수형, 나머지는 복수형
+                    key = f"{star}star" if star == 1 else f"{star}stars"
+                    ratings[key] = count
+                except Exception:
+                    # 찾지 못하면 0으로 설정
+                    key = f"{star}star" if star == 1 else f"{star}stars"
+                    ratings[key] = "0"
 
             # 형식: "5stars:9 4stars:1 3stars:0 2stars:0 1star:2" (공백으로 구분)
             rating_str = " ".join([f"{k}:{v}" for k, v in ratings.items()])
@@ -350,38 +338,21 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Star ratings 추출 실패: {e}")
             return None
 
-    def extract_top_mentions(self, tree):
-        """Top_Mentions 추출"""
+    def extract_top_mentions_from_reviews_page(self):
+        """Top_Mentions 추출 (See All Customer Reviews 페이지에서)"""
         try:
-            mentions = []
-            # 여러 XPath 패턴 시도
-            xpaths = [
-                # HTML 예시에 맞춘 패턴
-                '//ul[@class="list-unstyled"]//li[contains(@class, "inline-block")]//a[contains(@class, "pPqRKazD1ugrkdAf")]',
-                '//li[contains(@class, "inline-block")]//a[contains(@class, "pPqRKazD1ugrkdAf")]',
-                '//a[contains(@class, "pPqRKazD1ugrkdAf")]',
-                '//ul[@class="list-unstyled"]//a[contains(@href, "feature=")]',
-                # 더 넓은 패턴
-                '//a[contains(@href, "feature=")]'
-            ]
+            # XPath 패턴
+            xpath = '//*[@id="user-generated-content-ugc-stats-68760209"]/div/div/span/span/a/span'
 
-            for xpath in xpaths:
-                mention_elements = tree.xpath(xpath)
-                if mention_elements:
-                    for elem in mention_elements[:10]:  # 최대 10개
-                        text = elem.text_content().strip()
-                        # svg 아이콘 텍스트 제거 (예: "Advantage Icon", "Disadvantage Icon")
-                        text = text.replace("Advantage Icon", "").replace("Disadvantage Icon", "").strip()
-                        # &nbsp; 처리 및 여러 공백을 하나로
-                        text = text.replace('\u00a0', ' ')  # &nbsp; -> 공백
-                        text = ' '.join(text.split())
-                        # 괄호 앞 공백 제거 (예: "Picture Quality (114)" -> "Picture Quality(114)")
-                        text = re.sub(r'\s+\(', '(', text)
-                        if text:
-                            mentions.append(text)
-                    break
+            try:
+                elem = self.driver.find_element(By.XPATH, xpath)
+                text = elem.text.strip()
+                if text:
+                    return text
+            except Exception:
+                pass
 
-            return ", ".join(mentions) if mentions else None
+            return None
 
         except Exception as e:
             print(f"  [ERROR] Top mentions 추출 실패: {e}")
@@ -563,33 +534,30 @@ class BestBuyDetailCrawler:
                 # 5. 다이얼로그 닫기
                 self.close_specifications_dialog()
 
-            # 페이지 다시 로드
-            page_source = self.driver.page_source
-            tree = html.fromstring(page_source)
-
-            # 6. Similar products 추출
-            similar_names, pros_list, cons_list = self.extract_similar_products(tree)
-            print(f"  [✓] Similar products: {len([x for x in similar_names if x])}개")
-
-            # 7. Star ratings 추출
-            star_ratings = self.extract_star_ratings(tree)
-            print(f"  [✓] Star_Ratings: {star_ratings}")
-
-            # 8. Top mentions 추출
-            top_mentions = self.extract_top_mentions(tree)
-            print(f"  [✓] Top_Mentions: {top_mentions}")
-
-            # 9. See All Customer Reviews 클릭 및 리뷰 수집
+            # 6. See All Customer Reviews 클릭 및 데이터 수집
+            star_ratings = None
+            top_mentions = None
             detailed_reviews = None
+            recommendation_intent = None
+
             if self.click_see_all_reviews():
+                # 6-1. Star ratings 수집 (리뷰 페이지에서)
+                star_ratings = self.extract_star_ratings_from_reviews_page()
+                print(f"  [✓] Star_Ratings: {star_ratings}")
+
+                # 6-2. Top mentions 수집 (리뷰 페이지에서)
+                top_mentions = self.extract_top_mentions_from_reviews_page()
+                print(f"  [✓] Top_Mentions: {top_mentions}")
+
+                # 6-3. Detailed reviews 수집
                 detailed_reviews = self.extract_reviews()
                 print(f"  [✓] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
 
-            # 10. Recommendation intent 추출
-            page_source = self.driver.page_source
-            tree = html.fromstring(page_source)
-            recommendation_intent = self.extract_recommendation_intent(tree)
-            print(f"  [✓] Recommendation_Intent: {recommendation_intent}")
+                # 6-4. Recommendation intent 수집 (리뷰 페이지에서)
+                page_source = self.driver.page_source
+                tree = html.fromstring(page_source)
+                recommendation_intent = self.extract_recommendation_intent(tree)
+                print(f"  [✓] Recommendation_Intent: {recommendation_intent}")
 
             # DB 저장
             self.save_to_db(
@@ -598,9 +566,6 @@ class BestBuyDetailCrawler:
                 retailer_sku_name=retailer_sku_name,
                 samsung_sku_name=samsung_sku_name,
                 electricity_use=electricity_use,
-                similar_names=similar_names,
-                pros_list=pros_list,
-                cons_list=cons_list,
                 star_ratings=star_ratings,
                 top_mentions=top_mentions,
                 detailed_reviews=detailed_reviews,
@@ -617,8 +582,7 @@ class BestBuyDetailCrawler:
             return False
 
     def save_to_db(self, page_type, order, retailer_sku_name, samsung_sku_name,
-                   electricity_use, similar_names, pros_list, cons_list,
-                   star_ratings, top_mentions, detailed_reviews,
+                   electricity_use, star_ratings, top_mentions, detailed_reviews,
                    recommendation_intent, product_url):
         """DB에 저장"""
         try:
@@ -634,9 +598,6 @@ class BestBuyDetailCrawler:
                     Retailer_SKU_Name TEXT,
                     Samsung_SKU_Name TEXT,
                     Estimated_Annual_Electricity_Use TEXT,
-                    Retailer_SKU_Name_similar TEXT,
-                    Pros TEXT,
-                    Cons TEXT,
                     Count_of_Star_Ratings TEXT,
                     Top_Mentions TEXT,
                     Detailed_Review_Content TEXT,
@@ -650,16 +611,10 @@ class BestBuyDetailCrawler:
             insert_query = """
                 INSERT INTO bby_tv_detail_crawled
                 (batch_id, page_type, "order", Retailer_SKU_Name, Samsung_SKU_Name,
-                 Estimated_Annual_Electricity_Use, Retailer_SKU_Name_similar,
-                 Pros, Cons, Count_of_Star_Ratings, Top_Mentions,
+                 Estimated_Annual_Electricity_Use, Count_of_Star_Ratings, Top_Mentions,
                  Detailed_Review_Content, Recommendation_Intent, product_url)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-
-            # Similar products를 구분자로 연결
-            similar_names_str = " | ".join([x for x in similar_names if x]) if any(similar_names) else None
-            pros_str = " | ".join([x for x in pros_list if x]) if any(pros_list) else None
-            cons_str = " | ".join([x for x in cons_list if x]) if any(cons_list) else None
 
             cursor.execute(insert_query, (
                 self.batch_id,
@@ -668,9 +623,6 @@ class BestBuyDetailCrawler:
                 retailer_sku_name,
                 samsung_sku_name,
                 electricity_use,
-                similar_names_str,
-                pros_str,
-                cons_str,
                 star_ratings,
                 top_mentions,
                 detailed_reviews,

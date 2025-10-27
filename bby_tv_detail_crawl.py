@@ -1,7 +1,7 @@
 """
 Best Buy TV Detail Page Crawler
 수집 테이블: bestbuy_tv_main_crawl, bby_tv_trend_crawl, bby_tv_promotion_crawl
-저장 테이블: bby_tv_detail_crawled
+저장 테이블: bby_tv_detail_crawled, bby_tv_mst
 """
 import time
 import random
@@ -506,6 +506,183 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Recommendation intent 추출 실패: {e}")
             return None
 
+    def extract_compare_similar_products(self, current_url):
+        """Compare similar products 섹션 데이터 추출"""
+        try:
+            print("  [INFO] Compare similar products 섹션 찾는 중...")
+
+            # 페이지 상단으로 이동 후 30%까지 스크롤
+            self.driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(1)
+
+            total_height = self.driver.execute_script("return document.body.scrollHeight")
+            scroll_to = int(total_height * 0.3)
+            self.driver.execute_script(f"window.scrollTo(0, {scroll_to});")
+            time.sleep(3)
+
+            # 페이지 소스 가져오기
+            page_source = self.driver.page_source
+            tree = html.fromstring(page_source)
+
+            # 4개 제품 데이터 저장
+            products = []
+
+            # product-title div들 찾기
+            product_divs = tree.xpath('//div[@class="product-title font-weight-normal pb-100 body-copy-lg min-h-600"]')
+
+            if len(product_divs) < 4:
+                print(f"  [WARNING] Compare similar products 섹션을 찾을 수 없거나 제품이 부족합니다. (찾은 개수: {len(product_divs)})")
+                return None
+
+            # 첫 번째 제품 (현재 페이지)
+            first_product = {
+                'product_url': current_url,
+                'product_name': None,
+                'pros': None,
+                'cons': None
+            }
+
+            # 첫 번째 제품명 추출
+            span_elem = product_divs[0].xpath('.//span[@class="clamp"]')
+            if span_elem:
+                first_product['product_name'] = span_elem[0].text_content().strip()
+
+            products.append(first_product)
+
+            # 2-4번째 제품
+            for i in range(1, 4):
+                if i < len(product_divs):
+                    product = {
+                        'product_url': None,
+                        'product_name': None,
+                        'pros': None,
+                        'cons': None
+                    }
+
+                    # a 태그에서 URL과 제품명 추출
+                    a_elem = product_divs[i].xpath('.//a[@class="clamp"]')
+                    if a_elem:
+                        href = a_elem[0].get('href')
+                        if href:
+                            product['product_url'] = href
+                        product['product_name'] = a_elem[0].text_content().strip()
+
+                    products.append(product)
+
+            # Pros 추출 (tr[2]/td[1~4])
+            for i in range(1, 5):
+                pros_xpath = f'/html/body/div[5]/div[6]/div/table/tbody/tr[2]/td[{i}]/span/span'
+                pros_elem = tree.xpath(pros_xpath)
+                if pros_elem and i-1 < len(products):
+                    products[i-1]['pros'] = pros_elem[0].text_content().strip()
+
+            # Cons 추출 (tr[4]/td[1~4])
+            for i in range(1, 5):
+                cons_xpath = f'/html/body/div[5]/div[6]/div/table/tbody/tr[4]/td[{i}]/span/span'
+                cons_elem = tree.xpath(cons_xpath)
+                if cons_elem and i-1 < len(products):
+                    text = cons_elem[0].text_content().strip()
+                    # '—' 같은 값은 None으로 처리
+                    products[i-1]['cons'] = text if text and text != '—' else None
+
+            print(f"  [OK] Compare similar products 데이터 추출 완료 (4개)")
+            return products
+
+        except Exception as e:
+            print(f"  [ERROR] Compare similar products 추출 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def get_samsung_sku_by_product_name(self, product_name):
+        """bby_tv_detail_crawled에서 product_name으로 samsung_sku_name 찾기"""
+        try:
+            if not product_name:
+                return None
+
+            cursor = self.db_conn.cursor()
+
+            # 가장 최근 데이터에서 retailer_sku_name과 product_name이 일치하는 것 찾기
+            cursor.execute("""
+                SELECT Samsung_SKU_Name
+                FROM bby_tv_detail_crawled
+                WHERE Retailer_SKU_Name = %s
+                AND Samsung_SKU_Name IS NOT NULL
+                ORDER BY crawl_datetime DESC
+                LIMIT 1
+            """, (product_name,))
+
+            result = cursor.fetchone()
+            cursor.close()
+
+            if result:
+                return result[0]
+            return None
+
+        except Exception as e:
+            print(f"  [ERROR] Samsung SKU 조회 실패 ({product_name}): {e}")
+            return None
+
+    def save_to_mst_table(self, products, current_samsung_sku):
+        """bby_tv_mst 테이블에 4개 제품 데이터 저장"""
+        try:
+            cursor = self.db_conn.cursor()
+
+            # 테이블 존재 확인 및 생성
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS bby_tv_mst (
+                    id SERIAL PRIMARY KEY,
+                    sku VARCHAR(255),
+                    product_url TEXT,
+                    pros TEXT,
+                    cons TEXT,
+                    product_name TEXT,
+                    update_date VARCHAR(50)
+                )
+            """)
+
+            # 현지 시간 (AWS US 시간대)
+            us_eastern = pytz.timezone('America/New_York')
+            update_date = datetime.now(us_eastern).strftime('%y-%m-%d-%H-%M-%S')
+
+            # 각 제품 저장
+            for idx, product in enumerate(products):
+                # SKU 결정
+                if idx == 0:
+                    # 첫 번째 제품은 현재 페이지의 samsung_sku_name
+                    sku = current_samsung_sku
+                else:
+                    # 2-4번째 제품은 DB에서 찾기
+                    sku = self.get_samsung_sku_by_product_name(product['product_name'])
+
+                # 데이터 삽입
+                insert_query = """
+                    INSERT INTO bby_tv_mst
+                    (sku, product_url, pros, cons, product_name, update_date)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """
+
+                cursor.execute(insert_query, (
+                    sku,
+                    product['product_url'],
+                    product['pros'],
+                    product['cons'],
+                    product['product_name'],
+                    update_date
+                ))
+
+                print(f"    [MST {idx+1}/4] {product['product_name'][:50]}... (SKU: {sku})")
+
+            cursor.close()
+            print(f"  [✓] MST 테이블 저장 완료 (4개)")
+            return True
+
+        except Exception as e:
+            print(f"  [ERROR] MST 테이블 저장 실패: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
     def scrape_detail_page(self, page_type, product_url):
         """상세 페이지 크롤링"""
         try:
@@ -524,7 +701,10 @@ class BestBuyDetailCrawler:
             retailer_sku_name = self.extract_retailer_sku_name(tree)
             print(f"  [✓] Retailer_SKU_Name: {retailer_sku_name}")
 
-            # 2. Specification 버튼 클릭
+            # 2. Compare similar products 추출
+            mst_products = self.extract_compare_similar_products(product_url)
+
+            # 3. Specification 버튼 클릭
             samsung_sku_name = None
             electricity_use = None
 
@@ -543,41 +723,45 @@ class BestBuyDetailCrawler:
                 dialog_source = self.driver.page_source
                 dialog_tree = html.fromstring(dialog_source)
 
-                # 3. Samsung_SKU_Name 추출
+                # 4. Samsung_SKU_Name 추출
                 samsung_sku_name = self.extract_samsung_sku_name(dialog_tree)
                 print(f"  [✓] Samsung_SKU_Name: {samsung_sku_name}")
 
-                # 4. Estimated_Annual_Electricity_Use 추출
+                # 5. Estimated_Annual_Electricity_Use 추출
                 electricity_use = self.extract_electricity_use(dialog_tree)
                 print(f"  [✓] Estimated_Annual_Electricity_Use: {electricity_use}")
 
-                # 5. 다이얼로그 닫기
+                # 6. 다이얼로그 닫기
                 self.close_specifications_dialog()
 
-            # 6. See All Customer Reviews 클릭 및 데이터 수집
+            # 7. MST 테이블에 저장 (samsung_sku_name이 있고 mst_products가 있을 때)
+            if mst_products and samsung_sku_name:
+                self.save_to_mst_table(mst_products, samsung_sku_name)
+
+            # 8. See All Customer Reviews 클릭 및 데이터 수집
             star_ratings = None
             top_mentions = None
             detailed_reviews = None
             recommendation_intent = None
 
             if self.click_see_all_reviews():
-                # 6-1. Star ratings 수집 (리뷰 페이지에서)
+                # 8-1. Star ratings 수집 (리뷰 페이지에서)
                 star_ratings = self.extract_star_ratings_from_reviews_page()
                 print(f"  [✓] Star_Ratings: {star_ratings}")
 
-                # 6-2. Top mentions 수집 (리뷰 페이지에서)
+                # 8-2. Top mentions 수집 (리뷰 페이지에서)
                 top_mentions = self.extract_top_mentions_from_reviews_page()
                 print(f"  [✓] Top_Mentions: {top_mentions}")
 
-                # 6-3. Recommendation intent 수집 (리뷰 페이지에서)
+                # 8-3. Recommendation intent 수집 (리뷰 페이지에서)
                 recommendation_intent = self.extract_recommendation_intent_from_reviews_page()
                 print(f"  [✓] Recommendation_Intent: {recommendation_intent}")
 
-                # 6-4. Detailed reviews 수집
+                # 8-4. Detailed reviews 수집
                 detailed_reviews = self.extract_reviews()
                 print(f"  [✓] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
 
-            # DB 저장
+            # 9. Detail DB 저장
             self.save_to_db(
                 page_type=page_type,
                 order=self.order,

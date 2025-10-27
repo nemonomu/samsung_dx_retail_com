@@ -1,5 +1,5 @@
 """
-Best Buy Detail Crawler Test - count_of_star_ratings & detailed_review_content 테스트
+Best Buy Detail Crawler Test - top_mentions 테스트
 DB 저장 없이 로그만 출력
 """
 import time
@@ -138,6 +138,45 @@ class BestBuyTest:
             print(f"  [ERROR] Star ratings 추출 실패: {e}")
             return None
 
+    def extract_top_mentions(self):
+        """Top_Mentions 추출"""
+        try:
+            print("  [INFO] Top mentions 추출 중...")
+            time.sleep(3)  # 추가 대기
+
+            # XPath 패턴 (ID가 동적이므로 class 기반으로 찾기)
+            xpaths = [
+                # "Highly rated by customers for" 섹션의 span.text-nowrap들
+                '//div[contains(@class, "customer-review-pros-stats")]//span[@class="text-nowrap"]',
+                # 더 넓은 패턴
+                '//div[contains(., "Highly rated by customers for")]//span[@class="text-nowrap"]'
+            ]
+
+            mentions = []
+            for xpath in xpaths:
+                try:
+                    elements = self.driver.find_elements(By.XPATH, xpath)
+                    if elements:
+                        for elem in elements:
+                            text = elem.text.strip()
+                            # 콤마나 기타 불필요한 문자 제거
+                            text = text.replace(',', '').strip()
+                            if text:
+                                mentions.append(text)
+                        break
+                except Exception:
+                    continue
+
+            if mentions:
+                # 콤마로 구분하여 반환 (예: "Picture Quality, Brightness, Black Levels")
+                return ", ".join(mentions)
+
+            return None
+
+        except Exception as e:
+            print(f"  [ERROR] Top mentions 추출 실패: {e}")
+            return None
+
     def extract_reviews(self):
         """리뷰 20개 수집"""
         try:
@@ -197,15 +236,9 @@ class BestBuyTest:
 
             # See All Customer Reviews 클릭
             if self.click_see_all_reviews():
-                # Star ratings 추출
-                star_ratings = self.extract_star_ratings()
-                print(f"  [RESULT] Star_Ratings: {star_ratings}")
-
-                # Detailed reviews 추출
-                detailed_reviews = self.extract_reviews()
-                print(f"  [RESULT] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
-                if detailed_reviews:
-                    print(f"  [PREVIEW] {detailed_reviews[:200]}...")
+                # Top mentions 추출만 테스트
+                top_mentions = self.extract_top_mentions()
+                print(f"  [RESULT] Top_Mentions: {top_mentions}")
             else:
                 print("  [SKIP] See All Reviews 버튼을 찾지 못했습니다.")
 
@@ -222,7 +255,7 @@ class BestBuyTest:
         try:
             print("="*80)
             print("Best Buy Detail Crawler Test")
-            print("Testing: count_of_star_ratings & detailed_review_content")
+            print("Testing: top_mentions only")
             print("="*80)
 
             # 드라이버 설정

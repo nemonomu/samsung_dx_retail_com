@@ -309,6 +309,7 @@ class BestBuyDetailCrawler:
     def extract_star_ratings_from_reviews_page(self):
         """Count_of_Star_Ratings 추출 (See All Customer Reviews 페이지에서)"""
         try:
+            time.sleep(3)  # 페이지 로딩 대기
             ratings = {}
             # XPath 패턴 (5점부터 1점까지)
             xpaths = [
@@ -402,13 +403,13 @@ class BestBuyDetailCrawler:
                         button = self.driver.find_element(By.XPATH, xpath)
                         print("  [OK] See All Customer Reviews 버튼 발견")
                         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
-                        time.sleep(2)
+                        time.sleep(3)
                         # 버튼이 클릭 가능할 때까지 대기
-                        wait = WebDriverWait(self.driver, 5)
+                        wait = WebDriverWait(self.driver, 10)
                         wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
                         button.click()
                         print("  [OK] See All Customer Reviews 클릭 성공")
-                        time.sleep(4)  # 리뷰 페이지 로딩 대기 (3초 -> 4초)
+                        time.sleep(5)  # 리뷰 페이지 로딩 대기
                         return True
                     except:
                         continue
@@ -416,7 +417,7 @@ class BestBuyDetailCrawler:
                 # 버튼을 못 찾으면 계속 스크롤
                 current_position += step
                 self.driver.execute_script(f"window.scrollTo(0, {current_position});")
-                time.sleep(1.5)  # 스크롤 후 대기 시간 증가 (0.5초 -> 1.5초)
+                time.sleep(2)  # 스크롤 후 대기 시간
 
             print("  [WARNING] See All Customer Reviews 버튼을 찾을 수 없습니다.")
             return False
@@ -428,6 +429,7 @@ class BestBuyDetailCrawler:
     def extract_reviews(self):
         """리뷰 20개 수집 (페이지네이션 포함)"""
         try:
+            time.sleep(3)  # 페이지 로딩 대기
             reviews = []
             collected = 0
             page = 1
@@ -458,9 +460,9 @@ class BestBuyDetailCrawler:
                     next_button = self.driver.find_element(By.XPATH, '//li[contains(@class, "page next")]//a')
                     print(f"  [INFO] 다음 페이지로 이동 중... (Page {page + 1})")
                     self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
-                    time.sleep(1)
+                    time.sleep(2)
                     next_button.click()
-                    time.sleep(3)
+                    time.sleep(4)
                     page += 1
                 except:
                     print("  [INFO] 다음 페이지 버튼이 없습니다. 수집 종료.")
@@ -512,7 +514,7 @@ class BestBuyDetailCrawler:
 
             # 페이지 접속
             self.driver.get(product_url)
-            time.sleep(random.uniform(5, 8))
+            time.sleep(random.uniform(8, 12))
 
             # 페이지 소스 가져오기
             page_source = self.driver.page_source

@@ -641,9 +641,8 @@ class BestBuyDetailCrawler:
                 )
             """)
 
-            # 현지 시간 (AWS US 시간대)
-            us_eastern = pytz.timezone('America/New_York')
-            update_date = datetime.now(us_eastern).strftime('%y-%m-%d-%H-%M-%S')
+            # current timestamp
+            update_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             # 각 제품 저장
             for idx, product in enumerate(products):

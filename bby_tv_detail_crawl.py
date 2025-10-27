@@ -369,8 +369,8 @@ class BestBuyDetailCrawler:
                     continue
 
             if mentions:
-                # 콤마로 구분하여 반환 (예: "Picture Quality, Brightness, Black Levels")
-                return ", ".join(mentions)
+                # 첫 번째 항목만 반환 (예: "Picture Quality")
+                return mentions[0]
 
             return None
 

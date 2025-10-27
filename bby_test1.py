@@ -1,5 +1,5 @@
 """
-Best Buy Detail Crawler Test - top_mentions 테스트
+Best Buy Detail Crawler Test - samsung_sku_name & estimated_annual_electricity_use 테스트
 DB 저장 없이 로그만 출력
 """
 import time
@@ -63,165 +63,128 @@ class BestBuyTest:
             print(f"[ERROR] 드라이버 설정 실패: {e}")
             return False
 
-    def click_see_all_reviews(self):
-        """See All Customer Reviews 버튼 클릭"""
+    def click_specifications(self):
+        """Specification 버튼 클릭"""
         try:
-            print("  [INFO] See All Customer Reviews 버튼 찾는 중...")
-            print("  [INFO] 페이지 스크롤 시작...")
-
-            scroll_height = self.driver.execute_script("return document.body.scrollHeight")
-            current_position = 0
-            step = 400
-
+            print("  [INFO] Specification 버튼 클릭...")
             xpaths = [
-                '//button[contains(., "See All Customer Reviews")]',
-                '//button[contains(@class, "Op9coqeII1kYHR9Q")]'
+                "//button[@class='c-button-unstyled specs-accordion font-weight-medium w-full flex justify-content-between align-items-center CiN3vihE2Ub2POwD']",
+                "//button[.//h3[text()='Specifications']]",
+                "//button[contains(@class, 'specs-accordion')]"
             ]
 
-            while current_position < scroll_height:
-                for xpath in xpaths:
-                    try:
-                        button = self.driver.find_element(By.XPATH, xpath)
-                        print("  [OK] See All Customer Reviews 버튼 발견")
-                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
-                        time.sleep(3)  # 대기 시간 증가
-                        wait = WebDriverWait(self.driver, 10)
-                        wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
-                        button.click()
-                        print("  [OK] See All Customer Reviews 클릭 성공")
-                        time.sleep(5)  # 리뷰 페이지 로딩 대기 증가
-                        return True
-                    except:
-                        continue
-
-                current_position += step
-                self.driver.execute_script(f"window.scrollTo(0, {current_position});")
-                time.sleep(2)  # 스크롤 후 대기 시간 증가
-
-            print("  [WARNING] See All Customer Reviews 버튼을 찾을 수 없습니다.")
-            return False
-
-        except Exception as e:
-            print(f"  [ERROR] See All Customer Reviews 클릭 실패: {e}")
-            return False
-
-    def extract_star_ratings(self):
-        """Count_of_Star_Ratings 추출"""
-        try:
-            print("  [INFO] Star ratings 추출 중...")
-            time.sleep(3)  # 추가 대기
-
-            ratings = {}
-            xpaths = [
-                '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[1]/div/label/span[5]',  # 5점
-                '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[2]/div/label/span[5]',  # 4점
-                '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[3]/div/label/span[5]',  # 3점
-                '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[4]/div/label/span[5]',  # 2점
-                '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[5]/div/label/span[5]'   # 1점
-            ]
-
-            for idx, xpath in enumerate(xpaths):
-                star = 5 - idx
-                try:
-                    elem = self.driver.find_element(By.XPATH, xpath)
-                    count = elem.text.strip()
-                    key = f"{star}star" if star == 1 else f"{star}stars"
-                    ratings[key] = count
-                except Exception:
-                    key = f"{star}star" if star == 1 else f"{star}stars"
-                    ratings[key] = "0"
-
-            rating_str = " ".join([f"{k}:{v}" for k, v in ratings.items()])
-            return rating_str if rating_str else None
-
-        except Exception as e:
-            print(f"  [ERROR] Star ratings 추출 실패: {e}")
-            return None
-
-    def extract_top_mentions(self):
-        """Top_Mentions 추출"""
-        try:
-            print("  [INFO] Top mentions 추출 중...")
-            time.sleep(3)  # 추가 대기
-
-            # XPath 패턴 (ID가 동적이므로 class 기반으로 찾기)
-            xpaths = [
-                # "Highly rated by customers for" 섹션의 span.text-nowrap들
-                '//div[contains(@class, "customer-review-pros-stats")]//span[@class="text-nowrap"]',
-                # 더 넓은 패턴
-                '//div[contains(., "Highly rated by customers for")]//span[@class="text-nowrap"]'
-            ]
-
-            mentions = []
             for xpath in xpaths:
                 try:
-                    elements = self.driver.find_elements(By.XPATH, xpath)
-                    if elements:
-                        for elem in elements:
-                            text = elem.text.strip()
-                            # 콤마나 기타 불필요한 문자 제거
-                            text = text.replace(',', '').strip()
-                            if text:
-                                mentions.append(text)
-                        break
-                except Exception:
+                    spec_button = self.driver.find_element(By.XPATH, xpath)
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", spec_button)
+                    time.sleep(1)
+                    spec_button.click()
+                    print("  [OK] Specification 클릭 성공")
+                    time.sleep(5)  # 다이얼로그 로딩 대기
+                    return True
+                except:
                     continue
 
-            if mentions:
-                # 첫 번째 항목만 반환 (예: "Picture Quality")
-                return mentions[0]
-
-            return None
+            print("  [WARNING] Specification 버튼을 찾을 수 없습니다.")
+            return False
 
         except Exception as e:
-            print(f"  [ERROR] Top mentions 추출 실패: {e}")
-            return None
+            print(f"  [ERROR] Specification 클릭 실패: {e}")
+            return False
 
-    def extract_reviews(self):
-        """리뷰 20개 수집"""
+    def extract_samsung_sku_name(self):
+        """Samsung_SKU_Name (Model Number) 추출"""
         try:
-            print("  [INFO] Detailed reviews 추출 중...")
-            time.sleep(3)  # 추가 대기
+            print("  [INFO] Samsung SKU Name (Model Number) 추출 중...")
 
-            reviews = []
-            collected = 0
-            page = 1
+            # Model Number 요소가 나타날 때까지 대기
+            try:
+                wait = WebDriverWait(self.driver, 10)
+                wait.until(EC.presence_of_element_located((By.XPATH, '//div[contains(text(), "Model Number")]')))
+                print("  [OK] 다이얼로그 로드 완료")
+            except Exception as e:
+                print(f"  [WARNING] 다이얼로그 로딩 대기 타임아웃: {e}")
 
-            while collected < 20:
-                page_source = self.driver.page_source
-                tree = html.fromstring(page_source)
+            time.sleep(2)
 
-                review_elements = tree.xpath('//li[@class="review-item"]//div[@class="ugc-review-body"]//p[@class="pre-white-space"]')
+            page_source = self.driver.page_source
+            tree = html.fromstring(page_source)
 
-                for elem in review_elements:
-                    if collected >= 20:
-                        break
-                    review_text = elem.text_content().strip()
-                    if review_text:
-                        reviews.append(review_text)
-                        collected += 1
-                        print(f"    [리뷰 {collected}/20] {review_text[:50]}...")
+            xpaths = [
+                '//div[contains(@class, "dB7j8sHUbncyf79K")]//div[contains(text(), "Model Number")]/following-sibling::div[@class="grow basis-none pl-300"]',
+                '//li[.//h4[text()="General"]]//div[.//div[text()="Model Number"]]//div[@class="grow basis-none pl-300"]',
+                '//div[contains(text(), "Model Number")]/following-sibling::div[@class="grow basis-none pl-300"]',
+                '//div[text()="Model Number"]/..//div[@class="grow basis-none pl-300"]',
+                '//div[contains(., "Model Number")]//div[contains(@class, "pl-300")]'
+            ]
 
-                if collected >= 20:
-                    break
-
-                try:
-                    next_button = self.driver.find_element(By.XPATH, '//li[contains(@class, "page next")]//a')
-                    print(f"  [INFO] 다음 페이지로 이동 중... (Page {page + 1})")
-                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
-                    time.sleep(2)
-                    next_button.click()
-                    time.sleep(4)  # 페이지 로딩 대기 증가
-                    page += 1
-                except:
-                    print("  [INFO] 다음 페이지 버튼이 없습니다. 수집 종료.")
-                    break
-
-            return " | ".join(reviews) if reviews else None
+            for xpath in xpaths:
+                elem = tree.xpath(xpath)
+                if elem:
+                    model_number = elem[0].text_content().strip()
+                    if model_number:
+                        return model_number
+            return None
 
         except Exception as e:
-            print(f"  [ERROR] 리뷰 수집 실패: {e}")
+            print(f"  [ERROR] Samsung SKU Name 추출 실패: {e}")
             return None
+
+    def extract_electricity_use(self):
+        """Estimated_Annual_Electricity_Use 추출"""
+        try:
+            print("  [INFO] Estimated Annual Electricity Use 추출 중...")
+            time.sleep(2)
+
+            page_source = self.driver.page_source
+            tree = html.fromstring(page_source)
+
+            xpaths = [
+                '//div[contains(@class, "dB7j8sHUbncyf79K")]//div[contains(text(), "Estimated Annual Electricity Use")]/following-sibling::div[@class="grow basis-none pl-300"]',
+                '//li[.//h4[text()="Power"]]//div[.//div[contains(text(), "Estimated Annual Electricity Use")]]//div[@class="grow basis-none pl-300"]',
+                '//div[contains(text(), "Estimated Annual Electricity Use")]/following-sibling::div[@class="grow basis-none pl-300"]',
+                '//div[contains(text(), "Estimated Annual Electricity Use")]/..//div[@class="grow basis-none pl-300"]',
+                '//div[contains(., "Estimated Annual Electricity Use")]//div[contains(@class, "pl-300")]'
+            ]
+
+            for xpath in xpaths:
+                elem = tree.xpath(xpath)
+                if elem:
+                    electricity = elem[0].text_content().strip()
+                    if electricity:
+                        return electricity
+            return None
+
+        except Exception as e:
+            print(f"  [ERROR] Estimated Annual Electricity Use 추출 실패: {e}")
+            return None
+
+    def close_specifications_dialog(self):
+        """Specification 다이얼로그 닫기"""
+        try:
+            print("  [INFO] Specification 다이얼로그 닫기...")
+            xpaths = [
+                '//button[@data-testid="brix-sheet-closeButton"]',
+                '//button[@aria-label="Close Sheet"]',
+                '//div[@class="relative"]//button'
+            ]
+
+            for xpath in xpaths:
+                try:
+                    close_button = self.driver.find_element(By.XPATH, xpath)
+                    close_button.click()
+                    print("  [OK] 다이얼로그 닫기 성공")
+                    time.sleep(2)
+                    return True
+                except:
+                    continue
+
+            print("  [WARNING] 다이얼로그 닫기 버튼을 찾을 수 없습니다.")
+            return False
+
+        except Exception as e:
+            print(f"  [ERROR] 다이얼로그 닫기 실패: {e}")
+            return False
 
     def test_product(self, idx, url):
         """단일 제품 테스트"""
@@ -234,13 +197,20 @@ class BestBuyTest:
             self.driver.get(url)
             time.sleep(random.uniform(8, 12))  # 초기 로딩 대기 증가
 
-            # See All Customer Reviews 클릭
-            if self.click_see_all_reviews():
-                # Top mentions 추출만 테스트
-                top_mentions = self.extract_top_mentions()
-                print(f"  [RESULT] Top_Mentions: {top_mentions}")
+            # Specification 버튼 클릭
+            if self.click_specifications():
+                # Samsung SKU Name 추출
+                samsung_sku_name = self.extract_samsung_sku_name()
+                print(f"  [RESULT] Samsung_SKU_Name: {samsung_sku_name}")
+
+                # Estimated Annual Electricity Use 추출
+                electricity_use = self.extract_electricity_use()
+                print(f"  [RESULT] Estimated_Annual_Electricity_Use: {electricity_use}")
+
+                # 다이얼로그 닫기
+                self.close_specifications_dialog()
             else:
-                print("  [SKIP] See All Reviews 버튼을 찾지 못했습니다.")
+                print("  [SKIP] Specification 버튼을 찾지 못했습니다.")
 
             return True
 
@@ -255,7 +225,7 @@ class BestBuyTest:
         try:
             print("="*80)
             print("Best Buy Detail Crawler Test")
-            print("Testing: top_mentions only")
+            print("Testing: samsung_sku_name & estimated_annual_electricity_use")
             print("="*80)
 
             # 드라이버 설정

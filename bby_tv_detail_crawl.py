@@ -5,6 +5,7 @@ Best Buy TV Detail Page Crawler
 """
 import time
 import random
+import re
 import psycopg2
 from datetime import datetime
 import pytz
@@ -310,18 +311,32 @@ class BestBuyDetailCrawler:
             for star in range(5, 0, -1):
                 # 여러 XPath 패턴 시도
                 xpaths = [
+                    # 가장 구체적인 패턴 (HTML 예시와 일치)
+                    f'//a[contains(@href, "rating={star}")]//span[contains(@class, "uq0khJy2NYfr1ydM") and contains(@class, "text-left") and contains(@class, "v-text-tech-black") and @aria-hidden="true"]',
+                    # 조금 더 넓은 패턴
                     f'//a[contains(@href, "rating={star}")]//span[@class="uq0khJy2NYfr1ydM text-left v-text-tech-black" and @aria-hidden="true"]',
                     f'//a[contains(@href, "rating={star}")]//span[@class="uq0khJy2NYfr1ydM text-left v-text-tech-black"]',
+                    # 더 넓은 패턴
                     f'//a[contains(@href, "rating={star}")]//span[contains(@class, "uq0khJy2NYfr1ydM")]',
-                    f'//a[contains(@href, "rating={star}")]//span[contains(@class, "text-left") and contains(@class, "v-text-tech-black")]'
+                    f'//a[contains(@href, "rating={star}")]//span[contains(@class, "text-left") and contains(@class, "v-text-tech-black")]',
+                    # sr-only에서 추출하는 fallback
+                    f'//a[contains(@href, "rating={star}")]//span[@class="sr-only"]'
                 ]
 
                 count = "0"
                 for xpath in xpaths:
                     elem = tree.xpath(xpath)
                     if elem:
-                        count = elem[0].text_content().strip()
-                        break
+                        text = elem[0].text_content().strip()
+                        # sr-only인 경우 "5 star rating. 9 reviews"에서 숫자 추출
+                        if "reviews" in text or "review" in text:
+                            match = re.search(r'(\d+)\s+review', text)
+                            if match:
+                                count = match.group(1)
+                                break
+                        else:
+                            count = text
+                            break
 
                 # 1star는 단수형, 나머지는 복수형
                 key = f"{star}star" if star == 1 else f"{star}stars"
@@ -341,9 +356,13 @@ class BestBuyDetailCrawler:
             mentions = []
             # 여러 XPath 패턴 시도
             xpaths = [
+                # HTML 예시에 맞춘 패턴
+                '//ul[@class="list-unstyled"]//li[contains(@class, "inline-block")]//a[contains(@class, "pPqRKazD1ugrkdAf")]',
                 '//li[contains(@class, "inline-block")]//a[contains(@class, "pPqRKazD1ugrkdAf")]',
                 '//a[contains(@class, "pPqRKazD1ugrkdAf")]',
-                '//ul[@class="list-unstyled"]//a[contains(@href, "feature=")]'
+                '//ul[@class="list-unstyled"]//a[contains(@href, "feature=")]',
+                # 더 넓은 패턴
+                '//a[contains(@href, "feature=")]'
             ]
 
             for xpath in xpaths:
@@ -351,10 +370,13 @@ class BestBuyDetailCrawler:
                 if mention_elements:
                     for elem in mention_elements[:10]:  # 최대 10개
                         text = elem.text_content().strip()
-                        # svg 아이콘 텍스트 제거 (예: "Advantage Icon")
+                        # svg 아이콘 텍스트 제거 (예: "Advantage Icon", "Disadvantage Icon")
                         text = text.replace("Advantage Icon", "").replace("Disadvantage Icon", "").strip()
-                        # 여러 공백을 하나로
+                        # &nbsp; 처리 및 여러 공백을 하나로
+                        text = text.replace('\u00a0', ' ')  # &nbsp; -> 공백
                         text = ' '.join(text.split())
+                        # 괄호 앞 공백 제거 (예: "Picture Quality (114)" -> "Picture Quality(114)")
+                        text = re.sub(r'\s+\(', '(', text)
                         if text:
                             mentions.append(text)
                     break
@@ -374,7 +396,7 @@ class BestBuyDetailCrawler:
             print("  [INFO] 페이지 스크롤 시작...")
             scroll_height = self.driver.execute_script("return document.body.scrollHeight")
             current_position = 0
-            step = 500  # 500px씩 스크롤
+            step = 400  # 400px씩 스크롤 (더 천천히)
 
             xpaths = [
                 '//button[contains(., "See All Customer Reviews")]',
@@ -391,9 +413,12 @@ class BestBuyDetailCrawler:
                         print("  [OK] See All Customer Reviews 버튼 발견")
                         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
                         time.sleep(2)
+                        # 버튼이 클릭 가능할 때까지 대기
+                        wait = WebDriverWait(self.driver, 5)
+                        wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
                         button.click()
                         print("  [OK] See All Customer Reviews 클릭 성공")
-                        time.sleep(3)
+                        time.sleep(4)  # 리뷰 페이지 로딩 대기 (3초 -> 4초)
                         return True
                     except:
                         continue
@@ -401,7 +426,7 @@ class BestBuyDetailCrawler:
                 # 버튼을 못 찾으면 계속 스크롤
                 current_position += step
                 self.driver.execute_script(f"window.scrollTo(0, {current_position});")
-                time.sleep(0.5)
+                time.sleep(1.5)  # 스크롤 후 대기 시간 증가 (0.5초 -> 1.5초)
 
             print("  [WARNING] See All Customer Reviews 버튼을 찾을 수 없습니다.")
             return False
@@ -463,9 +488,11 @@ class BestBuyDetailCrawler:
         try:
             # 여러 XPath 패턴 시도
             xpaths = [
-                # 새로운 패턴: svg와 span이 있는 div
+                # HTML 예시에 맞춘 패턴: svg + span.font-weight-bold를 포함하는 div
+                '//div[contains(@class, "v-text-dark-gray") and .//svg and .//span[@class="font-weight-bold"]]',
+                # svg와 span이 있는 div
                 '//div[.//svg[contains(@class, "mr-50")] and .//span[@class="font-weight-bold"]]',
-                # 기존 패턴
+                # "would recommend" 텍스트를 포함하는 div
                 '//div[contains(@class, "v-text-dark-gray") and contains(., "would recommend")]',
                 # 더 넓은 패턴
                 '//div[contains(., "would recommend to a friend")]'
@@ -477,6 +504,9 @@ class BestBuyDetailCrawler:
                     text = elem[0].text_content().strip()
                     # "83% would recommend to a friend" 형식으로 추출
                     text = ' '.join(text.split())  # 여러 공백을 하나로
+                    # 불필요한 줄바꿈 제거
+                    text = text.replace('\n', ' ').replace('\r', ' ')
+                    text = ' '.join(text.split())
                     return text
 
             return None
@@ -508,6 +538,15 @@ class BestBuyDetailCrawler:
             electricity_use = None
 
             if self.click_specifications():
+                # 다이얼로그가 완전히 로드될 때까지 대기
+                try:
+                    # Model Number 요소가 나타날 때까지 최대 10초 대기
+                    wait = WebDriverWait(self.driver, 10)
+                    wait.until(EC.presence_of_element_located((By.XPATH, '//div[contains(text(), "Model Number")]')))
+                    print("  [OK] 다이얼로그 로드 완료")
+                except Exception as e:
+                    print(f"  [WARNING] 다이얼로그 로딩 대기 타임아웃: {e}")
+
                 time.sleep(2)
                 # 다이얼로그 소스 가져오기
                 dialog_source = self.driver.page_source

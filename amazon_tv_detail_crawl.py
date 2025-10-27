@@ -9,6 +9,9 @@ import pytz
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 from lxml import html
 import re
@@ -549,8 +552,19 @@ class AmazonDetailCrawler:
             # Extract count of star ratings
             count_of_star_ratings = self.extract_count_of_star_ratings(tree)
 
-            # Extract summarized review content
-            summarized_review_content = self.extract_summarized_review(tree)
+            # Extract summarized review content (dynamically loaded by JavaScript)
+            summarized_review_content = None
+            try:
+                # Wait for the summarized review element to load (up to 10 seconds)
+                wait = WebDriverWait(self.driver, 10)
+                summary_element = wait.until(
+                    EC.presence_of_element_located((By.XPATH, '//div[@data-testid="overall-summary"]//span[contains(@class, "__SAR2l0zNyyuZ")]'))
+                )
+                summarized_review_content = summary_element.text.strip() if summary_element.text else None
+                if summarized_review_content:
+                    print(f"  [INFO] Found summarized review: {summarized_review_content[:50]}...")
+            except Exception as e:
+                print(f"  [WARNING] Summarized review not found (may not exist for this product): {str(e)[:100]}")
 
             # Extract detailed review content (20 reviews in JSON format)
             detailed_review_content = self.extract_detailed_reviews(url)

@@ -344,16 +344,32 @@ class BestBuyDetailCrawler:
     def extract_top_mentions_from_reviews_page(self):
         """Top_Mentions 추출 (See All Customer Reviews 페이지에서)"""
         try:
-            # XPath 패턴
-            xpath = '//*[@id="user-generated-content-ugc-stats-68760209"]/div/div/span/span/a/span'
+            # XPath 패턴 (ID가 동적이므로 class 기반으로 찾기)
+            xpaths = [
+                # "Highly rated by customers for" 섹션의 span.text-nowrap들
+                '//div[contains(@class, "customer-review-pros-stats")]//span[@class="text-nowrap"]',
+                # 더 넓은 패턴
+                '//div[contains(., "Highly rated by customers for")]//span[@class="text-nowrap"]'
+            ]
 
-            try:
-                elem = self.driver.find_element(By.XPATH, xpath)
-                text = elem.text.strip()
-                if text:
-                    return text
-            except Exception:
-                pass
+            mentions = []
+            for xpath in xpaths:
+                try:
+                    elements = self.driver.find_elements(By.XPATH, xpath)
+                    if elements:
+                        for elem in elements:
+                            text = elem.text.strip()
+                            # 콤마나 기타 불필요한 문자 제거
+                            text = text.replace(',', '').strip()
+                            if text:
+                                mentions.append(text)
+                        break
+                except Exception:
+                    continue
+
+            if mentions:
+                # 콤마로 구분하여 반환 (예: "Picture Quality, Brightness, Black Levels")
+                return ", ".join(mentions)
 
             return None
 

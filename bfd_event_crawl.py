@@ -1,6 +1,7 @@
 import time
 import random
 import psycopg2
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options

@@ -122,8 +122,16 @@ class WalmartDetailCrawler:
 
             cursor.close()
 
-            all_urls = main_urls + bsr_urls
-            print(f"[OK] Loaded {len(main_urls)} main URLs + {len(bsr_urls)} bsr URLs = {len(all_urls)} total")
+            # Remove duplicate URLs (keep main, skip duplicates from bsr)
+            main_url_set = {item['url'] for item in main_urls}
+            unique_bsr_urls = [item for item in bsr_urls if item['url'] not in main_url_set]
+
+            duplicates_removed = len(bsr_urls) - len(unique_bsr_urls)
+            if duplicates_removed > 0:
+                print(f"[INFO] Removed {duplicates_removed} duplicate URLs from BSR (already in Main)")
+
+            all_urls = main_urls + unique_bsr_urls
+            print(f"[OK] Loaded {len(main_urls)} main URLs + {len(unique_bsr_urls)} unique bsr URLs = {len(all_urls)} total")
             return all_urls
 
         except Exception as e:

@@ -5,6 +5,8 @@ from datetime import datetime
 from playwright.sync_api import sync_playwright
 from lxml import html
 import re
+import os
+import json
 from urllib.parse import urlparse, parse_qs, unquote
 
 # Database configuration
@@ -15,6 +17,9 @@ DB_CONFIG = {
     'user': 'postgres',
     'password': 'admin2025!'
 }
+
+# Storage state file for cookies and localStorage
+STORAGE_STATE_FILE = "walmart_storage_state.json"
 
 class WalmartTVCrawler:
     def __init__(self):
@@ -108,16 +113,25 @@ class WalmartTVCrawler:
                 ]
             )
 
+            # Check if we have saved storage state (cookies + localStorage)
+            storage_state = None
+            if os.path.exists(STORAGE_STATE_FILE):
+                print(f"[INFO] Found saved storage state: {STORAGE_STATE_FILE}")
+                print("[INFO] Loading cookies and localStorage from previous session...")
+                storage_state = STORAGE_STATE_FILE
+            else:
+                print("[INFO] No saved storage state found, starting fresh session")
+
             # Create context with realistic settings
-            self.context = self.browser.new_context(
-                viewport={'width': 1920, 'height': 1080},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                locale='en-US',
-                timezone_id='America/New_York',
-                permissions=['geolocation', 'notifications'],
-                geolocation={'longitude': -74.006, 'latitude': 40.7128},
-                color_scheme='light',
-                extra_http_headers={
+            context_options = {
+                'viewport': {'width': 1920, 'height': 1080},
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                'locale': 'en-US',
+                'timezone_id': 'America/New_York',
+                'permissions': ['geolocation', 'notifications'],
+                'geolocation': {'longitude': -74.006, 'latitude': 40.7128},
+                'color_scheme': 'light',
+                'extra_http_headers': {
                     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
                     'Accept-Language': 'en-US,en;q=0.9',
                     'Accept-Encoding': 'gzip, deflate, br',
@@ -130,7 +144,13 @@ class WalmartTVCrawler:
                     'Sec-Fetch-User': '?1',
                     'Cache-Control': 'max-age=0'
                 }
-            )
+            }
+
+            # Add storage_state if available
+            if storage_state:
+                context_options['storage_state'] = storage_state
+
+            self.context = self.browser.new_context(**context_options)
 
             # Add comprehensive stealth scripts
             self.context.add_init_script("""
@@ -275,6 +295,18 @@ class WalmartTVCrawler:
 
         except Exception as e:
             print(f"[ERROR] Failed to setup Playwright: {e}")
+            return False
+
+    def save_storage_state(self):
+        """Save current storage state (cookies + localStorage) to file"""
+        try:
+            if self.context:
+                self.context.storage_state(path=STORAGE_STATE_FILE)
+                print(f"[OK] Storage state saved to: {STORAGE_STATE_FILE}")
+                print("[INFO] Next run will use these cookies to avoid bot detection")
+                return True
+        except Exception as e:
+            print(f"[WARNING] Failed to save storage state: {e}")
             return False
 
     def add_random_mouse_movements(self):
@@ -807,6 +839,10 @@ class WalmartTVCrawler:
             traceback.print_exc()
 
         finally:
+            # Save storage state before closing (cookies + localStorage)
+            print("\n[INFO] Saving storage state for future sessions...")
+            self.save_storage_state()
+
             if self.page:
                 try:
                     self.page.close()

@@ -503,13 +503,34 @@ class WalmartTVCrawler:
         """Initialize session by searching Walmart through Google"""
         try:
             print("[INFO] Initializing session - visiting Google...")
-            self.page.goto("https://www.google.com", wait_until="networkidle")
+            self.page.goto("https://www.google.com", wait_until="domcontentloaded")
             time.sleep(random.uniform(3, 5))
 
             # Search for "walmart"
             print("[INFO] Searching for 'walmart' on Google...")
             try:
-                search_box = self.page.wait_for_selector("input[name='q']", timeout=20000)
+                # Try multiple selectors for Google search box
+                search_box = None
+                selectors = [
+                    "textarea[name='q']",
+                    "input[name='q']",
+                    "textarea[title='Search']",
+                    "input[title='Search']"
+                ]
+
+                for selector in selectors:
+                    try:
+                        print(f"[DEBUG] Trying selector: {selector}")
+                        search_box = self.page.wait_for_selector(selector, timeout=5000)
+                        if search_box:
+                            print(f"[OK] Found search box with: {selector}")
+                            break
+                    except:
+                        continue
+
+                if not search_box:
+                    raise Exception("Could not find Google search box with any selector")
+
                 time.sleep(random.uniform(1, 2))
 
                 # Type "walmart" character by character
@@ -518,7 +539,7 @@ class WalmartTVCrawler:
 
                 time.sleep(random.uniform(1, 2))
                 search_box.press("Enter")
-                self.page.wait_for_load_state("networkidle")
+                self.page.wait_for_load_state("domcontentloaded")
                 time.sleep(random.uniform(3, 5))
 
                 print("[INFO] Clicking on Walmart link from search results...")
@@ -526,12 +547,12 @@ class WalmartTVCrawler:
                 walmart_link = self.page.wait_for_selector("a[href*='walmart.com']", timeout=20000)
                 time.sleep(random.uniform(1, 2))
                 walmart_link.click()
-                self.page.wait_for_load_state("networkidle")
+                self.page.wait_for_load_state("domcontentloaded")
                 time.sleep(random.uniform(5, 8))
 
             except Exception as e:
                 print(f"[WARNING] Google search failed: {e}, trying direct access...")
-                self.page.goto("https://www.walmart.com", wait_until="networkidle")
+                self.page.goto("https://www.walmart.com", wait_until="domcontentloaded")
                 time.sleep(random.uniform(8, 12))
 
             # Add random mouse movements

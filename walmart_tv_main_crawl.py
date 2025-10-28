@@ -694,9 +694,58 @@ class WalmartTVCrawler:
                 time.sleep(random.uniform(1, 2))
                 self.add_random_mouse_movements()
 
-            # Scroll back to top
+            # Scroll back to top to see search box
+            print("[INFO] Scrolling back to top...")
             self.page.evaluate("window.scrollTo(0, 0)")
-            time.sleep(random.uniform(1, 2))
+            time.sleep(random.uniform(2, 3))
+
+            # Try to search for TV from homepage
+            print("[INFO] Searching for 'TV' from homepage...")
+            try:
+                # Try multiple selectors for Walmart search box
+                search_box = None
+                selectors = [
+                    "input[type='search']",
+                    "input[aria-label*='Search']",
+                    "input[placeholder*='Search']",
+                    "input[name='q']"
+                ]
+
+                for selector in selectors:
+                    try:
+                        print(f"[DEBUG] Trying search box selector: {selector}")
+                        search_box = self.page.wait_for_selector(selector, timeout=5000)
+                        if search_box:
+                            print(f"[OK] Found search box with: {selector}")
+                            break
+                    except:
+                        continue
+
+                if search_box:
+                    # Click on search box
+                    search_box.click()
+                    time.sleep(random.uniform(1, 2))
+
+                    # Type "TV" character by character
+                    print("[INFO] Typing 'TV' in search box...")
+                    for char in "TV":
+                        search_box.type(char, delay=random.uniform(200, 400))
+
+                    time.sleep(random.uniform(1, 2))
+
+                    # Press Enter
+                    print("[INFO] Pressing Enter to search...")
+                    search_box.press("Enter")
+                    self.page.wait_for_load_state("domcontentloaded")
+                    time.sleep(random.uniform(5, 8))
+
+                    print("[OK] Successfully searched for TV")
+                else:
+                    print("[WARNING] Could not find search box, will try alternative method later")
+
+            except Exception as e:
+                print(f"[WARNING] Failed to search from homepage: {e}")
+                print("[INFO] Will try alternative navigation method later")
 
             print("[OK] Session initialized")
             return True

@@ -462,19 +462,46 @@ class WalmartTVCrawler:
             return False
 
     def initialize_session(self):
-        """Initialize session by visiting Walmart homepage first"""
+        """Initialize session by searching Walmart through Google"""
         try:
-            print("[INFO] Initializing session - visiting Walmart homepage...")
-            self.driver.get("https://www.walmart.com")
-            time.sleep(random.uniform(8, 12))
+            print("[INFO] Initializing session - visiting Google...")
+            self.driver.get("https://www.google.com")
+            time.sleep(random.uniform(3, 5))
+
+            # Search for "walmart"
+            print("[INFO] Searching for 'walmart' on Google...")
+            try:
+                search_box = self.wait.until(EC.presence_of_element_located((By.NAME, "q")))
+                time.sleep(random.uniform(1, 2))
+
+                # Type "walmart" character by character
+                for char in "walmart":
+                    search_box.send_keys(char)
+                    time.sleep(random.uniform(0.15, 0.3))
+
+                time.sleep(random.uniform(1, 2))
+                search_box.submit()
+                time.sleep(random.uniform(3, 5))
+
+                print("[INFO] Clicking on Walmart link from search results...")
+                # Find and click on walmart.com link
+                walmart_link = self.wait.until(EC.presence_of_element_located((By.XPATH, "//a[contains(@href, 'walmart.com')]")))
+                time.sleep(random.uniform(1, 2))
+                walmart_link.click()
+                time.sleep(random.uniform(5, 8))
+
+            except Exception as e:
+                print(f"[WARNING] Google search failed: {e}, trying direct access...")
+                self.driver.get("https://www.walmart.com")
+                time.sleep(random.uniform(8, 12))
 
             # Add random mouse movements
             self.add_random_mouse_movements()
             time.sleep(random.uniform(1, 3))
 
-            # Check if we got the robot page on homepage
+            # Check if we got the robot page
             if self.check_robot_page(self.driver.page_source):
-                print("[WARNING] Robot detection on homepage. Trying recovery...")
+                print("[WARNING] Robot detection detected. Trying recovery...")
 
                 # Try scrolling
                 for _ in range(3):
@@ -490,7 +517,7 @@ class WalmartTVCrawler:
                 time.sleep(random.uniform(10, 15))
 
                 if self.check_robot_page(self.driver.page_source):
-                    print("[ERROR] Cannot bypass robot detection on homepage")
+                    print("[ERROR] Cannot bypass robot detection")
                     return False
 
             print("[OK] Session initialized successfully")

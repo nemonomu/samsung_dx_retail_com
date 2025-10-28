@@ -84,20 +84,27 @@ class WalmartTVCrawler:
             return []
 
     def setup_playwright(self):
-        """Setup Playwright browser with stealth mode"""
+        """Setup Playwright browser with enhanced stealth mode"""
         try:
             self.playwright = sync_playwright().start()
 
-            # Launch browser with stealth settings
+            # Launch browser with channel="chrome" to use installed Chrome
+            # This helps avoid detection as it uses real Chrome instead of Chromium
             self.browser = self.playwright.chromium.launch(
                 headless=False,
+                channel="chrome",  # Use installed Chrome
                 args=[
                     '--disable-blink-features=AutomationControlled',
                     '--disable-dev-shm-usage',
                     '--no-sandbox',
-                    '--disable-gpu',
+                    '--disable-setuid-sandbox',
+                    '--disable-infobars',
                     '--window-size=1920,1080',
-                    '--lang=en-US,en;q=0.9'
+                    '--start-maximized',
+                    '--disable-web-security',
+                    '--disable-features=IsolateOrigins,site-per-process',
+                    '--lang=en-US,en;q=0.9',
+                    '--disable-blink-features=AutomationControlled'
                 ]
             )
 
@@ -109,18 +116,58 @@ class WalmartTVCrawler:
                 timezone_id='America/New_York',
                 permissions=['geolocation', 'notifications'],
                 geolocation={'longitude': -74.006, 'latitude': 40.7128},
+                color_scheme='light',
+                extra_http_headers={
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'DNT': '1',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
+                    'Cache-Control': 'max-age=0'
+                }
             )
 
-            # Add stealth scripts
+            # Add comprehensive stealth scripts
             self.context.add_init_script("""
                 // Override the navigator.webdriver property
                 Object.defineProperty(navigator, 'webdriver', {
                     get: () => undefined
                 });
 
+                // Remove automation indicators
+                delete navigator.__proto__.webdriver;
+
                 // Override plugins to avoid headless detection
                 Object.defineProperty(navigator, 'plugins', {
-                    get: () => [1, 2, 3, 4, 5]
+                    get: () => [
+                        {
+                            0: {type: "application/x-google-chrome-pdf", suffixes: "pdf", description: "Portable Document Format"},
+                            description: "Portable Document Format",
+                            filename: "internal-pdf-viewer",
+                            length: 1,
+                            name: "Chrome PDF Plugin"
+                        },
+                        {
+                            0: {type: "application/pdf", suffixes: "pdf", description: ""},
+                            description: "",
+                            filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai",
+                            length: 1,
+                            name: "Chrome PDF Viewer"
+                        },
+                        {
+                            0: {type: "application/x-nacl", suffixes: "", description: "Native Client Executable"},
+                            1: {type: "application/x-pnacl", suffixes: "", description: "Portable Native Client Executable"},
+                            description: "",
+                            filename: "internal-nacl-plugin",
+                            length: 2,
+                            name: "Native Client"
+                        }
+                    ]
                 });
 
                 // Override languages
@@ -130,7 +177,10 @@ class WalmartTVCrawler:
 
                 // Add chrome object
                 window.chrome = {
-                    runtime: {}
+                    runtime: {},
+                    loadTimes: function() {},
+                    csi: function() {},
+                    app: {}
                 };
 
                 // Override permissions
@@ -140,6 +190,79 @@ class WalmartTVCrawler:
                         Promise.resolve({ state: Notification.permission }) :
                         originalQuery(parameters)
                 );
+
+                // Mock battery API
+                Object.defineProperty(navigator, 'getBattery', {
+                    value: () => Promise.resolve({
+                        charging: true,
+                        chargingTime: 0,
+                        dischargingTime: Infinity,
+                        level: 1,
+                        addEventListener: () => {},
+                        removeEventListener: () => {},
+                        dispatchEvent: () => true
+                    })
+                });
+
+                // Canvas fingerprinting protection
+                const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+                HTMLCanvasElement.prototype.toDataURL = function(type) {
+                    if (type === 'image/png' && this.width === 280 && this.height === 60) {
+                        return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+                    }
+                    return originalToDataURL.apply(this, arguments);
+                };
+
+                // WebGL vendor override
+                const getParameter = WebGLRenderingContext.prototype.getParameter;
+                WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                    if (parameter === 37445) {
+                        return 'Intel Inc.';
+                    }
+                    if (parameter === 37446) {
+                        return 'Intel Iris OpenGL Engine';
+                    }
+                    return getParameter.apply(this, arguments);
+                };
+
+                // Screen resolution consistency
+                Object.defineProperty(screen, 'width', {
+                    get: () => 1920
+                });
+                Object.defineProperty(screen, 'height', {
+                    get: () => 1080
+                });
+                Object.defineProperty(screen, 'availWidth', {
+                    get: () => 1920
+                });
+                Object.defineProperty(screen, 'availHeight', {
+                    get: () => 1040
+                });
+
+                // Notification permission
+                Object.defineProperty(Notification, 'permission', {
+                    get: () => 'default'
+                });
+
+                // Connection type
+                Object.defineProperty(navigator, 'connection', {
+                    get: () => ({
+                        effectiveType: '4g',
+                        rtt: 50,
+                        downlink: 10,
+                        saveData: false
+                    })
+                });
+
+                // Hardware concurrency
+                Object.defineProperty(navigator, 'hardwareConcurrency', {
+                    get: () => 8
+                });
+
+                // Device memory
+                Object.defineProperty(navigator, 'deviceMemory', {
+                    get: () => 8
+                });
             """)
 
             self.page = self.context.new_page()
@@ -147,7 +270,7 @@ class WalmartTVCrawler:
             # Set default timeout
             self.page.set_default_timeout(60000)
 
-            print("[OK] Playwright browser setup complete (stealth mode enabled)")
+            print("[OK] Playwright browser setup complete (enhanced stealth mode)")
             return True
 
         except Exception as e:
@@ -500,87 +623,82 @@ class WalmartTVCrawler:
             return False
 
     def initialize_session(self):
-        """Initialize session by searching Walmart through Google"""
+        """Initialize session with natural browsing pattern"""
         try:
-            print("[INFO] Initializing session - visiting Google...")
-            self.page.goto("https://www.google.com", wait_until="domcontentloaded")
-            time.sleep(random.uniform(3, 5))
+            print("[INFO] Initializing session - starting with simple page...")
 
-            # Search for "walmart"
-            print("[INFO] Searching for 'walmart' on Google...")
-            try:
-                # Try multiple selectors for Google search box
-                search_box = None
-                selectors = [
-                    "textarea[name='q']",
-                    "input[name='q']",
-                    "textarea[title='Search']",
-                    "input[title='Search']"
-                ]
+            # Start with a simple, less-protected page first
+            print("[INFO] Visiting example.com first...")
+            self.page.goto("http://example.com", wait_until="domcontentloaded")
+            time.sleep(random.uniform(2, 4))
 
-                for selector in selectors:
-                    try:
-                        print(f"[DEBUG] Trying selector: {selector}")
-                        search_box = self.page.wait_for_selector(selector, timeout=5000)
-                        if search_box:
-                            print(f"[OK] Found search box with: {selector}")
-                            break
-                    except:
-                        continue
+            # Random scroll on example.com
+            for _ in range(random.randint(1, 2)):
+                self.page.evaluate("window.scrollBy(0, 200)")
+                time.sleep(random.uniform(0.5, 1))
 
-                if not search_box:
-                    raise Exception("Could not find Google search box with any selector")
-
-                time.sleep(random.uniform(1, 2))
-
-                # Type "walmart" character by character
-                for char in "walmart":
-                    search_box.type(char, delay=random.uniform(150, 300))
-
-                time.sleep(random.uniform(1, 2))
-                search_box.press("Enter")
-                self.page.wait_for_load_state("domcontentloaded")
-                time.sleep(random.uniform(3, 5))
-
-                print("[INFO] Clicking on Walmart link from search results...")
-                # Find and click on walmart.com link
-                walmart_link = self.page.wait_for_selector("a[href*='walmart.com']", timeout=20000)
-                time.sleep(random.uniform(1, 2))
-                walmart_link.click()
-                self.page.wait_for_load_state("domcontentloaded")
-                time.sleep(random.uniform(5, 8))
-
-            except Exception as e:
-                print(f"[WARNING] Google search failed: {e}, trying direct access...")
-                self.page.goto("https://www.walmart.com", wait_until="domcontentloaded")
-                time.sleep(random.uniform(8, 12))
-
-            # Add random mouse movements
+            # Add mouse movements
             self.add_random_mouse_movements()
-            time.sleep(random.uniform(1, 3))
+            time.sleep(random.uniform(1, 2))
 
-            # Check if we got the robot page
+            # Now navigate to Walmart homepage slowly
+            print("[INFO] Navigating to Walmart homepage...")
+            self.page.goto("https://www.walmart.com", wait_until="domcontentloaded")
+            time.sleep(random.uniform(8, 12))
+
+            # Check for robot detection
             if self.check_robot_page(self.page.content()):
-                print("[WARNING] Robot detection detected. Trying recovery...")
+                print("[WARNING] Robot detection on homepage. Trying recovery...")
 
-                # Try scrolling
-                for _ in range(3):
-                    self.page.evaluate("window.scrollBy(0, 300)")
-                    time.sleep(random.uniform(0.5, 1))
+                # More natural recovery behavior
+                print("[INFO] Simulating human confusion - random mouse movements...")
+                for _ in range(5):
+                    self.add_random_mouse_movements()
+                    time.sleep(random.uniform(0.8, 1.5))
 
-                time.sleep(20)
+                # Slow scroll down
+                print("[INFO] Scrolling slowly...")
+                for i in range(5):
+                    scroll_amount = random.randint(150, 300)
+                    self.page.evaluate(f"window.scrollBy(0, {scroll_amount})")
+                    time.sleep(random.uniform(1.5, 2.5))
 
-                # Add more mouse movements
-                self.add_random_mouse_movements()
+                # Scroll back up a bit
+                self.page.evaluate("window.scrollBy(0, -200)")
+                time.sleep(random.uniform(1, 2))
 
-                self.page.reload(wait_until="networkidle")
+                # Wait longer
+                print("[INFO] Waiting 30 seconds...")
+                time.sleep(30)
+
+                # Try reload
+                print("[INFO] Reloading page...")
+                self.page.reload(wait_until="domcontentloaded")
                 time.sleep(random.uniform(10, 15))
 
+                # Check again
                 if self.check_robot_page(self.page.content()):
-                    print("[ERROR] Cannot bypass robot detection")
-                    return False
+                    print("[ERROR] Still getting robot detection after recovery")
+                    print("[INFO] Attempting to continue anyway...")
+                    # Don't return False, try to continue
 
-            print("[OK] Session initialized successfully")
+            # More human-like exploration
+            print("[INFO] Exploring homepage...")
+            self.add_random_mouse_movements()
+            time.sleep(random.uniform(2, 4))
+
+            # Random scrolling
+            for _ in range(random.randint(2, 4)):
+                scroll_amount = random.randint(200, 500)
+                self.page.evaluate(f"window.scrollBy(0, {scroll_amount})")
+                time.sleep(random.uniform(1, 2))
+                self.add_random_mouse_movements()
+
+            # Scroll back to top
+            self.page.evaluate("window.scrollTo(0, 0)")
+            time.sleep(random.uniform(1, 2))
+
+            print("[OK] Session initialized")
             return True
 
         except Exception as e:

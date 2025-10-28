@@ -354,7 +354,7 @@ class WalmartTVCrawler:
                 print("[INFO] Navigating to Walmart browse page first...")
                 try:
                     # Try browse electronics category first
-                    self.page.goto("https://www.walmart.com/browse/electronics/tvs/3944_1060825", wait_until="networkidle")
+                    self.page.goto("https://www.walmart.com/browse/electronics/tvs/3944_1060825", wait_until="domcontentloaded", timeout=90000)
                     time.sleep(random.uniform(10, 15))
 
                     # Check for robot detection
@@ -384,14 +384,14 @@ class WalmartTVCrawler:
                         time.sleep(random.uniform(8, 12))
                     else:
                         print("[WARNING] Robot detected on browse page, using direct URL...")
-                        self.page.goto(url, wait_until="networkidle")
+                        self.page.goto(url, wait_until="domcontentloaded", timeout=90000)
                         time.sleep(random.uniform(12, 18))
                 except Exception as e:
                     print(f"[WARNING] Browse navigation failed: {e}, using direct URL...")
-                    self.page.goto(url, wait_until="networkidle")
+                    self.page.goto(url, wait_until="domcontentloaded", timeout=90000)
                     time.sleep(random.uniform(12, 18))
             else:
-                self.page.goto(url, wait_until="networkidle")
+                self.page.goto(url, wait_until="domcontentloaded", timeout=90000)
                 time.sleep(random.uniform(12, 18))
 
             # Check for robot detection
@@ -404,7 +404,7 @@ class WalmartTVCrawler:
                     time.sleep(wait_time)
 
                     print("[INFO] Refreshing page...")
-                    self.page.reload(wait_until="networkidle")
+                    self.page.reload(wait_until="domcontentloaded", timeout=90000)
                     time.sleep(random.uniform(10, 15))
 
                     return self.scrape_page(url, page_number, retry_count + 1)

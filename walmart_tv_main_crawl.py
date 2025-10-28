@@ -340,7 +340,7 @@ class WalmartTVCrawler:
                         # Now try search
                         print("[INFO] Now trying search for TV...")
                         search_box = self.page.wait_for_selector("input[type='search']", timeout=20000)
-                        search_box.clear()
+                        search_box.fill('')  # Clear the search box (Playwright method)
                         time.sleep(random.uniform(1, 2))
 
                         # Type "TV" character by character
@@ -488,7 +488,6 @@ class WalmartTVCrawler:
                     'Retailer_Membership_Discounts': membership_discount,
                     'Available_Quantity_for_Purchase': available_quantity,
                     'Inventory_Status': inventory_status,
-                    'Rank': None,  # To be added later
                     'Product_url': product_url
                 }
 
@@ -584,8 +583,8 @@ class WalmartTVCrawler:
                 ("order", page_type, Retailer_SKU_Name, Final_SKU_Price, Original_SKU_Price,
                  Offer, Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
                  SKU_Status, Retailer_Membership_Discounts, Available_Quantity_for_Purchase,
-                 Inventory_Status, Rank, Product_url, batch_id, calendar_week)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 Inventory_Status, Product_url, batch_id, calendar_week)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
                 collection_order,
@@ -601,7 +600,6 @@ class WalmartTVCrawler:
                 data['Retailer_Membership_Discounts'],
                 data['Available_Quantity_for_Purchase'],
                 data['Inventory_Status'],
-                data['Rank'],
                 data['Product_url'],
                 self.batch_id,
                 calendar_week

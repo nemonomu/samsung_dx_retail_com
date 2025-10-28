@@ -604,6 +604,21 @@ class WalmartTVCrawler:
         try:
             cursor = self.db_conn.cursor()
 
+            # Check for duplicate product_url in the same batch
+            product_url = data.get('Product_url')
+            if product_url:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM wmart_tv_main_crawl
+                    WHERE batch_id = %s AND Product_url = %s
+                """, (self.batch_id, product_url))
+
+                count = cursor.fetchone()[0]
+
+                if count > 0:
+                    cursor.close()
+                    print(f"  [SKIP] Duplicate URL already saved in this batch")
+                    return False
+
             # Use sequential_id (1-300) for collection order
             collection_order = self.sequential_id
 

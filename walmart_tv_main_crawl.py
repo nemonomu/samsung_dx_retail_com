@@ -2,10 +2,7 @@ import time
 import random
 import psycopg2
 from datetime import datetime
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from playwright.sync_api import sync_playwright
 from lxml import html
 import re
 from urllib.parse import urlparse, parse_qs, unquote
@@ -21,8 +18,10 @@ DB_CONFIG = {
 
 class WalmartTVCrawler:
     def __init__(self):
-        self.driver = None
-        self.wait = None
+        self.playwright = None
+        self.browser = None
+        self.context = None
+        self.page = None
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
@@ -84,46 +83,86 @@ class WalmartTVCrawler:
             print(f"[ERROR] Failed to load page URLs: {e}")
             return []
 
-    def setup_driver(self):
-        """Setup Chrome WebDriver with undetected-chromedriver to bypass PerimeterX"""
-        options = uc.ChromeOptions()
+    def setup_playwright(self):
+        """Setup Playwright browser with stealth mode"""
+        try:
+            self.playwright = sync_playwright().start()
 
-        # Basic options
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-gpu')
-        options.add_argument('--window-size=1920,1080')
-        options.add_argument('--lang=en-US,en;q=0.9')
+            # Launch browser with stealth settings
+            self.browser = self.playwright.chromium.launch(
+                headless=False,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-dev-shm-usage',
+                    '--no-sandbox',
+                    '--disable-gpu',
+                    '--window-size=1920,1080',
+                    '--lang=en-US,en;q=0.9'
+                ]
+            )
 
-        # Preferences
-        prefs = {
-            "profile.default_content_setting_values.notifications": 2,
-            "credentials_enable_service": False,
-            "profile.password_manager_enabled": False,
-        }
-        options.add_experimental_option("prefs", prefs)
+            # Create context with realistic settings
+            self.context = self.browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+                locale='en-US',
+                timezone_id='America/New_York',
+                permissions=['geolocation', 'notifications'],
+                geolocation={'longitude': -74.006, 'latitude': 40.7128},
+            )
 
-        # Use undetected_chromedriver (auto-detect Chrome version)
-        self.driver = uc.Chrome(options=options)
-        self.driver.set_page_load_timeout(60)
-        self.wait = WebDriverWait(self.driver, 20)
+            # Add stealth scripts
+            self.context.add_init_script("""
+                // Override the navigator.webdriver property
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
 
-        print("[OK] Undetected Chrome WebDriver setup complete (PerimeterX bypass enabled)")
+                // Override plugins to avoid headless detection
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5]
+                });
+
+                // Override languages
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en']
+                });
+
+                // Add chrome object
+                window.chrome = {
+                    runtime: {}
+                };
+
+                // Override permissions
+                const originalQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                        Promise.resolve({ state: Notification.permission }) :
+                        originalQuery(parameters)
+                );
+            """)
+
+            self.page = self.context.new_page()
+
+            # Set default timeout
+            self.page.set_default_timeout(60000)
+
+            print("[OK] Playwright browser setup complete (stealth mode enabled)")
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Failed to setup Playwright: {e}")
+            return False
 
     def add_random_mouse_movements(self):
         """Add random mouse movements to appear more human"""
         try:
-            from selenium.webdriver.common.action_chains import ActionChains
-            actions = ActionChains(self.driver)
-
             # Random small movements
             for _ in range(random.randint(2, 4)):
-                x_offset = random.randint(-100, 100)
-                y_offset = random.randint(-100, 100)
-                actions.move_by_offset(x_offset, y_offset)
-                actions.pause(random.uniform(0.1, 0.3))
-
-            actions.perform()
+                x = random.randint(100, 1800)
+                y = random.randint(100, 900)
+                self.page.mouse.move(x, y)
+                time.sleep(random.uniform(0.1, 0.3))
         except Exception as e:
             pass  # Silent fail if mouse movement doesn't work
 
@@ -160,11 +199,11 @@ class WalmartTVCrawler:
                 print("[INFO] Navigating to Walmart browse page first...")
                 try:
                     # Try browse electronics category first
-                    self.driver.get("https://www.walmart.com/browse/electronics/tvs/3944_1060825")
+                    self.page.goto("https://www.walmart.com/browse/electronics/tvs/3944_1060825", wait_until="networkidle")
                     time.sleep(random.uniform(10, 15))
 
                     # Check for robot detection
-                    if not self.check_robot_page(self.driver.page_source):
+                    if not self.check_robot_page(self.page.content()):
                         print("[OK] Browse page loaded successfully")
                         # Add human-like behavior
                         self.add_random_mouse_movements()
@@ -172,37 +211,36 @@ class WalmartTVCrawler:
 
                         # Scroll a bit
                         for _ in range(2):
-                            self.driver.execute_script("window.scrollBy(0, 400);")
+                            self.page.evaluate("window.scrollBy(0, 400)")
                             time.sleep(random.uniform(1, 2))
 
                         # Now try search
                         print("[INFO] Now trying search for TV...")
-                        search_box = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='search']")))
+                        search_box = self.page.wait_for_selector("input[type='search']", timeout=20000)
                         search_box.clear()
                         time.sleep(random.uniform(1, 2))
 
                         # Type "TV" character by character
                         for char in "TV":
-                            search_box.send_keys(char)
-                            time.sleep(random.uniform(0.2, 0.5))
+                            search_box.type(char, delay=random.uniform(200, 500))
 
                         time.sleep(random.uniform(1, 2))
-                        search_box.submit()
+                        search_box.press("Enter")
                         time.sleep(random.uniform(8, 12))
                     else:
                         print("[WARNING] Robot detected on browse page, using direct URL...")
-                        self.driver.get(url)
+                        self.page.goto(url, wait_until="networkidle")
                         time.sleep(random.uniform(12, 18))
                 except Exception as e:
                     print(f"[WARNING] Browse navigation failed: {e}, using direct URL...")
-                    self.driver.get(url)
+                    self.page.goto(url, wait_until="networkidle")
                     time.sleep(random.uniform(12, 18))
             else:
-                self.driver.get(url)
+                self.page.goto(url, wait_until="networkidle")
                 time.sleep(random.uniform(12, 18))
 
             # Check for robot detection
-            page_source = self.driver.page_source
+            page_source = self.page.content()
             if self.check_robot_page(page_source):
                 if retry_count < max_retries:
                     print(f"[WARNING] Robot detection page detected. Retry {retry_count + 1}/{max_retries}...")
@@ -211,7 +249,7 @@ class WalmartTVCrawler:
                     time.sleep(wait_time)
 
                     print("[INFO] Refreshing page...")
-                    self.driver.refresh()
+                    self.page.reload(wait_until="networkidle")
                     time.sleep(random.uniform(10, 15))
 
                     return self.scrape_page(url, page_number, retry_count + 1)
@@ -228,23 +266,23 @@ class WalmartTVCrawler:
 
             # Scroll to load all products
             print("[INFO] Scrolling to load all products...")
-            last_height = self.driver.execute_script("return document.body.scrollHeight")
+            last_height = self.page.evaluate("document.body.scrollHeight")
 
             for scroll_round in range(2):
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 time.sleep(3)
 
-                new_height = self.driver.execute_script("return document.body.scrollHeight")
+                new_height = self.page.evaluate("document.body.scrollHeight")
                 if new_height == last_height:
                     break
                 last_height = new_height
 
             # Scroll back to top
-            self.driver.execute_script("window.scrollTo(0, 0);")
+            self.page.evaluate("window.scrollTo(0, 0)")
             time.sleep(2)
 
             # Get page source and parse with lxml
-            page_source = self.driver.page_source
+            page_source = self.page.content()
             tree = html.fromstring(page_source)
 
             # Find all product containers
@@ -465,34 +503,35 @@ class WalmartTVCrawler:
         """Initialize session by searching Walmart through Google"""
         try:
             print("[INFO] Initializing session - visiting Google...")
-            self.driver.get("https://www.google.com")
+            self.page.goto("https://www.google.com", wait_until="networkidle")
             time.sleep(random.uniform(3, 5))
 
             # Search for "walmart"
             print("[INFO] Searching for 'walmart' on Google...")
             try:
-                search_box = self.wait.until(EC.presence_of_element_located((By.NAME, "q")))
+                search_box = self.page.wait_for_selector("input[name='q']", timeout=20000)
                 time.sleep(random.uniform(1, 2))
 
                 # Type "walmart" character by character
                 for char in "walmart":
-                    search_box.send_keys(char)
-                    time.sleep(random.uniform(0.15, 0.3))
+                    search_box.type(char, delay=random.uniform(150, 300))
 
                 time.sleep(random.uniform(1, 2))
-                search_box.submit()
+                search_box.press("Enter")
+                self.page.wait_for_load_state("networkidle")
                 time.sleep(random.uniform(3, 5))
 
                 print("[INFO] Clicking on Walmart link from search results...")
                 # Find and click on walmart.com link
-                walmart_link = self.wait.until(EC.presence_of_element_located((By.XPATH, "//a[contains(@href, 'walmart.com')]")))
+                walmart_link = self.page.wait_for_selector("a[href*='walmart.com']", timeout=20000)
                 time.sleep(random.uniform(1, 2))
                 walmart_link.click()
+                self.page.wait_for_load_state("networkidle")
                 time.sleep(random.uniform(5, 8))
 
             except Exception as e:
                 print(f"[WARNING] Google search failed: {e}, trying direct access...")
-                self.driver.get("https://www.walmart.com")
+                self.page.goto("https://www.walmart.com", wait_until="networkidle")
                 time.sleep(random.uniform(8, 12))
 
             # Add random mouse movements
@@ -500,12 +539,12 @@ class WalmartTVCrawler:
             time.sleep(random.uniform(1, 3))
 
             # Check if we got the robot page
-            if self.check_robot_page(self.driver.page_source):
+            if self.check_robot_page(self.page.content()):
                 print("[WARNING] Robot detection detected. Trying recovery...")
 
                 # Try scrolling
                 for _ in range(3):
-                    self.driver.execute_script("window.scrollBy(0, 300);")
+                    self.page.evaluate("window.scrollBy(0, 300)")
                     time.sleep(random.uniform(0.5, 1))
 
                 time.sleep(20)
@@ -513,10 +552,10 @@ class WalmartTVCrawler:
                 # Add more mouse movements
                 self.add_random_mouse_movements()
 
-                self.driver.refresh()
+                self.page.reload(wait_until="networkidle")
                 time.sleep(random.uniform(10, 15))
 
-                if self.check_robot_page(self.driver.page_source):
+                if self.check_robot_page(self.page.content()):
                     print("[ERROR] Cannot bypass robot detection")
                     return False
 
@@ -525,13 +564,15 @@ class WalmartTVCrawler:
 
         except Exception as e:
             print(f"[ERROR] Failed to initialize session: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def run(self):
         """Main execution"""
         try:
             print("="*80)
-            print("Walmart TV Crawler - Starting")
+            print("Walmart TV Crawler - Starting (Playwright Mode)")
             print(f"Batch ID: {self.batch_id}")
             print("="*80)
 
@@ -548,8 +589,9 @@ class WalmartTVCrawler:
                 print("[ERROR] No page URLs found")
                 return
 
-            # Setup WebDriver
-            self.setup_driver()
+            # Setup Playwright
+            if not self.setup_playwright():
+                return
 
             # Try to initialize session, but continue even if it fails
             print("[INFO] Attempting to initialize session...")
@@ -579,10 +621,31 @@ class WalmartTVCrawler:
             traceback.print_exc()
 
         finally:
-            if self.driver:
-                self.driver.quit()
+            if self.page:
+                try:
+                    self.page.close()
+                except:
+                    pass
+            if self.context:
+                try:
+                    self.context.close()
+                except:
+                    pass
+            if self.browser:
+                try:
+                    self.browser.close()
+                except:
+                    pass
+            if self.playwright:
+                try:
+                    self.playwright.stop()
+                except:
+                    pass
             if self.db_conn:
-                self.db_conn.close()
+                try:
+                    self.db_conn.close()
+                except:
+                    pass
 
 
 if __name__ == "__main__":

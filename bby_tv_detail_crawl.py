@@ -136,8 +136,24 @@ class BestBuyDetailCrawler:
                 print(f"[OK] Promotion URLs (batch {promo_batch_id}): {len(promo_urls)}개")
 
             cursor.close()
-            print(f"[OK] 총 {len(urls)}개 URLs 로드 완료")
-            return urls
+
+            # Remove duplicate URLs across tables (keep first occurrence)
+            seen_urls = set()
+            unique_urls = []
+            duplicates_count = 0
+
+            for mother, url in urls:
+                if url not in seen_urls:
+                    seen_urls.add(url)
+                    unique_urls.append((mother, url))
+                else:
+                    duplicates_count += 1
+
+            if duplicates_count > 0:
+                print(f"[INFO] Removed {duplicates_count} duplicate URLs across tables")
+
+            print(f"[OK] 총 {len(unique_urls)}개 unique URLs 로드 완료 (중복 제거 전: {len(urls)}개)")
+            return unique_urls
 
         except Exception as e:
             print(f"[ERROR] Failed to load URLs: {e}")

@@ -183,6 +183,113 @@ class WalmartDetailTester:
         except Exception as e:
             return None
 
+    def is_invalid_sku(self, sku):
+        """Check if SKU is invalid (generic values that are not actual model numbers)"""
+        if not sku:
+            return True
+
+        invalid_values = ['4K UHD', '4K (2160P)', '3840 x 2160', '1080p', 'Samsung', 'Hisense']
+        sku_clean = sku.strip()
+
+        return sku_clean in invalid_values
+
+    def extract_sku_from_url(self, url):
+        """Extract SKU from product URL"""
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            path_parts = parsed.path.strip('/').split('/')
+
+            if len(path_parts) < 2 or path_parts[0] != 'ip':
+                return None
+
+            product_part = path_parts[1]
+
+            # Pattern 1: Simple model at end (e.g., "55UA7500ZUA-AUS")
+            if len(path_parts) == 2:
+                model = product_part.replace('-AUS', '')
+                if model and len(model) > 3:
+                    return model
+
+            # Pattern 2: Model within product name
+            parts = product_part.split('-')
+
+            potential_models = []
+            for part in parts:
+                if not part or part.isdigit() or part.isalpha():
+                    continue
+                if part.lower() in ['class', 'inch', 'hd', 'uhd', 'led', 'lcd', 'smart', 'tv', 'new', 'with']:
+                    continue
+
+                has_letter = any(c.isalpha() for c in part)
+                has_number = any(c.isdigit() for c in part)
+
+                if has_letter and has_number and len(part) >= 5:
+                    potential_models.append(part)
+
+            if potential_models:
+                return max(potential_models, key=len)
+
+            return None
+
+        except Exception as e:
+            return None
+
+    def extract_sku_from_product_name(self, product_name):
+        """Extract SKU from retailer_sku_name"""
+        try:
+            if not product_name:
+                return None
+
+            # Pattern 1: Comma-separated at the end
+            if ',' in product_name:
+                parts = product_name.split(',')
+                last_part = parts[-1].strip()
+                if last_part and not ' ' in last_part:
+                    has_letter = any(c.isalpha() for c in last_part)
+                    has_number = any(c.isdigit() for c in last_part)
+                    if has_letter and has_number and 5 <= len(last_part) <= 20:
+                        return last_part
+
+            # Pattern 2: In parentheses
+            paren_match = re.search(r'\(([A-Z0-9]+)\)', product_name)
+            if paren_match:
+                model = paren_match.group(1)
+                if 5 <= len(model) <= 20:
+                    return model
+
+            # Pattern 3: At the end after space
+            words = product_name.split()
+            if words:
+                last_word = words[-1].strip('.,;:')
+                has_letter = any(c.isalpha() for c in last_word)
+                has_number = any(c.isdigit() for c in last_word)
+                if has_letter and has_number and 5 <= len(last_word) <= 20:
+                    if last_word.upper() not in ['HD', 'UHD', 'LED', 'LCD', '4K', 'TV']:
+                        return last_word
+
+            return None
+
+        except Exception as e:
+            return None
+
+    def extract_sku_from_lg_xpath(self):
+        """Extract SKU using LG-specific XPath"""
+        try:
+            page_source = self.page.content()
+            tree = html.fromstring(page_source)
+
+            lg_xpath = '//*[@id="inpage_container"]/div[2]/div/div/div/div[1]'
+            sku = self.extract_text_safe(tree, lg_xpath)
+
+            if sku and 5 <= len(sku) <= 20:
+                return sku
+
+            return None
+
+        except Exception as e:
+            return None
+
     def test_product_url(self, product):
         """Test a single product URL to check if NULL fields actually exist on page"""
         try:
@@ -211,7 +318,34 @@ class WalmartDetailTester:
             actual_data['savings'] = self.extract_text_safe(tree, self.xpaths.get('savings', {}).get('xpath'))
             actual_data['count_of_star_ratings'] = self.extract_text_safe(tree, self.xpaths.get('count_of_star_ratings', {}).get('xpath'))
             actual_data['detailed_review_content'] = self.extract_text_safe(tree, self.xpaths.get('detailed_review', {}).get('xpath'))
-            actual_data['sku'] = self.extract_text_safe(tree, self.xpaths.get('samsung_sku_name', {}).get('xpath'))
+
+            # Extract SKU with fallback logic (matching walmart_tv_detail_crawl.py)
+            sku_xpath_value = self.extract_text_safe(tree, self.xpaths.get('samsung_sku_name', {}).get('xpath'))
+
+            # If SKU is invalid, try fallback methods
+            if self.is_invalid_sku(sku_xpath_value):
+                # Fallback 1: Extract from URL
+                url_sku = self.extract_sku_from_url(url)
+                if url_sku:
+                    actual_data['sku'] = url_sku
+                else:
+                    # Fallback 2: Extract from product name
+                    full_product_name = self.extract_text_safe(tree, self.xpaths.get('product_name', {}).get('xpath'))
+                    name_sku = self.extract_sku_from_product_name(full_product_name)
+                    if name_sku:
+                        actual_data['sku'] = name_sku
+                    else:
+                        # Fallback 3: LG-specific XPath (if LG product)
+                        if full_product_name and 'LG' in full_product_name.upper():
+                            lg_sku = self.extract_sku_from_lg_xpath()
+                            if lg_sku:
+                                actual_data['sku'] = lg_sku
+                            else:
+                                actual_data['sku'] = None
+                        else:
+                            actual_data['sku'] = None
+            else:
+                actual_data['sku'] = sku_xpath_value
 
             # Compare DB data with actual data
             print(f"\n{'Field':<40} | {'DB Value':<30} | {'Actual Page Value':<30} | Status")

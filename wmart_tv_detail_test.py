@@ -66,23 +66,24 @@ class WalmartDetailTester:
         try:
             cursor = self.db_conn.cursor()
 
-            # Get latest batch
+            # Get latest crawl date
             cursor.execute("""
-                SELECT DISTINCT batch_id
+                SELECT DATE(created_at) as crawl_date
                 FROM walmart_tv_detail_crawled
-                ORDER BY batch_id DESC
+                WHERE created_at IS NOT NULL
+                ORDER BY created_at DESC
                 LIMIT 1
             """)
-            batch_result = cursor.fetchone()
+            date_result = cursor.fetchone()
 
-            if not batch_result:
-                print("[ERROR] No batch found")
+            if not date_result:
+                print("[ERROR] No data found in table")
                 return []
 
-            batch_id = batch_result[0]
-            print(f"[INFO] Latest batch: {batch_id}")
+            latest_date = date_result[0]
+            print(f"[INFO] Latest crawl date: {latest_date}")
 
-            # Get products with at least one NULL field
+            # Get products with at least one NULL field from latest date
             cursor.execute("""
                 SELECT
                     id,
@@ -97,7 +98,7 @@ class WalmartDetailTester:
                     detailed_review_content,
                     sku
                 FROM walmart_tv_detail_crawled
-                WHERE batch_id = %s
+                WHERE DATE(created_at) = %s
                   AND (
                       star_rating IS NULL OR star_rating = '' OR
                       number_of_ppl_purchased_yesterday IS NULL OR number_of_ppl_purchased_yesterday = '' OR
@@ -109,7 +110,7 @@ class WalmartDetailTester:
                       sku IS NULL OR sku = ''
                   )
                 ORDER BY id
-            """, (batch_id,))
+            """, (latest_date,))
 
             products = []
             for row in cursor.fetchall():

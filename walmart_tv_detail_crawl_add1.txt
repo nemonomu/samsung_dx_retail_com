@@ -1,0 +1,133 @@
+walmart_tv_detail_crawl.py 수정하자. 
+
+sku 결과 값이 다음 값 중 하나이거나 값을 추출하지 못한 경우
+
+(다음 값 : 4K UHD, 4K (2160P), 3840 x 2160, 1080p, Samsung, Hisense)
+
+먼저 product_url 중 아래 예시에 따른 sku 값을 추출한다. 추출 로직을 만들어도 좋다. 
+
+product_url : https://www.walmart.com/ip/TCL-43-Class-S3-43S310R-1080p-FHD-LED-Smart-TV-with-Roku-TV-New/3883035649
+sku : 43S310R
+
+product_url : https://www.walmart.com/ip/iLive-18-5-LED-TV-with-DVD-Player-ITDE1988B/414649405
+sku : ITDE1988B
+ 
+product_url : https://www.walmart.com/ip/Supersonic-SC-1926SDVD-19-inch-AC-DC-LED-SMART-TV-Built-in-DVD-Powered-by-VIDAA-LED/14071706329
+sku : 1926SDVD
+
+product_url : https://www.walmart.com/ip/LG-50-4K-UHD-Smart-TV-2160p-webOS-50UQ7070ZUE/854767900
+sku : 50UQ7070ZUE
+
+product_url : https://www.walmart.com/ip/VIZIO-50-Class-4K-UHD-LED-HDR-Smart-TV-New-V4K50M-08/5195359734
+sku : V4K50M-08
+
+product_url : https://www.walmart.com/ip/Samsung-55-Class-Crystal-UHD-U7900F-4K-Smart-TV-2025-UN55U7900FFXZA/16436012780
+sku : UN55U7900FFXZA
+
+product_url : https://www.walmart.com/ip/onn-55-Class-4K-UHD-2160P-LED-Roku-Smart-Television-HDR-100012586/201216466
+sku : 100012586
+
+product_url : https://www.walmart.com/ip/VIZIO-43-Class-4K-LED-HDR-Smart-TV-New-V4K43M-08/5195359736
+sku : V4K43M-08
+
+product_url : https://www.walmart.com/ip/TCL-115-Class-QM8-115QM891G-4K-UHD-HDR-QD-Mini-LED-Smart-TV-with-Google-TV-NEW-2024/5373842532
+sku : 115QM891G
+
+product_url : https://www.walmart.com/ip/Hisense-50-Class-4K-UHD-LED-LCD-Roku-Smart-TV-HDR-R6-Series-50R6E3/298384909
+sku : 50R6E3
+
+product_url : https://www.walmart.com/ip/55UA7500ZUA-AUS/14356152032
+sku : 55UA7500ZUA
+
+product_url : https://www.walmart.com/ip/43UA7500ZUA-AUS/14350017890
+sku : 43UA7500ZUA
+
+product_url : https://www.walmart.com/ip/VIZIO-50-Class-4K-UHD-LED-HDR-Smart-TV-New-V4K50M-08/5195359734
+sku : V4K50M-08
+
+product_url : https://www.walmart.com/ip/TCL-115-Q-Series-4K-UHD-HDR-QD-Mini-LED-Smart-TV-with-Google-TV-115QM7K/15178657841
+sku : 115QM7K
+
+product_url : https://www.walmart.com/ip/LG-43-Class-4K-UHD-QNED-Wed-OS-Smart-TV-43QNED80TUC/5440505131
+sku : 43QNED80TUC
+
+product_url : https://www.walmart.com/ip/LG-83-Class-4K-UHD-OLED-C4-Series-120-Hz-Web-OS-24-Smart-TV-with-Dolby-Vision-OLED83C4PUA/5332753047
+sku : OLED83C4PUA
+
+product_url : https://www.walmart.com/ip/VIZIO-75-Class-4K-UHD-LED-HDR-Smart-TV-New-V4K75M-08/5195359735
+sku : V4K75M-08
+
+product_url : https://www.walmart.com/ip/TCL-Google-TV-55Q51K/14566603957
+sku : 55Q51K
+
+product_url : https://www.walmart.com/ip/Samsung-55-Class-DU7200-Series-Crystal-UHD-4K-Smart-Tizen-TV-2024-UN55DU7200FXZA/5631768641
+sku : UN55DU7200FXZA
+
+product_url : https://www.walmart.com/ip/Hisense-65-Inch-Class-QD603G-Series-Mini-LED-QLED-Google-Smart-TV-65QD6030G-QLED-600-Nit-Dolby-Vision-IQ-Dolby-Atmos-Full-Array-Local-Dimming/13625917964
+sku : 65QD6030G
+
+product_url : https://www.walmart.com/ip/Sony-65-Class-X77L-4K-Ultra-HD-LED-Smart-Google-TV-KD65X77L-2023-Model/2727006920
+sku : KD65X77L
+
+product_url : https://www.walmart.com/ip/Samsung-UN85U8000F/15031766627
+sku : UN85U8000F
+
+product_url : https://www.walmart.com/ip/VIZIO-65-Class-Quantum-Pro-4K-QLED-HDR-120Hz-Smart-TV-NEW-VQP65C-84/1110721814
+sku : VQP65C-84
+
+product_url : https://www.walmart.com/ip/Hisense-40-Inch-Class-A4-Series-FHD-1080p-Google-Smart-TV-40A4K-DTS-Virtual-X-Game-Sports-Modes-Chromecast-Built-in-Alexa-Compatibility/3405717257
+sku : 40A4K
+
+product_url : https://www.walmart.com/ip/Element-43-Class-4K-UHD-2160p-LED-XUMO-Smart-Television-HDR-E550AE43C-G/5558619060
+sku : E550AE43C-G
+
+product_url : https://www.walmart.com/ip/LG-27-in-StanbyME-LED-Full-HD-Touch-Screen-Smart-TV-27ART10AKPL/2953341337
+sku : 27ART10AKPL
+
+product_url : https://www.walmart.com/ip/VIZIO-50-Class-Quantum-4K-QLED-HDR-Smart-TV-NEW-VQD50M-0809/7766121878
+sku : VQD50M-0809
+
+product_url : https://www.walmart.com/ip/Hisense-85-Class-4K-UHD-LED-LCD-Roku-Smart-TV-HDR-R6-Series-85R6E4/3491792460
+sku : 85R6E4
+
+
+
+다음과 같은 url에서는 sku 추출 불가 -> 아래 방법 진행
+
+product_url : https://www.walmart.com/ip/Sansui-32-VA-Series-Full-HD-Frameless-Design-Smart-TV-with-Dolby-Vision-HDR-Dolby-Atmos-WebOS/14337862799
+product_url : https://www.walmart.com/ip/Hisense-85-Class-QD6-Series-QLED-4K-UHD-Smart-Google-TV/13110405902
+product_url : https://www.walmart.com/ip/65-UHD-2160p-120Hz-4K/5387137037
+product_url : https://www.walmart.com/ip/Samsung-55-in-2160p-UHD-Smart-TV-With-TM2360E-Remote-Control/5387137036
+
+product_url 에서 sku 추출 불가라면 해당 retailer_sku_name 에서 아래 예시에 따른 값을 추출한다. 추출 로직을 만들어도 좋다. 
+
+retailer_sku_name : SANSUI 32" 1920 x 1080 LED Bluetooth/Wi-Fi Smart TV , S32VAFW
+sku : S32VAFW
+
+retailer_sku_name : Hisense 85-Inch Class QD6 Series QLED UHD 4K HDR Google Smart TV (85QD6N) - QLED, Dolby Vision, Dolby Atmos, 4K AI Upscaler, Motion Rate 120, HDR 10+, Game Mode Plus, Voice Remote
+sku : 85QD6N
+
+retailer_sku_name : SAMSUNG 65" 4K Crystal UHD DU8000 Smart TV, Ultra Slim Design, Dynamic Crystal Color, Motion Xcelerator & Object Tracking Sound Lite UN65DU8000
+sku : UN65DU8000
+
+retailer_sku_name : SAMSUNG 55" 4K Crystal UHD DU8000 Smart TV, Ultra Slim Design, Dynamic Crystal Color, Motion Xcelerator & Object Tracking Sound Lite UN55DU8000
+sku : UN55DU8000
+
+retailer_sku_name 에서도 추출 불가하면서 retailer_sku_name에 LG가 포함돼있다면 아래 xpath에서 추출한다.
+//*[@id="inpage_container"]/div[2]/div/div/div/div[1]
+
+
+
+
+위의 어떤 로직에서도 추출 불가하다면
+
+어떤 값도 저장하지 않는다.
+
+
+
+
+
+
+
+
+

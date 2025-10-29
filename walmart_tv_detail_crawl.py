@@ -475,15 +475,13 @@ class WalmartDetailCrawler:
                 if model and len(model) > 3:
                     return model
 
-            # Pattern 2: Pure numeric model at end of path (e.g., /100012586/314022535)
-            if len(path_parts) == 3:
-                last_part = path_parts[2]
-                if last_part.isdigit() and len(last_part) >= 8:
-                    return last_part
-
-            # Pattern 3: Model within product name (e.g., "TCL-43-Class-S3-43S310R-1080p-...")
+            # Pattern 2: Model within product name (e.g., "TCL-43-Class-S3-43S310R-1080p-...")
             # Look for pattern: capital letters + numbers (like 43S310R, UN55U7900FFXZA)
             parts = product_part.split('-')
+
+            # Check if last part is pure numeric model (8+ digits, like 100012589)
+            if parts and parts[-1].isdigit() and len(parts[-1]) >= 8:
+                return parts[-1]
 
             # Find parts that look like model numbers (contain both letters and numbers)
             potential_models = []

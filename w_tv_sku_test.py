@@ -192,14 +192,13 @@ class WalmartSKUTester:
                 if model and len(model) > 3:
                     return model
 
-            # Pattern 2: Pure numeric model at end of path (e.g., /100012586/314022535)
-            if len(path_parts) == 3:
-                last_part = path_parts[2]
-                if last_part.isdigit() and len(last_part) >= 8:
-                    return last_part
-
-            # Pattern 3: Model within product name
+            # Pattern 2: Model within product name
             parts = product_part.split('-')
+
+            # Check if last part is pure numeric model (8+ digits, like 100012589)
+            if parts and parts[-1].isdigit() and len(parts[-1]) >= 8:
+                return parts[-1]
+
             potential_models = []
 
             for i, part in enumerate(parts):

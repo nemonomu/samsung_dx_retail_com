@@ -419,21 +419,32 @@ class BestBuyDetailCrawler:
                         button = self.driver.find_element(By.XPATH, xpath)
                         print("  [OK] See All Customer Reviews 버튼 발견")
                         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
-                        time.sleep(3)
-                        # 버튼이 클릭 가능할 때까지 대기
-                        wait = WebDriverWait(self.driver, 10)
-                        wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
-                        button.click()
-                        print("  [OK] See All Customer Reviews 클릭 성공")
-                        time.sleep(5)  # 리뷰 페이지 로딩 대기
-                        return True
-                    except:
+                        time.sleep(2)
+
+                        # JavaScript로 클릭 시도
+                        try:
+                            self.driver.execute_script("arguments[0].click();", button)
+                            print("  [OK] See All Customer Reviews 클릭 성공")
+                            time.sleep(5)  # 리뷰 페이지 로딩 대기
+                            return True
+                        except Exception as click_err:
+                            print(f"  [WARNING] 클릭 실패 (JS): {click_err}, 일반 클릭 시도")
+                            # 일반 클릭 시도
+                            button.click()
+                            print("  [OK] See All Customer Reviews 클릭 성공 (일반)")
+                            time.sleep(5)
+                            return True
+
+                    except Exception as e:
+                        # 버튼을 찾지 못한 경우만 continue
+                        if "no such element" not in str(e).lower():
+                            print(f"  [DEBUG] 버튼 처리 실패: {e}")
                         continue
 
                 # 버튼을 못 찾으면 계속 스크롤
                 current_position += step
                 self.driver.execute_script(f"window.scrollTo(0, {current_position});")
-                time.sleep(2)  # 스크롤 후 대기 시간
+                time.sleep(1)  # 스크롤 후 대기 시간
 
             print("  [WARNING] See All Customer Reviews 버튼을 찾을 수 없습니다.")
             return False

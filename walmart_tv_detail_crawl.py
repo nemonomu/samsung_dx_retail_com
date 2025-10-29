@@ -471,7 +471,7 @@ class WalmartDetailCrawler:
 
             # Find parts that look like model numbers (contain both letters and numbers)
             potential_models = []
-            for part in parts:
+            for i, part in enumerate(parts):
                 # Skip pure numbers, pure letters, or common words
                 if not part or part.isdigit() or part.isalpha():
                     continue
@@ -483,7 +483,15 @@ class WalmartDetailCrawler:
                 has_number = any(c.isdigit() for c in part)
 
                 if has_letter and has_number and len(part) >= 5:
-                    potential_models.append(part)
+                    # Check if next part is a short number suffix (like "08", "84")
+                    model = part
+                    if i + 1 < len(parts):
+                        next_part = parts[i + 1]
+                        # If next part is 2-3 digit number, append it
+                        if next_part.isdigit() and 2 <= len(next_part) <= 3:
+                            model = f"{part}-{next_part}"
+
+                    potential_models.append(model)
 
             # Return the longest potential model (usually the most specific)
             if potential_models:

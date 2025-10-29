@@ -215,7 +215,7 @@ class WalmartDetailTester:
             parts = product_part.split('-')
 
             potential_models = []
-            for part in parts:
+            for i, part in enumerate(parts):
                 if not part or part.isdigit() or part.isalpha():
                     continue
                 if part.lower() in ['class', 'inch', 'hd', 'uhd', 'led', 'lcd', 'smart', 'tv', 'new', 'with']:
@@ -225,7 +225,15 @@ class WalmartDetailTester:
                 has_number = any(c.isdigit() for c in part)
 
                 if has_letter and has_number and len(part) >= 5:
-                    potential_models.append(part)
+                    # Check if next part is a short number suffix (like "08", "84")
+                    model = part
+                    if i + 1 < len(parts):
+                        next_part = parts[i + 1]
+                        # If next part is 2-3 digit number, append it
+                        if next_part.isdigit() and 2 <= len(next_part) <= 3:
+                            model = f"{part}-{next_part}"
+
+                    potential_models.append(model)
 
             if potential_models:
                 return max(potential_models, key=len)

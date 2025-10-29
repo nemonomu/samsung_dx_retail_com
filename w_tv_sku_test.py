@@ -158,8 +158,21 @@ class WalmartSKUTester:
         """Check if SKU is invalid"""
         if not sku:
             return True
-        invalid_values = ['4K UHD', '4K (2160P)', '3840 x 2160', '1080p', 'Samsung', 'Hisense']
-        return sku.strip() in invalid_values
+
+        sku_clean = sku.strip()
+
+        # Exact match invalid values
+        invalid_values = ['4K UHD', '4K (2160P)', '3840 x 2160', '1080p', '720p', 'Samsung', 'Hisense']
+        if sku_clean in invalid_values:
+            return True
+
+        # Pattern-based invalid values (contains parentheses with resolution)
+        if '(' in sku_clean and ')' in sku_clean:
+            # Check if it contains resolution patterns like (2160p), (1080p), etc
+            if re.search(r'\(\d+p\)', sku_clean):
+                return True
+
+        return False
 
     def extract_sku_from_url(self, url):
         """Extract SKU from product URL"""
@@ -179,7 +192,13 @@ class WalmartSKUTester:
                 if model and len(model) > 3:
                     return model
 
-            # Pattern 2: Model within product name
+            # Pattern 2: Pure numeric model at end of path (e.g., /100012586/314022535)
+            if len(path_parts) == 3:
+                last_part = path_parts[2]
+                if last_part.isdigit() and len(last_part) >= 8:
+                    return last_part
+
+            # Pattern 3: Model within product name
             parts = product_part.split('-')
             potential_models = []
 
@@ -194,10 +213,10 @@ class WalmartSKUTester:
 
                 if has_letter and has_number and len(part) >= 5:
                     model = part
-                    # Check for numeric suffix
+                    # Check for numeric suffix (2-4 digits)
                     if i + 1 < len(parts):
                         next_part = parts[i + 1]
-                        if next_part.isdigit() and 2 <= len(next_part) <= 3:
+                        if next_part.isdigit() and 2 <= len(next_part) <= 4:
                             model = f"{part}-{next_part}"
                     potential_models.append(model)
 

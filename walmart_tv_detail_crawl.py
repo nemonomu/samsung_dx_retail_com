@@ -435,10 +435,20 @@ class WalmartDetailCrawler:
         if not sku:
             return True
 
-        invalid_values = ['4K UHD', '4K (2160P)', '3840 x 2160', '1080p', 'Samsung', 'Hisense']
         sku_clean = sku.strip()
 
-        return sku_clean in invalid_values
+        # Exact match invalid values
+        invalid_values = ['4K UHD', '4K (2160P)', '3840 x 2160', '1080p', '720p', 'Samsung', 'Hisense']
+        if sku_clean in invalid_values:
+            return True
+
+        # Pattern-based invalid values (contains parentheses with resolution)
+        if '(' in sku_clean and ')' in sku_clean:
+            # Check if it contains resolution patterns like (2160p), (1080p), etc
+            if re.search(r'\(\d+p\)', sku_clean):
+                return True
+
+        return False
 
     def extract_sku_from_url(self, url):
         """Extract SKU from product URL"""
@@ -465,7 +475,13 @@ class WalmartDetailCrawler:
                 if model and len(model) > 3:
                     return model
 
-            # Pattern 2: Model within product name (e.g., "TCL-43-Class-S3-43S310R-1080p-...")
+            # Pattern 2: Pure numeric model at end of path (e.g., /100012586/314022535)
+            if len(path_parts) == 3:
+                last_part = path_parts[2]
+                if last_part.isdigit() and len(last_part) >= 8:
+                    return last_part
+
+            # Pattern 3: Model within product name (e.g., "TCL-43-Class-S3-43S310R-1080p-...")
             # Look for pattern: capital letters + numbers (like 43S310R, UN55U7900FFXZA)
             parts = product_part.split('-')
 
@@ -483,12 +499,12 @@ class WalmartDetailCrawler:
                 has_number = any(c.isdigit() for c in part)
 
                 if has_letter and has_number and len(part) >= 5:
-                    # Check if next part is a short number suffix (like "08", "84")
+                    # Check if next part is a short number suffix (like "08", "84", "0809")
                     model = part
                     if i + 1 < len(parts):
                         next_part = parts[i + 1]
-                        # If next part is 2-3 digit number, append it
-                        if next_part.isdigit() and 2 <= len(next_part) <= 3:
+                        # If next part is 2-4 digit number, append it
+                        if next_part.isdigit() and 2 <= len(next_part) <= 4:
                             model = f"{part}-{next_part}"
 
                     potential_models.append(model)

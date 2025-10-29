@@ -112,10 +112,28 @@ def login_to_amazon(driver, email, password):
         print("    [DEBUG] Saved page source to login_page_debug.html")
 
         # Try to find existing account button (e.g., "lch6322@gmail.com")
+        # Multiple selector strategies for different account selection screens
         account_button_selectors = [
+            # Strategy 1: Account selection dropdown
             (By.CSS_SELECTOR, "div[data-a-input-name='accountSelectionSelect'] span.a-button-text"),
             (By.XPATH, "//div[@data-a-input-name='accountSelectionSelect']//span[contains(@class, 'a-button-text')]"),
-            (By.XPATH, "//span[contains(text(), '@')]"),  # Find email address text
+
+            # Strategy 2: "Switch accounts" section - clickable account div/span
+            (By.XPATH, "//div[contains(@class, 'cvf-account-switcher-account')]"),
+            (By.XPATH, "//div[contains(@data-testid, 'account-list-item')]"),
+            (By.CSS_SELECTOR, "div[data-testid*='account-list-item']"),
+
+            # Strategy 3: Find by email text (common pattern)
+            (By.XPATH, f"//span[contains(text(), '{email}')]"),
+            (By.XPATH, f"//div[contains(text(), '{email}')]"),
+
+            # Strategy 4: Generic - any element with @ symbol (email)
+            (By.XPATH, "//span[contains(text(), '@')]"),
+            (By.XPATH, "//div[contains(text(), '@')]"),
+
+            # Strategy 5: Account card/container
+            (By.CSS_SELECTOR, "div.cvf-account-switcher-account"),
+            (By.CSS_SELECTOR, "div[class*='account']"),
         ]
 
         account_found = False
@@ -125,7 +143,8 @@ def login_to_amazon(driver, email, password):
                     EC.element_to_be_clickable((by, selector))
                 )
                 print(f"    ✓ Found existing account button using selector #{idx}")
-                print(f"    ✓ Clicking account: {account_button.text[:50]}...")
+                button_text = account_button.text[:80] if account_button.text else "[No text]"
+                print(f"    ✓ Clicking account: {button_text}...")
                 account_button.click()
                 account_found = True
                 time.sleep(2)

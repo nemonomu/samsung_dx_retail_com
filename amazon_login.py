@@ -102,8 +102,8 @@ def login_to_amazon(driver, email, password):
         except Exception as e:
             print(f"    [WARNING] Error clicking sign-in: {e}")
 
-        # Enter email
-        print("\n[3] Entering email...")
+        # Check for account selection screen first
+        print("\n[3] Checking for account selection screen...")
         print(f"    Current URL: {driver.current_url}")
 
         # Save page source for debugging
@@ -111,56 +111,84 @@ def login_to_amazon(driver, email, password):
             f.write(driver.page_source)
         print("    [DEBUG] Saved page source to login_page_debug.html")
 
-        # Try multiple selectors for email field
-        email_selectors = [
-            (By.ID, "ap_email"),
-            (By.NAME, "email"),
-            (By.CSS_SELECTOR, "input[type='email']"),
-            (By.CSS_SELECTOR, "input[name='email']"),
-            (By.XPATH, "//input[@type='email']")
+        # Try to find existing account button (e.g., "lch6322@gmail.com")
+        account_button_selectors = [
+            (By.CSS_SELECTOR, "div[data-a-input-name='accountSelectionSelect'] span.a-button-text"),
+            (By.XPATH, "//div[@data-a-input-name='accountSelectionSelect']//span[contains(@class, 'a-button-text')]"),
+            (By.XPATH, "//span[contains(text(), '@')]"),  # Find email address text
         ]
 
-        email_input = None
-        for idx, (by, selector) in enumerate(email_selectors, 1):
+        account_found = False
+        for idx, (by, selector) in enumerate(account_button_selectors, 1):
             try:
-                email_input = WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located((by, selector))
+                account_button = WebDriverWait(driver, 3).until(
+                    EC.element_to_be_clickable((by, selector))
                 )
-                print(f"    ✓ Found email input using selector #{idx}: {selector}")
-                break
-            except:
-                print(f"    ✗ Not found using selector #{idx}: {selector}")
-                continue
-
-        if not email_input:
-            print("\n[ERROR] Could not find email input field!")
-            print("Please check login_page_debug.html for page structure")
-            raise Exception("Email input field not found")
-
-        email_input.clear()
-        email_input.send_keys(email)
-        print("    ✓ Email entered")
-        time.sleep(1)
-
-        # Click Continue
-        print("\n[4] Clicking 'Continue' button...")
-        continue_selectors = [
-            (By.ID, "continue"),
-            (By.CSS_SELECTOR, "input[type='submit']"),
-            (By.CSS_SELECTOR, "input.a-button-input"),
-            (By.XPATH, "//input[@id='continue']")
-        ]
-
-        for idx, (by, selector) in enumerate(continue_selectors, 1):
-            try:
-                continue_button = driver.find_element(by, selector)
-                continue_button.click()
-                print(f"    ✓ Clicked continue button using selector #{idx}")
+                print(f"    ✓ Found existing account button using selector #{idx}")
+                print(f"    ✓ Clicking account: {account_button.text[:50]}...")
+                account_button.click()
+                account_found = True
+                time.sleep(2)
                 break
             except:
                 continue
 
-        time.sleep(3)
+        if account_found:
+            print("    ✓ Selected existing account, skipping email entry")
+        else:
+            # No account selection, proceed with email entry
+            print("    ✗ No account selection screen, entering email...")
+
+            # Try multiple selectors for email field
+            email_selectors = [
+                (By.ID, "ap_email"),
+                (By.NAME, "email"),
+                (By.CSS_SELECTOR, "input[type='email']"),
+                (By.CSS_SELECTOR, "input[name='email']"),
+                (By.XPATH, "//input[@type='email']")
+            ]
+
+            email_input = None
+            for idx, (by, selector) in enumerate(email_selectors, 1):
+                try:
+                    email_input = WebDriverWait(driver, 5).until(
+                        EC.presence_of_element_located((by, selector))
+                    )
+                    print(f"    ✓ Found email input using selector #{idx}: {selector}")
+                    break
+                except:
+                    print(f"    ✗ Not found using selector #{idx}: {selector}")
+                    continue
+
+            if not email_input:
+                print("\n[ERROR] Could not find email input field!")
+                print("Please check login_page_debug.html for page structure")
+                raise Exception("Email input field not found")
+
+            email_input.clear()
+            email_input.send_keys(email)
+            print("    ✓ Email entered")
+            time.sleep(1)
+
+            # Click Continue
+            print("\n[4] Clicking 'Continue' button...")
+            continue_selectors = [
+                (By.ID, "continue"),
+                (By.CSS_SELECTOR, "input[type='submit']"),
+                (By.CSS_SELECTOR, "input.a-button-input"),
+                (By.XPATH, "//input[@id='continue']")
+            ]
+
+            for idx, (by, selector) in enumerate(continue_selectors, 1):
+                try:
+                    continue_button = driver.find_element(by, selector)
+                    continue_button.click()
+                    print(f"    ✓ Clicked continue button using selector #{idx}")
+                    break
+                except:
+                    continue
+
+            time.sleep(3)
 
         # Enter password
         print("\n[5] Entering password...")

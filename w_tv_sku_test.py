@@ -162,14 +162,29 @@ class WalmartSKUTester:
         sku_clean = sku.strip()
 
         # Exact match invalid values
-        invalid_values = ['4K UHD', '4K (2160P)', '3840 x 2160', '1080p', '720p', 'Samsung', 'Hisense']
+        invalid_values = ['4K UHD', '4K (2160P)', '3840 x 2160', '1920 x 1080', '1080p', '1080i', '720p', '480p', '480i', 'Samsung', 'Hisense']
         if sku_clean in invalid_values:
             return True
 
-        # Pattern-based invalid values (contains parentheses with resolution)
+        # Contains semicolon (multiple resolutions listed)
+        if ';' in sku_clean:
+            return True
+
+        # Pattern 1: Refresh rate (60Hz, 120Hz, 144Hz, etc.)
+        if re.search(r'^\d+Hz$', sku_clean, re.IGNORECASE):
+            return True
+
+        # Pattern 2: Resolution with x (3,840 x 2,160 or 3840 x 2160 or 1920 x 1080)
+        if re.search(r'\d{1,3}(,\d{3})?\s*x\s*\d{1,3}(,\d{3})?', sku_clean, re.IGNORECASE):
+            return True
+
+        # Pattern 3: Resolution format (480i, 480p, 720p, 1080i, 1080p, 2160p, etc.)
+        if re.search(r'^\d{3,4}[ip]$', sku_clean, re.IGNORECASE):
+            return True
+
+        # Pattern 4: Contains parentheses with resolution like (2160p), (1080p)
         if '(' in sku_clean and ')' in sku_clean:
-            # Check if it contains resolution patterns like (2160p), (1080p), etc
-            if re.search(r'\(\d+p\)', sku_clean):
+            if re.search(r'\(\d+[ip]\)', sku_clean):
                 return True
 
         return False
@@ -347,6 +362,9 @@ class WalmartSKUTester:
                     model_lower = extracted.lower()
                     if not any(kw in model_lower for kw in ['skip', 'sign in', 'pickup', 'delivery', 'close']):
                         model = extracted
+                        # Remove parentheses if model is entirely wrapped: "(SC-1311)" -> "SC-1311"
+                        if model.startswith('(') and model.endswith(')'):
+                            model = model[1:-1]
                         break
 
             # Close dialog

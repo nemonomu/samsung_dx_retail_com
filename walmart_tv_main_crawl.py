@@ -347,40 +347,93 @@ class WalmartTVCrawler:
         try:
             print("[INFO] Checking for CAPTCHA...")
 
-            # Check for "PRESS & HOLD" button
-            button = self.page.locator('text=PRESS & HOLD')
-            if button.is_visible(timeout=3000):
-                print("[OK] CAPTCHA detected - attempting to solve...")
+            # Multiple selectors to find CAPTCHA button
+            captcha_selectors = [
+                'text=PRESS & HOLD',
+                'text="PRESS & HOLD"',
+                'text=/PRESS.*HOLD/i',
+                'button:has-text("PRESS")',
+                'button:has-text("HOLD")',
+                '[class*="captcha"]',
+                '[id*="captcha"]',
+                '[class*="PressHold"]',
+                '[class*="press-hold"]'
+            ]
 
-                # Get button position
-                box = button.bounding_box()
-                if box:
-                    # Move mouse to button center
-                    center_x = box['x'] + box['width'] / 2
-                    center_y = box['y'] + box['height'] / 2
+            button = None
+            found_selector = None
 
-                    self.page.mouse.move(center_x, center_y)
-                    time.sleep(random.uniform(0.3, 0.6))
+            # Try each selector
+            for selector in captcha_selectors:
+                try:
+                    temp_button = self.page.locator(selector).first
+                    if temp_button.is_visible(timeout=2000):
+                        button = temp_button
+                        found_selector = selector
+                        print(f"[OK] CAPTCHA detected with selector: {selector}")
+                        break
+                except:
+                    continue
 
-                    # Press and hold
-                    self.page.mouse.down()
-                    print("[INFO] Holding button...")
-                    time.sleep(random.uniform(4.5, 5.5))  # Hold for 4-5 seconds
-                    self.page.mouse.up()
+            # If no button found with locators, check page content
+            if not button:
+                page_content = self.page.content().lower()
+                if any(keyword in page_content for keyword in ['press & hold', 'press and hold', 'captcha', 'human verification']):
+                    print("[WARNING] CAPTCHA keywords found in page but button not located")
+                    print("[INFO] Page may require manual intervention")
+                    # Save screenshot for debugging
+                    try:
+                        self.page.screenshot(path=f"captcha_screen_{int(time.time())}.png")
+                        print("[INFO] Screenshot saved for debugging")
+                    except:
+                        pass
 
-                    print("[OK] CAPTCHA button released")
-                    time.sleep(random.uniform(2, 4))  # Wait for verification
+                    # Pause for manual intervention
+                    print("[INFO] Please solve CAPTCHA manually if present...")
+                    print("[INFO] Waiting 30 seconds...")
+                    time.sleep(30)
+                    return True
+                else:
+                    print("[INFO] No CAPTCHA detected")
+                    return True
 
-                    # Check if CAPTCHA was solved
+            # Try to solve CAPTCHA automatically
+            print("[OK] Attempting to solve CAPTCHA automatically...")
+
+            # Get button position
+            box = button.bounding_box()
+            if box:
+                # Move mouse to button center
+                center_x = box['x'] + box['width'] / 2
+                center_y = box['y'] + box['height'] / 2
+
+                self.page.mouse.move(center_x, center_y)
+                time.sleep(random.uniform(0.3, 0.6))
+
+                # Press and hold
+                self.page.mouse.down()
+                print("[INFO] Holding button...")
+                time.sleep(random.uniform(4.5, 5.5))  # Hold for 4-5 seconds
+                self.page.mouse.up()
+
+                print("[OK] CAPTCHA button released")
+                time.sleep(random.uniform(2, 4))  # Wait for verification
+
+                # Check if CAPTCHA was solved
+                try:
                     if not button.is_visible(timeout=2000):
                         print("[OK] CAPTCHA solved successfully")
                         return True
                     else:
                         print("[WARNING] CAPTCHA still visible after attempt")
                         return False
+                except:
+                    # If button is gone (exception), consider it solved
+                    print("[OK] CAPTCHA appears to be solved")
+                    return True
             else:
-                print("[INFO] No CAPTCHA detected")
-                return True
+                print("[WARNING] Could not get button position")
+                return False
 
         except Exception as e:
             print(f"[WARNING] CAPTCHA check failed: {e}")

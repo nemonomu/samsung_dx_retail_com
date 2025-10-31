@@ -342,6 +342,50 @@ class WalmartTVCrawler:
             return True
         return False
 
+    def handle_captcha(self):
+        """Handle 'PRESS & HOLD' CAPTCHA if present"""
+        try:
+            print("[INFO] Checking for CAPTCHA...")
+
+            # Check for "PRESS & HOLD" button
+            button = self.page.locator('text=PRESS & HOLD')
+            if button.is_visible(timeout=3000):
+                print("[OK] CAPTCHA detected - attempting to solve...")
+
+                # Get button position
+                box = button.bounding_box()
+                if box:
+                    # Move mouse to button center
+                    center_x = box['x'] + box['width'] / 2
+                    center_y = box['y'] + box['height'] / 2
+
+                    self.page.mouse.move(center_x, center_y)
+                    time.sleep(random.uniform(0.3, 0.6))
+
+                    # Press and hold
+                    self.page.mouse.down()
+                    print("[INFO] Holding button...")
+                    time.sleep(random.uniform(4.5, 5.5))  # Hold for 4-5 seconds
+                    self.page.mouse.up()
+
+                    print("[OK] CAPTCHA button released")
+                    time.sleep(random.uniform(2, 4))  # Wait for verification
+
+                    # Check if CAPTCHA was solved
+                    if not button.is_visible(timeout=2000):
+                        print("[OK] CAPTCHA solved successfully")
+                        return True
+                    else:
+                        print("[WARNING] CAPTCHA still visible after attempt")
+                        return False
+            else:
+                print("[INFO] No CAPTCHA detected")
+                return True
+
+        except Exception as e:
+            print(f"[WARNING] CAPTCHA check failed: {e}")
+            return True  # Continue anyway
+
     def scrape_page(self, url, page_number, retry_count=0):
         """Scrape a single page"""
         max_retries = 2
@@ -357,7 +401,13 @@ class WalmartTVCrawler:
                     self.page.goto("https://www.walmart.com/browse/electronics/tvs/3944_1060825", wait_until="domcontentloaded", timeout=90000)
                     time.sleep(random.uniform(10, 15))
 
-                    # Check for robot detection
+                    # Check for robot detection and handle CAPTCHA if needed
+                    if self.check_robot_page(self.page.content()):
+                        print("[WARNING] Robot detected on browse page, handling CAPTCHA...")
+                        self.handle_captcha()
+                        time.sleep(random.uniform(2, 4))
+
+                    # If no robot detection (or after handling CAPTCHA)
                     if not self.check_robot_page(self.page.content()):
                         print("[OK] Browse page loaded successfully")
                         # Add human-like behavior
@@ -383,7 +433,7 @@ class WalmartTVCrawler:
                         search_box.press("Enter")
                         time.sleep(random.uniform(8, 12))
                     else:
-                        print("[WARNING] Robot detected on browse page, using direct URL...")
+                        print("[WARNING] Robot still detected after CAPTCHA, using direct URL...")
                         self.page.goto(url, wait_until="domcontentloaded", timeout=90000)
                         time.sleep(random.uniform(12, 18))
                 except Exception as e:
@@ -394,26 +444,43 @@ class WalmartTVCrawler:
                 self.page.goto(url, wait_until="domcontentloaded", timeout=90000)
                 time.sleep(random.uniform(12, 18))
 
-            # Check for robot detection
+            # Check for robot detection and handle CAPTCHA
             page_source = self.page.content()
             if self.check_robot_page(page_source):
-                if retry_count < max_retries:
-                    print(f"[WARNING] Robot detection page detected. Retry {retry_count + 1}/{max_retries}...")
-                    wait_time = 30 + retry_count * 15
-                    print(f"[INFO] Waiting {wait_time} seconds before retry...")
-                    time.sleep(wait_time)
+                print(f"[WARNING] Robot detection page detected.")
 
-                    print("[INFO] Refreshing page...")
-                    self.page.reload(wait_until="domcontentloaded", timeout=90000)
-                    time.sleep(random.uniform(10, 15))
+                # Try to handle CAPTCHA first
+                if self.handle_captcha():
+                    print("[OK] CAPTCHA handled, checking page again...")
+                    time.sleep(random.uniform(3, 5))
+                    page_source = self.page.content()
 
-                    return self.scrape_page(url, page_number, retry_count + 1)
-                else:
-                    print(f"[ERROR] Failed to bypass robot detection after {max_retries} retries")
-                    print("[INFO] Saving page source for debugging...")
-                    with open(f'walmart_robot_page_{page_number}.html', 'w', encoding='utf-8') as f:
-                        f.write(page_source)
-                    return False
+                    # Check if robot detection is gone
+                    if not self.check_robot_page(page_source):
+                        print("[OK] Robot detection bypassed after CAPTCHA")
+                        # Continue with scraping (fall through)
+                    else:
+                        print("[WARNING] Robot detection still present after CAPTCHA")
+
+                # If still robot detected, retry
+                if self.check_robot_page(self.page.content()):
+                    if retry_count < max_retries:
+                        print(f"[WARNING] Retrying... {retry_count + 1}/{max_retries}")
+                        wait_time = 30 + retry_count * 15
+                        print(f"[INFO] Waiting {wait_time} seconds before retry...")
+                        time.sleep(wait_time)
+
+                        print("[INFO] Refreshing page...")
+                        self.page.reload(wait_until="domcontentloaded", timeout=90000)
+                        time.sleep(random.uniform(10, 15))
+
+                        return self.scrape_page(url, page_number, retry_count + 1)
+                    else:
+                        print(f"[ERROR] Failed to bypass robot detection after {max_retries} retries")
+                        print("[INFO] Saving page source for debugging...")
+                        with open(f'walmart_robot_page_{page_number}.html', 'w', encoding='utf-8') as f:
+                            f.write(page_source)
+                        return False
 
             # Wait for page to load
             print("[INFO] Waiting for products to load...")
@@ -691,26 +758,34 @@ class WalmartTVCrawler:
             self.page.goto("https://www.walmart.com", wait_until="domcontentloaded")
             time.sleep(random.uniform(8, 12))
 
-            # Check for robot detection
+            # Check for robot detection and handle CAPTCHA
             if self.check_robot_page(self.page.content()):
-                print("[WARNING] Robot detection on homepage. Trying recovery...")
+                print("[WARNING] Robot detection on homepage. Handling CAPTCHA...")
 
-                # More natural recovery behavior
-                print("[INFO] Simulating human confusion - random mouse movements...")
-                for _ in range(5):
-                    self.add_random_mouse_movements()
-                    time.sleep(random.uniform(0.8, 1.5))
+                # Try CAPTCHA first
+                self.handle_captcha()
+                time.sleep(random.uniform(3, 5))
 
-                # Slow scroll down
-                print("[INFO] Scrolling slowly...")
-                for i in range(5):
-                    scroll_amount = random.randint(150, 300)
-                    self.page.evaluate(f"window.scrollBy(0, {scroll_amount})")
-                    time.sleep(random.uniform(1.5, 2.5))
+                # If still showing robot detection, try recovery behavior
+                if self.check_robot_page(self.page.content()):
+                    print("[WARNING] Still showing robot detection, trying recovery...")
 
-                # Scroll back up a bit
-                self.page.evaluate("window.scrollBy(0, -200)")
-                time.sleep(random.uniform(1, 2))
+                    # More natural recovery behavior
+                    print("[INFO] Simulating human confusion - random mouse movements...")
+                    for _ in range(5):
+                        self.add_random_mouse_movements()
+                        time.sleep(random.uniform(0.8, 1.5))
+
+                    # Slow scroll down
+                    print("[INFO] Scrolling slowly...")
+                    for i in range(5):
+                        scroll_amount = random.randint(150, 300)
+                        self.page.evaluate(f"window.scrollBy(0, {scroll_amount})")
+                        time.sleep(random.uniform(1.5, 2.5))
+
+                    # Scroll back up a bit
+                    self.page.evaluate("window.scrollBy(0, -200)")
+                    time.sleep(random.uniform(1, 2))
 
                 # Wait longer
                 print("[INFO] Waiting 30 seconds...")

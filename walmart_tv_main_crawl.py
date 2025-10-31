@@ -498,7 +498,26 @@ class WalmartTVCrawler:
                 time.sleep(random.uniform(12, 18))
 
             # Check for robot detection and handle CAPTCHA
-            page_source = self.page.content()
+            page_source = None
+            try:
+                page_source = self.page.content()
+            except Exception as e:
+                if "navigating" in str(e).lower():
+                    print(f"[WARNING] Page still navigating (likely bot detection)")
+                    print(f"[INFO] Please solve CAPTCHA manually if needed...")
+                    print(f"[INFO] Waiting 60 seconds for manual intervention...")
+                    time.sleep(60)
+
+                    # Try to get content again
+                    try:
+                        page_source = self.page.content()
+                        print("[OK] Page content retrieved after waiting")
+                    except Exception as e2:
+                        print(f"[ERROR] Still cannot get page content: {e2}")
+                        # Will retry this page
+                        raise
+                else:
+                    raise
             if self.check_robot_page(page_source):
                 print(f"[WARNING] Robot detection page detected.")
 
@@ -961,13 +980,43 @@ class WalmartTVCrawler:
                 print("[INFO] Will attempt direct access to search pages...")
                 time.sleep(random.uniform(5, 10))
 
-            # Scrape each page
+            # Scrape each page with retry logic
             for page_number, url in page_urls:
                 if self.total_collected >= self.max_skus:
                     break
 
-                if not self.scrape_page(url, page_number):
-                    break
+                # Retry failed pages up to 2 times
+                max_page_retries = 2
+                page_success = False
+
+                for retry_attempt in range(max_page_retries + 1):
+                    try:
+                        if retry_attempt > 0:
+                            print(f"\n[RETRY] Attempting page {page_number} again (attempt {retry_attempt + 1}/{max_page_retries + 1})")
+                            time.sleep(random.uniform(10, 15))
+
+                        if self.scrape_page(url, page_number):
+                            page_success = True
+                            break
+                        else:
+                            # scrape_page returned False (robot detection failed)
+                            if retry_attempt < max_page_retries:
+                                print(f"[WARNING] Page {page_number} failed, will retry...")
+                            else:
+                                print(f"[ERROR] Page {page_number} failed after {max_page_retries + 1} attempts, skipping...")
+
+                    except Exception as e:
+                        print(f"[ERROR] Exception on page {page_number}: {e}")
+                        if retry_attempt < max_page_retries:
+                            print(f"[INFO] Will retry page {page_number}...")
+                        else:
+                            print(f"[ERROR] Page {page_number} failed after {max_page_retries + 1} attempts, skipping...")
+                            import traceback
+                            traceback.print_exc()
+
+                # Continue to next page even if this one failed
+                if not page_success:
+                    print(f"[INFO] Continuing to next page...")
 
                 # Random delay between pages
                 time.sleep(random.uniform(8, 12))

@@ -410,23 +410,39 @@ class WalmartTVCrawler:
                 self.page.mouse.move(center_x, center_y)
                 time.sleep(random.uniform(0.3, 0.6))
 
-                # Press and hold
+                # Press and hold (longer duration)
                 self.page.mouse.down()
                 print("[INFO] Holding button...")
-                time.sleep(random.uniform(4.5, 5.5))  # Hold for 4-5 seconds
+                hold_time = random.uniform(7, 9)  # Hold for 7-9 seconds
+                print(f"[INFO] Holding for {hold_time:.1f} seconds...")
+                time.sleep(hold_time)
                 self.page.mouse.up()
 
                 print("[OK] CAPTCHA button released")
-                time.sleep(random.uniform(2, 4))  # Wait for verification
+                time.sleep(random.uniform(3, 5))  # Wait for verification
 
                 # Check if CAPTCHA was solved
                 try:
-                    if not button.is_visible(timeout=2000):
+                    if not button.is_visible(timeout=3000):
                         print("[OK] CAPTCHA solved successfully")
                         return True
                     else:
-                        print("[WARNING] CAPTCHA still visible after attempt")
-                        return False
+                        print("[WARNING] CAPTCHA still visible after automatic attempt")
+                        print("[INFO] Automatic solving failed, please solve manually...")
+                        print("[INFO] Waiting 60 seconds for manual intervention...")
+                        time.sleep(60)
+
+                        # Check again after manual intervention time
+                        try:
+                            if not button.is_visible(timeout=2000):
+                                print("[OK] CAPTCHA solved (likely manually)")
+                                return True
+                            else:
+                                print("[WARNING] CAPTCHA still present after manual wait")
+                                return False
+                        except:
+                            print("[OK] CAPTCHA appears to be solved")
+                            return True
                 except:
                     # If button is gone (exception), consider it solved
                     print("[OK] CAPTCHA appears to be solved")

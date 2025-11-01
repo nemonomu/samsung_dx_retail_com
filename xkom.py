@@ -31,14 +31,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# DB 설정
-DB_CONFIG = {
-    'user': 'admin',
-    'password': 'samsungcrawl1!',
-    'host': 'samsung-ssd-crawl-db.csnixzmkuppn.ap-northeast-2.rds.amazonaws.com',
-    'port': 3306,
-    'database': 'ssd_crawl_db'
-}
+# Import database configuration
+from config import DB_CONFIG
 
 # 파일서버 설정
 FILE_SERVER_CONFIG = {

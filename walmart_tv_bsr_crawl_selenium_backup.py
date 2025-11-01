@@ -9,14 +9,8 @@ from lxml import html
 import re
 from urllib.parse import urlparse, parse_qs, unquote
 
-# Database configuration
-DB_CONFIG = {
-    'host': 'samsung-dx-crawl.csnixzmkuppn.ap-northeast-2.rds.amazonaws.com',
-    'port': 5432,
-    'database': 'postgres',
-    'user': 'postgres',
-    'password': 'admin2025!'
-}
+# Import database configuration
+from config import DB_CONFIG
 
 class WalmartTVBSRCrawler:
     def __init__(self):

@@ -4,13 +4,8 @@ Walmart 페이지에서 실제 제품 컨테이너 구조를 분석하는 디버
 import psycopg2
 from lxml import html
 
-DB_CONFIG = {
-    'host': 'samsung-dx-crawl.csnixzmkuppn.ap-northeast-2.rds.amazonaws.com',
-    'port': 5432,
-    'database': 'postgres',
-    'user': 'postgres',
-    'password': 'admin2025!'
-}
+# Import database configuration
+from config import DB_CONFIG
 
 def analyze_containers():
     """여러 XPath 패턴을 시도해서 가장 적합한 패턴 찾기"""

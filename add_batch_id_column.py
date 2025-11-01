@@ -1,12 +1,7 @@
 import psycopg2
 
-DB_CONFIG = {
-    'host': 'samsung-dx-crawl.csnixzmkuppn.ap-northeast-2.rds.amazonaws.com',
-    'port': 5432,
-    'database': 'postgres',
-    'user': 'postgres',
-    'password': 'admin2025!'
-}
+# Import database configuration
+from config import DB_CONFIG
 
 def add_batch_id_column():
     """Add batch_id column to raw_data and amazon_tv_bsr tables"""

@@ -1,14 +1,8 @@
 import psycopg2
 from psycopg2 import sql
 
-# Database connection parameters
-DB_CONFIG = {
-    'host': 'samsung-dx-crawl.csnixzmkuppn.ap-northeast-2.rds.amazonaws.com',
-    'port': 5432,
-    'database': 'postgres',
-    'user': 'postgres',
-    'password': 'admin2025!'
-}
+# Import database configuration
+from config import DB_CONFIG
 
 def test_connection():
     """Test database connection"""

@@ -1,13 +1,7 @@
 import psycopg2
 
-# Database configuration
-DB_CONFIG = {
-    'host': 'samsung-dx-crawl.csnixzmkuppn.ap-northeast-2.rds.amazonaws.com',
-    'port': 5432,
-    'database': 'postgres',
-    'user': 'postgres',
-    'password': 'admin2025!'
-}
+# Import database configuration
+from config import DB_CONFIG
 
 def fix_column_types():
     """Fix Count_of_Star_Ratings column type from integer to TEXT"""

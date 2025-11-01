@@ -1,12 +1,7 @@
 import psycopg2
 
-DB_CONFIG = {
-    'host': 'samsung-dx-crawl.csnixzmkuppn.ap-northeast-2.rds.amazonaws.com',
-    'port': 5432,
-    'database': 'postgres',
-    'user': 'postgres',
-    'password': 'admin2025!'
-}
+# Import database configuration
+from config import DB_CONFIG
 
 def update_tables():
     """Rename collected_data to raw_data and create Amazon_tv_main_crawled table"""

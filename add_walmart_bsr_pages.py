@@ -3,14 +3,8 @@ Add Walmart BSR pages 2 and 3 to database
 """
 import psycopg2
 
-# Database configuration
-DB_CONFIG = {
-    'host': 'samsung-dx-crawl.csnixzmkuppn.ap-northeast-2.rds.amazonaws.com',
-    'port': 5432,
-    'database': 'postgres',
-    'user': 'postgres',
-    'password': 'admin2025!'
-}
+# Import database configuration
+from config import DB_CONFIG
 
 def add_pages():
     """Add page 2 and 3 URLs to wmart_tv_bsr_page_url table"""

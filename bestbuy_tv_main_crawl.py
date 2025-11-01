@@ -12,14 +12,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from lxml import html
 
-# Database configuration
-DB_CONFIG = {
-    'host': 'samsung-dx-crawl.csnixzmkuppn.ap-northeast-2.rds.amazonaws.com',
-    'port': 5432,
-    'database': 'postgres',
-    'user': 'postgres',
-    'password': 'admin2025!'
-}
+# Import database configuration
+from config import DB_CONFIG
 
 class BestBuyTVCrawler:
     def __init__(self):

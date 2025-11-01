@@ -15,14 +15,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from lxml import html
 
-# DB 설정
-DB_CONFIG = {
-    'host': 'samsung-dx-crawl.csnixzmkuppn.ap-northeast-2.rds.amazonaws.com',
-    'port': 5432,
-    'database': 'postgres',
-    'user': 'postgres',
-    'password': 'admin2025!'
-}
+# Import database configuration
+from config import DB_CONFIG
 
 class BestBuyDetailCrawler:
     def __init__(self):

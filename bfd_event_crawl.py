@@ -111,8 +111,21 @@ class BFDEventCrawler:
             time.sleep(2)
 
             print("[INFO] Parsing page source...")
-            page_source = self.driver.page_source
-            print(f"[DEBUG] Page source length: {len(page_source)} characters")
+            # Retry logic for page_source due to connection issues
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    page_source = self.driver.page_source
+                    print(f"[DEBUG] Page source length: {len(page_source)} characters")
+                    break
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        print(f"[WARNING] Failed to get page source (attempt {attempt + 1}/{max_retries}): {e}")
+                        print(f"[INFO] Retrying in 5 seconds...")
+                        time.sleep(5)
+                    else:
+                        print(f"[ERROR] All {max_retries} attempts failed")
+                        raise
 
             print("[INFO] Creating HTML tree...")
             tree = html.fromstring(page_source)

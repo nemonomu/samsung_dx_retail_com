@@ -15,7 +15,7 @@ from lxml import html
 from config import DB_CONFIG
 
 BASE_URL = "https://blackfriday.com"
-TARGET_RETAILERS = ["Walmart", "Amazon", "Best Buy"]
+TARGET_RETAILERS = ["Walmart", "Amazon", "Bestbuy"]
 
 class BFDEventCrawler:
     def __init__(self):
@@ -25,7 +25,7 @@ class BFDEventCrawler:
         self.events_data = {
             'Walmart': [],
             'Amazon': [],
-            'Best Buy': []
+            'Bestbuy': []
         }
 
     def connect_db(self):
@@ -134,6 +134,9 @@ class BFDEventCrawler:
                     continue
 
                 retailer_name = retailer_name_elem[0].text_content().strip()
+                # Normalize "Best Buy" to "Bestbuy"
+                if retailer_name == "Best Buy":
+                    retailer_name = "Bestbuy"
                 print(f"[DEBUG] Container {idx}: Found retailer '{retailer_name}'")
 
                 # Check if it's one of our target retailers
@@ -227,13 +230,17 @@ class BFDEventCrawler:
 
                     # Extract date only (e.g., "2024-11-25 00:00:00" -> "2024-11-25")
                     start_date = start_date_raw.split()[0] if ' ' in start_date_raw else start_date_raw
-                    end_date = end_date_raw.split()[0] if ' ' in end_date_raw else end_date_raw
+                    end_date = end_date_raw.split()[0] if ' ' in end_date_raw
 
-                    # Combine into final format: "Event Name, event start date: YYYY-MM-DD, event end date: YYYY-MM-DD"
-                    event_schedule = f"{event_name}, event start date: {start_date}, event end date: {end_date}"
-                    events.append(event_schedule)
+                    # Store as dictionary for structured DB insert
+                    event_data = {
+                        'event_name': event_name,
+                        'start_date': start_date,
+                        'end_date': end_date
+                    }
+                    events.append(event_data)
 
-                    print(f"  [{retailer_name}][{idx}] {event_schedule}")
+                    print(f"  [{retailer_name}][{idx}] {event_name} ({start_date} ~ {end_date})")
 
                 except Exception as e:
                     print(f"  [{retailer_name}][{idx}] Error extracting event: {e}")
@@ -262,32 +269,41 @@ class BFDEventCrawler:
             return datetime_str[:10]  # Return raw date if format fails
 
     def save_to_db(self):
-        """Save event schedules to database (with crawl timestamp)"""
+        """Save event schedules to database (each event as separate row)"""
         try:
             cursor = self.db_conn.cursor()
-
-            # Combine all events for each retailer into single text
-            bestbuy_schedule = " | ".join(self.events_data.get('Best Buy', []))
-            walmart_schedule = " | ".join(self.events_data.get('Walmart', []))
-            amazon_schedule = " | ".join(self.events_data.get('Amazon', []))
 
             # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
 
-            # Insert with current timestamp
-            cursor.execute("""
-                INSERT INTO bfd_event_crawl
-                (Bestbuy_event_schedule, Walmart_event_schedule, Amazon_event_schedule, crawl_at_local_time, calendar_week)
-                VALUES (%s, %s, %s, NOW(), %s)
-            """, (bestbuy_schedule, walmart_schedule, amazon_schedule, calendar_week))
+            total_inserted = 0
+
+            # Insert each event as a separate row
+            for channel, events in self.events_data.items():
+                if not events:
+                    print(f"[INFO] No events to save for {channel}")
+                    continue
+
+                for event in events:
+                    cursor.execute("""
+                        INSERT INTO bfd_event_crawl
+                        (Event_channel, Event_name, Event_start_date, Event_end_date, crawl_at_local_time, calendar_week)
+                        VALUES (%s, %s, %s, %s, NOW(), %s)
+                    """, (
+                        channel,
+                        event['event_name'],
+                        event['start_date'],
+                        event['end_date'],
+                        calendar_week
+                    ))
+                    total_inserted += 1
+
+                print(f"[OK] {channel}: {len(events)} events saved")
 
             self.db_conn.commit()
             cursor.close()
 
-            print("\n[OK] Data saved to database with timestamp")
-            print(f"  - Best Buy: {bestbuy_schedule or 'No data collected'}")
-            print(f"  - Walmart: {walmart_schedule or 'No data collected'}")
-            print(f"  - Amazon: {amazon_schedule or 'No data collected'}")
+            print(f"\n[OK] Total {total_inserted} events saved to database")
 
             return True
 

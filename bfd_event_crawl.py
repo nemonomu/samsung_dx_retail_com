@@ -230,7 +230,7 @@ class BFDEventCrawler:
 
                     # Extract date only (e.g., "2024-11-25 00:00:00" -> "2024-11-25")
                     start_date = start_date_raw.split()[0] if ' ' in start_date_raw else start_date_raw
-                    end_date = end_date_raw.split()[0] if ' ' in end_date_raw
+                    end_date = end_date_raw.split()[0] if ' ' in end_date_raw else end_date_raw
 
                     # Store as dictionary for structured DB insert
                     event_data = {

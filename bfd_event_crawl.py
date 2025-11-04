@@ -112,7 +112,11 @@ class BFDEventCrawler:
 
             print("[INFO] Parsing page source...")
             page_source = self.driver.page_source
+            print(f"[DEBUG] Page source length: {len(page_source)} characters")
+
+            print("[INFO] Creating HTML tree...")
             tree = html.fromstring(page_source)
+            print("[OK] HTML tree created")
 
             # Find all base containers
             print("[INFO] Searching for base containers...")

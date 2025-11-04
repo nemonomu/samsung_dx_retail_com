@@ -15,7 +15,7 @@ from lxml import html
 from config import DB_CONFIG
 
 BASE_URL = "https://blackfriday.com"
-TARGET_RETAILERS = ["Walmart", "Amazon", "Bestbuy"]
+TARGET_RETAILERS = ["Walmart", "Amazon", "Best Buy"]
 
 class BFDEventCrawler:
     def __init__(self):
@@ -25,7 +25,7 @@ class BFDEventCrawler:
         self.events_data = {
             'Walmart': [],
             'Amazon': [],
-            'Bestbuy': []
+            'Best Buy': []
         }
 
     def connect_db(self):
@@ -134,9 +134,6 @@ class BFDEventCrawler:
                     continue
 
                 retailer_name = retailer_name_elem[0].text_content().strip()
-                # Normalize "Best Buy" to "Bestbuy"
-                if retailer_name == "Best Buy":
-                    retailer_name = "Bestbuy"
                 print(f"[DEBUG] Container {idx}: Found retailer '{retailer_name}'")
 
                 # Check if it's one of our target retailers
@@ -284,13 +281,16 @@ class BFDEventCrawler:
                     print(f"[INFO] No events to save for {channel}")
                     continue
 
+                # Normalize channel name for DB (Best Buy -> Bestbuy)
+                db_channel = "Bestbuy" if channel == "Best Buy" else channel
+
                 for event in events:
                     cursor.execute("""
                         INSERT INTO bfd_event_crawl
                         (Event_channel, Event_name, Event_start_date, Event_end_date, crawl_at_local_time, calendar_week)
                         VALUES (%s, %s, %s, %s, NOW(), %s)
                     """, (
-                        channel,
+                        db_channel,
                         event['event_name'],
                         event['start_date'],
                         event['end_date'],

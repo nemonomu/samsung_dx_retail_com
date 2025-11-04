@@ -4,7 +4,7 @@ Best Buy TV Main Page Crawler (Modified)
 수정사항:
 1. offer는 숫자만 저장 (예: "+2 offers for you" -> "2")
 2. SKU Status는 sponsored만 수집 (Regular는 공란)
-3. retailer_sku_name -> item으로 변경
+3. item -> retailer_sku_name으로 변경
 """
 import time
 import random
@@ -192,7 +192,7 @@ class BestBuyTVCrawler:
 
             for idx, container in enumerate(containers, 1):
                 try:
-                    # Extract product name (Item, 구 Retailer_SKU_Name)
+                    # Extract product name (Retailer_SKU_Name)
                     # Try multiple possible XPaths
                     product_name_elem = container.xpath('.//h2[contains(@class, "product-title")]')
                     if not product_name_elem:
@@ -289,7 +289,7 @@ class BestBuyTVCrawler:
                     # Save to database
                     if self.save_to_db(
                         page_type='main',
-                        item=product_name,
+                        retailer_sku_name=product_name,
                         final_price=final_price,
                         savings=savings,
                         comp_pricing=comp_pricing,
@@ -318,7 +318,7 @@ class BestBuyTVCrawler:
             traceback.print_exc()
             return False
 
-    def save_to_db(self, page_type, item, final_price, savings, comp_pricing,
+    def save_to_db(self, page_type, retailer_sku_name, final_price, savings, comp_pricing,
                    offer, pickup, shipping, delivery, star_rating, sku_status, product_url):
         """Save product data to database"""
         try:
@@ -342,11 +342,11 @@ class BestBuyTVCrawler:
 
             cursor.execute("""
                 INSERT INTO bestbuy_tv_main_crawl
-                (batch_id, page_type, item, Final_SKU_Price, Savings, Comparable_Pricing,
+                (batch_id, page_type, retailer_sku_name, Final_SKU_Price, Savings, Comparable_Pricing,
                  Offer, Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
                  Star_Rating, SKU_Status, Product_url, calendar_week)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (self.batch_id, page_type, item, final_price, savings, comp_pricing,
+            """, (self.batch_id, page_type, retailer_sku_name, final_price, savings, comp_pricing,
                   offer, pickup, shipping, delivery, star_rating, sku_status, product_url, calendar_week))
 
             self.db_conn.commit()

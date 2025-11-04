@@ -6,8 +6,8 @@ https://www.bestbuy.com/site/all-tv-home-theater-on-sale/tvs-on-sale/pcmcat17206
 1. 프로모션 메인 페이지에서 4개 컬럼 추가 수집: final_sku_price, original_sku_price, offer, savings
 2. offer는 숫자만 저장 (예: "+2 offers for you" -> "2")
 3. savings 검증: original_sku_price - final_sku_price와 동일해야 함
-4. 컬럼 순서 변경: page_type, item, rank, final_sku_price, original_sku_price, offer, savings, promotion_type, product_url, crawl_datetime, calendar_week, batch_id
-5. retailer_sku_name -> item으로 변경
+4. 컬럼 순서 변경: page_type, retailer_sku_name, rank, final_sku_price, original_sku_price, offer, savings, promotion_type, product_url, crawl_datetime, calendar_week, batch_id
+5. item -> retailer_sku_name으로 변경
 """
 import time
 import random
@@ -177,7 +177,7 @@ class BestBuyPromotionCrawler:
                     # rank는 1부터 시작
                     rank = idx
 
-                    # 제품명 추출 (item, 구 retailer_sku_name)
+                    # 제품명 추출 (retailer_sku_name)
                     name_xpaths = [
                         './/span[contains(@class, "BxIuyHdYvE_KO21sTHqZ")]',
                         './/div[@data-testid="product-card-title"]//span',
@@ -277,7 +277,7 @@ class BestBuyPromotionCrawler:
                     if product_name and product_url:
                         product = {
                             'page_type': 'Top deals',
-                            'item': product_name,
+                            'retailer_sku_name': product_name,
                             'rank': rank,
                             'final_sku_price': final_price,
                             'original_sku_price': original_price,
@@ -320,7 +320,7 @@ class BestBuyPromotionCrawler:
                 CREATE TABLE IF NOT EXISTS bby_tv_promotion_crawl (
                     id SERIAL PRIMARY KEY,
                     page_type VARCHAR(50),
-                    item TEXT,
+                    retailer_sku_name TEXT,
                     rank INTEGER,
                     final_sku_price VARCHAR(50),
                     original_sku_price VARCHAR(50),
@@ -340,7 +340,7 @@ class BestBuyPromotionCrawler:
             # 데이터 삽입
             insert_query = """
                 INSERT INTO bby_tv_promotion_crawl
-                (page_type, item, rank, final_sku_price, original_sku_price, offer, savings,
+                (page_type, retailer_sku_name, rank, final_sku_price, original_sku_price, offer, savings,
                  promotion_type, product_url, calendar_week, batch_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
@@ -350,7 +350,7 @@ class BestBuyPromotionCrawler:
                 try:
                     cursor.execute(insert_query, (
                         product['page_type'],
-                        product['item'],
+                        product['retailer_sku_name'],
                         product['rank'],
                         product['final_sku_price'],
                         product['original_sku_price'],

@@ -6,7 +6,7 @@ Best Buy TV Detail Page Crawler (Modified)
 수정사항:
 1. estimated_annual_electricity_use: 숫자만 추출 (예: "286 kilowatt hours" -> "286")
 2. screen_size 컬럼 추가
-3. retailer_sku_name -> item으로 변경
+3. samsung_sku_name -> item으로 변경, item -> retailer_sku_name으로 변경
 """
 import time
 import random
@@ -158,8 +158,8 @@ class BestBuyDetailCrawler:
             print(f"[ERROR] Failed to load URLs: {e}")
             return []
 
-    def extract_item(self, tree):
-        """Item (구 Retailer_SKU_Name) 추출"""
+    def extract_retailer_sku_name(self, tree):
+        """Retailer_SKU_Name 추출"""
         try:
             xpaths = [
                 '//h1[contains(@class, "h4")]',
@@ -171,7 +171,7 @@ class BestBuyDetailCrawler:
                     return elem[0].text_content().strip()
             return None
         except Exception as e:
-            print(f"  [ERROR] Item 추출 실패: {e}")
+            print(f"  [ERROR] Retailer_SKU_Name 추출 실패: {e}")
             return None
 
     def click_specifications(self):
@@ -204,8 +204,8 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Specification 클릭 실패: {e}")
             return False
 
-    def extract_samsung_sku_name(self, tree):
-        """Samsung_SKU_Name (Model Number) 추출"""
+    def extract_item(self, tree):
+        """Item (Model Number) 추출"""
         try:
             # 다이얼로그에서 Model Number 찾기 (여러 패턴 시도)
             xpaths = [
@@ -226,7 +226,7 @@ class BestBuyDetailCrawler:
                         return model_number
             return None
         except Exception as e:
-            print(f"  [ERROR] Samsung_SKU_Name 추출 실패: {e}")
+            print(f"  [ERROR] Item 추출 실패: {e}")
             return None
 
     def extract_electricity_use(self, tree):
@@ -320,7 +320,7 @@ class BestBuyDetailCrawler:
             pros_list = []
             cons_list = []
 
-            # Item_similar 추출 (구 Retailer_SKU_Name_similar)
+            # Retailer_SKU_Name_similar 추출
             name_elements = tree.xpath('//span[@class="clamp" and starts-with(@id, "compare-title-")]')
             for elem in name_elements[:4]:  # 최대 4개
                 similar_names.append(elem.text_content().strip())
@@ -652,20 +652,20 @@ class BestBuyDetailCrawler:
             traceback.print_exc()
             return None
 
-    def get_samsung_sku_by_product_name(self, product_name):
-        """bby_tv_detail_crawled에서 product_name으로 samsung_sku_name 찾기"""
+    def get_item_by_product_name(self, product_name):
+        """bby_tv_detail_crawled에서 product_name으로 item 찾기"""
         try:
             if not product_name:
                 return None
 
             cursor = self.db_conn.cursor()
 
-            # 가장 최근 데이터에서 item과 product_name이 일치하는 것 찾기
+            # 가장 최근 데이터에서 retailer_sku_name과 product_name이 일치하는 것 찾기
             cursor.execute("""
-                SELECT Samsung_SKU_Name
+                SELECT item
                 FROM bby_tv_detail_crawled
-                WHERE item = %s
-                AND Samsung_SKU_Name IS NOT NULL
+                WHERE retailer_sku_name = %s
+                AND item IS NOT NULL
                 ORDER BY crawl_datetime DESC
                 LIMIT 1
             """, (product_name,))
@@ -678,10 +678,10 @@ class BestBuyDetailCrawler:
             return None
 
         except Exception as e:
-            print(f"  [ERROR] Samsung SKU 조회 실패 ({product_name}): {e}")
+            print(f"  [ERROR] Item 조회 실패 ({product_name}): {e}")
             return None
 
-    def save_to_mst_table(self, products, current_samsung_sku):
+    def save_to_mst_table(self, products, current_item):
         """bby_tv_mst 테이블에 4개 제품 데이터 저장"""
         try:
             cursor = self.db_conn.cursor()
@@ -710,11 +710,11 @@ class BestBuyDetailCrawler:
             for idx, product in enumerate(products):
                 # SKU 결정
                 if idx == 0:
-                    # 첫 번째 제품은 현재 페이지의 samsung_sku_name
-                    sku = current_samsung_sku
+                    # 첫 번째 제품은 현재 페이지의 item
+                    sku = current_item
                 else:
                     # 2-4번째 제품은 DB에서 찾기
-                    sku = self.get_samsung_sku_by_product_name(product['product_name'])
+                    sku = self.get_item_by_product_name(product['product_name'])
 
                 # 데이터 삽입
                 insert_query = """
@@ -759,15 +759,15 @@ class BestBuyDetailCrawler:
             page_source = self.driver.page_source
             tree = html.fromstring(page_source)
 
-            # 1. Item 추출 (구 Retailer_SKU_Name)
-            item = self.extract_item(tree)
-            print(f"  [✓] Item: {item}")
+            # 1. Retailer_SKU_Name 추출
+            retailer_sku_name = self.extract_retailer_sku_name(tree)
+            print(f"  [✓] Retailer_SKU_Name: {retailer_sku_name}")
 
             # 2. Compare similar products 추출
             mst_products = self.extract_compare_similar_products(product_url)
 
             # 3. Specification 버튼 클릭
-            samsung_sku_name = None
+            item = None
             electricity_use = None
             screen_size = None
 
@@ -786,9 +786,9 @@ class BestBuyDetailCrawler:
                 dialog_source = self.driver.page_source
                 dialog_tree = html.fromstring(dialog_source)
 
-                # 4. Samsung_SKU_Name 추출
-                samsung_sku_name = self.extract_samsung_sku_name(dialog_tree)
-                print(f"  [✓] Samsung_SKU_Name: {samsung_sku_name}")
+                # 4. Item 추출
+                item = self.extract_item(dialog_tree)
+                print(f"  [✓] Item: {item}")
 
                 # 5. Estimated_Annual_Electricity_Use 추출 (숫자만)
                 electricity_use = self.extract_electricity_use(dialog_tree)
@@ -801,9 +801,9 @@ class BestBuyDetailCrawler:
                 # 7. 다이얼로그 닫기
                 self.close_specifications_dialog()
 
-            # 8. MST 테이블에 저장 (samsung_sku_name이 있고 mst_products가 있을 때)
-            if mst_products and samsung_sku_name:
-                self.save_to_mst_table(mst_products, samsung_sku_name)
+            # 8. MST 테이블에 저장 (item이 있고 mst_products가 있을 때)
+            if mst_products and item:
+                self.save_to_mst_table(mst_products, item)
 
             # 9. See All Customer Reviews 클릭 및 데이터 수집
             star_ratings = None
@@ -832,8 +832,8 @@ class BestBuyDetailCrawler:
             self.save_to_db(
                 page_type=page_type,
                 order=self.order,
+                retailer_sku_name=retailer_sku_name,
                 item=item,
-                samsung_sku_name=samsung_sku_name,
                 electricity_use=electricity_use,
                 screen_size=screen_size,
                 star_ratings=star_ratings,
@@ -851,7 +851,7 @@ class BestBuyDetailCrawler:
             traceback.print_exc()
             return False
 
-    def save_to_db(self, page_type, order, item, samsung_sku_name,
+    def save_to_db(self, page_type, order, retailer_sku_name, item,
                    electricity_use, screen_size, star_ratings, top_mentions, detailed_reviews,
                    recommendation_intent, product_url):
         """DB에 저장"""
@@ -868,8 +868,8 @@ class BestBuyDetailCrawler:
                     batch_id VARCHAR(50),
                     page_type VARCHAR(50),
                     "order" INTEGER,
+                    retailer_sku_name TEXT,
                     item TEXT,
-                    Samsung_SKU_Name TEXT,
                     Estimated_Annual_Electricity_Use TEXT,
                     screen_size TEXT,
                     Count_of_Star_Ratings TEXT,
@@ -885,7 +885,7 @@ class BestBuyDetailCrawler:
             # 데이터 삽입
             insert_query = """
                 INSERT INTO bby_tv_detail_crawled
-                (batch_id, page_type, "order", item, Samsung_SKU_Name,
+                (batch_id, page_type, "order", retailer_sku_name, item,
                  Estimated_Annual_Electricity_Use, screen_size, Count_of_Star_Ratings, Top_Mentions,
                  Detailed_Review_Content, Recommendation_Intent, product_url, calendar_week)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -895,8 +895,8 @@ class BestBuyDetailCrawler:
                 self.batch_id,
                 page_type,
                 order,
+                retailer_sku_name,
                 item,
-                samsung_sku_name,
                 electricity_use,
                 screen_size,
                 star_ratings,

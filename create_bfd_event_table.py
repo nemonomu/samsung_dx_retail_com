@@ -1,7 +1,12 @@
 import psycopg2
 
-# Import database configuration
-from config import DB_CONFIG
+DB_CONFIG = {
+    'host': 'samsung-dx-crawl.csnixzmkuppn.ap-northeast-2.rds.amazonaws.com',
+    'port': 5432,
+    'database': 'postgres',
+    'user': 'postgres',
+    'password': 'admin2025!'
+}
 
 def create_bfd_event_table():
     """Create table for Black Friday event schedule"""
@@ -17,10 +22,12 @@ def create_bfd_event_table():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS bfd_event_crawl (
                 id SERIAL PRIMARY KEY,
-                Bestbuy_event_schedule TEXT,
-                Walmart_event_schedule TEXT,
-                Amazon_event_schedule TEXT,
-                crawl_at_local_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                Event_channel VARCHAR(50) CHECK (Event_channel IN ('Amazon', 'Walmart', 'Bestbuy')),
+                Event_name TEXT,
+                Event_start_date DATE,
+                Event_end_date DATE,
+                crawl_at_local_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                calendar_week VARCHAR(10)
             );
         """)
         print("[OK] bfd_event_crawl table created")
@@ -34,10 +41,12 @@ def create_bfd_event_table():
         print("="*80)
         print("\nTable structure:")
         print("  - id (SERIAL PRIMARY KEY)")
-        print("  - Bestbuy_event_schedule (TEXT)")
-        print("  - Walmart_event_schedule (TEXT)")
-        print("  - Amazon_event_schedule (TEXT)")
+        print("  - Event_channel (VARCHAR(50)) - only: Amazon, Walmart, Bestbuy")
+        print("  - Event_name (TEXT)")
+        print("  - Event_start_date (DATE)")
+        print("  - Event_end_date (DATE)")
         print("  - crawl_at_local_time (TIMESTAMP)")
+        print("  - calendar_week (VARCHAR(10))")
         print("\nReady to run: python bfd_event_crawl.py")
 
     except Exception as e:

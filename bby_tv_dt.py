@@ -389,6 +389,36 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Star ratings 추출 실패: {e}")
             return None
 
+    def extract_count_of_reviews(self):
+        """Count_of_Reviews 추출 (See All Customer Reviews 페이지에서)"""
+        try:
+            # XPath 패턴
+            xpaths = [
+                # 제공된 HTML 패턴
+                '//span[@class="c-reviews order-2"]',
+                # ID 기반 패턴 (동적 ID이므로 contains 사용)
+                '//div[contains(@id, "user-generated-content-ugc-stats")]//span[@class="c-reviews order-2"]',
+                # 더 범용적인 패턴
+                '//span[contains(@class, "c-reviews")]'
+            ]
+
+            for xpath in xpaths:
+                try:
+                    elem = self.driver.find_element(By.XPATH, xpath)
+                    text = elem.text.strip()
+                    # 숫자만 추출 (예: "(84 Reviews)" -> "84")
+                    match = re.search(r'\((\d+)\s*Reviews?\)', text)
+                    if match:
+                        return match.group(1)
+                except Exception:
+                    continue
+
+            return None
+
+        except Exception as e:
+            print(f"  [ERROR] Count of reviews 추출 실패: {e}")
+            return None
+
     def extract_top_mentions_from_reviews_page(self):
         """Top_Mentions 추출 (See All Customer Reviews 페이지에서)"""
         try:
@@ -808,24 +838,29 @@ class BestBuyDetailCrawler:
 
             # 9. See All Customer Reviews 클릭 및 데이터 수집
             star_ratings = None
+            count_of_reviews = None
             top_mentions = None
             detailed_reviews = None
             recommendation_intent = None
 
             if self.click_see_all_reviews():
-                # 9-1. Star ratings 수집 (리뷰 페이지에서)
+                # 9-1. Count of reviews 수집 (리뷰 페이지에서)
+                count_of_reviews = self.extract_count_of_reviews()
+                print(f"  [✓] Count_of_Reviews: {count_of_reviews}")
+
+                # 9-2. Star ratings 수집 (리뷰 페이지에서)
                 star_ratings = self.extract_star_ratings_from_reviews_page()
                 print(f"  [✓] Star_Ratings: {star_ratings}")
 
-                # 9-2. Top mentions 수집 (리뷰 페이지에서)
+                # 9-3. Top mentions 수집 (리뷰 페이지에서)
                 top_mentions = self.extract_top_mentions_from_reviews_page()
                 print(f"  [✓] Top_Mentions: {top_mentions}")
 
-                # 9-3. Recommendation intent 수집 (리뷰 페이지에서)
+                # 9-4. Recommendation intent 수집 (리뷰 페이지에서)
                 recommendation_intent = self.extract_recommendation_intent_from_reviews_page()
                 print(f"  [✓] Recommendation_Intent: {recommendation_intent}")
 
-                # 9-4. Detailed reviews 수집
+                # 9-5. Detailed reviews 수집
                 detailed_reviews = self.extract_reviews()
                 print(f"  [✓] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
 
@@ -837,6 +872,7 @@ class BestBuyDetailCrawler:
                 item=item,
                 electricity_use=electricity_use,
                 screen_size=screen_size,
+                count_of_reviews=count_of_reviews,
                 star_ratings=star_ratings,
                 top_mentions=top_mentions,
                 detailed_reviews=detailed_reviews,
@@ -853,7 +889,7 @@ class BestBuyDetailCrawler:
             return False
 
     def save_to_db(self, page_type, order, retailer_sku_name, item,
-                   electricity_use, screen_size, star_ratings, top_mentions, detailed_reviews,
+                   electricity_use, screen_size, count_of_reviews, star_ratings, top_mentions, detailed_reviews,
                    recommendation_intent, product_url):
         """DB에 저장"""
         try:
@@ -878,6 +914,7 @@ class BestBuyDetailCrawler:
                     item TEXT,
                     Estimated_Annual_Electricity_Use TEXT,
                     screen_size TEXT,
+                    count_of_reviews TEXT,
                     Count_of_Star_Ratings TEXT,
                     Top_Mentions TEXT,
                     Detailed_Review_Content TEXT,
@@ -892,9 +929,9 @@ class BestBuyDetailCrawler:
             insert_query = """
                 INSERT INTO bby_tv_detail_crawled
                 (account_name, batch_id, page_type, "order", retailer_sku_name, item,
-                 Estimated_Annual_Electricity_Use, screen_size, Count_of_Star_Ratings, Top_Mentions,
+                 Estimated_Annual_Electricity_Use, screen_size, count_of_reviews, Count_of_Star_Ratings, Top_Mentions,
                  Detailed_Review_Content, Recommendation_Intent, product_url, crawl_strdatetime, calendar_week)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
 
             cursor.execute(insert_query, (
@@ -906,6 +943,7 @@ class BestBuyDetailCrawler:
                 item,
                 electricity_use,
                 screen_size,
+                count_of_reviews,
                 star_ratings,
                 top_mentions,
                 detailed_reviews,

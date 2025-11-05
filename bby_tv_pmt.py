@@ -6,7 +6,7 @@ https://www.bestbuy.com/site/all-tv-home-theater-on-sale/tvs-on-sale/pcmcat17206
 1. 프로모션 메인 페이지에서 4개 컬럼 추가 수집: final_sku_price, original_sku_price, offer, savings
 2. offer는 숫자만 저장 (예: "+2 offers for you" -> "2")
 3. savings 검증: original_sku_price - final_sku_price와 동일해야 함
-4. 컬럼 순서 변경: page_type, retailer_sku_name, rank, final_sku_price, original_sku_price, offer, savings, promotion_type, product_url, crawl_datetime, calendar_week, batch_id
+4. 컬럼 순서 변경: page_type, retailer_sku_name, promotion_rank, final_sku_price, original_sku_price, offer, savings, promotion_type, product_url, crawl_strdatetime, calendar_week, batch_id
 5. item -> retailer_sku_name으로 변경
 """
 import time
@@ -174,8 +174,8 @@ class BestBuyPromotionCrawler:
 
             for idx, item in enumerate(product_items, 1):
                 try:
-                    # rank는 1부터 시작
-                    rank = idx
+                    # promotion_rank는 1부터 시작
+                    promotion_rank = idx
 
                     # 제품명 추출 (retailer_sku_name)
                     name_xpaths = [
@@ -284,7 +284,7 @@ class BestBuyPromotionCrawler:
                         product = {
                             'page_type': 'Top deals',
                             'retailer_sku_name': product_name,
-                            'rank': rank,
+                            'promotion_rank': promotion_rank,
                             'final_sku_price': final_price,
                             'original_sku_price': original_price,
                             'offer': offer,
@@ -293,7 +293,7 @@ class BestBuyPromotionCrawler:
                             'product_url': product_url
                         }
                         products.append(product)
-                        print(f"  [{rank}] {product_name[:50]}...")
+                        print(f"  [{promotion_rank}] {product_name[:50]}...")
                         print(f"      Price: ${final_price} (Was: ${original_price}, Save: ${savings}, Offers: {offer})")
                         print(f"      URL: {product_url[:80]}...")
 
@@ -328,7 +328,7 @@ class BestBuyPromotionCrawler:
                     account_name VARCHAR(50),
                     page_type VARCHAR(50),
                     retailer_sku_name TEXT,
-                    rank INTEGER,
+                    promotion_rank INTEGER,
                     final_sku_price VARCHAR(50),
                     original_sku_price VARCHAR(50),
                     offer VARCHAR(50),
@@ -351,7 +351,7 @@ class BestBuyPromotionCrawler:
             # 데이터 삽입
             insert_query = """
                 INSERT INTO bby_tv_promotion_crawl
-                (account_name, page_type, retailer_sku_name, rank, final_sku_price, original_sku_price, offer, savings,
+                (account_name, page_type, retailer_sku_name, promotion_rank, final_sku_price, original_sku_price, offer, savings,
                  promotion_type, product_url, crawl_strdatetime, calendar_week, batch_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
@@ -363,7 +363,7 @@ class BestBuyPromotionCrawler:
                         'Bestbuy',
                         product['page_type'],
                         product['retailer_sku_name'],
-                        product['rank'],
+                        product['promotion_rank'],
                         product['final_sku_price'],
                         product['original_sku_price'],
                         product['offer'],
@@ -376,7 +376,7 @@ class BestBuyPromotionCrawler:
                     ))
                     success_count += 1
                 except Exception as e:
-                    print(f"[ERROR] 저장 실패 - Rank {product['rank']}: {e}")
+                    print(f"[ERROR] 저장 실패 - Promotion Rank {product['promotion_rank']}: {e}")
 
             cursor.close()
             print(f"[OK] DB 저장 완료: {success_count}/{len(products)}개")

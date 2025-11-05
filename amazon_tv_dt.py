@@ -681,12 +681,13 @@ class AmazonDetailCrawler:
             # Insert to amazon_tv_detail_crawled
             cursor.execute("""
                 INSERT INTO amazon_tv_detail_crawled
-                (batch_id, page_type, product_url, Retailer_SKU_Name, Star_Rating,
+                (account_name, batch_id, page_type, product_url, Retailer_SKU_Name, Star_Rating,
                  SKU_Popularity, Retailer_Membership_Discounts, item,
                  Rank_1, Rank_2, screen_size, count_of_reviews, Count_of_Star_Ratings,
                  Summarized_Review_Content, Detailed_Review_Content, calendar_week, crawl_strdatetime)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
+                'Amazon',
                 self.batch_id,
                 data['page_type'],
                 data['product_url'],

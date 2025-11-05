@@ -220,6 +220,8 @@ class BestBuyPromotionCrawler:
                         if elem:
                             price_text = elem[0].text_content().strip()
                             final_price = self.extract_price_from_text(price_text)
+                            if final_price:
+                                final_price = f"${final_price}"
                             break
 
                     # original_sku_price 추출
@@ -234,6 +236,8 @@ class BestBuyPromotionCrawler:
                         if elem:
                             price_text = elem[0].text_content().strip()
                             original_price = self.extract_price_from_text(price_text)
+                            if original_price:
+                                original_price = f"${original_price}"
                             break
 
                     # offer 추출 (숫자만)

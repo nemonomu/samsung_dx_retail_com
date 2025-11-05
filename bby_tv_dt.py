@@ -806,7 +806,7 @@ class BestBuyDetailCrawler:
                 FROM bby_tv_detail_crawled
                 WHERE retailer_sku_name = %s
                 AND item IS NOT NULL
-                ORDER BY crawl_datetime DESC
+                ORDER BY crawl_strdatetime DESC
                 LIMIT 1
             """, (product_name,))
 

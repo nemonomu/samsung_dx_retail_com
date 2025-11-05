@@ -257,21 +257,28 @@ class BestBuyTrendCrawler:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bby_tv_Trend_crawl (
                     id SERIAL PRIMARY KEY,
+                    account_name VARCHAR(50),
                     page_type VARCHAR(50),
                     rank INTEGER,
                     product_name TEXT,
                     product_url TEXT,
-                    crawl_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    crawl_strdatetime VARCHAR(20),
+                    batch_id VARCHAR(50),
+                    calendar_week VARCHAR(10)
                 )
             """)
 
             # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
 
+            # Calculate crawl_strdatetime (format: YYYYMMDDHHMISS + microseconds 4 digits)
+            now = datetime.now()
+            crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + now.strftime('%f')[:4]
+
             # 데이터 삽입
             insert_query = """
-                INSERT INTO bby_tv_Trend_crawl (account_name, batch_id, page_type, rank, product_name, product_url, calendar_week)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO bby_tv_Trend_crawl (account_name, batch_id, page_type, rank, product_name, product_url, crawl_strdatetime, calendar_week)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """
 
             success_count = 0
@@ -284,6 +291,7 @@ class BestBuyTrendCrawler:
                         product['rank'],
                         product['product_name'],
                         product['product_url'],
+                        crawl_strdatetime,
                         calendar_week
                     ))
                     success_count += 1

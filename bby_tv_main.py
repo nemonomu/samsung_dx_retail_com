@@ -340,14 +340,18 @@ class BestBuyTVCrawler:
             # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
 
+            # Calculate crawl_strdatetime (format: YYYYMMDDHHMISS + microseconds 4 digits)
+            now = datetime.now()
+            crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + now.strftime('%f')[:4]
+
             cursor.execute("""
                 INSERT INTO bestbuy_tv_main_crawl
                 (account_name, batch_id, page_type, retailer_sku_name, Final_SKU_Price, Savings, Comparable_Pricing,
                  Offer, Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
-                 Star_Rating, SKU_Status, Product_url, calendar_week)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 Star_Rating, SKU_Status, Product_url, crawl_strdatetime, calendar_week)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, ('Bestbuy', self.batch_id, page_type, retailer_sku_name, final_price, savings, comp_pricing,
-                  offer, pickup, shipping, delivery, star_rating, sku_status, product_url, calendar_week))
+                  offer, pickup, shipping, delivery, star_rating, sku_status, product_url, crawl_strdatetime, calendar_week))
 
             self.db_conn.commit()
             cursor.close()

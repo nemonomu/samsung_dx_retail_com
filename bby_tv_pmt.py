@@ -335,7 +335,7 @@ class BestBuyPromotionCrawler:
                     savings VARCHAR(50),
                     promotion_type TEXT,
                     product_url TEXT,
-                    crawl_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    crawl_strdatetime VARCHAR(20),
                     calendar_week VARCHAR(10),
                     batch_id VARCHAR(50)
                 )
@@ -344,12 +344,16 @@ class BestBuyPromotionCrawler:
             # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
 
+            # Calculate crawl_strdatetime (format: YYYYMMDDHHMISS + microseconds 4 digits)
+            now = datetime.now()
+            crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + now.strftime('%f')[:4]
+
             # 데이터 삽입
             insert_query = """
                 INSERT INTO bby_tv_promotion_crawl
                 (account_name, page_type, retailer_sku_name, rank, final_sku_price, original_sku_price, offer, savings,
-                 promotion_type, product_url, calendar_week, batch_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 promotion_type, product_url, crawl_strdatetime, calendar_week, batch_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
 
             success_count = 0
@@ -366,6 +370,7 @@ class BestBuyPromotionCrawler:
                         product['savings'],
                         product['promotion_type'],
                         product['product_url'],
+                        crawl_strdatetime,
                         calendar_week,
                         self.batch_id
                     ))

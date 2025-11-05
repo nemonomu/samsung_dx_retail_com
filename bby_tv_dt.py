@@ -691,7 +691,7 @@ class BestBuyDetailCrawler:
                 CREATE TABLE IF NOT EXISTS bby_tv_mst (
                     id SERIAL PRIMARY KEY,
                     account_name VARCHAR(50),
-                    sku VARCHAR(255),
+                    item VARCHAR(255),
                     product_url TEXT,
                     pros TEXT,
                     cons TEXT,
@@ -709,24 +709,24 @@ class BestBuyDetailCrawler:
 
             # 각 제품 저장
             for idx, product in enumerate(products):
-                # SKU 결정
+                # item 결정
                 if idx == 0:
                     # 첫 번째 제품은 현재 페이지의 item
-                    sku = current_item
+                    mst_item = current_item
                 else:
                     # 2-4번째 제품은 DB에서 찾기
-                    sku = self.get_item_by_product_name(product['product_name'])
+                    mst_item = self.get_item_by_product_name(product['product_name'])
 
                 # 데이터 삽입
                 insert_query = """
                     INSERT INTO bby_tv_mst
-                    (account_name, sku, product_url, pros, cons, product_name, update_date, calendar_week)
+                    (account_name, item, product_url, pros, cons, product_name, update_date, calendar_week)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """
 
                 cursor.execute(insert_query, (
                     'Bestbuy',
-                    sku,
+                    mst_item,
                     product['product_url'],
                     product['pros'],
                     product['cons'],
@@ -735,7 +735,7 @@ class BestBuyDetailCrawler:
                     calendar_week
                 ))
 
-                print(f"    [MST {idx+1}/4] {product['product_name'][:50]}... (SKU: {sku})")
+                print(f"    [MST {idx+1}/4] {product['product_name'][:50]}... (item: {mst_item})")
 
             cursor.close()
             print(f"  [✓] MST 테이블 저장 완료 (4개)")
@@ -921,61 +921,61 @@ class BestBuyDetailCrawler:
             traceback.print_exc()
             return False
 
-    def fill_missing_skus(self):
-        """빈 SKU를 이전 세션 데이터로 채우기"""
+    def fill_missing_items(self):
+        """빈 item을 이전 세션 데이터로 채우기"""
         try:
-            print("\n[INFO] 빈 SKU 채우는 중...")
+            print("\n[INFO] 빈 item 채우는 중...")
             cursor = self.db_conn.cursor()
 
-            # 현재 세션에서 sku가 NULL인 레코드 찾기
+            # 현재 세션에서 item이 NULL인 레코드 찾기
             cursor.execute("""
                 SELECT id, product_name
                 FROM bby_tv_mst
-                WHERE sku IS NULL
+                WHERE item IS NULL
                 AND product_name IS NOT NULL
             """)
 
-            empty_skus = cursor.fetchall()
+            empty_items = cursor.fetchall()
 
-            if not empty_skus:
-                print("[OK] 빈 SKU 없음")
+            if not empty_items:
+                print("[OK] 빈 item 없음")
                 cursor.close()
                 return
 
-            print(f"[INFO] 빈 SKU {len(empty_skus)}개 발견")
+            print(f"[INFO] 빈 item {len(empty_items)}개 발견")
 
             updated_count = 0
-            for record_id, product_name in empty_skus:
-                # 이전 세션에서 같은 product_name을 가진 레코드의 sku 찾기
+            for record_id, product_name in empty_items:
+                # 이전 세션에서 같은 product_name을 가진 레코드의 item 찾기
                 cursor.execute("""
-                    SELECT sku
+                    SELECT item
                     FROM bby_tv_mst
                     WHERE product_name = %s
-                    AND sku IS NOT NULL
+                    AND item IS NOT NULL
                     ORDER BY id DESC
                     LIMIT 1
                 """, (product_name,))
 
                 result = cursor.fetchone()
                 if result:
-                    sku = result[0]
+                    item_value = result[0]
                     # UPDATE
                     cursor.execute("""
                         UPDATE bby_tv_mst
-                        SET sku = %s
+                        SET item = %s
                         WHERE id = %s
-                    """, (sku, record_id))
+                    """, (item_value, record_id))
                     updated_count += 1
-                    print(f"  [✓] Updated: {product_name[:50]}... → SKU: {sku}")
+                    print(f"  [✓] Updated: {product_name[:50]}... → item: {item_value}")
 
             self.db_conn.commit()
             cursor.close()
 
-            print(f"[OK] {updated_count}/{len(empty_skus)}개 SKU 채움 완료")
+            print(f"[OK] {updated_count}/{len(empty_items)}개 item 채움 완료")
             return True
 
         except Exception as e:
-            print(f"[ERROR] SKU 채우기 실패: {e}")
+            print(f"[ERROR] item 채우기 실패: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -1014,8 +1014,8 @@ class BestBuyDetailCrawler:
             print(f"크롤링 완료! 성공: {success_count}/{len(urls)}개")
             print("="*80)
 
-            # 빈 SKU 채우기
-            self.fill_missing_skus()
+            # 빈 item 채우기
+            self.fill_missing_items()
 
         except Exception as e:
             print(f"[ERROR] 크롤러 실행 오류: {e}")

@@ -192,6 +192,11 @@ class BestBuyBSRCrawler:
                 print(f"[DEBUG] Saved page source to bestbuy_page_{page_number}_debug.html")
 
             for idx, container in enumerate(containers, 1):
+                # 100개 도달하면 수집 중단
+                if self.total_collected >= 100:
+                    print(f"[INFO] Reached maximum 100 products. Stopping collection.")
+                    break
+
                 try:
                     # Extract product name (Retailer_SKU_Name)
                     # Try multiple possible XPaths
@@ -293,10 +298,10 @@ class BestBuyBSRCrawler:
                     sku_status = "Sponsored" if status_elem else None
 
                     # Save to database
-                    self.total_collected += 1  # Increment before saving to use as rank
+                    # 저장 성공 시에만 total_collected 증가
                     if self.save_to_db(
                         page_type='bsr',
-                        bsr_rank=self.total_collected,
+                        bsr_rank=self.total_collected + 1,  # 다음 rank 값 전달
                         retailer_sku_name=product_name,
                         final_price=final_price,
                         savings=savings,
@@ -309,6 +314,7 @@ class BestBuyBSRCrawler:
                         sku_status=sku_status,
                         product_url=product_url
                     ):
+                        self.total_collected += 1  # 저장 성공 시에만 증가
                         collected_count += 1
                         print(f"  [{idx}/{len(containers)}] {product_name[:60]}... | Price: {final_price}")
 
@@ -317,6 +323,12 @@ class BestBuyBSRCrawler:
                     continue
 
             print(f"[PAGE {page_number}] Collected {collected_count} products (Total: {self.total_collected})")
+
+            # 100개에 도달했으면 더 이상 수집하지 않음
+            if self.total_collected >= 100:
+                print(f"[INFO] Maximum 100 products reached. Stopping page collection.")
+                return False
+
             return True
 
         except Exception as e:
@@ -406,7 +418,12 @@ class BestBuyBSRCrawler:
             # Scrape each page
             for page_number, url in page_urls:
                 if not self.scrape_page(url, page_number):
-                    print(f"[WARNING] Failed to scrape page {page_number}, continuing...")
+                    # scrape_page returns False if 100 products reached or error occurred
+                    if self.total_collected >= 100:
+                        print(f"[INFO] Stopping page collection - reached maximum 100 products")
+                        break
+                    else:
+                        print(f"[WARNING] Failed to scrape page {page_number}, continuing...")
 
                 # Random delay between pages
                 time.sleep(random.uniform(5, 8))

@@ -1,12 +1,18 @@
 """
 Best Buy TV Detail Page Crawler (Modified)
-수집 테이블: bestbuy_tv_main_crawl, bby_tv_trend_crawl, bby_tv_promotion_crawl
+수집 테이블: bestbuy_tv_main_crawl, bby_tv_trend_crawl, bby_tv_promotion_crawl, bby_tv_bsr_crawl
 저장 테이블: bby_tv_detail_crawled, bby_tv_mst
 
 수정사항:
 1. estimated_annual_electricity_use: 숫자만 추출 (예: "286 kilowatt hours" -> "286")
 2. screen_size 컬럼 추가
 3. samsung_sku_name -> item으로 변경, item -> retailer_sku_name으로 변경
+4. 소스 테이블에서 14개 컬럼 추가 수집:
+   - 9개 데이터 컬럼: final_sku_price, savings, original_sku_price, offer,
+     pick_up_availability, shipping_availability, delivery_availability, sku_status, star_rating
+   - 5개 rank/type 컬럼: promotion_type, promotion_rank, bsr_rank, main_rank, trend_rank
+   - 첫 번째 발견된 URL의 데이터 우선 (중복 URL은 첫 소스 데이터 사용)
+   - 소스 테이블에 없는 컬럼은 NULL 처리
 """
 import time
 import random
@@ -55,7 +61,7 @@ class BestBuyDetailCrawler:
             return False
 
     def get_recent_urls(self):
-        """최신 batch_id의 product URLs 가져오기"""
+        """최신 batch_id의 product URLs와 추가 데이터 가져오기"""
         try:
             cursor = self.db_conn.cursor()
             urls = []
@@ -106,56 +112,133 @@ class BestBuyDetailCrawler:
 
             print(f"[INFO] Latest batch_id - Main: {main_batch_id}, Trend: {trend_batch_id}, Promotion: {promo_batch_id}, BSR: {bsr_batch_id}")
 
-            # bestbuy_tv_main_crawl에서 해당 batch의 URLs 가져오기
+            # bestbuy_tv_main_crawl에서 해당 batch의 URLs와 데이터 가져오기
             if main_batch_id:
                 cursor.execute("""
-                    SELECT DISTINCT product_url
+                    SELECT DISTINCT product_url, final_sku_price, savings, original_sku_price, offer,
+                           pick_up_availability, shipping_availability, delivery_availability,
+                           sku_status, star_rating, main_rank
                     FROM bestbuy_tv_main_crawl
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
                     ORDER BY product_url
                 """, (main_batch_id,))
                 main_urls = cursor.fetchall()
-                urls.extend([('main', url[0]) for url in main_urls])
+                for row in main_urls:
+                    urls.append({
+                        'page_type': 'main',
+                        'product_url': row[0],
+                        'final_sku_price': row[1],
+                        'savings': row[2],
+                        'original_sku_price': row[3],
+                        'offer': row[4],
+                        'pick_up_availability': row[5],
+                        'shipping_availability': row[6],
+                        'delivery_availability': row[7],
+                        'sku_status': row[8],
+                        'star_rating': row[9],
+                        'main_rank': row[10],
+                        'bsr_rank': None,
+                        'trend_rank': None,
+                        'promotion_rank': None,
+                        'promotion_type': None
+                    })
                 print(f"[OK] Main URLs (batch {main_batch_id}): {len(main_urls)}개")
 
-            # bby_tv_Trend_crawl에서 해당 batch의 URLs 가져오기
+            # bby_tv_Trend_crawl에서 해당 batch의 URLs와 데이터 가져오기
             if trend_batch_id:
                 cursor.execute("""
-                    SELECT DISTINCT product_url
+                    SELECT DISTINCT product_url, rank
                     FROM bby_tv_Trend_crawl
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
                     ORDER BY product_url
                 """, (trend_batch_id,))
                 trend_urls = cursor.fetchall()
-                urls.extend([('Trend', url[0]) for url in trend_urls])
+                for row in trend_urls:
+                    urls.append({
+                        'page_type': 'Trend',
+                        'product_url': row[0],
+                        'final_sku_price': None,
+                        'savings': None,
+                        'original_sku_price': None,
+                        'offer': None,
+                        'pick_up_availability': None,
+                        'shipping_availability': None,
+                        'delivery_availability': None,
+                        'sku_status': None,
+                        'star_rating': None,
+                        'main_rank': None,
+                        'bsr_rank': None,
+                        'trend_rank': row[1],
+                        'promotion_rank': None,
+                        'promotion_type': None
+                    })
                 print(f"[OK] Trend URLs (batch {trend_batch_id}): {len(trend_urls)}개")
 
-            # bby_tv_promotion_crawl에서 해당 batch의 URLs 가져오기
+            # bby_tv_promotion_crawl에서 해당 batch의 URLs와 데이터 가져오기
             if promo_batch_id:
                 cursor.execute("""
-                    SELECT DISTINCT product_url
+                    SELECT DISTINCT product_url, final_sku_price, original_sku_price, offer, savings,
+                           promotion_type, promotion_rank
                     FROM bby_tv_promotion_crawl
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
                     ORDER BY product_url
                 """, (promo_batch_id,))
                 promo_urls = cursor.fetchall()
-                urls.extend([('promotion', url[0]) for url in promo_urls])
+                for row in promo_urls:
+                    urls.append({
+                        'page_type': 'promotion',
+                        'product_url': row[0],
+                        'final_sku_price': row[1],
+                        'savings': row[4],
+                        'original_sku_price': row[2],
+                        'offer': row[3],
+                        'pick_up_availability': None,
+                        'shipping_availability': None,
+                        'delivery_availability': None,
+                        'sku_status': None,
+                        'star_rating': None,
+                        'main_rank': None,
+                        'bsr_rank': None,
+                        'trend_rank': None,
+                        'promotion_rank': row[6],
+                        'promotion_type': row[5]
+                    })
                 print(f"[OK] Promotion URLs (batch {promo_batch_id}): {len(promo_urls)}개")
 
-            # bby_tv_bsr_crawl에서 해당 batch의 URLs 가져오기
+            # bby_tv_bsr_crawl에서 해당 batch의 URLs와 데이터 가져오기
             if bsr_batch_id:
                 cursor.execute("""
-                    SELECT DISTINCT product_url
+                    SELECT DISTINCT product_url, final_sku_price, savings, original_sku_price, offer,
+                           pick_up_availability, shipping_availability, delivery_availability,
+                           sku_status, star_rating, bsr_rank
                     FROM bby_tv_bsr_crawl
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
                     ORDER BY product_url
                 """, (bsr_batch_id,))
                 bsr_urls = cursor.fetchall()
-                urls.extend([('bsr', url[0]) for url in bsr_urls])
+                for row in bsr_urls:
+                    urls.append({
+                        'page_type': 'bsr',
+                        'product_url': row[0],
+                        'final_sku_price': row[1],
+                        'savings': row[2],
+                        'original_sku_price': row[3],
+                        'offer': row[4],
+                        'pick_up_availability': row[5],
+                        'shipping_availability': row[6],
+                        'delivery_availability': row[7],
+                        'sku_status': row[8],
+                        'star_rating': row[9],
+                        'main_rank': None,
+                        'bsr_rank': row[10],
+                        'trend_rank': None,
+                        'promotion_rank': None,
+                        'promotion_type': None
+                    })
                 print(f"[OK] BSR URLs (batch {bsr_batch_id}): {len(bsr_urls)}개")
 
             cursor.close()
@@ -165,10 +248,11 @@ class BestBuyDetailCrawler:
             unique_urls = []
             duplicates_count = 0
 
-            for mother, url in urls:
+            for url_data in urls:
+                url = url_data['product_url']
                 if url not in seen_urls:
                     seen_urls.add(url)
-                    unique_urls.append((mother, url))
+                    unique_urls.append(url_data)
                 else:
                     duplicates_count += 1
 
@@ -180,6 +264,8 @@ class BestBuyDetailCrawler:
 
         except Exception as e:
             print(f"[ERROR] Failed to load URLs: {e}")
+            import traceback
+            traceback.print_exc()
             return []
 
     def extract_retailer_sku_name(self, tree):
@@ -801,10 +887,12 @@ class BestBuyDetailCrawler:
             traceback.print_exc()
             return False
 
-    def scrape_detail_page(self, page_type, product_url):
+    def scrape_detail_page(self, url_data):
         """상세 페이지 크롤링"""
         try:
             self.order += 1
+            page_type = url_data['page_type']
+            product_url = url_data['product_url']
             print(f"\n[{self.order}] [{page_type}] {product_url[:80]}...")
 
             # 페이지 접속
@@ -901,7 +989,22 @@ class BestBuyDetailCrawler:
                 top_mentions=top_mentions,
                 detailed_reviews=detailed_reviews,
                 recommendation_intent=recommendation_intent,
-                product_url=product_url
+                product_url=product_url,
+                # 소스 테이블의 추가 데이터
+                final_sku_price=url_data['final_sku_price'],
+                savings=url_data['savings'],
+                original_sku_price=url_data['original_sku_price'],
+                offer=url_data['offer'],
+                pick_up_availability=url_data['pick_up_availability'],
+                shipping_availability=url_data['shipping_availability'],
+                delivery_availability=url_data['delivery_availability'],
+                sku_status=url_data['sku_status'],
+                star_rating_source=url_data['star_rating'],
+                promotion_type=url_data['promotion_type'],
+                promotion_rank=url_data['promotion_rank'],
+                bsr_rank=url_data['bsr_rank'],
+                main_rank=url_data['main_rank'],
+                trend_rank=url_data['trend_rank']
             )
 
             return True
@@ -914,7 +1017,11 @@ class BestBuyDetailCrawler:
 
     def save_to_db(self, page_type, order, retailer_sku_name, item,
                    electricity_use, screen_size, count_of_reviews, star_ratings, top_mentions, detailed_reviews,
-                   recommendation_intent, product_url):
+                   recommendation_intent, product_url,
+                   final_sku_price, savings, original_sku_price, offer,
+                   pick_up_availability, shipping_availability, delivery_availability,
+                   sku_status, star_rating_source, promotion_type, promotion_rank,
+                   bsr_rank, main_rank, trend_rank):
         """DB에 저장"""
         try:
             cursor = self.db_conn.cursor()
@@ -926,36 +1033,16 @@ class BestBuyDetailCrawler:
             now = datetime.now()
             crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + now.strftime('%f')[:4]
 
-            # 테이블 존재 확인 및 생성
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS bby_tv_detail_crawled (
-                    id SERIAL PRIMARY KEY,
-                    account_name VARCHAR(50),
-                    batch_id VARCHAR(50),
-                    page_type VARCHAR(50),
-                    "order" INTEGER,
-                    retailer_sku_name TEXT,
-                    item TEXT,
-                    Estimated_Annual_Electricity_Use TEXT,
-                    screen_size TEXT,
-                    count_of_reviews TEXT,
-                    Count_of_Star_Ratings TEXT,
-                    Top_Mentions TEXT,
-                    Detailed_Review_Content TEXT,
-                    Recommendation_Intent TEXT,
-                    product_url TEXT,
-                    crawl_strdatetime VARCHAR(20),
-                    calendar_week VARCHAR(10)
-                )
-            """)
-
             # 데이터 삽입
             insert_query = """
                 INSERT INTO bby_tv_detail_crawled
                 (account_name, batch_id, page_type, "order", retailer_sku_name, item,
                  Estimated_Annual_Electricity_Use, screen_size, count_of_reviews, Count_of_Star_Ratings, Top_Mentions,
-                 Detailed_Review_Content, Recommendation_Intent, product_url, crawl_strdatetime, calendar_week)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 Detailed_Review_Content, Recommendation_Intent, product_url, crawl_strdatetime, calendar_week,
+                 final_sku_price, savings, original_sku_price, offer, pick_up_availability, shipping_availability,
+                 delivery_availability, sku_status, star_rating, promotion_type, promotion_rank,
+                 bsr_rank, main_rank, trend_rank)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
 
             cursor.execute(insert_query, (
@@ -974,7 +1061,21 @@ class BestBuyDetailCrawler:
                 recommendation_intent,
                 product_url,
                 crawl_strdatetime,
-                calendar_week
+                calendar_week,
+                final_sku_price,
+                savings,
+                original_sku_price,
+                offer,
+                pick_up_availability,
+                shipping_availability,
+                delivery_availability,
+                sku_status,
+                star_rating_source,
+                promotion_type,
+                promotion_rank,
+                bsr_rank,
+                main_rank,
+                trend_rank
             ))
 
             cursor.close()
@@ -1069,8 +1170,8 @@ class BestBuyDetailCrawler:
 
             # 각 URL 크롤링
             success_count = 0
-            for page_type, url in urls:
-                if self.scrape_detail_page(page_type, url):
+            for url_data in urls:
+                if self.scrape_detail_page(url_data):
                     success_count += 1
 
                 # 페이지 간 딜레이

@@ -22,7 +22,6 @@ class AmazonBSRCrawler:
         self.wait = None
         self.db_conn = None
         self.xpaths = {}
-        self.main_xpaths = {}  # For price/shipping info from main_page xpaths
         self.total_collected = 0
         self.error_messages = []
         self.batch_id = None  # Batch ID for this crawling session
@@ -38,11 +37,9 @@ class AmazonBSRCrawler:
             return False
 
     def load_xpaths(self):
-        """Load XPath selectors for BSR page and main_page from database"""
+        """Load XPath selectors for BSR page from database"""
         try:
             cursor = self.db_conn.cursor()
-
-            # Load BSR page xpaths
             cursor.execute("""
                 SELECT data_field, xpath, css_selector
                 FROM xpath_selectors
@@ -55,24 +52,8 @@ class AmazonBSRCrawler:
                     'css': row[2]
                 }
 
-            print(f"[OK] Loaded {len(self.xpaths)} XPath selectors for BSR page")
-
-            # Load main_page xpaths for price/shipping info
-            cursor.execute("""
-                SELECT data_field, xpath, css_selector
-                FROM xpath_selectors
-                WHERE mall_name = 'Amazon' AND page_type = 'main_page' AND is_active = TRUE
-            """)
-
-            for row in cursor.fetchall():
-                self.main_xpaths[row[0]] = {
-                    'xpath': row[1],
-                    'css': row[2]
-                }
-
-            print(f"[OK] Loaded {len(self.main_xpaths)} XPath selectors from main_page for additional data")
-
             cursor.close()
+            print(f"[OK] Loaded {len(self.xpaths)} XPath selectors for BSR page")
 
             if len(self.xpaths) == 0:
                 print("[WARNING] No XPath selectors found for BSR page!")
@@ -217,42 +198,16 @@ class AmazonBSRCrawler:
         except Exception as e:
             return None
 
-    def convert_purchase_count(self, text):
-        """Convert purchase count format: '10K+ bought in past month' -> '10,000'"""
+    def extract_star_rating(self, text):
+        """Extract numeric rating from text like '4.4 out of 5 stars' -> '4.4'"""
         if not text:
             return None
-
         try:
-            # Extract number part (e.g., "10K+" from "10K+ bought in past month")
-            match = re.search(r'([\d.]+)K?\+?', text, re.IGNORECASE)
-            if not match:
-                return None
-
-            number_str = match.group(1)
-            number = float(number_str)
-
-            # Check if K/k is present
-            if 'K' in text.upper():
-                number = number * 1000
-
-            # Convert to integer and format with comma
-            return f"{int(number):,}"
-
-        except Exception as e:
-            return None
-
-    def extract_available_quantity(self, text):
-        """Extract only number from availability text: 'Only 1 left in stock - order soon' -> '1'"""
-        if not text:
-            return None
-
-        try:
-            # Extract first number from text
-            match = re.search(r'(\d+)', text)
+            # Extract first number (rating)
+            match = re.search(r'([\d.]+)', text)
             if match:
                 return match.group(1)
             return None
-
         except Exception as e:
             return None
 
@@ -356,12 +311,18 @@ class AmazonBSRCrawler:
             rank_xpath = self.xpaths.get('rank', {}).get('xpath', '')
             product_name_xpath = self.xpaths.get('product_name', {}).get('xpath', '')
             product_url_xpath = self.xpaths.get('product_url', {}).get('xpath', '')
+            final_sku_price_xpath = self.xpaths.get('final_sku_price', {}).get('xpath', '')
+            count_of_reviews_xpath = self.xpaths.get('count_of_reviews', {}).get('xpath', '')
+            star_rating_xpath = self.xpaths.get('star_rating', {}).get('xpath', '')
 
             if not all([base_container_xpath, rank_xpath, product_name_xpath, product_url_xpath]):
                 print("[ERROR] Required XPaths not found")
                 return False
 
             print(f"[DEBUG] Base Container XPath: {base_container_xpath}")
+            print(f"[DEBUG] Rank XPath: {rank_xpath}")
+            print(f"[DEBUG] Product Name XPath: {product_name_xpath}")
+            print(f"[DEBUG] Product URL XPath: {product_url_xpath}")
 
             # Find all BSR product containers
             containers = tree.xpath(base_container_xpath)
@@ -399,32 +360,23 @@ class AmazonBSRCrawler:
                         product_url = None
                         print(f"  [WARNING] Rank #{bsr_rank}: No URL found")
 
-                    # Extract additional data using main_page xpaths
-                    final_price = self.extract_text_safe(container, self.main_xpaths.get('final_price', {}).get('xpath', ''))
-                    original_price = self.extract_text_safe(container, self.main_xpaths.get('original_price', {}).get('xpath', ''))
+                    # Extract final_sku_price
+                    final_sku_price = self.extract_text_safe(container, final_sku_price_xpath)
 
-                    # Extract and convert purchase count
-                    purchase_count_raw = self.extract_text_safe(container, self.main_xpaths.get('purchase_history', {}).get('xpath', ''))
-                    purchase_count = self.convert_purchase_count(purchase_count_raw)
+                    # Extract count_of_reviews
+                    count_of_reviews = self.extract_text_safe(container, count_of_reviews_xpath)
 
-                    shipping_info = self.extract_text_safe(container, self.main_xpaths.get('shipping_info', {}).get('xpath', ''))
-
-                    # Extract available quantity (only numbers)
-                    available_qty_raw = self.extract_text_safe(container, self.main_xpaths.get('stock_availability', {}).get('xpath', ''))
-                    available_qty = self.extract_available_quantity(available_qty_raw)
-
-                    # Extract discount type and validate
-                    discount_type_raw = self.extract_text_safe(container, self.main_xpaths.get('deal_badge', {}).get('xpath', ''))
-                    # Only keep "Limited time deal", set others to None
-                    discount_type = discount_type_raw if discount_type_raw == "Limited time deal" else None
+                    # Extract star_rating (extract number only)
+                    star_rating_raw = self.extract_text_safe(container, star_rating_xpath)
+                    star_rating = self.extract_star_rating(star_rating_raw)
 
                     # Save to database
-                    if self.save_to_db(bsr_rank, product_name, product_url, final_price, original_price,
-                                       purchase_count, shipping_info, available_qty, discount_type):
+                    if self.save_to_db(bsr_rank, product_name, product_url, final_sku_price,
+                                       count_of_reviews, star_rating):
                         collected_count += 1
                         self.total_collected += 1
                         print(f"  [{idx}/{len(containers)}] Rank #{bsr_rank}: {product_name[:60]}...")
-                        print(f"      Price: {final_price or 'N/A'} | Qty: {available_qty or 'N/A'}")
+                        print(f"      Price: {final_sku_price or 'N/A'} | Reviews: {count_of_reviews or 'N/A'} | Rating: {star_rating or 'N/A'}")
                     else:
                         print(f"  [FAILED {idx}] Rank #{bsr_rank}: Database save failed")
 
@@ -442,8 +394,7 @@ class AmazonBSRCrawler:
             return False
 
     def save_to_db(self, bsr_rank, product_name, product_url=None, final_sku_price=None,
-                   original_sku_price=None, number_of_units_purchased_past_month=None,
-                   shipping_info=None, available_quantity_for_purchase=None, discount_type=None):
+                   count_of_reviews=None, star_rating=None):
         """Save BSR data to database"""
         try:
             cursor = self.db_conn.cursor()
@@ -452,18 +403,17 @@ class AmazonBSRCrawler:
             calendar_week = f"w{datetime.now().isocalendar().week}"
 
             # Calculate crawl_strdatetime (format: 202511040300559260)
-            now = datetime.now()
+            korea_tz = pytz.timezone('Asia/Seoul')
+            now = datetime.now(korea_tz)
             crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + now.strftime('%f')[:4]
 
             cursor.execute("""
                 INSERT INTO amazon_tv_bsr
-                (bsr_rank, page_type, Retailer_SKU_Name, product_url, final_sku_price, original_sku_price,
-                 number_of_units_purchased_past_month, shipping_info, available_quantity_for_purchase,
-                 discount_type, batch_id, calendar_week, crawl_strdatetime)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (bsr_rank, 'bsr', product_name, product_url, final_sku_price, original_sku_price,
-                  number_of_units_purchased_past_month, shipping_info, available_quantity_for_purchase,
-                  discount_type, self.batch_id, calendar_week, crawl_strdatetime))
+                (account_name, bsr_rank, page_type, Retailer_SKU_Name, product_url, final_sku_price,
+                 count_of_reviews, star_rating, batch_id, calendar_week, crawl_strdatetime)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, ('Amazon', bsr_rank, 'bsr', product_name, product_url, final_sku_price,
+                  count_of_reviews, star_rating, self.batch_id, calendar_week, crawl_strdatetime))
 
             self.db_conn.commit()
             cursor.close()

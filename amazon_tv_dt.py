@@ -315,10 +315,11 @@ class AmazonDetailCrawler:
     def extract_screen_size(self, tree):
         """Extract screen size (format: '32 inches')"""
         try:
-            # XPath: //*[@id="poExpander"]/div[1]/div/table/tbody/tr[1]/td[2]/span
+            # Use po-display.size class to find Screen Size row (most reliable)
             xpaths = [
-                '//*[@id="poExpander"]/div[1]/div/table/tbody/tr[1]/td[2]/span',
+                '//tr[contains(@class, "po-display.size")]//td[@class="a-span9"]//span[@class="a-size-base po-break-word"]',
                 '//table[@class="a-normal a-spacing-small"]//tr[contains(@class, "po-display.size")]//td[@class="a-span9"]//span[@class="a-size-base po-break-word"]',
+                '//*[@id="poExpander"]/div[1]/div/table/tbody/tr[2]/td[2]/span',  # tr[2] typically contains Screen Size
                 '//tr[contains(@class, "po-display.size")]//span[@class="a-size-base po-break-word"]'
             ]
 

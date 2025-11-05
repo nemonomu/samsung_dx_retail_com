@@ -231,9 +231,14 @@ class BestBuyTVCrawler:
                         price_elem = container.xpath('.//div[@class="pricing"]//span[contains(@class, "font-500")]')
                     final_price = price_elem[0].text_content().strip() if price_elem else None
 
-                    # Extract Savings
+                    # Extract Savings (Save 제외, 금액만 저장)
                     savings_elem = container.xpath('.//span[@data-testid="price-block-total-savings-text"]')
-                    savings = savings_elem[0].text_content().strip() if savings_elem else None
+                    if savings_elem:
+                        savings_text = savings_elem[0].text_content().strip()
+                        # "Save $50" -> "$50"
+                        savings = savings_text.replace('Save ', '').replace('save ', '').strip()
+                    else:
+                        savings = None
 
                     # Extract Comparable_Pricing
                     # Try the new XPath pattern first

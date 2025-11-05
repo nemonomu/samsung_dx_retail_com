@@ -134,10 +134,10 @@ class BestBuyPromotionCrawler:
             if not final_price or not original_price or not savings:
                 return True  # 값이 없으면 검증 스킵
 
-            # 숫자로 변환
-            final = float(final_price.replace(',', ''))
-            original = float(original_price.replace(',', ''))
-            saving = float(savings.replace(',', ''))
+            # 숫자로 변환 ($, 콤마 제거)
+            final = float(final_price.replace(',', '').replace('$', ''))
+            original = float(original_price.replace(',', '').replace('$', ''))
+            saving = float(savings.replace(',', '').replace('$', ''))
 
             # 계산된 savings
             calculated = original - final
@@ -264,8 +264,10 @@ class BestBuyPromotionCrawler:
                         elem = item.xpath(xpath)
                         if elem:
                             savings_text = elem[0].text_content().strip()
-                            # 숫자만 추출 (예: "$55 off" -> "55")
+                            # 숫자만 추출하고 $ 붙이기 (예: "$55 off" -> "$55")
                             savings = self.extract_price_from_text(savings_text)
+                            if savings:
+                                savings = f"${savings}"
                             break
 
                     # savings 검증

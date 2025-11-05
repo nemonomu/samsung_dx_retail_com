@@ -292,8 +292,10 @@ class BestBuyTVCrawler:
                     sku_status = "Sponsored" if status_elem else None
 
                     # Save to database
+                    self.total_collected += 1  # Increment before saving to use as rank
                     if self.save_to_db(
                         page_type='main',
+                        main_rank=self.total_collected,
                         retailer_sku_name=product_name,
                         final_price=final_price,
                         savings=savings,
@@ -307,7 +309,6 @@ class BestBuyTVCrawler:
                         product_url=product_url
                     ):
                         collected_count += 1
-                        self.total_collected += 1
                         print(f"  [{idx}/{len(containers)}] {product_name[:60]}... | Price: {final_price}")
 
                 except Exception as e:
@@ -323,7 +324,7 @@ class BestBuyTVCrawler:
             traceback.print_exc()
             return False
 
-    def save_to_db(self, page_type, retailer_sku_name, final_price, savings, original_sku_price,
+    def save_to_db(self, page_type, main_rank, retailer_sku_name, final_price, savings, original_sku_price,
                    offer, pickup, shipping, delivery, star_rating, sku_status, product_url):
         """Save product data to database"""
         try:
@@ -351,11 +352,11 @@ class BestBuyTVCrawler:
 
             cursor.execute("""
                 INSERT INTO bestbuy_tv_main_crawl
-                (account_name, batch_id, page_type, retailer_sku_name, Final_SKU_Price, Savings, Original_SKU_Price,
+                (account_name, batch_id, page_type, main_rank, retailer_sku_name, Final_SKU_Price, Savings, Original_SKU_Price,
                  Offer, Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
                  Star_Rating, SKU_Status, Product_url, crawl_strdatetime, calendar_week)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, ('Bestbuy', self.batch_id, page_type, retailer_sku_name, final_price, savings, original_sku_price,
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, ('Bestbuy', self.batch_id, page_type, main_rank, retailer_sku_name, final_price, savings, original_sku_price,
                   offer, pickup, shipping, delivery, star_rating, sku_status, product_url, crawl_strdatetime, calendar_week))
 
             self.db_conn.commit()

@@ -765,13 +765,16 @@ class BestBuyDetailCrawler:
             retailer_sku_name = self.extract_retailer_sku_name(tree)
             print(f"  [✓] Retailer_SKU_Name: {retailer_sku_name}")
 
-            # 2. Compare similar products 추출
+            # 2. Screen Size 추출 (메인 페이지에서)
+            screen_size = self.extract_screen_size(tree)
+            print(f"  [✓] Screen Size: {screen_size}")
+
+            # 3. Compare similar products 추출
             mst_products = self.extract_compare_similar_products(product_url)
 
-            # 3. Specification 버튼 클릭
+            # 4. Specification 버튼 클릭
             item = None
             electricity_use = None
-            screen_size = None
 
             if self.click_specifications():
                 # 다이얼로그가 완전히 로드될 때까지 대기
@@ -788,17 +791,13 @@ class BestBuyDetailCrawler:
                 dialog_source = self.driver.page_source
                 dialog_tree = html.fromstring(dialog_source)
 
-                # 4. Item 추출
+                # 5. Item 추출
                 item = self.extract_item(dialog_tree)
                 print(f"  [✓] Item: {item}")
 
-                # 5. Estimated_Annual_Electricity_Use 추출 (숫자만)
+                # 6. Estimated_Annual_Electricity_Use 추출 (숫자만)
                 electricity_use = self.extract_electricity_use(dialog_tree)
                 print(f"  [✓] Estimated_Annual_Electricity_Use: {electricity_use}")
-
-                # 6. Screen Size 추출
-                screen_size = self.extract_screen_size(dialog_tree)
-                print(f"  [✓] Screen Size: {screen_size}")
 
                 # 7. 다이얼로그 닫기
                 self.close_specifications_dialog()

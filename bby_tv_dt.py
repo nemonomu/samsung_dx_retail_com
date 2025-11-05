@@ -114,6 +114,10 @@ class BestBuyDetailCrawler:
 
             # 수집 순서: main → bsr → promotion → trend (우선순위 순서)
             # 각 테이블의 rank 순서대로 정렬
+            # 중복 URL은 rank 정보 병합 (크롤링은 한 번만)
+
+            # Dictionary to store merged URL data: {url: {page_type, ranks, data...}}
+            url_data_map = {}
 
             # 1. bestbuy_tv_main_crawl에서 해당 batch의 URLs와 데이터 가져오기
             if main_batch_id:
@@ -128,24 +132,26 @@ class BestBuyDetailCrawler:
                 """, (main_batch_id,))
                 main_urls = cursor.fetchall()
                 for row in main_urls:
-                    urls.append({
-                        'page_type': 'main',
-                        'product_url': row[0],
-                        'final_sku_price': row[1],
-                        'savings': row[2],
-                        'original_sku_price': row[3],
-                        'offer': row[4],
-                        'pick_up_availability': row[5],
-                        'shipping_availability': row[6],
-                        'delivery_availability': row[7],
-                        'sku_status': row[8],
-                        'star_rating': row[9],
-                        'main_rank': row[10],
-                        'bsr_rank': None,
-                        'trend_rank': None,
-                        'promotion_rank': None,
-                        'promotion_type': None
-                    })
+                    url = row[0]
+                    if url not in url_data_map:
+                        url_data_map[url] = {
+                            'page_type': 'main',
+                            'product_url': url,
+                            'final_sku_price': row[1],
+                            'savings': row[2],
+                            'original_sku_price': row[3],
+                            'offer': row[4],
+                            'pick_up_availability': row[5],
+                            'shipping_availability': row[6],
+                            'delivery_availability': row[7],
+                            'sku_status': row[8],
+                            'star_rating': row[9],
+                            'main_rank': row[10],
+                            'bsr_rank': None,
+                            'trend_rank': None,
+                            'promotion_rank': None,
+                            'promotion_type': None
+                        }
                 print(f"[OK] Main URLs (batch {main_batch_id}): {len(main_urls)}개")
 
             # 2. bby_tv_bsr_crawl에서 해당 batch의 URLs와 데이터 가져오기
@@ -161,24 +167,30 @@ class BestBuyDetailCrawler:
                 """, (bsr_batch_id,))
                 bsr_urls = cursor.fetchall()
                 for row in bsr_urls:
-                    urls.append({
-                        'page_type': 'bsr',
-                        'product_url': row[0],
-                        'final_sku_price': row[1],
-                        'savings': row[2],
-                        'original_sku_price': row[3],
-                        'offer': row[4],
-                        'pick_up_availability': row[5],
-                        'shipping_availability': row[6],
-                        'delivery_availability': row[7],
-                        'sku_status': row[8],
-                        'star_rating': row[9],
-                        'main_rank': None,
-                        'bsr_rank': row[10],
-                        'trend_rank': None,
-                        'promotion_rank': None,
-                        'promotion_type': None
-                    })
+                    url = row[0]
+                    if url in url_data_map:
+                        # URL already exists - just add bsr_rank
+                        url_data_map[url]['bsr_rank'] = row[10]
+                    else:
+                        # New URL from bsr
+                        url_data_map[url] = {
+                            'page_type': 'bsr',
+                            'product_url': url,
+                            'final_sku_price': row[1],
+                            'savings': row[2],
+                            'original_sku_price': row[3],
+                            'offer': row[4],
+                            'pick_up_availability': row[5],
+                            'shipping_availability': row[6],
+                            'delivery_availability': row[7],
+                            'sku_status': row[8],
+                            'star_rating': row[9],
+                            'main_rank': None,
+                            'bsr_rank': row[10],
+                            'trend_rank': None,
+                            'promotion_rank': None,
+                            'promotion_type': None
+                        }
                 print(f"[OK] BSR URLs (batch {bsr_batch_id}): {len(bsr_urls)}개")
 
             # 3. bby_tv_promotion_crawl에서 해당 batch의 URLs와 데이터 가져오기
@@ -193,24 +205,31 @@ class BestBuyDetailCrawler:
                 """, (promo_batch_id,))
                 promo_urls = cursor.fetchall()
                 for row in promo_urls:
-                    urls.append({
-                        'page_type': 'promotion',
-                        'product_url': row[0],
-                        'final_sku_price': row[1],
-                        'savings': row[4],
-                        'original_sku_price': row[2],
-                        'offer': row[3],
-                        'pick_up_availability': None,
-                        'shipping_availability': None,
-                        'delivery_availability': None,
-                        'sku_status': None,
-                        'star_rating': None,
-                        'main_rank': None,
-                        'bsr_rank': None,
-                        'trend_rank': None,
-                        'promotion_rank': row[6],
-                        'promotion_type': row[5]
-                    })
+                    url = row[0]
+                    if url in url_data_map:
+                        # URL already exists - just add promotion_rank and promotion_type
+                        url_data_map[url]['promotion_rank'] = row[6]
+                        url_data_map[url]['promotion_type'] = row[5]
+                    else:
+                        # New URL from promotion
+                        url_data_map[url] = {
+                            'page_type': 'promotion',
+                            'product_url': url,
+                            'final_sku_price': row[1],
+                            'savings': row[4],
+                            'original_sku_price': row[2],
+                            'offer': row[3],
+                            'pick_up_availability': None,
+                            'shipping_availability': None,
+                            'delivery_availability': None,
+                            'sku_status': None,
+                            'star_rating': None,
+                            'main_rank': None,
+                            'bsr_rank': None,
+                            'trend_rank': None,
+                            'promotion_rank': row[6],
+                            'promotion_type': row[5]
+                        }
                 print(f"[OK] Promotion URLs (batch {promo_batch_id}): {len(promo_urls)}개")
 
             # 4. bby_tv_Trend_crawl에서 해당 batch의 URLs와 데이터 가져오기
@@ -224,45 +243,65 @@ class BestBuyDetailCrawler:
                 """, (trend_batch_id,))
                 trend_urls = cursor.fetchall()
                 for row in trend_urls:
-                    urls.append({
-                        'page_type': 'Trend',
-                        'product_url': row[0],
-                        'final_sku_price': None,
-                        'savings': None,
-                        'original_sku_price': None,
-                        'offer': None,
-                        'pick_up_availability': None,
-                        'shipping_availability': None,
-                        'delivery_availability': None,
-                        'sku_status': None,
-                        'star_rating': None,
-                        'main_rank': None,
-                        'bsr_rank': None,
-                        'trend_rank': row[1],
-                        'promotion_rank': None,
-                        'promotion_type': None
-                    })
+                    url = row[0]
+                    if url in url_data_map:
+                        # URL already exists - just add trend_rank
+                        url_data_map[url]['trend_rank'] = row[1]
+                    else:
+                        # New URL from trend
+                        url_data_map[url] = {
+                            'page_type': 'Trend',
+                            'product_url': url,
+                            'final_sku_price': None,
+                            'savings': None,
+                            'original_sku_price': None,
+                            'offer': None,
+                            'pick_up_availability': None,
+                            'shipping_availability': None,
+                            'delivery_availability': None,
+                            'sku_status': None,
+                            'star_rating': None,
+                            'main_rank': None,
+                            'bsr_rank': None,
+                            'trend_rank': row[1],
+                            'promotion_rank': None,
+                            'promotion_type': None
+                        }
                 print(f"[OK] Trend URLs (batch {trend_batch_id}): {len(trend_urls)}개")
 
             cursor.close()
 
-            # Remove duplicate URLs across tables (keep first occurrence)
-            seen_urls = set()
-            unique_urls = []
-            duplicates_count = 0
+            # Convert dictionary to list (maintains insertion order: main, bsr, promotion, trend)
+            unique_urls = list(url_data_map.values())
 
-            for url_data in urls:
-                url = url_data['product_url']
-                if url not in seen_urls:
-                    seen_urls.add(url)
-                    unique_urls.append(url_data)
-                else:
-                    duplicates_count += 1
+            # Count duplicates
+            total_loaded = 0
+            if main_batch_id:
+                cursor = self.db_conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM bestbuy_tv_main_crawl WHERE batch_id = %s", (main_batch_id,))
+                total_loaded += cursor.fetchone()[0]
+                cursor.close()
+            if bsr_batch_id:
+                cursor = self.db_conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM bby_tv_bsr_crawl WHERE batch_id = %s", (bsr_batch_id,))
+                total_loaded += cursor.fetchone()[0]
+                cursor.close()
+            if promo_batch_id:
+                cursor = self.db_conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM bby_tv_promotion_crawl WHERE batch_id = %s", (promo_batch_id,))
+                total_loaded += cursor.fetchone()[0]
+                cursor.close()
+            if trend_batch_id:
+                cursor = self.db_conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM bby_tv_Trend_crawl WHERE batch_id = %s", (trend_batch_id,))
+                total_loaded += cursor.fetchone()[0]
+                cursor.close()
 
+            duplicates_count = total_loaded - len(unique_urls)
             if duplicates_count > 0:
-                print(f"[INFO] Removed {duplicates_count} duplicate URLs across tables")
+                print(f"[INFO] Found {duplicates_count} duplicate URLs - rank information merged")
 
-            print(f"[OK] 총 {len(unique_urls)}개 unique URLs 로드 완료 (중복 제거 전: {len(urls)}개)")
+            print(f"[OK] 총 {len(unique_urls)}개 unique URLs 로드 완료 (중복 제거 전: {total_loaded}개)")
             return unique_urls
 
         except Exception as e:

@@ -112,7 +112,10 @@ class BestBuyDetailCrawler:
 
             print(f"[INFO] Latest batch_id - Main: {main_batch_id}, Trend: {trend_batch_id}, Promotion: {promo_batch_id}, BSR: {bsr_batch_id}")
 
-            # bestbuy_tv_main_crawl에서 해당 batch의 URLs와 데이터 가져오기
+            # 수집 순서: main → bsr → promotion → trend (우선순위 순서)
+            # 각 테이블의 rank 순서대로 정렬
+
+            # 1. bestbuy_tv_main_crawl에서 해당 batch의 URLs와 데이터 가져오기
             if main_batch_id:
                 cursor.execute("""
                     SELECT DISTINCT product_url, final_sku_price, savings, original_sku_price, offer,
@@ -121,7 +124,7 @@ class BestBuyDetailCrawler:
                     FROM bestbuy_tv_main_crawl
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
-                    ORDER BY product_url
+                    ORDER BY main_rank
                 """, (main_batch_id,))
                 main_urls = cursor.fetchall()
                 for row in main_urls:
@@ -145,38 +148,40 @@ class BestBuyDetailCrawler:
                     })
                 print(f"[OK] Main URLs (batch {main_batch_id}): {len(main_urls)}개")
 
-            # bby_tv_Trend_crawl에서 해당 batch의 URLs와 데이터 가져오기
-            if trend_batch_id:
+            # 2. bby_tv_bsr_crawl에서 해당 batch의 URLs와 데이터 가져오기
+            if bsr_batch_id:
                 cursor.execute("""
-                    SELECT DISTINCT product_url, rank
-                    FROM bby_tv_Trend_crawl
+                    SELECT DISTINCT product_url, final_sku_price, savings, original_sku_price, offer,
+                           pick_up_availability, shipping_availability, delivery_availability,
+                           sku_status, star_rating, bsr_rank
+                    FROM bby_tv_bsr_crawl
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
-                    ORDER BY product_url
-                """, (trend_batch_id,))
-                trend_urls = cursor.fetchall()
-                for row in trend_urls:
+                    ORDER BY bsr_rank
+                """, (bsr_batch_id,))
+                bsr_urls = cursor.fetchall()
+                for row in bsr_urls:
                     urls.append({
-                        'page_type': 'Trend',
+                        'page_type': 'bsr',
                         'product_url': row[0],
-                        'final_sku_price': None,
-                        'savings': None,
-                        'original_sku_price': None,
-                        'offer': None,
-                        'pick_up_availability': None,
-                        'shipping_availability': None,
-                        'delivery_availability': None,
-                        'sku_status': None,
-                        'star_rating': None,
+                        'final_sku_price': row[1],
+                        'savings': row[2],
+                        'original_sku_price': row[3],
+                        'offer': row[4],
+                        'pick_up_availability': row[5],
+                        'shipping_availability': row[6],
+                        'delivery_availability': row[7],
+                        'sku_status': row[8],
+                        'star_rating': row[9],
                         'main_rank': None,
-                        'bsr_rank': None,
-                        'trend_rank': row[1],
+                        'bsr_rank': row[10],
+                        'trend_rank': None,
                         'promotion_rank': None,
                         'promotion_type': None
                     })
-                print(f"[OK] Trend URLs (batch {trend_batch_id}): {len(trend_urls)}개")
+                print(f"[OK] BSR URLs (batch {bsr_batch_id}): {len(bsr_urls)}개")
 
-            # bby_tv_promotion_crawl에서 해당 batch의 URLs와 데이터 가져오기
+            # 3. bby_tv_promotion_crawl에서 해당 batch의 URLs와 데이터 가져오기
             if promo_batch_id:
                 cursor.execute("""
                     SELECT DISTINCT product_url, final_sku_price, original_sku_price, offer, savings,
@@ -184,7 +189,7 @@ class BestBuyDetailCrawler:
                     FROM bby_tv_promotion_crawl
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
-                    ORDER BY product_url
+                    ORDER BY promotion_rank
                 """, (promo_batch_id,))
                 promo_urls = cursor.fetchall()
                 for row in promo_urls:
@@ -208,38 +213,36 @@ class BestBuyDetailCrawler:
                     })
                 print(f"[OK] Promotion URLs (batch {promo_batch_id}): {len(promo_urls)}개")
 
-            # bby_tv_bsr_crawl에서 해당 batch의 URLs와 데이터 가져오기
-            if bsr_batch_id:
+            # 4. bby_tv_Trend_crawl에서 해당 batch의 URLs와 데이터 가져오기
+            if trend_batch_id:
                 cursor.execute("""
-                    SELECT DISTINCT product_url, final_sku_price, savings, original_sku_price, offer,
-                           pick_up_availability, shipping_availability, delivery_availability,
-                           sku_status, star_rating, bsr_rank
-                    FROM bby_tv_bsr_crawl
+                    SELECT DISTINCT product_url, rank
+                    FROM bby_tv_Trend_crawl
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
-                    ORDER BY product_url
-                """, (bsr_batch_id,))
-                bsr_urls = cursor.fetchall()
-                for row in bsr_urls:
+                    ORDER BY rank
+                """, (trend_batch_id,))
+                trend_urls = cursor.fetchall()
+                for row in trend_urls:
                     urls.append({
-                        'page_type': 'bsr',
+                        'page_type': 'Trend',
                         'product_url': row[0],
-                        'final_sku_price': row[1],
-                        'savings': row[2],
-                        'original_sku_price': row[3],
-                        'offer': row[4],
-                        'pick_up_availability': row[5],
-                        'shipping_availability': row[6],
-                        'delivery_availability': row[7],
-                        'sku_status': row[8],
-                        'star_rating': row[9],
+                        'final_sku_price': None,
+                        'savings': None,
+                        'original_sku_price': None,
+                        'offer': None,
+                        'pick_up_availability': None,
+                        'shipping_availability': None,
+                        'delivery_availability': None,
+                        'sku_status': None,
+                        'star_rating': None,
                         'main_rank': None,
-                        'bsr_rank': row[10],
-                        'trend_rank': None,
+                        'bsr_rank': None,
+                        'trend_rank': row[1],
                         'promotion_rank': None,
                         'promotion_type': None
                     })
-                print(f"[OK] BSR URLs (batch {bsr_batch_id}): {len(bsr_urls)}개")
+                print(f"[OK] Trend URLs (batch {trend_batch_id}): {len(trend_urls)}개")
 
             cursor.close()
 

@@ -862,6 +862,10 @@ class BestBuyDetailCrawler:
             # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
 
+            # Calculate crawl_strdatetime (format: 202511040300276863)
+            now = datetime.now()
+            crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + now.strftime('%f')[:4]
+
             # 테이블 존재 확인 및 생성
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bby_tv_detail_crawled (
@@ -879,7 +883,7 @@ class BestBuyDetailCrawler:
                     Detailed_Review_Content TEXT,
                     Recommendation_Intent TEXT,
                     product_url TEXT,
-                    crawl_datetime TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    crawl_strdatetime VARCHAR(20),
                     calendar_week VARCHAR(10)
                 )
             """)
@@ -889,8 +893,8 @@ class BestBuyDetailCrawler:
                 INSERT INTO bby_tv_detail_crawled
                 (account_name, batch_id, page_type, "order", retailer_sku_name, item,
                  Estimated_Annual_Electricity_Use, screen_size, Count_of_Star_Ratings, Top_Mentions,
-                 Detailed_Review_Content, Recommendation_Intent, product_url, calendar_week)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 Detailed_Review_Content, Recommendation_Intent, product_url, crawl_strdatetime, calendar_week)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
 
             cursor.execute(insert_query, (
@@ -907,6 +911,7 @@ class BestBuyDetailCrawler:
                 detailed_reviews,
                 recommendation_intent,
                 product_url,
+                crawl_strdatetime,
                 calendar_week
             ))
 

@@ -144,44 +144,84 @@ class AmazonDetailCrawler:
 
             print(f"[INFO] Latest batch_id - Main: {main_batch_id}, BSR: {bsr_batch_id}")
 
+            # Dictionary to store merged URL data: {url: {page_type, main_rank, bsr_rank}}
+            url_data_map = {}
+
             # Load from amazon_tv_main_crawled (main) - latest batch only
-            main_urls = []
             if main_batch_id:
                 print(f"[INFO] Loading main URLs from batch {main_batch_id}...")
                 cursor.execute("""
-                    SELECT product_url
+                    SELECT product_url, main_rank
                     FROM amazon_tv_main_crawled
                     WHERE batch_id = %s
                       AND product_url IS NOT NULL
                       AND product_url != ''
                     ORDER BY main_rank
                 """, (main_batch_id,))
-                main_urls = [{'page_type': 'main', 'url': row[0]} for row in cursor.fetchall()]
-                print(f"[OK] Loaded {len(main_urls)} main URLs")
+                main_rows = cursor.fetchall()
+                for url, main_rank in main_rows:
+                    if url not in url_data_map:
+                        url_data_map[url] = {
+                            'page_type': 'main',
+                            'url': url,
+                            'main_rank': main_rank,
+                            'bsr_rank': None
+                        }
+                print(f"[OK] Loaded {len(main_rows)} main URLs")
             else:
                 print("[WARNING] No main batch_id found in amazon_tv_main_crawled")
 
             # Load from amazon_tv_bsr (bsr) - latest batch only
-            bsr_urls = []
             if bsr_batch_id:
                 print(f"[INFO] Loading BSR URLs from batch {bsr_batch_id}...")
                 cursor.execute("""
-                    SELECT product_url
+                    SELECT product_url, bsr_rank
                     FROM amazon_tv_bsr
                     WHERE batch_id = %s
                       AND product_url IS NOT NULL
                       AND product_url != ''
                     ORDER BY bsr_rank
                 """, (bsr_batch_id,))
-                bsr_urls = [{'page_type': 'bsr', 'url': row[0]} for row in cursor.fetchall()]
-                print(f"[OK] Loaded {len(bsr_urls)} BSR URLs")
+                bsr_rows = cursor.fetchall()
+                for url, bsr_rank in bsr_rows:
+                    if url in url_data_map:
+                        # URL already exists in main - just add bsr_rank
+                        url_data_map[url]['bsr_rank'] = bsr_rank
+                    else:
+                        # New URL from bsr
+                        url_data_map[url] = {
+                            'page_type': 'bsr',
+                            'url': url,
+                            'main_rank': None,
+                            'bsr_rank': bsr_rank
+                        }
+                print(f"[OK] Loaded {len(bsr_rows)} BSR URLs")
             else:
                 print("[WARNING] No BSR batch_id found in amazon_tv_bsr")
 
             cursor.close()
 
-            all_urls = main_urls + bsr_urls
-            print(f"[OK] Total URLs loaded: {len(all_urls)}")
+            # Convert dictionary to list (maintains insertion order: main first, then bsr)
+            all_urls = list(url_data_map.values())
+
+            # Count duplicates
+            total_loaded = 0
+            if main_batch_id:
+                cursor = self.db_conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM amazon_tv_main_crawled WHERE batch_id = %s", (main_batch_id,))
+                total_loaded += cursor.fetchone()[0]
+                cursor.close()
+            if bsr_batch_id:
+                cursor = self.db_conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM amazon_tv_bsr WHERE batch_id = %s", (bsr_batch_id,))
+                total_loaded += cursor.fetchone()[0]
+                cursor.close()
+
+            duplicates = total_loaded - len(all_urls)
+            if duplicates > 0:
+                print(f"[INFO] Found {duplicates} duplicate URLs - rank information merged")
+
+            print(f"[OK] Total unique URLs: {len(all_urls)}")
 
             if len(all_urls) == 0:
                 print("[ERROR] No product URLs found! Please check:")
@@ -630,7 +670,9 @@ class AmazonDetailCrawler:
                 'count_of_reviews': count_of_reviews,
                 'Count_of_Star_Ratings': count_of_star_ratings,
                 'Summarized_Review_Content': summarized_review_content,
-                'Detailed_Review_Content': detailed_review_content
+                'Detailed_Review_Content': detailed_review_content,
+                'main_rank': url_data.get('main_rank'),
+                'bsr_rank': url_data.get('bsr_rank')
             }
 
             # Save to database
@@ -639,6 +681,7 @@ class AmazonDetailCrawler:
                 print(f"  [OK] Collected: {retailer_sku_name[:50] if retailer_sku_name else '[NO NAME]'}...")
                 print(f"       Star: {star_rating or 'N/A'} | Popularity: {sku_popularity or 'N/A'}")
                 print(f"       Rank1: {rank_1 or 'N/A'} | Rank2: {rank_2 or 'N/A'}")
+                print(f"       Main Rank: {data['main_rank'] or 'N/A'} | BSR Rank: {data['bsr_rank'] or 'N/A'}")
                 print(f"       Screen Size: {screen_size or 'N/A'} | Reviews Count: {count_of_reviews or 'N/A'}")
                 print(f"       Star Counts: {count_of_star_ratings or 'N/A'}")
                 print(f"       Review Summary: {summarized_review_content[:80] + '...' if summarized_review_content and len(summarized_review_content) > 80 else summarized_review_content or 'N/A'}")
@@ -685,8 +728,9 @@ class AmazonDetailCrawler:
                 (account_name, batch_id, page_type, product_url, Retailer_SKU_Name, Star_Rating,
                  SKU_Popularity, Retailer_Membership_Discounts, item,
                  Rank_1, Rank_2, screen_size, count_of_reviews, Count_of_Star_Ratings,
-                 Summarized_Review_Content, Detailed_Review_Content, calendar_week, crawl_strdatetime)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 Summarized_Review_Content, Detailed_Review_Content, calendar_week, crawl_strdatetime,
+                 main_rank, bsr_rank)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 'Amazon',
                 self.batch_id,
@@ -705,7 +749,9 @@ class AmazonDetailCrawler:
                 data['Summarized_Review_Content'],
                 data['Detailed_Review_Content'],
                 calendar_week,
-                crawl_strdatetime
+                crawl_strdatetime,
+                data['main_rank'],
+                data['bsr_rank']
             ))
 
             # Commit transaction

@@ -93,7 +93,18 @@ class BestBuyDetailCrawler:
             promo_batch_result = cursor.fetchone()
             promo_batch_id = promo_batch_result[0] if promo_batch_result else None
 
-            print(f"[INFO] Latest batch_id - Main: {main_batch_id}, Trend: {trend_batch_id}, Promotion: {promo_batch_id}")
+            # bby_tv_bsr_crawl에서 최신 batch_id 가져오기
+            cursor.execute("""
+                SELECT batch_id
+                FROM bby_tv_bsr_crawl
+                WHERE batch_id IS NOT NULL
+                ORDER BY batch_id DESC
+                LIMIT 1
+            """)
+            bsr_batch_result = cursor.fetchone()
+            bsr_batch_id = bsr_batch_result[0] if bsr_batch_result else None
+
+            print(f"[INFO] Latest batch_id - Main: {main_batch_id}, Trend: {trend_batch_id}, Promotion: {promo_batch_id}, BSR: {bsr_batch_id}")
 
             # bestbuy_tv_main_crawl에서 해당 batch의 URLs 가져오기
             if main_batch_id:
@@ -133,6 +144,19 @@ class BestBuyDetailCrawler:
                 promo_urls = cursor.fetchall()
                 urls.extend([('promotion', url[0]) for url in promo_urls])
                 print(f"[OK] Promotion URLs (batch {promo_batch_id}): {len(promo_urls)}개")
+
+            # bby_tv_bsr_crawl에서 해당 batch의 URLs 가져오기
+            if bsr_batch_id:
+                cursor.execute("""
+                    SELECT DISTINCT product_url
+                    FROM bby_tv_bsr_crawl
+                    WHERE batch_id = %s
+                    AND product_url IS NOT NULL
+                    ORDER BY product_url
+                """, (bsr_batch_id,))
+                bsr_urls = cursor.fetchall()
+                urls.extend([('bsr', url[0]) for url in bsr_urls])
+                print(f"[OK] BSR URLs (batch {bsr_batch_id}): {len(bsr_urls)}개")
 
             cursor.close()
 

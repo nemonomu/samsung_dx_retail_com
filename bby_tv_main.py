@@ -240,17 +240,17 @@ class BestBuyTVCrawler:
                     else:
                         savings = None
 
-                    # Extract Comparable_Pricing
+                    # Extract Original_SKU_Price
                     # Try the new XPath pattern first
-                    comp_price_elem = container.xpath('.//span[@class="font-sans text-default text-style-body-md-400" and contains(@style, "color: rgb(108, 111, 117)")]')
-                    if not comp_price_elem:
-                        comp_price_elem = container.xpath('.//span[@data-testid="price-block-regular-price-message-text"]//span')
+                    original_sku_price_elem = container.xpath('.//span[@class="font-sans text-default text-style-body-md-400" and contains(@style, "color: rgb(108, 111, 117)")]')
+                    if not original_sku_price_elem:
+                        original_sku_price_elem = container.xpath('.//span[@data-testid="price-block-regular-price-message-text"]//span')
 
-                    if comp_price_elem:
+                    if original_sku_price_elem:
                         # For the new pattern, it's the first element
-                        comp_pricing = comp_price_elem[0].text_content().strip() if len(comp_price_elem) >= 1 else None
+                        original_sku_price = original_sku_price_elem[0].text_content().strip() if len(original_sku_price_elem) >= 1 else None
                     else:
-                        comp_pricing = None
+                        original_sku_price = None
 
                     # Extract Offer (+ X offers) - 숫자만 저장
                     offer_elem = container.xpath('.//div[@data-testid="plus-x-offers"]//span[@class="font-sans text-default text-style-body-md-400"]')
@@ -297,7 +297,7 @@ class BestBuyTVCrawler:
                         retailer_sku_name=product_name,
                         final_price=final_price,
                         savings=savings,
-                        comp_pricing=comp_pricing,
+                        original_sku_price=original_sku_price,
                         offer=offer,
                         pickup=pickup,
                         shipping=shipping,
@@ -323,7 +323,7 @@ class BestBuyTVCrawler:
             traceback.print_exc()
             return False
 
-    def save_to_db(self, page_type, retailer_sku_name, final_price, savings, comp_pricing,
+    def save_to_db(self, page_type, retailer_sku_name, final_price, savings, original_sku_price,
                    offer, pickup, shipping, delivery, star_rating, sku_status, product_url):
         """Save product data to database"""
         try:
@@ -351,11 +351,11 @@ class BestBuyTVCrawler:
 
             cursor.execute("""
                 INSERT INTO bestbuy_tv_main_crawl
-                (account_name, batch_id, page_type, retailer_sku_name, Final_SKU_Price, Savings, Comparable_Pricing,
+                (account_name, batch_id, page_type, retailer_sku_name, Final_SKU_Price, Savings, Original_SKU_Price,
                  Offer, Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
                  Star_Rating, SKU_Status, Product_url, crawl_strdatetime, calendar_week)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, ('Bestbuy', self.batch_id, page_type, retailer_sku_name, final_price, savings, comp_pricing,
+            """, ('Bestbuy', self.batch_id, page_type, retailer_sku_name, final_price, savings, original_sku_price,
                   offer, pickup, shipping, delivery, star_rating, sku_status, product_url, crawl_strdatetime, calendar_week))
 
             self.db_conn.commit()

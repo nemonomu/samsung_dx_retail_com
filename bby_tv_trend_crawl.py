@@ -270,14 +270,15 @@ class BestBuyTrendCrawler:
 
             # 데이터 삽입
             insert_query = """
-                INSERT INTO bby_tv_Trend_crawl (batch_id, page_type, rank, product_name, product_url, calendar_week)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO bby_tv_Trend_crawl (account_name, batch_id, page_type, rank, product_name, product_url, calendar_week)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
             """
 
             success_count = 0
             for product in products:
                 try:
                     cursor.execute(insert_query, (
+                        'Bestbuy',
                         self.batch_id,
                         product['page_type'],
                         product['rank'],

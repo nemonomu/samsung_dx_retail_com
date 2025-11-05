@@ -325,6 +325,7 @@ class BestBuyPromotionCrawler:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bby_tv_promotion_crawl (
                     id SERIAL PRIMARY KEY,
+                    account_name VARCHAR(50),
                     page_type VARCHAR(50),
                     retailer_sku_name TEXT,
                     rank INTEGER,
@@ -346,15 +347,16 @@ class BestBuyPromotionCrawler:
             # 데이터 삽입
             insert_query = """
                 INSERT INTO bby_tv_promotion_crawl
-                (page_type, retailer_sku_name, rank, final_sku_price, original_sku_price, offer, savings,
+                (account_name, page_type, retailer_sku_name, rank, final_sku_price, original_sku_price, offer, savings,
                  promotion_type, product_url, calendar_week, batch_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
 
             success_count = 0
             for product in products:
                 try:
                     cursor.execute(insert_query, (
+                        'Bestbuy',
                         product['page_type'],
                         product['retailer_sku_name'],
                         product['rank'],

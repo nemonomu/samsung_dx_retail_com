@@ -690,6 +690,7 @@ class BestBuyDetailCrawler:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bby_tv_mst (
                     id SERIAL PRIMARY KEY,
+                    account_name VARCHAR(50),
                     sku VARCHAR(255),
                     product_url TEXT,
                     pros TEXT,
@@ -719,11 +720,12 @@ class BestBuyDetailCrawler:
                 # 데이터 삽입
                 insert_query = """
                     INSERT INTO bby_tv_mst
-                    (sku, product_url, pros, cons, product_name, update_date, calendar_week)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (account_name, sku, product_url, pros, cons, product_name, update_date, calendar_week)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """
 
                 cursor.execute(insert_query, (
+                    'Bestbuy',
                     sku,
                     product['product_url'],
                     product['pros'],
@@ -865,6 +867,7 @@ class BestBuyDetailCrawler:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bby_tv_detail_crawled (
                     id SERIAL PRIMARY KEY,
+                    account_name VARCHAR(50),
                     batch_id VARCHAR(50),
                     page_type VARCHAR(50),
                     "order" INTEGER,
@@ -885,13 +888,14 @@ class BestBuyDetailCrawler:
             # 데이터 삽입
             insert_query = """
                 INSERT INTO bby_tv_detail_crawled
-                (batch_id, page_type, "order", retailer_sku_name, item,
+                (account_name, batch_id, page_type, "order", retailer_sku_name, item,
                  Estimated_Annual_Electricity_Use, screen_size, Count_of_Star_Ratings, Top_Mentions,
                  Detailed_Review_Content, Recommendation_Intent, product_url, calendar_week)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
 
             cursor.execute(insert_query, (
+                'Bestbuy',
                 self.batch_id,
                 page_type,
                 order,

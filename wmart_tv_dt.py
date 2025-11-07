@@ -573,10 +573,13 @@ class WalmartDetailCrawler:
                 return None
 
             # Extract number from text
-            # Examples: "248 reviews" -> 248, "1 review" -> 1
-            match = re.search(r'(\d+)\s*reviews?', review_text, re.IGNORECASE)
+            # Examples: "248 reviews" -> 248, "1,123 reviews" -> 1123, "1 review" -> 1
+            # Match numbers with optional commas
+            match = re.search(r'([\d,]+)\s*reviews?', review_text, re.IGNORECASE)
             if match:
-                return int(match.group(1))
+                # Remove commas and convert to int
+                number_str = match.group(1).replace(',', '')
+                return int(number_str)
 
             return None
 

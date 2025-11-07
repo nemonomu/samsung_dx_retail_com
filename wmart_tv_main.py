@@ -898,26 +898,15 @@ class WalmartTVCrawler:
     def initialize_session(self):
         """Initialize session with natural browsing pattern"""
         try:
-            print("[INFO] Initializing session - starting with simple page...")
+            print("[INFO] Initializing session - navigating to Walmart homepage...")
 
-            # Start with a simple, less-protected page first
-            print("[INFO] Visiting example.com first...")
-            self.page.goto("http://example.com", wait_until="domcontentloaded")
-            time.sleep(random.uniform(2, 4))
-
-            # Random scroll on example.com
-            for _ in range(random.randint(1, 2)):
-                self.page.evaluate("window.scrollBy(0, 200)")
-                time.sleep(random.uniform(0.5, 1))
+            # Navigate directly to Walmart homepage
+            self.page.goto("https://www.walmart.com", wait_until="domcontentloaded")
+            time.sleep(random.uniform(8, 12))
 
             # Add mouse movements
             self.add_random_mouse_movements()
             time.sleep(random.uniform(1, 2))
-
-            # Now navigate to Walmart homepage slowly
-            print("[INFO] Navigating to Walmart homepage...")
-            self.page.goto("https://www.walmart.com", wait_until="domcontentloaded")
-            time.sleep(random.uniform(8, 12))
 
             # Check for robot detection and handle CAPTCHA
             if self.check_robot_page(self.page.content()):

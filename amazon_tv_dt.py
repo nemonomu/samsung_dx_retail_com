@@ -780,6 +780,19 @@ class AmazonDetailCrawler:
                 except:
                     count_of_reviews_int = None
 
+            # Parse count_of_star_ratings to get total count
+            # Example: "5star:2634, 4star:445, 3star:148, 2star:74, 1star:408" -> 3709
+            count_of_star_ratings_int = None
+            if data['Count_of_Star_Ratings']:
+                try:
+                    import re
+                    # Extract numbers after colons (handle both comma and space separators)
+                    numbers = re.findall(r':(\d+)', str(data['Count_of_Star_Ratings']))
+                    if numbers:
+                        count_of_star_ratings_int = sum(int(n) for n in numbers)
+                except:
+                    count_of_star_ratings_int = None
+
             cursor.execute("""
                 INSERT INTO tv_retail_com
                 (item, account_name, page_type, count_of_reviews, retailer_sku_name, product_url,
@@ -801,7 +814,7 @@ class AmazonDetailCrawler:
                 data['Retailer_SKU_Name'],
                 data['product_url'],
                 data['Star_Rating'],
-                data['Count_of_Star_Ratings'],
+                count_of_star_ratings_int,  # Parsed from star ratings string
                 data['screen_size'],
                 data['SKU_Popularity'],
                 None,  # final_sku_price (Amazon doesn't have this in detail)

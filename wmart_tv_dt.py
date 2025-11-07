@@ -1242,6 +1242,19 @@ class WalmartDetailCrawler:
                 except:
                     count_of_reviews_int = None
 
+            # Parse count_of_star_ratings to get total count
+            # Example: "5star:142, 4star:14, 3star:7, 2star:2, 1star:4" -> 169
+            count_of_star_ratings_int = None
+            if data['Count_of_Star_Ratings']:
+                try:
+                    import re
+                    # Extract numbers after colons (handle both comma and space separators)
+                    numbers = re.findall(r':(\d+)', str(data['Count_of_Star_Ratings']))
+                    if numbers:
+                        count_of_star_ratings_int = sum(int(n) for n in numbers)
+                except:
+                    count_of_star_ratings_int = None
+
             cursor.execute("""
                 INSERT INTO tv_retail_com
                 (item, account_name, page_type, count_of_reviews, retailer_sku_name, product_url,
@@ -1263,7 +1276,7 @@ class WalmartDetailCrawler:
                 data['Retailer_SKU_Name'],
                 data['product_url'],
                 data['Star_Rating'],
-                data['Count_of_Star_Ratings'],
+                count_of_star_ratings_int,  # Parsed from star ratings string
                 data['screen_size'],
                 data['SKU_Popularity'],
                 data['final_sku_price'],

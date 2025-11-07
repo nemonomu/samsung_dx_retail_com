@@ -52,9 +52,16 @@ class BestBuyDetailCrawler:
         """Chrome 드라이버 설정"""
         try:
             print("[INFO] Chrome 드라이버 설정 중...")
-            self.driver = uc.Chrome()
+
+            # Chrome options with page load strategy
+            options = uc.ChromeOptions()
+            options.page_load_strategy = 'none'  # Don't wait for full page load
+
+            self.driver = uc.Chrome(options=options)
+            self.driver.set_page_load_timeout(120)  # Increased to 120 seconds
             self.driver.maximize_window()
-            print("[OK] 드라이버 설정 완료")
+
+            print("[OK] 드라이버 설정 완료 (page_load_strategy=none, timeout=120s)")
             return True
         except Exception as e:
             print(f"[ERROR] 드라이버 설정 실패: {e}")

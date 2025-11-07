@@ -90,8 +90,22 @@ class AmazonDetailCrawler:
             traceback.print_exc()
             return False
 
+    def extract_asin(self, url):
+        """Extract ASIN from Amazon URL
+        Example: https://www.amazon.com/.../dp/B0F19KLHG3/... -> B0F19KLHG3
+        """
+        try:
+            import re
+            match = re.search(r'/dp/([A-Z0-9]{10})', url)
+            if match:
+                return match.group(1)
+            return url  # Fallback to full URL if ASIN not found
+        except:
+            return url
+
     def load_product_urls(self):
-        """Load product URLs from amazon_tv_main_crawled and amazon_tv_bsr tables (latest batch only)"""
+        """Load product URLs from amazon_tv_main_crawled and amazon_tv_bsr tables (latest batch only)
+        Uses ASIN for duplicate detection but stores full URLs"""
         try:
             print("[INFO] Loading product URLs from database...")
             cursor = self.db_conn.cursor()
@@ -144,7 +158,8 @@ class AmazonDetailCrawler:
 
             print(f"[INFO] Latest batch_id - Main: {main_batch_id}, BSR: {bsr_batch_id}")
 
-            # Dictionary to store merged URL data: {url: {page_type, main_rank, bsr_rank}}
+            # Dictionary to store merged URL data: {asin: {page_type, url, main_rank, bsr_rank}}
+            # Use ASIN as key for duplicate detection, but store full URL
             url_data_map = {}
 
             # Load from amazon_tv_main_crawled (main) - latest batch only
@@ -160,10 +175,11 @@ class AmazonDetailCrawler:
                 """, (main_batch_id,))
                 main_rows = cursor.fetchall()
                 for url, main_rank in main_rows:
-                    if url not in url_data_map:
-                        url_data_map[url] = {
+                    asin = self.extract_asin(url)  # Extract ASIN for duplicate detection
+                    if asin not in url_data_map:
+                        url_data_map[asin] = {
                             'page_type': 'main',
-                            'url': url,
+                            'url': url,  # Store full URL
                             'main_rank': main_rank,
                             'bsr_rank': None
                         }
@@ -184,14 +200,15 @@ class AmazonDetailCrawler:
                 """, (bsr_batch_id,))
                 bsr_rows = cursor.fetchall()
                 for url, bsr_rank in bsr_rows:
-                    if url in url_data_map:
-                        # URL already exists in main - just add bsr_rank
-                        url_data_map[url]['bsr_rank'] = bsr_rank
+                    asin = self.extract_asin(url)  # Extract ASIN for duplicate detection
+                    if asin in url_data_map:
+                        # ASIN already exists in main - just add bsr_rank
+                        url_data_map[asin]['bsr_rank'] = bsr_rank
                     else:
-                        # New URL from bsr
-                        url_data_map[url] = {
+                        # New ASIN from bsr
+                        url_data_map[asin] = {
                             'page_type': 'bsr',
-                            'url': url,
+                            'url': url,  # Store full URL
                             'main_rank': None,
                             'bsr_rank': bsr_rank
                         }

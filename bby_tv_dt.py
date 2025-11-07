@@ -1121,6 +1121,14 @@ class BestBuyDetailCrawler:
             ))
 
             # Also insert into unified tv_retail_com table
+            # Convert count_of_reviews to integer (remove commas if present)
+            count_of_reviews_int = None
+            if count_of_reviews:
+                try:
+                    count_of_reviews_int = int(str(count_of_reviews).replace(',', ''))
+                except:
+                    count_of_reviews_int = None
+
             cursor.execute("""
                 INSERT INTO tv_retail_com
                 (item, account_name, page_type, count_of_reviews, retailer_sku_name, product_url,
@@ -1138,7 +1146,7 @@ class BestBuyDetailCrawler:
                 item,
                 'Bestbuy',  # account_name
                 page_type,
-                count_of_reviews,
+                count_of_reviews_int,  # Converted to integer
                 retailer_sku_name,
                 product_url,
                 star_rating_source,

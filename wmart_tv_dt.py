@@ -1234,6 +1234,14 @@ class WalmartDetailCrawler:
             ))
 
             # Also insert into unified tv_retail_com table
+            # Ensure count_of_reviews is integer
+            count_of_reviews_int = None
+            if data['count_of_reviews']:
+                try:
+                    count_of_reviews_int = int(data['count_of_reviews']) if isinstance(data['count_of_reviews'], int) else int(str(data['count_of_reviews']).replace(',', ''))
+                except:
+                    count_of_reviews_int = None
+
             cursor.execute("""
                 INSERT INTO tv_retail_com
                 (item, account_name, page_type, count_of_reviews, retailer_sku_name, product_url,
@@ -1251,7 +1259,7 @@ class WalmartDetailCrawler:
                 data['item'],
                 'Walmart',  # account_name
                 data['page_type'],
-                data['count_of_reviews'],
+                count_of_reviews_int,  # Converted to integer
                 data['Retailer_SKU_Name'],
                 data['product_url'],
                 data['Star_Rating'],

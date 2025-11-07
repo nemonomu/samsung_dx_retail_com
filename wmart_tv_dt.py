@@ -1385,7 +1385,20 @@ class WalmartDetailCrawler:
                 print(f"\n{'='*80}")
                 print(f"Processing {idx}/{len(product_urls)}")
 
-                self.scrape_detail_page(url_data)
+                # Retry logic: try up to 3 times
+                max_retries = 3
+                success = False
+                for attempt in range(max_retries):
+                    result = self.scrape_detail_page(url_data)
+                    if result:  # Success
+                        success = True
+                        break
+                    else:  # Failed
+                        if attempt < max_retries - 1:  # Not the last attempt
+                            print(f"  [RETRY] Attempt {attempt + 1} failed, retrying... ({attempt + 2}/{max_retries})")
+                            time.sleep(random.uniform(5, 8))  # Wait before retry
+                        else:
+                            print(f"  [FAILED] All {max_retries} attempts failed for this URL")
 
                 # Random delay between requests
                 time.sleep(random.uniform(3, 5))

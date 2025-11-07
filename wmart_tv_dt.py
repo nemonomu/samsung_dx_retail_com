@@ -1049,6 +1049,18 @@ class WalmartDetailCrawler:
             rank_display = f"Main:{main_rank}" if main_rank else f"BSR:{bsr_rank}"
             print(f"\n[{page_type.upper()}][{rank_display}] Accessing: {url[:80]}...")
 
+            # Check if window is still alive, restart if crashed
+            try:
+                _ = self.driver.current_url
+            except Exception as e:
+                print(f"  [WARNING] Browser window crashed, restarting driver...")
+                try:
+                    self.driver.quit()
+                except:
+                    pass
+                self.setup_driver()
+                print(f"  [OK] Driver restarted successfully")
+
             self.driver.get(url)
             time.sleep(random.uniform(4, 6))
 

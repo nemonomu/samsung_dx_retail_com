@@ -771,6 +771,63 @@ class AmazonDetailCrawler:
                 data['bsr_rank']
             ))
 
+            # Also insert into unified tv_retail_com table
+            cursor.execute("""
+                INSERT INTO tv_retail_com
+                (item, account_name, page_type, count_of_reviews, retailer_sku_name, product_url,
+                 star_rating, count_of_star_ratings, screen_size, sku_popularity,
+                 final_sku_price, original_sku_price, savings, discount_type, offer,
+                 pick_up_availability, shipping_availability, delivery_availability, shipping_info,
+                 available_quantity_for_purchase, inventory_status, sku_status, retailer_membership_discounts,
+                 detailed_review_content, summarized_review_content, top_mentions, recommendation_intent,
+                 main_rank, bsr_rank, rank_1, rank_2, promotion_rank, trend_rank,
+                 number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, retailer_sku_name_similar,
+                 estimated_annual_electricity_use, promotion_type,
+                 calendar_week, crawl_strdatetime)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                data['item'],
+                'Amazon',  # account_name
+                data['page_type'],
+                data['count_of_reviews'],
+                data['Retailer_SKU_Name'],
+                data['product_url'],
+                data['Star_Rating'],
+                data['Count_of_Star_Ratings'],
+                data['screen_size'],
+                data['SKU_Popularity'],
+                None,  # final_sku_price (Amazon doesn't have this in detail)
+                None,  # original_sku_price (Amazon doesn't have this in detail)
+                None,  # savings (Amazon doesn't have this in detail)
+                None,  # discount_type (Amazon doesn't have this in detail)
+                None,  # offer (Amazon doesn't have this)
+                None,  # pick_up_availability (Amazon doesn't have this)
+                None,  # shipping_availability (Amazon doesn't have this)
+                None,  # delivery_availability (Amazon doesn't have this)
+                None,  # shipping_info (Amazon doesn't have this in detail)
+                None,  # available_quantity_for_purchase (Amazon doesn't have this in detail)
+                None,  # inventory_status (Amazon doesn't have this)
+                None,  # sku_status (Amazon doesn't have this)
+                data['Retailer_Membership_Discounts'],
+                data['Detailed_Review_Content'],
+                data['Summarized_Review_Content'],
+                None,  # top_mentions (Amazon doesn't have this)
+                None,  # recommendation_intent (Amazon doesn't have this)
+                data['main_rank'],
+                data['bsr_rank'],
+                data['Rank_1'],
+                data['Rank_2'],
+                None,  # promotion_rank (Amazon doesn't have this)
+                None,  # trend_rank (Amazon doesn't have this)
+                None,  # number_of_ppl_purchased_yesterday (Amazon doesn't have this)
+                None,  # number_of_ppl_added_to_carts (Amazon doesn't have this)
+                None,  # retailer_sku_name_similar (Amazon doesn't have this)
+                None,  # estimated_annual_electricity_use (Amazon doesn't have this)
+                None,  # promotion_type (Amazon doesn't have this)
+                calendar_week,
+                crawl_strdatetime
+            ))
+
             # Commit transaction
             self.db_conn.commit()
 

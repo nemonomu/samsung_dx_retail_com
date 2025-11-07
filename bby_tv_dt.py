@@ -1120,8 +1120,65 @@ class BestBuyDetailCrawler:
                 trend_rank
             ))
 
+            # Also insert into unified tv_retail_com table
+            cursor.execute("""
+                INSERT INTO tv_retail_com
+                (item, account_name, page_type, count_of_reviews, retailer_sku_name, product_url,
+                 star_rating, count_of_star_ratings, screen_size, sku_popularity,
+                 final_sku_price, original_sku_price, savings, discount_type, offer,
+                 pick_up_availability, shipping_availability, delivery_availability, shipping_info,
+                 available_quantity_for_purchase, inventory_status, sku_status, retailer_membership_discounts,
+                 detailed_review_content, summarized_review_content, top_mentions, recommendation_intent,
+                 main_rank, bsr_rank, rank_1, rank_2, promotion_rank, trend_rank,
+                 number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, retailer_sku_name_similar,
+                 estimated_annual_electricity_use, promotion_type,
+                 calendar_week, crawl_strdatetime)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                item,
+                'Bestbuy',  # account_name
+                page_type,
+                count_of_reviews,
+                retailer_sku_name,
+                product_url,
+                star_rating_source,
+                star_ratings,
+                screen_size,
+                None,  # sku_popularity (BestBuy doesn't have this)
+                final_sku_price,
+                original_sku_price,
+                savings,
+                None,  # discount_type (BestBuy doesn't have this)
+                offer,
+                pick_up_availability,
+                shipping_availability,
+                delivery_availability,
+                None,  # shipping_info (BestBuy doesn't have this)
+                None,  # available_quantity_for_purchase (BestBuy doesn't have this)
+                None,  # inventory_status (BestBuy doesn't have this)
+                sku_status,
+                None,  # retailer_membership_discounts (BestBuy doesn't have this)
+                detailed_reviews,
+                None,  # summarized_review_content (BestBuy doesn't have this)
+                top_mentions,
+                recommendation_intent,
+                main_rank,
+                bsr_rank,
+                None,  # rank_1 (BestBuy doesn't have this)
+                None,  # rank_2 (BestBuy doesn't have this)
+                promotion_rank,
+                trend_rank,
+                None,  # number_of_ppl_purchased_yesterday (BestBuy doesn't have this)
+                None,  # number_of_ppl_added_to_carts (BestBuy doesn't have this)
+                None,  # retailer_sku_name_similar (BestBuy doesn't have this)
+                electricity_use,
+                promotion_type,
+                calendar_week,
+                crawl_strdatetime
+            ))
+
             cursor.close()
-            print(f"  [✓] DB 저장 완료")
+            print(f"  [✓] DB 저장 완료 (bby_tv_detail_crawled + tv_retail_com)")
             return True
 
         except Exception as e:

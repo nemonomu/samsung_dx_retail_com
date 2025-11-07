@@ -1129,6 +1129,18 @@ class BestBuyDetailCrawler:
                 except:
                     count_of_reviews_int = None
 
+            # Parse star_ratings to get total count
+            # Example: "5stars:231 4stars:19 3stars:2 2stars:1 1star:8" -> 261
+            count_of_star_ratings_int = None
+            if star_ratings:
+                try:
+                    import re
+                    numbers = re.findall(r':(\d+)', star_ratings)
+                    if numbers:
+                        count_of_star_ratings_int = sum(int(n) for n in numbers)
+                except:
+                    count_of_star_ratings_int = None
+
             cursor.execute("""
                 INSERT INTO tv_retail_com
                 (item, account_name, page_type, count_of_reviews, retailer_sku_name, product_url,
@@ -1150,7 +1162,7 @@ class BestBuyDetailCrawler:
                 retailer_sku_name,
                 product_url,
                 star_rating_source,
-                star_ratings,
+                count_of_star_ratings_int,  # Parsed from star_ratings string
                 screen_size,
                 None,  # sku_popularity (BestBuy doesn't have this)
                 final_sku_price,

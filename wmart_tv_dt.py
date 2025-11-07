@@ -537,6 +537,50 @@ class WalmartDetailCrawler:
             print(f"  [WARNING] Failed to extract screen size: {e}")
             return None
 
+    def extract_count_of_reviews(self, tree):
+        """Extract total number of reviews from main page
+        Example: '248 reviews' -> 248
+        """
+        try:
+            # Try multiple XPath strategies to find review count
+            xpaths = [
+                # Method 1: Direct XPath provided by user
+                "//*[@id='item-review-section']/div[2]/div[1]/div[1]/div/a",
+                # Method 2: Find link with 'seeAllReviewsStarRating' identifier
+                "//a[@link-identifier='seeAllReviewsStarRating']",
+                # Method 3: Find link containing 'reviews' text in item-review-section
+                "//*[@id='item-review-section']//a[contains(text(), 'reviews')]",
+                # Method 4: Any link in review section containing 'review' in text
+                "//div[@id='item-review-section']//a[contains(., 'review')]"
+            ]
+
+            review_text = None
+            for xpath in xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    if isinstance(result[0], str):
+                        review_text = result[0].strip()
+                    else:
+                        review_text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+
+                    if review_text:
+                        break
+
+            if not review_text:
+                return None
+
+            # Extract number from text
+            # Examples: "248 reviews" -> 248, "1 review" -> 1
+            match = re.search(r'(\d+)\s*reviews?', review_text, re.IGNORECASE)
+            if match:
+                return int(match.group(1))
+
+            return None
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract count of reviews: {e}")
+            return None
+
     def is_invalid_sku(self, sku):
         """Check if SKU is invalid (generic values that are not actual model numbers)"""
         if not sku:
@@ -1054,8 +1098,11 @@ class WalmartDetailCrawler:
             # Extract similar products
             similar_products = self.extract_similar_products(tree)
 
-            # Extract screen size
+            # Extract screen size (from main page)
             screen_size = self.extract_screen_size(tree)
+
+            # Extract count of reviews (from main page, BEFORE navigating to reviews)
+            count_of_reviews = self.extract_count_of_reviews(tree)
 
             # Click Specifications and get Model (after static content extraction)
             sku_model = self.click_specifications_and_get_model()
@@ -1090,7 +1137,8 @@ class WalmartDetailCrawler:
                 'inventory_status': inventory_status,
                 'main_rank': main_rank,
                 'bsr_rank': bsr_rank,
-                'screen_size': screen_size
+                'screen_size': screen_size,
+                'count_of_reviews': count_of_reviews
             }
 
             # Save to database
@@ -1098,7 +1146,7 @@ class WalmartDetailCrawler:
                 self.total_collected += 1
                 print(f"  [OK] Collected: {retailer_sku_name[:50] if retailer_sku_name else '[NO NAME]'}...")
                 print(f"       Model: {sku_model or 'N/A'} | Screen: {screen_size or 'N/A'} | Star: {star_rating or 'N/A'}")
-                print(f"       Purchased Yesterday: {purchased_yesterday or 'N/A'} | Added to Carts: {added_to_carts or 'N/A'}")
+                print(f"       Total Reviews: {count_of_reviews or 'N/A'} | Purchased Yesterday: {purchased_yesterday or 'N/A'} | Added to Carts: {added_to_carts or 'N/A'}")
                 print(f"       Savings: {savings or 'N/A'} | Discount: {discount_type or 'N/A'}")
                 print(f"       Popularity: {sku_popularity or 'N/A'}")
 
@@ -1144,8 +1192,8 @@ class WalmartDetailCrawler:
                  final_sku_price, original_sku_price, pick_up_availability,
                  shipping_availability, delivery_availability, sku_status,
                  retailer_membership_discounts, available_quantity_for_purchase,
-                 inventory_status, main_rank, bsr_rank, screen_size)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 inventory_status, main_rank, bsr_rank, screen_size, count_of_reviews)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 data['page_type'],  # Changed from 'mother'
                 data['product_url'],
@@ -1175,7 +1223,8 @@ class WalmartDetailCrawler:
                 data['inventory_status'],
                 data['main_rank'],
                 data['bsr_rank'],
-                data['screen_size']
+                data['screen_size'],
+                data['count_of_reviews']
             ))
 
             # Commit transaction

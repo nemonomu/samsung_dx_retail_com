@@ -199,6 +199,9 @@ class WalmartDetailCrawler:
         """Setup Chrome WebDriver with undetected-chromedriver"""
         options = uc.ChromeOptions()
 
+        # Set page load strategy to 'none' - don't wait for full page load
+        options.page_load_strategy = 'none'
+
         # Basic options
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--no-sandbox')
@@ -216,7 +219,7 @@ class WalmartDetailCrawler:
 
         # Use undetected_chromedriver
         self.driver = uc.Chrome(options=options)
-        self.driver.set_page_load_timeout(60)
+        self.driver.set_page_load_timeout(120)  # Increased to 120 seconds as backup
         self.wait = WebDriverWait(self.driver, 20)
 
         print("[OK] WebDriver setup complete")

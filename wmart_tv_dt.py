@@ -492,6 +492,51 @@ class WalmartDetailCrawler:
             print(f"  [WARNING] Failed to extract similar products: {e}")
             return None
 
+    def extract_screen_size(self, tree):
+        """Extract screen size from 'Specifications at a glance' section
+        Example: '65 in' -> '65 inches'
+        """
+        try:
+            # Try multiple XPath strategies to find Screen size
+            xpaths = [
+                # Method 1: Use aria-label (most reliable)
+                "//div[@aria-label[contains(., 'Screen size:')]]/@aria-label",
+                # Method 2: Find "Screen size" text and get the next sibling div
+                "//div[contains(@class, 'b') and contains(., 'Screen size')]/following-sibling::div//span",
+                # Method 3: Direct XPath provided by user
+                "//*[@id='ip-prod-desc-atf-div-1']/section/section[2]/div/div/div[1]/div[1]/div/div/div[2]/span",
+                # Method 4: Find within "Specifications at a glance" container
+                "//h3[contains(text(), 'Specifications at a glance')]/parent::div//div[@aria-label[contains(., 'Screen size')]]/@aria-label"
+            ]
+
+            screen_size_text = None
+            for xpath in xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    if isinstance(result[0], str):
+                        screen_size_text = result[0].strip()
+                    else:
+                        screen_size_text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+
+                    if screen_size_text:
+                        break
+
+            if not screen_size_text:
+                return None
+
+            # Extract number from text
+            # Examples: "Screen size: 65 in" -> "65", "65 in" -> "65"
+            match = re.search(r'(\d+)\s*in', screen_size_text, re.IGNORECASE)
+            if match:
+                size_number = match.group(1)
+                return f"{size_number} inches"
+
+            return None
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract screen size: {e}")
+            return None
+
     def is_invalid_sku(self, sku):
         """Check if SKU is invalid (generic values that are not actual model numbers)"""
         if not sku:
@@ -1009,6 +1054,9 @@ class WalmartDetailCrawler:
             # Extract similar products
             similar_products = self.extract_similar_products(tree)
 
+            # Extract screen size
+            screen_size = self.extract_screen_size(tree)
+
             # Click Specifications and get Model (after static content extraction)
             sku_model = self.click_specifications_and_get_model()
 
@@ -1041,14 +1089,15 @@ class WalmartDetailCrawler:
                 'available_quantity_for_purchase': available_quantity_for_purchase,
                 'inventory_status': inventory_status,
                 'main_rank': main_rank,
-                'bsr_rank': bsr_rank
+                'bsr_rank': bsr_rank,
+                'screen_size': screen_size
             }
 
             # Save to database
             if self.save_to_db(data):
                 self.total_collected += 1
                 print(f"  [OK] Collected: {retailer_sku_name[:50] if retailer_sku_name else '[NO NAME]'}...")
-                print(f"       Model: {sku_model or 'N/A'} | Star: {star_rating or 'N/A'}")
+                print(f"       Model: {sku_model or 'N/A'} | Screen: {screen_size or 'N/A'} | Star: {star_rating or 'N/A'}")
                 print(f"       Purchased Yesterday: {purchased_yesterday or 'N/A'} | Added to Carts: {added_to_carts or 'N/A'}")
                 print(f"       Savings: {savings or 'N/A'} | Discount: {discount_type or 'N/A'}")
                 print(f"       Popularity: {sku_popularity or 'N/A'}")
@@ -1095,8 +1144,8 @@ class WalmartDetailCrawler:
                  final_sku_price, original_sku_price, pick_up_availability,
                  shipping_availability, delivery_availability, sku_status,
                  retailer_membership_discounts, available_quantity_for_purchase,
-                 inventory_status, main_rank, bsr_rank)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 inventory_status, main_rank, bsr_rank, screen_size)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 data['page_type'],  # Changed from 'mother'
                 data['product_url'],
@@ -1125,7 +1174,8 @@ class WalmartDetailCrawler:
                 data['available_quantity_for_purchase'],
                 data['inventory_status'],
                 data['main_rank'],
-                data['bsr_rank']
+                data['bsr_rank'],
+                data['screen_size']
             ))
 
             # Commit transaction

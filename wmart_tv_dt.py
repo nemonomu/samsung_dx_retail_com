@@ -1195,9 +1195,9 @@ class WalmartDetailCrawler:
             # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
 
-            # Calculate crawl_strdatetime (format: 202511051100000000)
+            # Calculate crawl_strdatetime (format: 202511051100559260)
             now = datetime.now()
-            crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + '0000'
+            crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + now.strftime('%f')[:4]
 
             # Insert to Walmart_tv_detail_crawled
             cursor.execute("""

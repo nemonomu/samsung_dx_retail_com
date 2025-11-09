@@ -476,7 +476,7 @@ class WalmartTVCrawler:
         try:
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
 
-            # For page 1, try different approach - go to simple URL first
+            # For page 1, navigate naturally through browse page
             if page_number == 1 and retry_count == 0:
                 print("[INFO] Navigating to Walmart browse page first...")
                 try:
@@ -502,56 +502,10 @@ class WalmartTVCrawler:
                             self.page.evaluate("window.scrollBy(0, 400)")
                             time.sleep(random.uniform(1, 2))
 
-                        # Now try search
-                        print("[INFO] Now trying search for TV...")
-
-                        # Add random mouse movements before clicking
-                        print("[INFO] Moving mouse naturally...")
-                        self.page.mouse.move(random.randint(100, 300), random.randint(100, 300))
-                        time.sleep(random.uniform(0.5, 1))
-                        self.page.mouse.move(random.randint(400, 600), random.randint(200, 400))
-                        time.sleep(random.uniform(0.3, 0.7))
-
-                        search_box = self.page.wait_for_selector("input[type='search']", timeout=20000)
-                        search_box.click()
-                        time.sleep(random.uniform(1, 2))
-                        search_box.fill('')  # Clear the search box (Playwright method)
-                        time.sleep(random.uniform(2, 3))  # Increased wait time
-
-                        # Type "TV" character by character with longer delay
-                        print("[INFO] Typing 'TV' slowly...")
-                        for char in "TV":
-                            search_box.type(char, delay=random.uniform(400, 800))  # Increased typing delay
-
-                        # Wait for search suggestions to appear
-                        time.sleep(random.uniform(3, 5))  # Increased wait time
-
-                        # Try to click search button instead of pressing Enter
-                        print("[INFO] Looking for search button...")
-                        try:
-                            search_button = self.page.query_selector("button[aria-label='Search']")
-                            if not search_button:
-                                search_button = self.page.query_selector("button[data-automation-id='searchButton']")
-
-                            if search_button:
-                                print("[INFO] Clicking search button...")
-                                search_button.click()
-                            else:
-                                print("[INFO] Search button not found, pressing Enter...")
-                                search_box.press("Enter")
-                        except:
-                            print("[INFO] Pressing Enter to search...")
-                            search_box.press("Enter")
-
-                        # Wait longer for page load
-                        print("[INFO] Waiting for search results...")
-                        time.sleep(random.uniform(10, 15))  # Increased wait time
-
-                        # Add natural scrolling behavior after search
-                        print("[INFO] Scrolling naturally...")
-                        for _ in range(2):
-                            self.page.mouse.wheel(0, random.randint(200, 400))
-                            time.sleep(random.uniform(1, 2))
+                        # Now access the search URL directly
+                        print("[INFO] Now navigating to search page...")
+                        self.page.goto(url, wait_until="domcontentloaded", timeout=90000)
+                        time.sleep(random.uniform(8, 12))
                     else:
                         print("[WARNING] Robot still detected after CAPTCHA, using direct URL...")
                         self.page.goto(url, wait_until="domcontentloaded", timeout=90000)

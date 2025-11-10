@@ -410,10 +410,10 @@ class AmazonBSRCrawler:
             cursor.execute("""
                 INSERT INTO amazon_tv_bsr
                 (account_name, bsr_rank, page_type, Retailer_SKU_Name, product_url, final_sku_price,
-                 count_of_reviews, star_rating, batch_id, calendar_week, crawl_strdatetime)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 original_sku_price, count_of_reviews, star_rating, batch_id, calendar_week, crawl_strdatetime)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, ('Amazon', bsr_rank, 'bsr', product_name, product_url, final_sku_price,
-                  count_of_reviews, star_rating, self.batch_id, calendar_week, crawl_strdatetime))
+                  None, count_of_reviews, star_rating, self.batch_id, calendar_week, crawl_strdatetime))
 
             self.db_conn.commit()
             cursor.close()

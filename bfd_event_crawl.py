@@ -203,7 +203,35 @@ class BFDEventCrawler:
                 except Exception as e:
                     print(f"[WARNING] Event containers not found via wait, trying anyway...")
 
-                page_source = self.driver.page_source
+                # Get page_source with timeout handling
+                max_source_retries = 3
+                page_source = None
+                for source_attempt in range(max_source_retries):
+                    try:
+                        print(f"[{retailer_name}] Getting page source (attempt {source_attempt + 1}/{max_source_retries})...")
+
+                        # Set page load timeout
+                        self.driver.set_page_load_timeout(20)
+                        page_source = self.driver.page_source
+
+                        print(f"[{retailer_name}] Page source retrieved ({len(page_source)} chars)")
+                        break
+                    except Exception as source_error:
+                        if source_attempt < max_source_retries - 1:
+                            print(f"[WARNING] Failed to get page source: {source_error}")
+                            print(f"[INFO] Stopping page load and retrying...")
+                            try:
+                                self.driver.execute_script("window.stop();")  # Stop loading
+                            except:
+                                pass
+                            time.sleep(5)
+                        else:
+                            print(f"[ERROR] Failed to get page source after {max_source_retries} attempts")
+                            raise
+
+                if not page_source:
+                    raise Exception("Failed to retrieve page source")
+
                 tree = html.fromstring(page_source)
                 break  # Success, exit retry loop
 
@@ -263,6 +291,9 @@ class BFDEventCrawler:
             self.events_data[retailer_name] = events
             print(f"[{retailer_name}] Collected {len(events)} events")
 
+            # Save to DB immediately
+            self.save_retailer_to_db(retailer_name)
+
             return True
 
         except Exception as e:
@@ -281,6 +312,47 @@ class BFDEventCrawler:
         except Exception as e:
             print(f"[WARNING] Date format error: {e}")
             return datetime_str[:10]  # Return raw date if format fails
+
+    def save_retailer_to_db(self, retailer_name):
+        """Save single retailer events to database immediately"""
+        try:
+            cursor = self.db_conn.cursor()
+
+            # Calculate calendar week
+            calendar_week = f"w{datetime.now().isocalendar().week}"
+
+            events = self.events_data.get(retailer_name, [])
+            if not events:
+                print(f"[INFO] No events to save for {retailer_name}")
+                return True
+
+            # Normalize channel name for DB (Best Buy -> Bestbuy)
+            db_channel = "Bestbuy" if retailer_name == "Best Buy" else retailer_name
+
+            for event in events:
+                cursor.execute("""
+                    INSERT INTO bfd_event_crawl
+                    (Event_channel, Event_name, Event_start_date, Event_end_date, crawl_at_local_time, calendar_week)
+                    VALUES (%s, %s, %s, %s, NOW(), %s)
+                """, (
+                    db_channel,
+                    event['event_name'],
+                    event['start_date'],
+                    event['end_date'],
+                    calendar_week
+                ))
+
+            self.db_conn.commit()
+            cursor.close()
+
+            print(f"[OK] {retailer_name}: {len(events)} events saved to DB immediately")
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Failed to save {retailer_name} to DB: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def save_to_db(self):
         """Save event schedules to database (each event as separate row)"""
@@ -349,15 +421,11 @@ class BFDEventCrawler:
 
             if not retailer_urls:
                 print("[WARNING] No target retailers found")
-                print("[INFO] Saving timestamp to database anyway...")
             else:
-                # Scrape events for each retailer
+                # Scrape events for each retailer (saves to DB immediately after each)
                 for retailer_name, url in retailer_urls.items():
                     self.scrape_retailer_events(retailer_name, url)
                     time.sleep(random.uniform(3, 5))
-
-            # Save to database (even if no data collected)
-            self.save_to_db()
 
             print("\n" + "="*80)
             print("BFD Event Crawling completed!")

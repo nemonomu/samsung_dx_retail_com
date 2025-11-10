@@ -183,18 +183,20 @@ class BFDEventCrawler:
             try:
                 print(f"\n[{retailer_name}] Accessing: {url} (Attempt {attempt + 1}/{max_retries})")
 
+                # Try to load page (timeout is expected with page_load_strategy='none')
                 try:
                     self.driver.get(url)
+                    print(f"[{retailer_name}] Page loaded successfully")
                 except Exception as e:
-                    if attempt < max_retries - 1:
-                        print(f"[WARNING] Page load failed: {e}")
-                        print(f"[INFO] Retrying in 10 seconds...")
-                        time.sleep(10)
-                        continue
-                    else:
-                        raise
+                    print(f"[INFO] Page load timeout (expected with page_load_strategy='none'): {str(e)[:100]}...")
+                    print(f"[INFO] Stopping page load and working with partial content...")
+                    # Stop any ongoing page load
+                    try:
+                        self.driver.execute_script("window.stop();")
+                    except:
+                        pass
 
-                print(f"[{retailer_name}] Page loaded, waiting for content...")
+                print(f"[{retailer_name}] Waiting for content to load...")
                 time.sleep(random.uniform(8, 12))
 
                 # Wait for event containers to load

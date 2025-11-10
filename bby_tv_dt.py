@@ -754,92 +754,142 @@ class BestBuyDetailCrawler:
             return None
 
     def extract_compare_similar_products(self, current_url):
-        """Compare similar products 섹션 데이터 추출"""
-        try:
-            print("  [INFO] Compare similar products 섹션 찾는 중...")
+        """Compare similar products 섹션 데이터 추출 (첫 페이지 로딩 개선)"""
+        max_retries = 2
 
-            # 페이지 상단으로 이동 후 30%까지 스크롤
-            self.driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(1)
+        for retry in range(max_retries):
+            try:
+                if retry > 0:
+                    print(f"  [RETRY {retry}/{max_retries}] Compare similar products 재시도...")
+                else:
+                    print("  [INFO] Compare similar products 섹션 찾는 중...")
 
-            total_height = self.driver.execute_script("return document.body.scrollHeight")
-            scroll_to = int(total_height * 0.3)
-            self.driver.execute_script(f"window.scrollTo(0, {scroll_to});")
-            time.sleep(3)
+                # 페이지 상단으로 이동 후 30%까지 스크롤
+                self.driver.execute_script("window.scrollTo(0, 0);")
+                time.sleep(1)
 
-            # 페이지 소스 가져오기
-            page_source = self.driver.page_source
-            tree = html.fromstring(page_source)
+                total_height = self.driver.execute_script("return document.body.scrollHeight")
+                scroll_to = int(total_height * 0.3)
+                self.driver.execute_script(f"window.scrollTo(0, {scroll_to});")
 
-            # 4개 제품 데이터 저장
-            products = []
+                # 첫 페이지 여부 확인
+                is_first_page = (self.order == 1)
 
-            # product-title div들 찾기
-            product_divs = tree.xpath('//div[@class="product-title font-weight-normal pb-100 body-copy-lg min-h-600"]')
+                # 타임아웃 설정: 첫 페이지는 30초, 나머지는 15초
+                timeout = 30 if is_first_page else 15
 
-            if len(product_divs) < 4:
-                print(f"  [WARNING] Compare similar products 섹션을 찾을 수 없거나 제품이 부족합니다. (찾은 개수: {len(product_divs)})")
-                return None
+                if is_first_page:
+                    print(f"  [INFO] 첫 페이지 감지 - 긴 대기 시간 적용 (최대 {timeout}초)")
 
-            # 첫 번째 제품 (현재 페이지)
-            first_product = {
-                'product_url': current_url,
-                'product_name': None,
-                'pros': None,
-                'cons': None
-            }
+                # WebDriverWait로 product-title 요소가 로드될 때까지 명시적 대기
+                try:
+                    wait = WebDriverWait(self.driver, timeout)
+                    wait.until(EC.presence_of_element_located(
+                        (By.XPATH, '//div[@class="product-title font-weight-normal pb-100 body-copy-lg min-h-600"]')
+                    ))
+                    print(f"  [OK] Compare similar products 요소 로드 완료")
 
-            # 첫 번째 제품명 추출
-            span_elem = product_divs[0].xpath('.//span[@class="clamp"]')
-            if span_elem:
-                first_product['product_name'] = span_elem[0].text_content().strip()
+                    # 요소가 로드된 후 안정화를 위한 추가 대기
+                    additional_wait = 5 if is_first_page else 3
+                    time.sleep(additional_wait)
 
-            products.append(first_product)
+                except Exception as wait_error:
+                    print(f"  [WARNING] 요소 대기 시간 초과: {wait_error}")
+                    if retry < max_retries - 1:
+                        # 다음 재시도를 위해 페이지 새로고침
+                        print("  [INFO] 페이지 새로고침 후 재시도...")
+                        self.driver.refresh()
+                        time.sleep(10)
+                        continue
+                    else:
+                        # 마지막 시도였다면 None 반환
+                        return None
 
-            # 2-4번째 제품
-            for i in range(1, 4):
-                if i < len(product_divs):
-                    product = {
-                        'product_url': None,
-                        'product_name': None,
-                        'pros': None,
-                        'cons': None
-                    }
+                # 페이지 소스 가져오기
+                page_source = self.driver.page_source
+                tree = html.fromstring(page_source)
 
-                    # a 태그에서 URL과 제품명 추출
-                    a_elem = product_divs[i].xpath('.//a[@class="clamp"]')
-                    if a_elem:
-                        href = a_elem[0].get('href')
-                        if href:
-                            product['product_url'] = href
-                        product['product_name'] = a_elem[0].text_content().strip()
+                # 4개 제품 데이터 저장
+                products = []
 
-                    products.append(product)
+                # product-title div들 찾기
+                product_divs = tree.xpath('//div[@class="product-title font-weight-normal pb-100 body-copy-lg min-h-600"]')
 
-            # Pros 추출 (tr[2]/td[1~4])
-            for i in range(1, 5):
-                pros_xpath = f'/html/body/div[5]/div[6]/div/table/tbody/tr[2]/td[{i}]/span/span'
-                pros_elem = tree.xpath(pros_xpath)
-                if pros_elem and i-1 < len(products):
-                    products[i-1]['pros'] = pros_elem[0].text_content().strip()
+                if len(product_divs) < 4:
+                    print(f"  [WARNING] 제품이 부족합니다. (찾은 개수: {len(product_divs)})")
+                    if retry < max_retries - 1:
+                        # 재시도
+                        time.sleep(5)
+                        continue
+                    else:
+                        return None
 
-            # Cons 추출 (tr[4]/td[1~4])
-            for i in range(1, 5):
-                cons_xpath = f'/html/body/div[5]/div[6]/div/table/tbody/tr[4]/td[{i}]/span/span'
-                cons_elem = tree.xpath(cons_xpath)
-                if cons_elem and i-1 < len(products):
-                    text = cons_elem[0].text_content().strip()
-                    # '—' 같은 값은 None으로 처리
-                    products[i-1]['cons'] = text if text and text != '—' else None
+                # 첫 번째 제품 (현재 페이지)
+                first_product = {
+                    'product_url': current_url,
+                    'product_name': None,
+                    'pros': None,
+                    'cons': None
+                }
 
-            print(f"  [OK] Compare similar products 데이터 추출 완료 (4개)")
-            return products
+                # 첫 번째 제품명 추출
+                span_elem = product_divs[0].xpath('.//span[@class="clamp"]')
+                if span_elem:
+                    first_product['product_name'] = span_elem[0].text_content().strip()
 
-        except Exception as e:
-            print(f"  [ERROR] Compare similar products 추출 실패: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
+                products.append(first_product)
+
+                # 2-4번째 제품
+                for i in range(1, 4):
+                    if i < len(product_divs):
+                        product = {
+                            'product_url': None,
+                            'product_name': None,
+                            'pros': None,
+                            'cons': None
+                        }
+
+                        # a 태그에서 URL과 제품명 추출
+                        a_elem = product_divs[i].xpath('.//a[@class="clamp"]')
+                        if a_elem:
+                            href = a_elem[0].get('href')
+                            if href:
+                                product['product_url'] = href
+                            product['product_name'] = a_elem[0].text_content().strip()
+
+                        products.append(product)
+
+                # Pros 추출 (tr[2]/td[1~4])
+                for i in range(1, 5):
+                    pros_xpath = f'/html/body/div[5]/div[6]/div/table/tbody/tr[2]/td[{i}]/span/span'
+                    pros_elem = tree.xpath(pros_xpath)
+                    if pros_elem and i-1 < len(products):
+                        products[i-1]['pros'] = pros_elem[0].text_content().strip()
+
+                # Cons 추출 (tr[4]/td[1~4])
+                for i in range(1, 5):
+                    cons_xpath = f'/html/body/div[5]/div[6]/div/table/tbody/tr[4]/td[{i}]/span/span'
+                    cons_elem = tree.xpath(cons_xpath)
+                    if cons_elem and i-1 < len(products):
+                        text = cons_elem[0].text_content().strip()
+                        # '—' 같은 값은 None으로 처리
+                        products[i-1]['cons'] = text if text and text != '—' else None
+
+                print(f"  [OK] Compare similar products 데이터 추출 완료 (4개)")
+                return products
+
+            except Exception as e:
+                print(f"  [ERROR] Compare similar products 추출 실패 (시도 {retry + 1}/{max_retries}): {e}")
+                if retry < max_retries - 1:
+                    print("  [INFO] 재시도 중...")
+                    time.sleep(5)
+                    continue
+                else:
+                    import traceback
+                    traceback.print_exc()
+                    return None
+
+        return None
 
     def get_item_by_product_name(self, product_name):
         """bby_tv_detail_crawled에서 product_name으로 item 찾기"""

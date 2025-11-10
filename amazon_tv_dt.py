@@ -166,7 +166,7 @@ class AmazonDetailCrawler:
             if main_batch_id:
                 print(f"[INFO] Loading main URLs from batch {main_batch_id}...")
                 cursor.execute("""
-                    SELECT product_url, main_rank
+                    SELECT product_url, main_rank, final_sku_price, original_sku_price
                     FROM amazon_tv_main_crawled
                     WHERE batch_id = %s
                       AND product_url IS NOT NULL
@@ -174,14 +174,16 @@ class AmazonDetailCrawler:
                     ORDER BY main_rank
                 """, (main_batch_id,))
                 main_rows = cursor.fetchall()
-                for url, main_rank in main_rows:
+                for url, main_rank, final_price, original_price in main_rows:
                     asin = self.extract_asin(url)  # Extract ASIN for duplicate detection
                     if asin not in url_data_map:
                         url_data_map[asin] = {
                             'page_type': 'main',
                             'url': url,  # Store full URL
                             'main_rank': main_rank,
-                            'bsr_rank': None
+                            'bsr_rank': None,
+                            'final_sku_price': final_price,
+                            'original_sku_price': original_price
                         }
                 print(f"[OK] Loaded {len(main_rows)} main URLs")
             else:
@@ -191,7 +193,7 @@ class AmazonDetailCrawler:
             if bsr_batch_id:
                 print(f"[INFO] Loading BSR URLs from batch {bsr_batch_id}...")
                 cursor.execute("""
-                    SELECT product_url, bsr_rank
+                    SELECT product_url, bsr_rank, final_sku_price, original_sku_price
                     FROM amazon_tv_bsr
                     WHERE batch_id = %s
                       AND product_url IS NOT NULL
@@ -199,18 +201,25 @@ class AmazonDetailCrawler:
                     ORDER BY bsr_rank
                 """, (bsr_batch_id,))
                 bsr_rows = cursor.fetchall()
-                for url, bsr_rank in bsr_rows:
+                for url, bsr_rank, final_price, original_price in bsr_rows:
                     asin = self.extract_asin(url)  # Extract ASIN for duplicate detection
                     if asin in url_data_map:
-                        # ASIN already exists in main - just add bsr_rank
+                        # ASIN already exists in main - add bsr_rank and update prices if main doesn't have them
                         url_data_map[asin]['bsr_rank'] = bsr_rank
+                        # Use BSR prices if main prices are missing
+                        if not url_data_map[asin]['final_sku_price'] and final_price:
+                            url_data_map[asin]['final_sku_price'] = final_price
+                        if not url_data_map[asin]['original_sku_price'] and original_price:
+                            url_data_map[asin]['original_sku_price'] = original_price
                     else:
                         # New ASIN from bsr
                         url_data_map[asin] = {
                             'page_type': 'bsr',
                             'url': url,  # Store full URL
                             'main_rank': None,
-                            'bsr_rank': bsr_rank
+                            'bsr_rank': bsr_rank,
+                            'final_sku_price': final_price,
+                            'original_sku_price': original_price
                         }
                 print(f"[OK] Loaded {len(bsr_rows)} BSR URLs")
             else:
@@ -689,7 +698,9 @@ class AmazonDetailCrawler:
                 'Summarized_Review_Content': summarized_review_content,
                 'Detailed_Review_Content': detailed_review_content,
                 'main_rank': url_data.get('main_rank'),
-                'bsr_rank': url_data.get('bsr_rank')
+                'bsr_rank': url_data.get('bsr_rank'),
+                'final_sku_price': url_data.get('final_sku_price'),
+                'original_sku_price': url_data.get('original_sku_price')
             }
 
             # Save to database
@@ -746,8 +757,8 @@ class AmazonDetailCrawler:
                  SKU_Popularity, Retailer_Membership_Discounts, item,
                  Rank_1, Rank_2, screen_size, count_of_reviews, Count_of_Star_Ratings,
                  Summarized_Review_Content, Detailed_Review_Content, calendar_week, crawl_strdatetime,
-                 main_rank, bsr_rank)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 main_rank, bsr_rank, final_sku_price, original_sku_price)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 'Amazon',
                 self.batch_id,
@@ -768,7 +779,9 @@ class AmazonDetailCrawler:
                 calendar_week,
                 crawl_strdatetime,
                 data['main_rank'],
-                data['bsr_rank']
+                data['bsr_rank'],
+                data['final_sku_price'],
+                data['original_sku_price']
             ))
 
             # Also insert into unified tv_retail_com table
@@ -817,8 +830,8 @@ class AmazonDetailCrawler:
                 count_of_star_ratings_int,  # Parsed from star ratings string
                 data['screen_size'],
                 data['SKU_Popularity'],
-                None,  # final_sku_price (Amazon doesn't have this in detail)
-                None,  # original_sku_price (Amazon doesn't have this in detail)
+                data['final_sku_price'],  # From main/bsr tables
+                data['original_sku_price'],  # From main/bsr tables
                 None,  # savings (Amazon doesn't have this in detail)
                 None,  # discount_type (Amazon doesn't have this in detail)
                 None,  # offer (Amazon doesn't have this)

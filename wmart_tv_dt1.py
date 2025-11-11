@@ -107,7 +107,7 @@ class WalmartDetailCrawler:
             # Load from wmart_tv_main_1 (main part 1) - latest batch only
             if main1_batch_id:
                 cursor.execute("""
-                    SELECT main_rank, Product_url, Final_SKU_Price, Original_SKU_Price,
+                    SELECT main_rank, Product_url,
                            Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
                            SKU_Status, Retailer_Membership_Discounts, Available_Quantity_for_Purchase,
                            Inventory_Status
@@ -126,22 +126,20 @@ class WalmartDetailCrawler:
                             'url': url,
                             'main_rank': row[0],
                             'bsr_rank': None,
-                            'final_sku_price': row[2],
-                            'original_sku_price': row[3],
-                            'pick_up_availability': row[4],
-                            'shipping_availability': row[5],
-                            'delivery_availability': row[6],
-                            'sku_status': row[7],
-                            'retailer_membership_discounts': row[8],
-                            'available_quantity_for_purchase': row[9],
-                            'inventory_status': row[10]
+                            'pick_up_availability': row[2],
+                            'shipping_availability': row[3],
+                            'delivery_availability': row[4],
+                            'sku_status': row[5],
+                            'retailer_membership_discounts': row[6],
+                            'available_quantity_for_purchase': row[7],
+                            'inventory_status': row[8]
                         }
                 print(f"[OK] Loaded {len(main1_rows)} URLs from wmart_tv_main_1")
 
             # Load from wmart_tv_main_2 (main part 2) - latest batch only
             if main2_batch_id:
                 cursor.execute("""
-                    SELECT main_rank, Product_url, Final_SKU_Price, Original_SKU_Price,
+                    SELECT main_rank, Product_url,
                            Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
                            SKU_Status, Retailer_Membership_Discounts, Available_Quantity_for_Purchase,
                            Inventory_Status
@@ -160,22 +158,20 @@ class WalmartDetailCrawler:
                             'url': url,
                             'main_rank': row[0],
                             'bsr_rank': None,
-                            'final_sku_price': row[2],
-                            'original_sku_price': row[3],
-                            'pick_up_availability': row[4],
-                            'shipping_availability': row[5],
-                            'delivery_availability': row[6],
-                            'sku_status': row[7],
-                            'retailer_membership_discounts': row[8],
-                            'available_quantity_for_purchase': row[9],
-                            'inventory_status': row[10]
+                            'pick_up_availability': row[2],
+                            'shipping_availability': row[3],
+                            'delivery_availability': row[4],
+                            'sku_status': row[5],
+                            'retailer_membership_discounts': row[6],
+                            'available_quantity_for_purchase': row[7],
+                            'inventory_status': row[8]
                         }
                 print(f"[OK] Loaded {len(main2_rows)} URLs from wmart_tv_main_2")
 
             # Load from wmart_tv_bsr_crawl (bsr) - latest batch only
             if bsr_batch_id:
                 cursor.execute("""
-                    SELECT bsr_rank, Product_url, Final_SKU_Price, Original_SKU_Price,
+                    SELECT bsr_rank, Product_url,
                            Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
                            SKU_Status, Retailer_Membership_Discounts, Available_Quantity_for_Purchase,
                            Inventory_Status
@@ -198,15 +194,13 @@ class WalmartDetailCrawler:
                             'url': url,
                             'main_rank': None,
                             'bsr_rank': row[0],
-                            'final_sku_price': row[2],
-                            'original_sku_price': row[3],
-                            'pick_up_availability': row[4],
-                            'shipping_availability': row[5],
-                            'delivery_availability': row[6],
-                            'sku_status': row[7],
-                            'retailer_membership_discounts': row[8],
-                            'available_quantity_for_purchase': row[9],
-                            'inventory_status': row[10]
+                            'pick_up_availability': row[2],
+                            'shipping_availability': row[3],
+                            'delivery_availability': row[4],
+                            'sku_status': row[5],
+                            'retailer_membership_discounts': row[6],
+                            'available_quantity_for_purchase': row[7],
+                            'inventory_status': row[8]
                         }
                 print(f"[OK] Loaded {len(bsr_rows)} BSR URLs")
 

@@ -203,13 +203,6 @@ class WalmartTVBSRCrawler:
                 product_url_raw = self.extract_text_safe(product, self.xpaths['product_url']['xpath'])
                 product_url = self.normalize_product_url(product_url_raw) if product_url_raw else None
 
-                # Extract prices
-                final_price_raw = self.extract_text_safe(product, self.xpaths['final_price']['xpath'])
-                final_price = self.clean_price_text(final_price_raw) if final_price_raw else None
-
-                original_price_raw = self.extract_text_safe(product, self.xpaths['original_price']['xpath'])
-                original_price = original_price_raw if original_price_raw else None
-
                 # Extract other fields (numbers only for offer: "4 free offers from Apple" -> "4")
                 offer_raw = self.extract_text_safe(product, self.xpaths['offer']['xpath'])
                 offer = self.extract_number_only(offer_raw) if offer_raw else None
@@ -234,8 +227,6 @@ class WalmartTVBSRCrawler:
                 data = {
                     'page_type': 'bsr',
                     'Retailer_SKU_Name': product_name,
-                    'Final_SKU_Price': final_price,
-                    'Original_SKU_Price': original_price,
                     'Offer': offer,
                     'Pick_Up_Availability': pickup,
                     'Shipping_Availability': shipping,
@@ -251,7 +242,7 @@ class WalmartTVBSRCrawler:
                 if self.save_to_db(data):
                     collected_count += 1
                     self.total_collected += 1
-                    print(f"  [{idx}/{len(products)}] Collected: {product_name[:50]}... | Price: {final_price or 'N/A'}")
+                    print(f"  [{idx}/{len(products)}] Collected: {product_name[:50]}...")
 
             print(f"[PAGE {page_number}] Collected {collected_count} products (Total: {self.total_collected}/{self.max_skus})")
             return True
@@ -351,19 +342,17 @@ class WalmartTVBSRCrawler:
 
             cursor.execute("""
                 INSERT INTO wmart_tv_bsr_crawl
-                (account_name, bsr_rank, page_type, Retailer_SKU_Name, Final_SKU_Price, Original_SKU_Price,
+                (account_name, bsr_rank, page_type, Retailer_SKU_Name,
                  Offer, Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
                  SKU_Status, Retailer_Membership_Discounts, Available_Quantity_for_Purchase,
                  Inventory_Status, Product_url, batch_id, calendar_week, crawl_strdatetime)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
                 'Walmart',  # account_name
                 bsr_rank,  # Changed from "order" to bsr_rank
                 data['page_type'],
                 data['Retailer_SKU_Name'],
-                data['Final_SKU_Price'],
-                data['Original_SKU_Price'],
                 data['Offer'],
                 data['Pick_Up_Availability'],
                 data['Shipping_Availability'],

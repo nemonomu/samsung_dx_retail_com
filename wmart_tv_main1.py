@@ -122,137 +122,39 @@ class WalmartTVCrawler:
         return False
 
     def handle_captcha(self):
-        """Handle 'PRESS & HOLD' CAPTCHA if present"""
+        """Handle 'PRESS & HOLD' CAPTCHA if present (simplified for Selenium)"""
         try:
             print("[INFO] Checking for CAPTCHA...")
 
-            # Multiple selectors to find CAPTCHA button
-            captcha_selectors = [
-                'text=PRESS & HOLD',
-                'text="PRESS & HOLD"',
-                'text=/PRESS.*HOLD/i',
-                'button:has-text("PRESS")',
-                'button:has-text("HOLD")',
-                '[class*="captcha"]',
-                '[id*="captcha"]',
-                '[class*="PressHold"]',
-                '[class*="press-hold"]'
-            ]
+            # Check page content for CAPTCHA keywords
+            page_content = self.driver.page_source.lower()
+            if any(keyword in page_content for keyword in ['press & hold', 'press and hold', 'captcha', 'human verification']):
+                print("[WARNING] CAPTCHA keywords found in page")
+                print("[INFO] CAPTCHA detection - waiting 60 seconds for manual intervention...")
+                print("[INFO] Please solve CAPTCHA manually if present")
 
-            button = None
-            found_selector = None
-
-            # Try each selector
-            for selector in captcha_selectors:
+                # Save screenshot for debugging
                 try:
-                    temp_button = self.page.locator(selector).first
-                    if temp_button.is_visible(timeout=2000):
-                        button = temp_button
-                        found_selector = selector
-                        print(f"[OK] CAPTCHA detected with selector: {selector}")
-                        break
+                    self.driver.save_screenshot(f"captcha_screen_{int(time.time())}.png")
+                    print("[INFO] Screenshot saved for debugging")
                 except:
-                    continue
+                    pass
 
-            # If no button found with locators, check page content
-            if not button:
-                page_content = self.driver.page_source.lower()
-                if any(keyword in page_content for keyword in ['press & hold', 'press and hold', 'captcha', 'human verification']):
-                    print("[WARNING] CAPTCHA keywords found in page but button not located")
-                    print("[INFO] Page may require manual intervention")
-                    # Save screenshot for debugging
-                    try:
-                        self.page.screenshot(path=f"captcha_screen_{int(time.time())}.png")
-                        print("[INFO] Screenshot saved for debugging")
-                    except:
-                        pass
-
-                    # Pause for manual intervention
-                    print("[INFO] Please solve CAPTCHA manually if present...")
-                    print("[INFO] Waiting 30 seconds...")
-                    time.sleep(30)
-                    return True
-                else:
-                    print("[INFO] No CAPTCHA detected")
-                    return True
-
-            # Try to solve CAPTCHA automatically
-            print("[OK] Attempting to solve CAPTCHA automatically...")
-
-            # Get button position
-            box = button.bounding_box()
-            if box:
-                # Move mouse to button center
-                center_x = box['x'] + box['width'] / 2
-                center_y = box['y'] + box['height'] / 2
-
-                self.page.mouse.move(center_x, center_y)
-                time.sleep(random.uniform(0.3, 0.6))
-
-                # Press and hold with progressive retry strategy
-                hold_times = [
-                    random.uniform(7, 9),    # 1st attempt: 7-9 seconds
-                    10,                      # 2nd attempt: 10 seconds
-                    20                       # 3rd attempt: 20 seconds
-                ]
-
-                for attempt, hold_time in enumerate(hold_times, 1):
-                    # Move to button center (refresh position each time)
-                    box = button.bounding_box()
-                    if box:
-                        center_x = box['x'] + box['width'] / 2
-                        center_y = box['y'] + box['height'] / 2
-                        self.page.mouse.move(center_x, center_y)
-                        time.sleep(random.uniform(0.3, 0.6))
-
-                    # Press and hold
-                    self.page.mouse.down()
-                    print(f"[INFO] Holding button (attempt {attempt}/3)...")
-                    print(f"[INFO] Holding for {hold_time:.1f} seconds...")
-                    time.sleep(hold_time)
-                    self.page.mouse.up()
-
-                    print(f"[OK] CAPTCHA button released (attempt {attempt}/3)")
-                    time.sleep(random.uniform(3, 5))  # Wait for verification
-
-                    # Check if CAPTCHA was solved
-                    try:
-                        if not button.is_visible(timeout=3000):
-                            print(f"[OK] CAPTCHA solved successfully on attempt {attempt}")
-                            return True
-                        else:
-                            if attempt < 3:
-                                print(f"[WARNING] CAPTCHA still visible, trying again with longer hold...")
-                            else:
-                                print(f"[WARNING] CAPTCHA still visible after {attempt} attempts")
-                    except:
-                        # If button is gone (exception), consider it solved
-                        print(f"[OK] CAPTCHA appears to be solved on attempt {attempt}")
-                        return True
-
-                # All 3 attempts failed, wait for manual intervention
-                print("[INFO] Automatic solving failed after 3 attempts, please solve manually...")
-                print("[INFO] Waiting 60 seconds for manual intervention...")
                 time.sleep(60)
-
-                # Check again after manual intervention time
-                try:
-                    if not button.is_visible(timeout=2000):
-                        print("[OK] CAPTCHA solved (likely manually)")
-                        return True
-                    else:
-                        print("[WARNING] CAPTCHA still present after manual wait")
-                        return False
-                except:
-                    print("[OK] CAPTCHA appears to be solved")
-                    return True
+                print("[INFO] Continuing after wait...")
+                return True
             else:
-                print("[WARNING] Could not get button position")
-                return False
+                print("[INFO] No CAPTCHA detected")
+                return True
 
         except Exception as e:
             print(f"[WARNING] CAPTCHA check failed: {e}")
             return True  # Continue anyway
+
+    def add_random_mouse_movements(self):
+        """Placeholder for mouse movements (simplified for Selenium)"""
+        # Mouse movements are not critical for scraping, so we skip this in Selenium
+        pass
 
     def scrape_page(self, url, page_number, retry_count=0):
         """Scrape a single page"""
@@ -266,7 +168,7 @@ class WalmartTVCrawler:
                 print("[INFO] Navigating to Walmart browse page first...")
                 try:
                     # Try browse electronics category first
-                    self.driver.get("https://www.walmart.com/browse/electronics/tvs/3944_1060825", wait_until="domcontentloaded", timeout=90000)
+                    self.driver.get("https://www.walmart.com/browse/electronics/tvs/3944_1060825")
                     time.sleep(random.uniform(10, 15))
 
                     # Check for robot detection and handle CAPTCHA if needed
@@ -284,23 +186,23 @@ class WalmartTVCrawler:
 
                         # Scroll a bit
                         for _ in range(2):
-                            self.page.evaluate("window.scrollBy(0, 400)")
+                            self.driver.execute_script("window.scrollBy(0, 400)")
                             time.sleep(random.uniform(1, 2))
 
                         # Now access the search URL directly
                         print("[INFO] Now navigating to search page...")
-                        self.driver.get(url, wait_until="domcontentloaded", timeout=90000)
+                        self.driver.get(url)
                         time.sleep(random.uniform(8, 12))
                     else:
                         print("[WARNING] Robot still detected after CAPTCHA, using direct URL...")
-                        self.driver.get(url, wait_until="domcontentloaded", timeout=90000)
+                        self.driver.get(url)
                         time.sleep(random.uniform(12, 18))
                 except Exception as e:
                     print(f"[WARNING] Browse navigation failed: {e}, using direct URL...")
-                    self.driver.get(url, wait_until="domcontentloaded", timeout=90000)
+                    self.driver.get(url)
                     time.sleep(random.uniform(12, 18))
             else:
-                self.driver.get(url, wait_until="domcontentloaded", timeout=90000)
+                self.driver.get(url)
                 time.sleep(random.uniform(12, 18))
 
             # Check for robot detection and handle CAPTCHA
@@ -349,7 +251,7 @@ class WalmartTVCrawler:
                         time.sleep(wait_time)
 
                         print("[INFO] Refreshing page...")
-                        self.page.reload(wait_until="domcontentloaded", timeout=90000)
+                        self.driver.refresh()
                         time.sleep(random.uniform(10, 15))
 
                         return self.scrape_page(url, page_number, retry_count + 1)
@@ -366,19 +268,19 @@ class WalmartTVCrawler:
 
             # Scroll to load all products
             print("[INFO] Scrolling to load all products...")
-            last_height = self.page.evaluate("document.body.scrollHeight")
+            last_height = self.driver.execute_script("return document.body.scrollHeight")
 
             for scroll_round in range(2):
-                self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight)")
                 time.sleep(3)
 
-                new_height = self.page.evaluate("document.body.scrollHeight")
+                new_height = self.driver.execute_script("return document.body.scrollHeight")
                 if new_height == last_height:
                     break
                 last_height = new_height
 
             # Scroll back to top
-            self.page.evaluate("window.scrollTo(0, 0)")
+            self.driver.execute_script("window.scrollTo(0, 0)")
             time.sleep(2)
 
             # Get page source and parse with lxml
@@ -632,17 +534,13 @@ class WalmartTVCrawler:
             return False
 
     def initialize_session(self):
-        """Initialize session with natural browsing pattern"""
+        """Initialize session with natural browsing pattern (simplified for Selenium)"""
         try:
             print("[INFO] Initializing session - navigating to Walmart homepage...")
 
             # Navigate directly to Walmart homepage
-            self.page.goto("https://www.walmart.com", wait_until="domcontentloaded")
+            self.driver.get("https://www.walmart.com")
             time.sleep(random.uniform(8, 12))
-
-            # Add mouse movements
-            self.add_random_mouse_movements()
-            time.sleep(random.uniform(1, 2))
 
             # Check for robot detection and handle CAPTCHA
             if self.check_robot_page(self.driver.page_source):
@@ -656,21 +554,15 @@ class WalmartTVCrawler:
                 if self.check_robot_page(self.driver.page_source):
                     print("[WARNING] Still showing robot detection, trying recovery...")
 
-                    # More natural recovery behavior
-                    print("[INFO] Simulating human confusion - random mouse movements...")
-                    for _ in range(5):
-                        self.add_random_mouse_movements()
-                        time.sleep(random.uniform(0.8, 1.5))
-
                     # Slow scroll down
                     print("[INFO] Scrolling slowly...")
                     for i in range(5):
                         scroll_amount = random.randint(150, 300)
-                        self.page.evaluate(f"window.scrollBy(0, {scroll_amount})")
+                        self.driver.execute_script(f"window.scrollBy(0, {scroll_amount})")
                         time.sleep(random.uniform(1.5, 2.5))
 
                     # Scroll back up a bit
-                    self.page.evaluate("window.scrollBy(0, -200)")
+                    self.driver.execute_script("window.scrollBy(0, -200)")
                     time.sleep(random.uniform(1, 2))
 
                 # Wait longer
@@ -679,7 +571,7 @@ class WalmartTVCrawler:
 
                 # Try reload
                 print("[INFO] Reloading page...")
-                self.page.reload(wait_until="domcontentloaded")
+                self.driver.refresh()
                 time.sleep(random.uniform(10, 15))
 
                 # Check again
@@ -688,101 +580,20 @@ class WalmartTVCrawler:
                     print("[INFO] Attempting to continue anyway...")
                     # Don't return False, try to continue
 
-            # More human-like exploration
+            # Simple homepage exploration
             print("[INFO] Exploring homepage...")
-            self.add_random_mouse_movements()
             time.sleep(random.uniform(2, 4))
 
             # Random scrolling
             for _ in range(random.randint(2, 4)):
                 scroll_amount = random.randint(200, 500)
-                self.page.evaluate(f"window.scrollBy(0, {scroll_amount})")
+                self.driver.execute_script(f"window.scrollBy(0, {scroll_amount})")
                 time.sleep(random.uniform(1, 2))
-                self.add_random_mouse_movements()
 
-            # Scroll back to top to see search box
+            # Scroll back to top
             print("[INFO] Scrolling back to top...")
-            self.page.evaluate("window.scrollTo(0, 0)")
+            self.driver.execute_script("window.scrollTo(0, 0)")
             time.sleep(random.uniform(2, 3))
-
-            # Try to search for TV from homepage
-            print("[INFO] Searching for 'TV' from homepage...")
-            try:
-                # Try multiple selectors for Walmart search box
-                search_box = None
-                selectors = [
-                    "input[type='search']",
-                    "input[aria-label*='Search']",
-                    "input[placeholder*='Search']",
-                    "input[name='q']"
-                ]
-
-                for selector in selectors:
-                    try:
-                        print(f"[DEBUG] Trying search box selector: {selector}")
-                        search_box = self.page.wait_for_selector(selector, timeout=5000)
-                        if search_box:
-                            print(f"[OK] Found search box with: {selector}")
-                            break
-                    except:
-                        continue
-
-                if search_box:
-                    # Add random mouse movements before clicking
-                    print("[INFO] Moving mouse naturally...")
-                    self.page.mouse.move(random.randint(100, 300), random.randint(100, 300))
-                    time.sleep(random.uniform(0.5, 1))
-                    self.page.mouse.move(random.randint(400, 600), random.randint(200, 400))
-                    time.sleep(random.uniform(0.3, 0.7))
-
-                    # Click on search box
-                    print("[INFO] Clicking search box...")
-                    search_box.click()
-                    time.sleep(random.uniform(2, 3))  # Increased wait time
-
-                    # Type "TV" character by character with longer delay
-                    print("[INFO] Typing 'TV' in search box...")
-                    for char in "TV":
-                        search_box.type(char, delay=random.uniform(400, 800))  # Increased typing delay
-
-                    # Wait for search suggestions to appear
-                    time.sleep(random.uniform(3, 5))  # Increased wait time
-
-                    # Try to click search button instead of pressing Enter (more human-like)
-                    print("[INFO] Looking for search button...")
-                    try:
-                        search_button = self.page.query_selector("button[aria-label='Search']")
-                        if not search_button:
-                            search_button = self.page.query_selector("button[data-automation-id='searchButton']")
-
-                        if search_button:
-                            print("[INFO] Clicking search button...")
-                            search_button.click()
-                        else:
-                            print("[INFO] Search button not found, pressing Enter...")
-                            search_box.press("Enter")
-                    except:
-                        print("[INFO] Pressing Enter to search...")
-                        search_box.press("Enter")
-
-                    # Wait longer for page load
-                    print("[INFO] Waiting for search results...")
-                    self.page.wait_for_load_state("domcontentloaded")
-                    time.sleep(random.uniform(8, 12))  # Increased wait time
-
-                    # Add natural scrolling behavior after search
-                    print("[INFO] Scrolling naturally...")
-                    for _ in range(2):
-                        self.page.mouse.wheel(0, random.randint(200, 400))
-                        time.sleep(random.uniform(1, 2))
-
-                    print("[OK] Successfully searched for TV")
-                else:
-                    print("[WARNING] Could not find search box, will try alternative method later")
-
-            except Exception as e:
-                print(f"[WARNING] Failed to search from homepage: {e}")
-                print("[INFO] Will try alternative navigation method later")
 
             print("[OK] Session initialized")
             return True
@@ -797,7 +608,7 @@ class WalmartTVCrawler:
         """Main execution"""
         try:
             print("="*80)
-            print("Walmart TV Crawler [Part 1: Pages 1-5] - Starting (Playwright Mode)")
+            print("Walmart TV Crawler [Part 1: Pages 1-5] - Starting (undetected-chromedriver)")
             print(f"Batch ID: {self.batch_id}")
             print("="*80)
 

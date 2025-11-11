@@ -3,7 +3,7 @@ Amazon TV Crawler - Integrated Sequential Execution
 Executes main1 -> bsr1 -> dt1 in sequence
 
 If at least one of (main1, bsr1) succeeds, dt1 will run.
-If any step fails, creates a failure log at C:\samsung_dx_retail_com\failed_amazon\
+If any step fails, creates a failure log at C:\\samsung_dx_retail_com\\failed_amazon\\
 """
 
 import subprocess

@@ -1,6 +1,7 @@
 import time
 import random
 import re
+import sys
 import psycopg2
 from datetime import datetime
 import pytz
@@ -12,6 +13,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from lxml import html
+
+# Configure stdout encoding for Windows console
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 # Import database configuration
 from config import DB_CONFIG

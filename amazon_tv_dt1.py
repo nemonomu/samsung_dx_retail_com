@@ -1,5 +1,6 @@
 import time
 import random
+import sys
 import psycopg2
 import pickle
 import json
@@ -15,6 +16,10 @@ from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 from lxml import html
 import re
+
+# Configure stdout encoding for Windows console
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
 # Cookie file path
 COOKIE_FILE = 'amazon_cookies.pkl'

@@ -28,7 +28,7 @@ class TVRetailPriceBackfill:
         """Get rows with NULL prices from tv_retail_com"""
         try:
             query = """
-                SELECT id, product_url, crawl_strdatetime
+                SELECT id, product_url, crawl_strdatetime, retailer_sku_name
                 FROM tv_retail_com
                 WHERE account_name = %s
                   AND (final_sku_price IS NULL OR original_sku_price IS NULL)
@@ -69,7 +69,7 @@ class TVRetailPriceBackfill:
 
         updated_count = 0
 
-        for idx, (row_id, product_url, crawl_strdatetime) in enumerate(null_rows, 1):
+        for idx, (row_id, product_url, crawl_strdatetime, retailer_sku_name) in enumerate(null_rows, 1):
             try:
                 if idx % 10 == 0:
                     print(f"[Progress] {idx}/{len(null_rows)} rows processed...")
@@ -112,10 +112,12 @@ class TVRetailPriceBackfill:
                 bsr_batch_id = bsr_batch[0] if bsr_batch else None
 
                 # Step 3: Get prices from main (has both final and original)
+                # Priority: URL match > ASIN match (within same batch_id)
                 final_price = None
                 original_price = None
 
                 if main_batch_id:
+                    # Try URL match first
                     self.cursor.execute("""
                         SELECT final_sku_price, original_sku_price
                         FROM amazon_tv_main_crawled
@@ -127,8 +129,22 @@ class TVRetailPriceBackfill:
                     if main_result:
                         final_price, original_price = main_result
 
+                    # If URL match failed, try ASIN match (same batch_id)
+                    elif retailer_sku_name:
+                        self.cursor.execute("""
+                            SELECT final_sku_price, original_sku_price
+                            FROM amazon_tv_main_crawled
+                            WHERE batch_id = %s
+                              AND retailer_sku_name = %s
+                            LIMIT 1
+                        """, (main_batch_id, retailer_sku_name))
+                        main_result = self.cursor.fetchone()
+                        if main_result:
+                            final_price, original_price = main_result
+
                 # Step 4: If still NULL, get final_price from BSR (no original_sku_price in BSR)
                 if not final_price and bsr_batch_id:
+                    # Try URL match first
                     self.cursor.execute("""
                         SELECT final_sku_price
                         FROM amazon_tv_bsr
@@ -139,6 +155,19 @@ class TVRetailPriceBackfill:
                     bsr_result = self.cursor.fetchone()
                     if bsr_result:
                         final_price = bsr_result[0]
+
+                    # If URL match failed, try ASIN match (same batch_id)
+                    elif retailer_sku_name:
+                        self.cursor.execute("""
+                            SELECT final_sku_price
+                            FROM amazon_tv_bsr
+                            WHERE batch_id = %s
+                              AND retailer_sku_name = %s
+                            LIMIT 1
+                        """, (bsr_batch_id, retailer_sku_name))
+                        bsr_result = self.cursor.fetchone()
+                        if bsr_result:
+                            final_price = bsr_result[0]
 
                 # Step 5: Update tv_retail_com
                 if final_price or original_price:
@@ -183,7 +212,7 @@ class TVRetailPriceBackfill:
 
         updated_count = 0
 
-        for idx, (row_id, product_url, crawl_strdatetime) in enumerate(null_rows, 1):
+        for idx, (row_id, product_url, crawl_strdatetime, retailer_sku_name) in enumerate(null_rows, 1):
             try:
                 if idx % 10 == 0:
                     print(f"[Progress] {idx}/{len(null_rows)} rows processed...")
@@ -328,7 +357,7 @@ class TVRetailPriceBackfill:
 
         updated_count = 0
 
-        for idx, (row_id, product_url, crawl_strdatetime) in enumerate(null_rows, 1):
+        for idx, (row_id, product_url, crawl_strdatetime, retailer_sku_name) in enumerate(null_rows, 1):
             try:
                 if idx % 10 == 0:
                     print(f"[Progress] {idx}/{len(null_rows)} rows processed...")

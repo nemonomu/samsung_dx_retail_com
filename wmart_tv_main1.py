@@ -2,7 +2,10 @@ import time
 import random
 import psycopg2
 from datetime import datetime
-from playwright.sync_api import sync_playwright
+import undetected_chromedriver as uc
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from lxml import html
 import re
 import os
@@ -12,15 +15,10 @@ from urllib.parse import urlparse, parse_qs, unquote
 # Import database configuration
 from config import DB_CONFIG
 
-# Storage state file for cookies and localStorage
-STORAGE_STATE_FILE = "walmart_storage_state.json"
-
 class WalmartTVCrawler:
     def __init__(self):
-        self.playwright = None
-        self.browser = None
-        self.context = None
-        self.page = None
+        self.driver = None
+        self.wait = None
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
@@ -82,238 +80,25 @@ class WalmartTVCrawler:
             print(f"[ERROR] Failed to load page URLs: {e}")
             return []
 
-    def setup_playwright(self):
-        """Setup Playwright browser with enhanced stealth mode"""
+    def setup_browser(self):
+        """Setup undetected-chromedriver browser"""
         try:
-            self.playwright = sync_playwright().start()
+            options = uc.ChromeOptions()
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-setuid-sandbox')
+            options.add_argument('--start-maximized')
+            options.add_argument('--disable-infobars')
+            options.add_argument('--window-size=1920,1080')
 
-            # Launch browser with channel="chrome" to use installed Chrome
-            # This helps avoid detection as it uses real Chrome instead of Chromium
-            self.browser = self.playwright.chromium.launch(
-                headless=False,
-                channel="chrome",  # Use installed Chrome
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--disable-dev-shm-usage',
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-infobars',
-                    '--window-size=1920,1080',
-                    '--start-maximized',
-                    '--disable-web-security',
-                    '--disable-features=IsolateOrigins,site-per-process',
-                    '--lang=en-US,en;q=0.9',
-                    '--disable-blink-features=AutomationControlled'
-                ]
-            )
-
-            # Check if we have saved storage state (cookies + localStorage)
-            storage_state = None
-            if os.path.exists(STORAGE_STATE_FILE):
-                print(f"[INFO] Found saved storage state: {STORAGE_STATE_FILE}")
-                print("[INFO] Loading cookies and localStorage from previous session...")
-                storage_state = STORAGE_STATE_FILE
-            else:
-                print("[INFO] No saved storage state found, starting fresh session")
-
-            # Create context with realistic settings
-            context_options = {
-                'viewport': {'width': 1920, 'height': 1080},
-                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                'locale': 'en-US',
-                'timezone_id': 'America/New_York',
-                'permissions': ['geolocation', 'notifications'],
-                'geolocation': {'longitude': -74.006, 'latitude': 40.7128},
-                'color_scheme': 'light',
-                'extra_http_headers': {
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'DNT': '1',
-                    'Connection': 'keep-alive',
-                    'Upgrade-Insecure-Requests': '1',
-                    'Sec-Fetch-Dest': 'document',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-Site': 'none',
-                    'Sec-Fetch-User': '?1',
-                    'Cache-Control': 'max-age=0'
-                }
-            }
-
-            # Add storage_state if available
-            if storage_state:
-                context_options['storage_state'] = storage_state
-
-            self.context = self.browser.new_context(**context_options)
-
-            # Add comprehensive stealth scripts
-            self.context.add_init_script("""
-                // Override the navigator.webdriver property
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-
-                // Remove automation indicators
-                delete navigator.__proto__.webdriver;
-
-                // Override plugins to avoid headless detection
-                Object.defineProperty(navigator, 'plugins', {
-                    get: () => [
-                        {
-                            0: {type: "application/x-google-chrome-pdf", suffixes: "pdf", description: "Portable Document Format"},
-                            description: "Portable Document Format",
-                            filename: "internal-pdf-viewer",
-                            length: 1,
-                            name: "Chrome PDF Plugin"
-                        },
-                        {
-                            0: {type: "application/pdf", suffixes: "pdf", description: ""},
-                            description: "",
-                            filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai",
-                            length: 1,
-                            name: "Chrome PDF Viewer"
-                        },
-                        {
-                            0: {type: "application/x-nacl", suffixes: "", description: "Native Client Executable"},
-                            1: {type: "application/x-pnacl", suffixes: "", description: "Portable Native Client Executable"},
-                            description: "",
-                            filename: "internal-nacl-plugin",
-                            length: 2,
-                            name: "Native Client"
-                        }
-                    ]
-                });
-
-                // Override languages
-                Object.defineProperty(navigator, 'languages', {
-                    get: () => ['en-US', 'en']
-                });
-
-                // Add chrome object
-                window.chrome = {
-                    runtime: {},
-                    loadTimes: function() {},
-                    csi: function() {},
-                    app: {}
-                };
-
-                // Override permissions
-                const originalQuery = window.navigator.permissions.query;
-                window.navigator.permissions.query = (parameters) => (
-                    parameters.name === 'notifications' ?
-                        Promise.resolve({ state: Notification.permission }) :
-                        originalQuery(parameters)
-                );
-
-                // Mock battery API
-                Object.defineProperty(navigator, 'getBattery', {
-                    value: () => Promise.resolve({
-                        charging: true,
-                        chargingTime: 0,
-                        dischargingTime: Infinity,
-                        level: 1,
-                        addEventListener: () => {},
-                        removeEventListener: () => {},
-                        dispatchEvent: () => true
-                    })
-                });
-
-                // Canvas fingerprinting protection
-                const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
-                HTMLCanvasElement.prototype.toDataURL = function(type) {
-                    if (type === 'image/png' && this.width === 280 && this.height === 60) {
-                        return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-                    }
-                    return originalToDataURL.apply(this, arguments);
-                };
-
-                // WebGL vendor override
-                const getParameter = WebGLRenderingContext.prototype.getParameter;
-                WebGLRenderingContext.prototype.getParameter = function(parameter) {
-                    if (parameter === 37445) {
-                        return 'Intel Inc.';
-                    }
-                    if (parameter === 37446) {
-                        return 'Intel Iris OpenGL Engine';
-                    }
-                    return getParameter.apply(this, arguments);
-                };
-
-                // Screen resolution consistency
-                Object.defineProperty(screen, 'width', {
-                    get: () => 1920
-                });
-                Object.defineProperty(screen, 'height', {
-                    get: () => 1080
-                });
-                Object.defineProperty(screen, 'availWidth', {
-                    get: () => 1920
-                });
-                Object.defineProperty(screen, 'availHeight', {
-                    get: () => 1040
-                });
-
-                // Notification permission
-                Object.defineProperty(Notification, 'permission', {
-                    get: () => 'default'
-                });
-
-                // Connection type
-                Object.defineProperty(navigator, 'connection', {
-                    get: () => ({
-                        effectiveType: '4g',
-                        rtt: 50,
-                        downlink: 10,
-                        saveData: false
-                    })
-                });
-
-                // Hardware concurrency
-                Object.defineProperty(navigator, 'hardwareConcurrency', {
-                    get: () => 8
-                });
-
-                // Device memory
-                Object.defineProperty(navigator, 'deviceMemory', {
-                    get: () => 8
-                });
-            """)
-
-            self.page = self.context.new_page()
-
-            # Set default timeout
-            self.page.set_default_timeout(60000)
-
-            print("[OK] Playwright browser setup complete (enhanced stealth mode)")
+            self.driver = uc.Chrome(options=options, use_subprocess=True)
+            self.wait = WebDriverWait(self.driver, 20)
+            print("[OK] Browser setup complete (undetected-chromedriver)")
             return True
-
         except Exception as e:
-            print(f"[ERROR] Failed to setup Playwright: {e}")
+            print(f"[ERROR] Browser setup failed: {e}")
             return False
-
-    def save_storage_state(self):
-        """Save current storage state (cookies + localStorage) to file"""
-        try:
-            if self.context:
-                self.context.storage_state(path=STORAGE_STATE_FILE)
-                print(f"[OK] Storage state saved to: {STORAGE_STATE_FILE}")
-                print("[INFO] Next run will use these cookies to avoid bot detection")
-                return True
-        except Exception as e:
-            print(f"[WARNING] Failed to save storage state: {e}")
-            return False
-
-    def add_random_mouse_movements(self):
-        """Add random mouse movements to appear more human"""
-        try:
-            # Random small movements
-            for _ in range(random.randint(2, 4)):
-                x = random.randint(100, 1800)
-                y = random.randint(100, 900)
-                self.page.mouse.move(x, y)
-                time.sleep(random.uniform(0.1, 0.3))
-        except Exception as e:
-            pass  # Silent fail if mouse movement doesn't work
 
     def extract_text_safe(self, element, xpath):
         """Safely extract text from element using xpath"""
@@ -371,7 +156,7 @@ class WalmartTVCrawler:
 
             # If no button found with locators, check page content
             if not button:
-                page_content = self.page.content().lower()
+                page_content = self.driver.page_source.lower()
                 if any(keyword in page_content for keyword in ['press & hold', 'press and hold', 'captcha', 'human verification']):
                     print("[WARNING] CAPTCHA keywords found in page but button not located")
                     print("[INFO] Page may require manual intervention")
@@ -481,17 +266,17 @@ class WalmartTVCrawler:
                 print("[INFO] Navigating to Walmart browse page first...")
                 try:
                     # Try browse electronics category first
-                    self.page.goto("https://www.walmart.com/browse/electronics/tvs/3944_1060825", wait_until="domcontentloaded", timeout=90000)
+                    self.driver.get("https://www.walmart.com/browse/electronics/tvs/3944_1060825", wait_until="domcontentloaded", timeout=90000)
                     time.sleep(random.uniform(10, 15))
 
                     # Check for robot detection and handle CAPTCHA if needed
-                    if self.check_robot_page(self.page.content()):
+                    if self.check_robot_page(self.driver.page_source):
                         print("[WARNING] Robot detected on browse page, handling CAPTCHA...")
                         self.handle_captcha()
                         time.sleep(random.uniform(2, 4))
 
                     # If no robot detection (or after handling CAPTCHA)
-                    if not self.check_robot_page(self.page.content()):
+                    if not self.check_robot_page(self.driver.page_source):
                         print("[OK] Browse page loaded successfully")
                         # Add human-like behavior
                         self.add_random_mouse_movements()
@@ -504,24 +289,24 @@ class WalmartTVCrawler:
 
                         # Now access the search URL directly
                         print("[INFO] Now navigating to search page...")
-                        self.page.goto(url, wait_until="domcontentloaded", timeout=90000)
+                        self.driver.get(url, wait_until="domcontentloaded", timeout=90000)
                         time.sleep(random.uniform(8, 12))
                     else:
                         print("[WARNING] Robot still detected after CAPTCHA, using direct URL...")
-                        self.page.goto(url, wait_until="domcontentloaded", timeout=90000)
+                        self.driver.get(url, wait_until="domcontentloaded", timeout=90000)
                         time.sleep(random.uniform(12, 18))
                 except Exception as e:
                     print(f"[WARNING] Browse navigation failed: {e}, using direct URL...")
-                    self.page.goto(url, wait_until="domcontentloaded", timeout=90000)
+                    self.driver.get(url, wait_until="domcontentloaded", timeout=90000)
                     time.sleep(random.uniform(12, 18))
             else:
-                self.page.goto(url, wait_until="domcontentloaded", timeout=90000)
+                self.driver.get(url, wait_until="domcontentloaded", timeout=90000)
                 time.sleep(random.uniform(12, 18))
 
             # Check for robot detection and handle CAPTCHA
             page_source = None
             try:
-                page_source = self.page.content()
+                page_source = self.driver.page_source
             except Exception as e:
                 if "navigating" in str(e).lower():
                     print(f"[WARNING] Page still navigating (likely bot detection)")
@@ -531,7 +316,7 @@ class WalmartTVCrawler:
 
                     # Try to get content again
                     try:
-                        page_source = self.page.content()
+                        page_source = self.driver.page_source
                         print("[OK] Page content retrieved after waiting")
                     except Exception as e2:
                         print(f"[ERROR] Still cannot get page content: {e2}")
@@ -546,7 +331,7 @@ class WalmartTVCrawler:
                 if self.handle_captcha():
                     print("[OK] CAPTCHA handled, checking page again...")
                     time.sleep(random.uniform(3, 5))
-                    page_source = self.page.content()
+                    page_source = self.driver.page_source
 
                     # Check if robot detection is gone
                     if not self.check_robot_page(page_source):
@@ -556,7 +341,7 @@ class WalmartTVCrawler:
                         print("[WARNING] Robot detection still present after CAPTCHA")
 
                 # If still robot detected, retry
-                if self.check_robot_page(self.page.content()):
+                if self.check_robot_page(self.driver.page_source):
                     if retry_count < max_retries:
                         print(f"[WARNING] Retrying... {retry_count + 1}/{max_retries}")
                         wait_time = 30 + retry_count * 15
@@ -597,7 +382,7 @@ class WalmartTVCrawler:
             time.sleep(2)
 
             # Get page source and parse with lxml
-            page_source = self.page.content()
+            page_source = self.driver.page_source
             tree = html.fromstring(page_source)
 
             # Find all product containers
@@ -860,7 +645,7 @@ class WalmartTVCrawler:
             time.sleep(random.uniform(1, 2))
 
             # Check for robot detection and handle CAPTCHA
-            if self.check_robot_page(self.page.content()):
+            if self.check_robot_page(self.driver.page_source):
                 print("[WARNING] Robot detection on homepage. Handling CAPTCHA...")
 
                 # Try CAPTCHA first
@@ -868,7 +653,7 @@ class WalmartTVCrawler:
                 time.sleep(random.uniform(3, 5))
 
                 # If still showing robot detection, try recovery behavior
-                if self.check_robot_page(self.page.content()):
+                if self.check_robot_page(self.driver.page_source):
                     print("[WARNING] Still showing robot detection, trying recovery...")
 
                     # More natural recovery behavior
@@ -898,7 +683,7 @@ class WalmartTVCrawler:
                 time.sleep(random.uniform(10, 15))
 
                 # Check again
-                if self.check_robot_page(self.page.content()):
+                if self.check_robot_page(self.driver.page_source):
                     print("[ERROR] Still getting robot detection after recovery")
                     print("[INFO] Attempting to continue anyway...")
                     # Don't return False, try to continue
@@ -1034,7 +819,7 @@ class WalmartTVCrawler:
             print(f"[INFO] Processing pages 1-5 only ({len(page_urls)} pages)")
 
             # Setup Playwright
-            if not self.setup_playwright():
+            if not self.setup_browser():
                 return
 
             # Scrape each page with retry logic
@@ -1088,28 +873,9 @@ class WalmartTVCrawler:
             traceback.print_exc()
 
         finally:
-            # Save storage state before closing (cookies + localStorage)
-            print("\n[INFO] Saving storage state for future sessions...")
-            self.save_storage_state()
-
-            if self.page:
+            if self.driver:
                 try:
-                    self.page.close()
-                except:
-                    pass
-            if self.context:
-                try:
-                    self.context.close()
-                except:
-                    pass
-            if self.browser:
-                try:
-                    self.browser.close()
-                except:
-                    pass
-            if self.playwright:
-                try:
-                    self.playwright.stop()
+                    self.driver.quit()
                 except:
                     pass
             if self.db_conn:

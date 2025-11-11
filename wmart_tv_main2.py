@@ -1051,13 +1051,6 @@ class WalmartTVCrawler:
             if not self.setup_playwright():
                 return
 
-            # Try to initialize session, but continue even if it fails
-            print("[INFO] Attempting to initialize session...")
-            if not self.initialize_session():
-                print("[WARNING] Session initialization failed, proceeding anyway...")
-                print("[INFO] Will attempt direct access to search pages...")
-                time.sleep(random.uniform(5, 10))
-
             # Scrape each page with retry logic
             for page_number, url in page_urls:
                 if self.total_collected >= self.max_skus:

@@ -3,7 +3,7 @@ Walmart TV Crawler - Integrated Sequential Execution
 Executes main1 -> main2 -> bsr -> dt1 in sequence
 
 If at least one of (main1, main2, bsr) succeeds, dt1 will run.
-If any step fails, creates a failure log at C:\samsung_dx_retail_com\failed_wmart\
+If any step fails, creates a failure log at C:\\samsung_dx_retail_com\\failed_wmart\\
 """
 
 import subprocess
@@ -77,7 +77,7 @@ def run_crawler(script_name, stage_name):
 
 def create_failure_log(failed_stages):
     """
-    Create failure log file in C:\samsung_dx_retail_com\failed_wmart\
+    Create failure log file in C:\\samsung_dx_retail_com\\failed_wmart\\
 
     Args:
         failed_stages: List of failed script names

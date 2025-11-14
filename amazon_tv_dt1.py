@@ -822,9 +822,9 @@ class AmazonDetailCrawler:
             # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
 
-            # Calculate crawl_strdatetime (format: 202511040300559260)
+            # Calculate crawl_datetime (format: 2025-11-04 03:00:55)
             now = datetime.now()
-            crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + now.strftime('%f')[:4]
+            crawl_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
 
             # Insert to amazon_tv_detail_crawled
             cursor.execute("""
@@ -853,7 +853,7 @@ class AmazonDetailCrawler:
                 data['Summarized_Review_Content'],
                 data['Detailed_Review_Content'],
                 calendar_week,
-                crawl_strdatetime,
+                crawl_datetime,
                 data['main_rank'],
                 data['bsr_rank'],
                 data['final_sku_price'],
@@ -893,7 +893,7 @@ class AmazonDetailCrawler:
                  main_rank, bsr_rank, rank_1, rank_2, promotion_rank, trend_rank,
                  number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, retailer_sku_name_similar,
                  estimated_annual_electricity_use, promotion_type,
-                 calendar_week, crawl_strdatetime)
+                 calendar_week, crawl_datetime)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 data['item'],
@@ -935,7 +935,7 @@ class AmazonDetailCrawler:
                 None,  # estimated_annual_electricity_use (Amazon doesn't have this)
                 None,  # promotion_type (Amazon doesn't have this)
                 calendar_week,
-                crawl_strdatetime
+                crawl_datetime
             ))
 
             # Commit transaction

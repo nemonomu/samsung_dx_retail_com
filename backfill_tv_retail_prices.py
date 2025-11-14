@@ -83,39 +83,52 @@ class TVRetailPriceBackfill:
                 """, (crawl_strdatetime,))
 
                 detail_result = self.cursor.fetchone()
-                if not detail_result:
-                    continue
+                detail_batch_id = detail_result[0] if detail_result else None
 
-                detail_batch_id = detail_result[0]
+                # Step 2-5: Only process if detail_batch_id exists
+                final_price = None
+                original_price = None
+                main_batch_id = None
+                bsr_batch_id = None
 
-                # Step 2: Find most recent batch_ids before detail_batch_id
-                # Main
-                self.cursor.execute("""
-                    SELECT batch_id
-                    FROM amazon_tv_main_crawled
-                    WHERE batch_id < %s
-                    ORDER BY batch_id DESC
-                    LIMIT 1
-                """, (detail_batch_id,))
-                main_batch = self.cursor.fetchone()
-                main_batch_id = main_batch[0] if main_batch else None
+                if detail_batch_id:
+                    # Step 2: Find closest batch within 48 hours (before or after)
+                    # Main
+                    self.cursor.execute("""
+                        SELECT batch_id
+                        FROM amazon_tv_main_crawled
+                        WHERE ABS(EXTRACT(EPOCH FROM (
+                            TO_TIMESTAMP(%s, 'YYYYMMDD_HH24MISS') -
+                            TO_TIMESTAMP(batch_id, 'YYYYMMDD_HH24MISS')
+                        ))) <= 48 * 3600
+                        ORDER BY ABS(EXTRACT(EPOCH FROM (
+                            TO_TIMESTAMP(%s, 'YYYYMMDD_HH24MISS') -
+                            TO_TIMESTAMP(batch_id, 'YYYYMMDD_HH24MISS')
+                        )))
+                        LIMIT 1
+                    """, (detail_batch_id, detail_batch_id))
+                    main_batch = self.cursor.fetchone()
+                    main_batch_id = main_batch[0] if main_batch else None
 
-                # BSR
-                self.cursor.execute("""
-                    SELECT batch_id
-                    FROM amazon_tv_bsr
-                    WHERE batch_id < %s
-                    ORDER BY batch_id DESC
-                    LIMIT 1
-                """, (detail_batch_id,))
-                bsr_batch = self.cursor.fetchone()
-                bsr_batch_id = bsr_batch[0] if bsr_batch else None
+                    # BSR
+                    self.cursor.execute("""
+                        SELECT batch_id
+                        FROM amazon_tv_bsr
+                        WHERE ABS(EXTRACT(EPOCH FROM (
+                            TO_TIMESTAMP(%s, 'YYYYMMDD_HH24MISS') -
+                            TO_TIMESTAMP(batch_id, 'YYYYMMDD_HH24MISS')
+                        ))) <= 48 * 3600
+                        ORDER BY ABS(EXTRACT(EPOCH FROM (
+                            TO_TIMESTAMP(%s, 'YYYYMMDD_HH24MISS') -
+                            TO_TIMESTAMP(batch_id, 'YYYYMMDD_HH24MISS')
+                        )))
+                        LIMIT 1
+                    """, (detail_batch_id, detail_batch_id))
+                    bsr_batch = self.cursor.fetchone()
+                    bsr_batch_id = bsr_batch[0] if bsr_batch else None
 
                 # Step 3: Get prices from main (has both final and original)
                 # Priority: URL match > ASIN match (within same batch_id)
-                final_price = None
-                original_price = None
-
                 if main_batch_id:
                     # Try URL match first
                     self.cursor.execute("""
@@ -123,6 +136,7 @@ class TVRetailPriceBackfill:
                         FROM amazon_tv_main_crawled
                         WHERE batch_id = %s
                           AND product_url = %s
+                          AND page_type = 'main'
                         LIMIT 1
                     """, (main_batch_id, product_url))
                     main_result = self.cursor.fetchone()
@@ -136,6 +150,7 @@ class TVRetailPriceBackfill:
                             FROM amazon_tv_main_crawled
                             WHERE batch_id = %s
                               AND retailer_sku_name = %s
+                              AND page_type = 'main'
                             LIMIT 1
                         """, (main_batch_id, retailer_sku_name))
                         main_result = self.cursor.fetchone()
@@ -169,14 +184,66 @@ class TVRetailPriceBackfill:
                         if bsr_result:
                             final_price = bsr_result[0]
 
-                # Step 5: Update tv_retail_com
+                # Step 5: If no batch_id match, try time-based + ASIN matching (24-48 hours)
+                if (not final_price or not original_price) and retailer_sku_name:
+                    self.cursor.execute("""
+                        SELECT final_sku_price, original_sku_price
+                        FROM amazon_tv_main_crawled
+                        WHERE retailer_sku_name = %s
+                          AND page_type = 'main'
+                          AND ABS(EXTRACT(EPOCH FROM (
+                              TO_TIMESTAMP(SUBSTRING(%s, 1, 14), 'YYYYMMDDHH24MISS') -
+                              TO_TIMESTAMP(SUBSTRING(crawl_strdatetime, 1, 14), 'YYYYMMDDHH24MISS')
+                          ))) BETWEEN 24 * 3600 AND 48 * 3600
+                        ORDER BY ABS(EXTRACT(EPOCH FROM (
+                              TO_TIMESTAMP(SUBSTRING(%s, 1, 14), 'YYYYMMDDHH24MISS') -
+                              TO_TIMESTAMP(SUBSTRING(crawl_strdatetime, 1, 14), 'YYYYMMDDHH24MISS')
+                          )))
+                        LIMIT 1
+                    """, (retailer_sku_name, crawl_strdatetime, crawl_strdatetime))
+                    time_main = self.cursor.fetchone()
+                    if time_main:
+                        if not final_price:
+                            final_price = time_main[0]
+                        if not original_price:
+                            original_price = time_main[1]
+
+                    # Try BSR for final_price only if still NULL
+                    if not final_price:
+                        self.cursor.execute("""
+                            SELECT final_sku_price
+                            FROM amazon_tv_bsr
+                            WHERE retailer_sku_name = %s
+                              AND ABS(EXTRACT(EPOCH FROM (
+                                  TO_TIMESTAMP(SUBSTRING(%s, 1, 14), 'YYYYMMDDHH24MISS') -
+                                  TO_TIMESTAMP(SUBSTRING(crawl_strdatetime, 1, 14), 'YYYYMMDDHH24MISS')
+                              ))) BETWEEN 24 * 3600 AND 48 * 3600
+                            ORDER BY ABS(EXTRACT(EPOCH FROM (
+                                  TO_TIMESTAMP(SUBSTRING(%s, 1, 14), 'YYYYMMDDHH24MISS') -
+                                  TO_TIMESTAMP(SUBSTRING(crawl_strdatetime, 1, 14), 'YYYYMMDDHH24MISS')
+                              )))
+                            LIMIT 1
+                        """, (retailer_sku_name, crawl_strdatetime, crawl_strdatetime))
+                        time_bsr = self.cursor.fetchone()
+                        if time_bsr:
+                            final_price = time_bsr[0]
+
+                # Step 7: Update tv_retail_com
                 if final_price or original_price:
+                    # Calculate savings: original_sku_price - final_sku_price
+                    # Update all price fields together to maintain consistency
                     self.cursor.execute("""
                         UPDATE tv_retail_com
                         SET final_sku_price = COALESCE(final_sku_price, %s),
-                            original_sku_price = COALESCE(original_sku_price, %s)
+                            original_sku_price = COALESCE(original_sku_price, %s),
+                            savings = CASE
+                                WHEN COALESCE(original_sku_price, %s) IS NOT NULL
+                                     AND COALESCE(final_sku_price, %s) IS NOT NULL
+                                THEN COALESCE(original_sku_price, %s) - COALESCE(final_sku_price, %s)
+                                ELSE savings
+                            END
                         WHERE id = %s
-                    """, (final_price, original_price, row_id))
+                    """, (final_price, original_price, original_price, final_price, original_price, final_price, row_id))
 
                     if self.cursor.rowcount > 0:
                         updated_count += 1
@@ -231,15 +298,21 @@ class TVRetailPriceBackfill:
 
                 detail_batch_id = detail_result[0]
 
-                # Step 2: Find most recent batch_ids before detail_batch_id
+                # Step 2: Find closest batch within 48 hours (before or after)
                 # Main
                 self.cursor.execute("""
                     SELECT batch_id
                     FROM bestbuy_tv_main_crawl
-                    WHERE batch_id < %s
-                    ORDER BY batch_id DESC
+                    WHERE ABS(EXTRACT(EPOCH FROM (
+                        TO_TIMESTAMP(%s, 'YYYYMMDD_HH24MISS') -
+                        TO_TIMESTAMP(batch_id, 'YYYYMMDD_HH24MISS')
+                    ))) <= 48 * 3600
+                    ORDER BY ABS(EXTRACT(EPOCH FROM (
+                        TO_TIMESTAMP(%s, 'YYYYMMDD_HH24MISS') -
+                        TO_TIMESTAMP(batch_id, 'YYYYMMDD_HH24MISS')
+                    )))
                     LIMIT 1
-                """, (detail_batch_id,))
+                """, (detail_batch_id, detail_batch_id))
                 main_batch = self.cursor.fetchone()
                 main_batch_id = main_batch[0] if main_batch else None
 
@@ -247,10 +320,16 @@ class TVRetailPriceBackfill:
                 self.cursor.execute("""
                     SELECT batch_id
                     FROM bby_tv_bsr_crawl
-                    WHERE batch_id < %s
-                    ORDER BY batch_id DESC
+                    WHERE ABS(EXTRACT(EPOCH FROM (
+                        TO_TIMESTAMP(%s, 'YYYYMMDD_HH24MISS') -
+                        TO_TIMESTAMP(batch_id, 'YYYYMMDD_HH24MISS')
+                    ))) <= 48 * 3600
+                    ORDER BY ABS(EXTRACT(EPOCH FROM (
+                        TO_TIMESTAMP(%s, 'YYYYMMDD_HH24MISS') -
+                        TO_TIMESTAMP(batch_id, 'YYYYMMDD_HH24MISS')
+                    )))
                     LIMIT 1
-                """, (detail_batch_id,))
+                """, (detail_batch_id, detail_batch_id))
                 bsr_batch = self.cursor.fetchone()
                 bsr_batch_id = bsr_batch[0] if bsr_batch else None
 
@@ -258,10 +337,16 @@ class TVRetailPriceBackfill:
                 self.cursor.execute("""
                     SELECT batch_id
                     FROM bby_tv_promotion_crawl
-                    WHERE batch_id < %s
-                    ORDER BY batch_id DESC
+                    WHERE ABS(EXTRACT(EPOCH FROM (
+                        TO_TIMESTAMP(%s, 'YYYYMMDD_HH24MISS') -
+                        TO_TIMESTAMP(batch_id, 'YYYYMMDD_HH24MISS')
+                    ))) <= 48 * 3600
+                    ORDER BY ABS(EXTRACT(EPOCH FROM (
+                        TO_TIMESTAMP(%s, 'YYYYMMDD_HH24MISS') -
+                        TO_TIMESTAMP(batch_id, 'YYYYMMDD_HH24MISS')
+                    )))
                     LIMIT 1
-                """, (detail_batch_id,))
+                """, (detail_batch_id, detail_batch_id))
                 promo_batch = self.cursor.fetchone()
                 promo_batch_id = promo_batch[0] if promo_batch else None
 
@@ -314,7 +399,31 @@ class TVRetailPriceBackfill:
                         if not original_price:
                             original_price = promo_result[1]
 
-                # Step 4: Update tv_retail_com
+                # Step 4: Time-based URL matching (24-48 hours) if no batch_id
+                if not final_price or not original_price:
+                    # Try Main
+                    self.cursor.execute("""
+                        SELECT final_sku_price, original_sku_price
+                        FROM bestbuy_tv_main_crawl
+                        WHERE product_url = %s
+                          AND ABS(EXTRACT(EPOCH FROM (
+                              TO_TIMESTAMP(SUBSTRING(%s, 1, 14), 'YYYYMMDDHH24MISS') -
+                              TO_TIMESTAMP(SUBSTRING(crawl_strdatetime, 1, 14), 'YYYYMMDDHH24MISS')
+                          ))) BETWEEN 24 * 3600 AND 48 * 3600
+                        ORDER BY ABS(EXTRACT(EPOCH FROM (
+                              TO_TIMESTAMP(SUBSTRING(%s, 1, 14), 'YYYYMMDDHH24MISS') -
+                              TO_TIMESTAMP(SUBSTRING(crawl_strdatetime, 1, 14), 'YYYYMMDDHH24MISS')
+                          )))
+                        LIMIT 1
+                    """, (product_url, crawl_strdatetime, crawl_strdatetime))
+                    time_result = self.cursor.fetchone()
+                    if time_result:
+                        if not final_price:
+                            final_price = time_result[0]
+                        if not original_price:
+                            original_price = time_result[1]
+
+                # Step 5: Update tv_retail_com
                 if final_price or original_price:
                     self.cursor.execute("""
                         UPDATE tv_retail_com
@@ -363,27 +472,39 @@ class TVRetailPriceBackfill:
                     print(f"[Progress] {idx}/{len(null_rows)} rows processed...")
 
                 # Step 1: walmart_tv_detail_crawled does NOT have batch_id
-                # Find most recent batch_ids before crawl_strdatetime directly from main/bsr tables
+                # Find closest batch within 48 hours (before or after) directly from main/bsr tables
 
-                # Find Main batch_id
+                # Find Main batch_id (closest within 48h)
                 self.cursor.execute("""
                     SELECT batch_id
                     FROM wmart_tv_main_crawl
-                    WHERE crawl_strdatetime < %s
-                    ORDER BY crawl_strdatetime DESC
+                    WHERE ABS(EXTRACT(EPOCH FROM (
+                        TO_TIMESTAMP(SUBSTRING(%s, 1, 14), 'YYYYMMDDHH24MISS') -
+                        TO_TIMESTAMP(SUBSTRING(crawl_strdatetime, 1, 14), 'YYYYMMDDHH24MISS')
+                    ))) <= 48 * 3600
+                    ORDER BY ABS(EXTRACT(EPOCH FROM (
+                        TO_TIMESTAMP(SUBSTRING(%s, 1, 14), 'YYYYMMDDHH24MISS') -
+                        TO_TIMESTAMP(SUBSTRING(crawl_strdatetime, 1, 14), 'YYYYMMDDHH24MISS')
+                    )))
                     LIMIT 1
-                """, (crawl_strdatetime,))
+                """, (crawl_strdatetime, crawl_strdatetime))
                 main_batch = self.cursor.fetchone()
                 main_batch_id = main_batch[0] if main_batch else None
 
-                # Find BSR batch_id
+                # Find BSR batch_id (closest within 48h)
                 self.cursor.execute("""
                     SELECT batch_id
                     FROM wmart_tv_bsr_crawl
-                    WHERE crawl_strdatetime < %s
-                    ORDER BY crawl_strdatetime DESC
+                    WHERE ABS(EXTRACT(EPOCH FROM (
+                        TO_TIMESTAMP(SUBSTRING(%s, 1, 14), 'YYYYMMDDHH24MISS') -
+                        TO_TIMESTAMP(SUBSTRING(crawl_strdatetime, 1, 14), 'YYYYMMDDHH24MISS')
+                    ))) <= 48 * 3600
+                    ORDER BY ABS(EXTRACT(EPOCH FROM (
+                        TO_TIMESTAMP(SUBSTRING(%s, 1, 14), 'YYYYMMDDHH24MISS') -
+                        TO_TIMESTAMP(SUBSTRING(crawl_strdatetime, 1, 14), 'YYYYMMDDHH24MISS')
+                    )))
                     LIMIT 1
-                """, (crawl_strdatetime,))
+                """, (crawl_strdatetime, crawl_strdatetime))
                 bsr_batch = self.cursor.fetchone()
                 bsr_batch_id = bsr_batch[0] if bsr_batch else None
 
@@ -420,7 +541,31 @@ class TVRetailPriceBackfill:
                         if not original_price:
                             original_price = bsr_result[1]
 
-                # Step 4: Update tv_retail_com
+                # Step 4: Time-based URL matching (24-48 hours)
+                if not final_price or not original_price:
+                    # Try Main
+                    self.cursor.execute("""
+                        SELECT final_sku_price, original_sku_price
+                        FROM wmart_tv_main_crawl
+                        WHERE product_url = %s
+                          AND ABS(EXTRACT(EPOCH FROM (
+                              TO_TIMESTAMP(SUBSTRING(%s, 1, 14), 'YYYYMMDDHH24MISS') -
+                              TO_TIMESTAMP(SUBSTRING(crawl_strdatetime, 1, 14), 'YYYYMMDDHH24MISS')
+                          ))) BETWEEN 24 * 3600 AND 48 * 3600
+                        ORDER BY ABS(EXTRACT(EPOCH FROM (
+                              TO_TIMESTAMP(SUBSTRING(%s, 1, 14), 'YYYYMMDDHH24MISS') -
+                              TO_TIMESTAMP(SUBSTRING(crawl_strdatetime, 1, 14), 'YYYYMMDDHH24MISS')
+                          )))
+                        LIMIT 1
+                    """, (product_url, crawl_strdatetime, crawl_strdatetime))
+                    time_result = self.cursor.fetchone()
+                    if time_result:
+                        if not final_price:
+                            final_price = time_result[0]
+                        if not original_price:
+                            original_price = time_result[1]
+
+                # Step 5: Update tv_retail_com
                 if final_price or original_price:
                     self.cursor.execute("""
                         UPDATE tv_retail_com

@@ -72,25 +72,10 @@ def show_table_columns():
             print(f"\n{'='*100}")
             print(f"TABLE: {table_name.upper()} (Rows: {row_count:,})")
             print(f"{'='*100}")
-            print(f"{'#':<4} {'Column Name':<35} {'Type':<25} {'Nullable':<10} {'Default':<15}")
-            print("-"*100)
 
-            for idx, col in enumerate(columns, 1):
-                col_name, data_type, max_length, is_nullable, default = col
-
-                # Format data type
-                if max_length:
-                    type_str = f"{data_type}({max_length})"
-                else:
-                    type_str = data_type
-
-                # Format default
-                default_str = str(default)[:15] if default else '-'
-
-                # Format nullable
-                nullable_str = 'YES' if is_nullable == 'YES' else 'NO'
-
-                print(f"{idx:<4} {col_name:<35} {type_str:<25} {nullable_str:<10} {default_str:<15}")
+            # Just show column names in a compact format
+            col_names = [col[0] for col in columns]
+            print(", ".join(col_names))
 
         cursor.close()
         conn.close()

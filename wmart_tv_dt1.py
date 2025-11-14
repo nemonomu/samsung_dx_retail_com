@@ -1302,9 +1302,9 @@ class WalmartDetailCrawler:
             # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
 
-            # Calculate crawl_strdatetime (format: 202511051100559260)
+            # Calculate crawl_datetime (format: 2025-11-05 11:00:55)
             now = datetime.now()
-            crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + now.strftime('%f')[:4]
+            crawl_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
 
             # Insert to Walmart_tv_detail_crawled
             cursor.execute("""
@@ -1335,7 +1335,7 @@ class WalmartDetailCrawler:
                 data['Retailer_SKU_Name_similar'],
                 data['Detailed_Review_Content'],
                 calendar_week,
-                crawl_strdatetime,  # New field
+                crawl_datetime,  # New field
                 # 11 additional columns
                 data['final_sku_price'],
                 data['original_sku_price'],
@@ -1385,7 +1385,7 @@ class WalmartDetailCrawler:
                  main_rank, bsr_rank, rank_1, rank_2, promotion_rank, trend_rank,
                  number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, retailer_sku_name_similar,
                  estimated_annual_electricity_use, promotion_type,
-                 calendar_week, crawl_strdatetime)
+                 calendar_week, crawl_datetime)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 data['item'],
@@ -1427,7 +1427,7 @@ class WalmartDetailCrawler:
                 None,  # estimated_annual_electricity_use (Walmart doesn't have this)
                 None,  # promotion_type (Walmart doesn't have this)
                 calendar_week,
-                crawl_strdatetime
+                crawl_datetime
             ))
 
             # Commit transaction

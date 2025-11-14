@@ -1128,9 +1128,9 @@ class BestBuyDetailCrawler:
             # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
 
-            # Calculate crawl_strdatetime (format: 202511040300276863)
+            # Calculate crawl_datetime (format: 2025-11-04 03:00:27)
             now = datetime.now()
-            crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + now.strftime('%f')[:4]
+            crawl_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
 
             # 데이터 삽입
             insert_query = """
@@ -1159,7 +1159,7 @@ class BestBuyDetailCrawler:
                 detailed_reviews,
                 recommendation_intent,
                 product_url,
-                crawl_strdatetime,
+                crawl_datetime,
                 calendar_week,
                 final_sku_price,
                 savings,
@@ -1209,7 +1209,7 @@ class BestBuyDetailCrawler:
                  main_rank, bsr_rank, rank_1, rank_2, promotion_rank, trend_rank,
                  number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, retailer_sku_name_similar,
                  estimated_annual_electricity_use, promotion_type,
-                 calendar_week, crawl_strdatetime)
+                 calendar_week, crawl_datetime)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 item,
@@ -1251,7 +1251,7 @@ class BestBuyDetailCrawler:
                 electricity_use,
                 promotion_type,
                 calendar_week,
-                crawl_strdatetime
+                crawl_datetime
             ))
 
             cursor.close()

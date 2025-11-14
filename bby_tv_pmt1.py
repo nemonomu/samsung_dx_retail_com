@@ -157,7 +157,7 @@ class BestBuyPromotionCrawler:
 
     def extract_promotion_sections(self, tree):
         """
-        페이지에서 모든 프로모션 섹션 찾기 (정확한 키워드 기반)
+        페이지에서 모든 프로모션 섹션 찾기 (동적 탐지 - 키워드 독립적)
 
         Returns:
             List of tuples: [(section_element, section_type, promotion_type), ...]
@@ -165,46 +165,67 @@ class BestBuyPromotionCrawler:
         sections = []
 
         try:
-            # Section 1: "Big savings for a limited time"
-            section1 = tree.xpath('//section[contains(., "Big savings")]')
-            if section1:
-                section1 = section1[0]
-                # promotion_type 추출
-                text_content = section1.text_content().strip()
-                # h2 + p 결합 텍스트 찾기
-                lines = [line.strip() for line in text_content.split('\n') if line.strip()]
-                if len(lines) >= 2:
-                    promotion_type = f"{lines[0]} {lines[1]}"
+            # 모든 section 찾기 (facet 제외)
+            all_sections = tree.xpath('//section')
+            print(f"[INFO] 총 {len(all_sections)}개 section 발견")
+
+            # 각 섹션이 프로모션 섹션인지 확인 (carousel 매핑 여부로 판단)
+            all_carousels = tree.xpath('//ul[@class="c-carousel-list"]')
+
+            for section in all_sections:
+                # facet 섹션 제외 (필터 섹션)
+                section_class = section.get('class', '')
+                if 'facet' in section_class:
+                    continue
+
+                # 이 섹션에 매핑된 carousel이 있는지 확인
+                has_carousel = False
+                for carousel in all_carousels:
+                    preceding_sections = carousel.xpath('preceding::section')
+                    if preceding_sections and preceding_sections[-1] == section:
+                        has_carousel = True
+                        break
+
+                if not has_carousel:
+                    continue
+
+                # promotion_type 동적 추출
+                promotion_type = None
+
+                # 방법 1: hero-holiday-blue-gradient 섹션 (span 태그에서 추출)
+                if 'hero-holiday-blue-gradient' in section_class:
+                    span_elem = section.xpath('.//span[contains(@class, "hero-fluid-headline-2")]')
+                    if span_elem:
+                        promotion_type = self.extract_promotion_type_text(span_elem[0])
+
+                # 방법 2: 일반 섹션 (h2 + p 또는 첫 2줄)
                 else:
-                    promotion_type = lines[0] if lines else "Big savings for a limited time"
+                    # h2 태그 먼저 시도
+                    h2_elem = section.xpath('.//h2')
+                    p_elem = section.xpath('.//p[contains(@class, "heading") or contains(@class, "subhead")]')
 
-                promotion_type = ' '.join(promotion_type.split())  # 공백 정리
-                sections.append((section1, 'section1', promotion_type))
-                print(f"[OK] Section {len(sections)}: {promotion_type[:60]}...")
+                    if h2_elem and p_elem:
+                        h2_text = h2_elem[0].text_content().strip()
+                        p_text = p_elem[0].text_content().strip()
+                        promotion_type = f"{h2_text} {p_text}"
+                    elif h2_elem:
+                        promotion_type = h2_elem[0].text_content().strip()
+                    else:
+                        # 텍스트 내용의 첫 2줄 사용
+                        text_content = section.text_content().strip()
+                        lines = [line.strip() for line in text_content.split('\n') if line.strip()]
+                        if len(lines) >= 2:
+                            promotion_type = f"{lines[0]} {lines[1]}"
+                        elif lines:
+                            promotion_type = lines[0]
 
-            # Section 2: "On-sale TVs as low as $69.99"
-            section2 = tree.xpath('//section[contains(@class, "hero-holiday-blue-gradient")][contains(., "On-sale")]')
-            if section2:
-                section2 = section2[0]
-                # span 태그에서 promotion_type 추출
-                span_elem = section2.xpath('.//span[contains(@class, "hero-fluid-headline-2")]')
-                if span_elem:
-                    promotion_type = self.extract_promotion_type_text(span_elem[0])
-                    sections.append((section2, 'section2', promotion_type))
+                if promotion_type:
+                    # 공백 정리
+                    promotion_type = ' '.join(promotion_type.split())
+                    sections.append((section, 'dynamic', promotion_type))
                     print(f"[OK] Section {len(sections)}: {promotion_type[:60]}...")
 
-            # Section 3: "Save on select gaming TVs"
-            section3 = tree.xpath('//section[contains(@class, "hero-holiday-blue-gradient")][contains(., "gaming")]')
-            if section3:
-                section3 = section3[0]
-                # span 태그에서 promotion_type 추출
-                span_elem = section3.xpath('.//span[contains(@class, "hero-fluid-headline-2")]')
-                if span_elem:
-                    promotion_type = self.extract_promotion_type_text(span_elem[0])
-                    sections.append((section3, 'section3', promotion_type))
-                    print(f"[OK] Section {len(sections)}: {promotion_type[:60]}...")
-
-            print(f"[OK] 총 {len(sections)}개 섹션 발견")
+            print(f"[OK] 총 {len(sections)}개 프로모션 섹션 발견")
             return sections
 
         except Exception as e:

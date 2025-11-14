@@ -5,7 +5,7 @@ BestBuy HTML 분석 스크립트
 from lxml import html, etree
 
 def analyze_html():
-    html_file = "C:/Users/gomguard/Documents/퀵오일/삼성전자/samsung_dx/bby_pmt_page.html"
+    html_file = "bby_pmt_page.html"  # 현재 디렉토리
 
     print(f"[INFO] HTML 파일 읽기: {html_file}")
     with open(html_file, 'r', encoding='utf-8') as f:

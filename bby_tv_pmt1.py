@@ -1,13 +1,26 @@
 """
-Best Buy TV Promotion Crawler (Modified)
+Best Buy TV Promotion Crawler (Multi-Section Dynamic Version)
 https://www.bestbuy.com/site/all-tv-home-theater-on-sale/tvs-on-sale/pcmcat1720647543741.c
 
-수정사항:
-1. 프로모션 메인 페이지에서 4개 컬럼 추가 수집: final_sku_price, original_sku_price, offer, savings
-2. offer는 숫자만 저장 (예: "+2 offers for you" -> "2")
-3. savings 검증: original_sku_price - final_sku_price와 동일해야 함
-4. 컬럼 순서 변경: page_type, retailer_sku_name, promotion_rank, final_sku_price, original_sku_price, offer, savings, promotion_type, product_url, crawl_strdatetime, calendar_week, batch_id
-5. item -> retailer_sku_name으로 변경
+핵심 기능:
+1. 다중 섹션 처리: 3개 프로모션 섹션에서 총 18개 SKU 수집 (각 섹션당 6개)
+2. 완전 동적 탐지: 키워드 독립적, 섹션 순서 변경 대응
+3. HTML 태그 처리: <br> → 공백, <sup> → 소수점 변환
+4. preceding 축 기반 매핑: 섹션과 carousel을 DOM 순서로 정확히 매핑
+
+수집 데이터:
+- page_type, retailer_sku_name, promotion_rank (섹션 내 1-6)
+- final_sku_price, original_sku_price, offer, savings
+- promotion_type (동적 추출), product_url
+- crawl_strdatetime, calendar_week, batch_id
+
+견고성:
+- facet 섹션 자동 제외
+- 개별 섹션 에러 시 계속 진행
+- 빈 promotion_type 자동 필터링
+- carousel 매핑 검증
+
+버전: v2.0 (Dynamic Multi-Section)
 """
 import time
 import random
@@ -173,57 +186,67 @@ class BestBuyPromotionCrawler:
             all_carousels = tree.xpath('//ul[@class="c-carousel-list"]')
 
             for section in all_sections:
-                # facet 섹션 제외 (필터 섹션)
-                section_class = section.get('class', '')
-                if 'facet' in section_class:
-                    continue
+                try:
+                    # facet 섹션 제외 (필터 섹션)
+                    section_class = section.get('class', '')
+                    if 'facet' in section_class:
+                        continue
 
-                # 이 섹션에 매핑된 carousel이 있는지 확인
-                has_carousel = False
-                for carousel in all_carousels:
-                    preceding_sections = carousel.xpath('preceding::section')
-                    if preceding_sections and preceding_sections[-1] == section:
-                        has_carousel = True
-                        break
+                    # 이 섹션에 매핑된 carousel이 있는지 확인
+                    has_carousel = False
+                    for carousel in all_carousels:
+                        preceding_sections = carousel.xpath('preceding::section')
+                        if preceding_sections and preceding_sections[-1] == section:
+                            has_carousel = True
+                            break
 
-                if not has_carousel:
-                    continue
+                    if not has_carousel:
+                        continue
 
-                # promotion_type 동적 추출
-                promotion_type = None
+                    # promotion_type 동적 추출
+                    promotion_type = None
 
-                # 방법 1: hero-holiday-blue-gradient 섹션 (span 태그에서 추출)
-                if 'hero-holiday-blue-gradient' in section_class:
-                    span_elem = section.xpath('.//span[contains(@class, "hero-fluid-headline-2")]')
-                    if span_elem:
-                        promotion_type = self.extract_promotion_type_text(span_elem[0])
+                    # 방법 1: hero-holiday-blue-gradient 섹션 (span 태그에서 추출)
+                    if 'hero-holiday-blue-gradient' in section_class:
+                        span_elem = section.xpath('.//span[contains(@class, "hero-fluid-headline-2")]')
+                        if span_elem:
+                            promotion_type = self.extract_promotion_type_text(span_elem[0])
 
-                # 방법 2: 일반 섹션 (h2 + p 또는 첫 2줄)
-                else:
-                    # h2 태그 먼저 시도
-                    h2_elem = section.xpath('.//h2')
-                    p_elem = section.xpath('.//p[contains(@class, "heading") or contains(@class, "subhead")]')
-
-                    if h2_elem and p_elem:
-                        h2_text = h2_elem[0].text_content().strip()
-                        p_text = p_elem[0].text_content().strip()
-                        promotion_type = f"{h2_text} {p_text}"
-                    elif h2_elem:
-                        promotion_type = h2_elem[0].text_content().strip()
+                    # 방법 2: 일반 섹션 (h2 + p 또는 첫 2줄)
                     else:
-                        # 텍스트 내용의 첫 2줄 사용
-                        text_content = section.text_content().strip()
-                        lines = [line.strip() for line in text_content.split('\n') if line.strip()]
-                        if len(lines) >= 2:
-                            promotion_type = f"{lines[0]} {lines[1]}"
-                        elif lines:
-                            promotion_type = lines[0]
+                        # h2 태그 먼저 시도
+                        h2_elem = section.xpath('.//h2')
+                        p_elem = section.xpath('.//p[contains(@class, "heading") or contains(@class, "subhead")]')
 
-                if promotion_type:
-                    # 공백 정리
-                    promotion_type = ' '.join(promotion_type.split())
-                    sections.append((section, 'dynamic', promotion_type))
-                    print(f"[OK] Section {len(sections)}: {promotion_type[:60]}...")
+                        if h2_elem and p_elem:
+                            h2_text = h2_elem[0].text_content().strip()
+                            p_text = p_elem[0].text_content().strip()
+                            # 빈 문자열 체크
+                            if h2_text or p_text:
+                                promotion_type = f"{h2_text} {p_text}".strip()
+                        elif h2_elem:
+                            promotion_type = h2_elem[0].text_content().strip()
+                        else:
+                            # 텍스트 내용의 첫 2줄 사용
+                            text_content = section.text_content().strip()
+                            lines = [line.strip() for line in text_content.split('\n') if line.strip()]
+                            if len(lines) >= 2:
+                                promotion_type = f"{lines[0]} {lines[1]}"
+                            elif lines:
+                                promotion_type = lines[0]
+
+                    # promotion_type 최종 검증 및 정리
+                    if promotion_type:
+                        # 공백 정리
+                        promotion_type = ' '.join(promotion_type.split())
+                        # 빈 문자열이 아닌지 재확인
+                        if promotion_type:
+                            sections.append((section, 'dynamic', promotion_type))
+                            print(f"[OK] Section {len(sections)}: {promotion_type[:60]}...")
+
+                except Exception as e:
+                    print(f"[WARNING] 섹션 처리 중 오류 (건너뜀): {e}")
+                    continue
 
             print(f"[OK] 총 {len(sections)}개 프로모션 섹션 발견")
             return sections

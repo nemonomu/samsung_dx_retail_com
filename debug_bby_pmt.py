@@ -20,7 +20,7 @@ def save_page_html():
 
         # HTML 저장
         html_content = driver.page_source
-        output_file = "C:/Users/gomguard/samsung_ds/bby_pmt_page.html"
+        output_file = "bby_pmt_page.html"  # 현재 디렉토리에 저장
 
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write(html_content)

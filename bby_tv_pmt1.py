@@ -157,80 +157,52 @@ class BestBuyPromotionCrawler:
 
     def extract_promotion_sections(self, tree):
         """
-        페이지에서 모든 프로모션 섹션 찾기
+        페이지에서 모든 프로모션 섹션 찾기 (정확한 키워드 기반)
 
         Returns:
             List of tuples: [(section_element, section_type, promotion_type), ...]
-            section_type: 'h2_p' 또는 'hero_gradient'
         """
         sections = []
 
         try:
-            # Section 1: h2 + p 방식 (기존 첫 번째 섹션)
-            h2_xpaths = [
-                '//h2[contains(@class, "headline80")]',
-                '//h2[@class="headline80 font-weight-bold font-condensed"]'
-            ]
+            # Section 1: "Big savings for a limited time"
+            section1 = tree.xpath('//section[contains(., "Big savings")]')
+            if section1:
+                section1 = section1[0]
+                # promotion_type 추출
+                text_content = section1.text_content().strip()
+                # h2 + p 결합 텍스트 찾기
+                lines = [line.strip() for line in text_content.split('\n') if line.strip()]
+                if len(lines) >= 2:
+                    promotion_type = f"{lines[0]} {lines[1]}"
+                else:
+                    promotion_type = lines[0] if lines else "Big savings for a limited time"
 
-            for xpath in h2_xpaths:
-                h2_elems = tree.xpath(xpath)
-                if h2_elems:
-                    # 첫 번째 h2만 사용 (기존 첫 번째 섹션)
-                    h2_elem = h2_elems[0]
+                promotion_type = ' '.join(promotion_type.split())  # 공백 정리
+                sections.append((section1, 'section1', promotion_type))
+                print(f"[OK] Section {len(sections)}: {promotion_type[:60]}...")
 
-                    # h2의 부모 섹션 또는 컨테이너 찾기
-                    section_elem = h2_elem.getparent()
-                    while section_elem is not None and section_elem.tag not in ['section', 'div']:
-                        section_elem = section_elem.getparent()
+            # Section 2: "On-sale TVs as low as $69.99"
+            section2 = tree.xpath('//section[contains(@class, "hero-holiday-blue-gradient")][contains(., "On-sale")]')
+            if section2:
+                section2 = section2[0]
+                # span 태그에서 promotion_type 추출
+                span_elem = section2.xpath('.//span[contains(@class, "hero-fluid-headline-2")]')
+                if span_elem:
+                    promotion_type = self.extract_promotion_type_text(span_elem[0])
+                    sections.append((section2, 'section2', promotion_type))
+                    print(f"[OK] Section {len(sections)}: {promotion_type[:60]}...")
 
-                    if section_elem is not None:
-                        # promotion_type 추출 (h2 + p)
-                        h2_text = h2_elem.text_content().strip()
-                        h2_text = ' '.join(h2_text.split())
-
-                        # p 텍스트 찾기 (같은 섹션 내에서)
-                        p_xpaths = [
-                            './/p[contains(@class, "heading-4") and contains(@class, "font-weight-light")]',
-                            './/p[@class="heading-4 font-weight-light v-text-pure-white mb-200"]'
-                        ]
-                        p_text = None
-                        for p_xpath in p_xpaths:
-                            p_elem = section_elem.xpath(p_xpath)
-                            if p_elem:
-                                p_text = p_elem[0].text_content().strip()
-                                break
-
-                        promotion_type = f"{h2_text} {p_text}" if p_text else h2_text
-                        sections.append((section_elem, 'h2_p', promotion_type))
-                        print(f"[OK] Section {len(sections)}: {promotion_type[:60]}...")
-                    break  # 첫 번째 h2 xpath에서 찾으면 종료
-
-            # Section 2, 3: hero-holiday-blue-gradient 방식
-            hero_sections = tree.xpath('//section[@class="hero-holiday-blue-gradient"]')
-
-            for hero_section in hero_sections:
-                try:
-                    # promotion_type 추출 (span class="hero-fluid-headline-2")
-                    span_xpaths = [
-                        './/span[@class="hero-fluid-headline-2 v-fw-medium v-text-holiday-teal"]',
-                        './/span[contains(@class, "hero-fluid-headline-2")]'
-                    ]
-
-                    promotion_type = None
-                    for span_xpath in span_xpaths:
-                        span_elem = hero_section.xpath(span_xpath)
-                        if span_elem:
-                            # <br>, <sup> 태그 처리
-                            promotion_type = self.extract_promotion_type_text(span_elem[0])
-                            break
-
-                    if promotion_type:
-                        sections.append((hero_section, 'hero_gradient', promotion_type))
-                        print(f"[OK] Section {len(sections)}: {promotion_type[:60]}...")
-
-                except Exception as e:
-                    print(f"[WARNING] hero-gradient 섹션 추출 실패: {e}")
-                    continue
+            # Section 3: "Save on select gaming TVs"
+            section3 = tree.xpath('//section[contains(@class, "hero-holiday-blue-gradient")][contains(., "gaming")]')
+            if section3:
+                section3 = section3[0]
+                # span 태그에서 promotion_type 추출
+                span_elem = section3.xpath('.//span[contains(@class, "hero-fluid-headline-2")]')
+                if span_elem:
+                    promotion_type = self.extract_promotion_type_text(span_elem[0])
+                    sections.append((section3, 'section3', promotion_type))
+                    print(f"[OK] Section {len(sections)}: {promotion_type[:60]}...")
 
             print(f"[OK] 총 {len(sections)}개 섹션 발견")
             return sections
@@ -299,46 +271,34 @@ class BestBuyPromotionCrawler:
                 try:
                     print(f"\n[INFO] Section {section_idx} 처리 중: {promotion_type[:60]}...")
 
-                    # 섹션 타입에 따라 SKU 컨테이너 찾기
+                    # 이 섹션에 속하는 모든 carousel 찾기 (preceding 축 기반)
+                    # 섹션 이후의 모든 c-carousel-list를 찾아서
+                    # 각 carousel의 preceding::section[-1]이 현재 섹션인지 확인
+
+                    all_carousels = tree.xpath('//ul[@class="c-carousel-list"]')
+                    section_carousels = []
+
+                    for carousel in all_carousels:
+                        # 이 carousel 앞의 가장 가까운 section 찾기
+                        preceding_sections = carousel.xpath('preceding::section')
+                        if preceding_sections:
+                            nearest_section = preceding_sections[-1]  # 가장 가까운 section
+                            # 현재 섹션과 동일한지 확인 (메모리 주소 비교)
+                            if nearest_section == section_elem:
+                                section_carousels.append(carousel)
+
+                    print(f"[OK] Section {section_idx}에 매핑된 carousel: {len(section_carousels)}개")
+
+                    # 모든 carousel에서 li 아이템 수집 (최대 6개)
                     product_items = []
+                    for carousel in section_carousels:
+                        items = carousel.xpath('.//li[@class="item c-carousel-item "]')
+                        product_items.extend(items)
+                        if len(product_items) >= 6:
+                            break
 
-                    if section_type == 'h2_p':
-                        # 기존 방식: ul class="c-carousel-list"
-                        product_items = section_elem.xpath('.//ul[@class="c-carousel-list"]//li[@class="item c-carousel-item "]')[:6]
-                        if not product_items:
-                            # 전역 검색 시도
-                            product_items = tree.xpath('//ul[@class="c-carousel-list"]//li[@class="item c-carousel-item "]')[:6]
-
-                    elif section_type == 'hero_gradient':
-                        # hero-gradient 방식: div class="pl-flex-carousel-container"
-                        # 여러 XPath 시도
-                        container_xpaths = [
-                            './/div[@class="pl-flex-carousel-container"]',
-                            './/div[contains(@class, "pl-flex-carousel-container")]',
-                            './/div[@id="deals-flex-carousel"]/..',
-                        ]
-
-                        container = None
-                        for container_xpath in container_xpaths:
-                            containers = section_elem.xpath(container_xpath)
-                            if containers:
-                                container = containers[0]
-                                break
-
-                        if container:
-                            # 컨테이너 내의 제품 카드 찾기
-                            item_xpaths = [
-                                './/li[@class="item c-carousel-item "]',
-                                './/div[contains(@class, "product-card")]',
-                                './/a[@data-testid="hero-experience-deal-card-test-id"]/..'
-                            ]
-
-                            for item_xpath in item_xpaths:
-                                product_items = container.xpath(item_xpath)[:6]
-                                if product_items:
-                                    break
-
-                    print(f"[OK] Section {section_idx}에서 {len(product_items)}개 제품 발견")
+                    product_items = product_items[:6]  # 최대 6개로 제한
+                    print(f"[OK] Section {section_idx}에서 총 {len(product_items)}개 제품 수집")
 
                     # 각 제품 처리 (promotion_rank는 섹션 내에서 1-6)
                     for idx, item in enumerate(product_items[:6], 1):

@@ -152,9 +152,9 @@ class BestBuyDetailCrawler:
             # 1. bestbuy_tv_main_crawl에서 해당 batch의 URLs와 데이터 가져오기
             if main_batch_id:
                 cursor.execute("""
-                    SELECT DISTINCT product_url, final_sku_price, savings, original_sku_price, offer,
+                    SELECT DISTINCT product_url, offer,
                            pick_up_availability, shipping_availability, delivery_availability,
-                           sku_status, star_rating, main_rank
+                           sku_status, main_rank
                     FROM bby_tv_main1
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
@@ -167,16 +167,16 @@ class BestBuyDetailCrawler:
                         url_data_map[url] = {
                             'page_type': 'main',
                             'product_url': url,
-                            'final_sku_price': row[1],
-                            'savings': row[2],
-                            'original_sku_price': row[3],
-                            'offer': row[4],
-                            'pick_up_availability': row[5],
-                            'shipping_availability': row[6],
-                            'delivery_availability': row[7],
-                            'sku_status': row[8],
-                            'star_rating': row[9],
-                            'main_rank': row[10],
+                            'final_sku_price': None,
+                            'savings': None,
+                            'original_sku_price': None,
+                            'offer': row[1],
+                            'pick_up_availability': row[2],
+                            'shipping_availability': row[3],
+                            'delivery_availability': row[4],
+                            'sku_status': row[5],
+                            'star_rating': None,
+                            'main_rank': row[6],
                             'bsr_rank': None,
                             'trend_rank': None,
                             'promotion_rank': None,
@@ -187,9 +187,9 @@ class BestBuyDetailCrawler:
             # 2. bby_tv_bsr_crawl에서 해당 batch의 URLs와 데이터 가져오기
             if bsr_batch_id:
                 cursor.execute("""
-                    SELECT DISTINCT product_url, final_sku_price, savings, original_sku_price, offer,
+                    SELECT DISTINCT product_url, offer,
                            pick_up_availability, shipping_availability, delivery_availability,
-                           sku_status, star_rating, bsr_rank
+                           sku_status, bsr_rank
                     FROM bby_tv_bsr1
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
@@ -200,23 +200,23 @@ class BestBuyDetailCrawler:
                     url = row[0]
                     if url in url_data_map:
                         # URL already exists - just add bsr_rank
-                        url_data_map[url]['bsr_rank'] = row[10]
+                        url_data_map[url]['bsr_rank'] = row[6]
                     else:
                         # New URL from bsr
                         url_data_map[url] = {
                             'page_type': 'bsr',
                             'product_url': url,
-                            'final_sku_price': row[1],
-                            'savings': row[2],
-                            'original_sku_price': row[3],
-                            'offer': row[4],
-                            'pick_up_availability': row[5],
-                            'shipping_availability': row[6],
-                            'delivery_availability': row[7],
-                            'sku_status': row[8],
-                            'star_rating': row[9],
+                            'final_sku_price': None,
+                            'savings': None,
+                            'original_sku_price': None,
+                            'offer': row[1],
+                            'pick_up_availability': row[2],
+                            'shipping_availability': row[3],
+                            'delivery_availability': row[4],
+                            'sku_status': row[5],
+                            'star_rating': None,
                             'main_rank': None,
-                            'bsr_rank': row[10],
+                            'bsr_rank': row[6],
                             'trend_rank': None,
                             'promotion_rank': None,
                             'promotion_type': None

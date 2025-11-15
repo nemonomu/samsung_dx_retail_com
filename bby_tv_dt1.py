@@ -1445,6 +1445,43 @@ class BestBuyDetailCrawler:
         try:
             cursor = self.db_conn.cursor()
 
+            # Create table if not exists (copy structure from bby_tv_detail_crawled)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS bby_tv_crawl (
+                    id SERIAL PRIMARY KEY,
+                    account_name VARCHAR(50),
+                    batch_id VARCHAR(50),
+                    page_type VARCHAR(50),
+                    "order" INTEGER,
+                    retailer_sku_name TEXT,
+                    item VARCHAR(50),
+                    Estimated_Annual_Electricity_Use VARCHAR(50),
+                    screen_size VARCHAR(50),
+                    count_of_reviews VARCHAR(50),
+                    Count_of_Star_Ratings VARCHAR(50),
+                    Top_Mentions TEXT,
+                    Detailed_Review_Content TEXT,
+                    Recommendation_Intent TEXT,
+                    product_url TEXT,
+                    crawl_datetime VARCHAR(50),
+                    calendar_week VARCHAR(10),
+                    final_sku_price VARCHAR(50),
+                    savings VARCHAR(50),
+                    original_sku_price VARCHAR(50),
+                    offer VARCHAR(50),
+                    pick_up_availability TEXT,
+                    shipping_availability TEXT,
+                    delivery_availability TEXT,
+                    sku_status VARCHAR(50),
+                    star_rating VARCHAR(50),
+                    promotion_type TEXT,
+                    promotion_rank INTEGER,
+                    bsr_rank INTEGER,
+                    main_rank INTEGER,
+                    trend_rank INTEGER
+                )
+            """)
+
             # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
 

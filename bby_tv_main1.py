@@ -368,18 +368,32 @@ class BestBuyTVCrawler:
             if not self.connect_db():
                 return
 
-            # Add batch_id column if not exists
+            # Create table if not exists (copy structure from bestbuy_tv_main_crawl)
             try:
                 cursor = self.db_conn.cursor()
                 cursor.execute("""
-                    ALTER TABLE bby_tv_main1
-                    ADD COLUMN IF NOT EXISTS batch_id VARCHAR(50)
+                    CREATE TABLE IF NOT EXISTS bby_tv_main1 (
+                        id SERIAL PRIMARY KEY,
+                        account_name VARCHAR(50),
+                        batch_id VARCHAR(50),
+                        page_type VARCHAR(50),
+                        main_rank INTEGER,
+                        retailer_sku_name TEXT,
+                        Offer VARCHAR(50),
+                        Pick_Up_Availability TEXT,
+                        Shipping_Availability TEXT,
+                        Delivery_Availability TEXT,
+                        SKU_Status VARCHAR(50),
+                        Product_url TEXT,
+                        crawl_strdatetime VARCHAR(50),
+                        calendar_week VARCHAR(10)
+                    )
                 """)
                 self.db_conn.commit()
                 cursor.close()
-                print("[OK] Table schema updated (batch_id column added if needed)")
+                print("[OK] Table created/verified (bby_tv_main1)")
             except Exception as e:
-                print(f"[WARNING] Could not add batch_id column: {e}")
+                print(f"[WARNING] Could not create table: {e}")
 
             # Load page URLs
             page_urls = self.load_page_urls()

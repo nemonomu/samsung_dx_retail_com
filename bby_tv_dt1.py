@@ -28,7 +28,13 @@ v1 추가 수정사항 (2025-11-15):
    - 2단계 추출: 1) 가격 컨테이너 찾기 (/html/body/div[5]/div[4]/div[1]) 2) 컨테이너 내부에서만 가격 추출
    - data-testid 기반 XPath 사용 (price-block-customer-price, price-block-total-savings-text 등)
    - 다른 요소와의 혼동 방지 (컨테이너 내부만 검색)
-   - savings는 "Save $60" → "$60" 형식으로 정규식 파싱
+   - savings는 "Save $1,200" → "$1,200" 형식으로 정규식 파싱 (콤마 처리 포함)
+8. star_rating 및 count_of_reviews 직접 수집으로 변경 (컨테이너 기반):
+   - star_rating: 소스 테이블 → 메인 페이지에서 직접 크롤링 (예: "4.7")
+   - count_of_reviews: 리뷰 페이지 → 메인 페이지에서 직접 크롤링 (예: "(79 reviews)" → "79")
+   - extract_star_rating(), extract_count_of_reviews_from_detail() 메서드 추가
+   - 동일한 가격 컨테이너 사용 (/html/body/div[5]/div[4]/div[1])
+   - 콤마 처리 포함 (예: "(1,234 reviews)" → "1234")
 """
 import time
 import random
@@ -642,6 +648,104 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Savings 추출 실패: {e}")
             return None
 
+    def extract_star_rating(self, tree):
+        """Star Rating 추출 (평점 점수) - 컨테이너 기반"""
+        try:
+            # 1단계: 가격 컨테이너 찾기
+            container_xpaths = [
+                # 절대 경로
+                '/html/body/div[5]/div[4]/div[1]',
+                # class 기반
+                '//div[@class="order-2 t3V0AOwowrTfUzPn "]',
+                # 컨테이너 구조 기반
+                '//div[contains(@class, "order-2")]'
+            ]
+
+            price_container = None
+            for xpath in container_xpaths:
+                containers = tree.xpath(xpath)
+                if containers:
+                    price_container = containers[0]
+                    break
+
+            if price_container is None or len(price_container) == 0:
+                # 컨테이너 없으면 None 반환 (리뷰가 없는 상품일 수 있음)
+                return None
+
+            # 2단계: 컨테이너 내부에서만 평점 추출
+            rating_xpaths = [
+                # 절대 경로 기반 (컨테이너 내부)
+                './/div/div[3]/a/div/span[1]',
+                # class 기반 (가장 안정적)
+                './/span[@class="font-weight-medium  font-weight-bold order-1"]',
+                './/span[contains(@class, "font-weight-bold") and contains(@class, "order-1")]',
+                # aria-hidden 속성 기반
+                './/span[@aria-hidden="true"][contains(@class, "order-1")]'
+            ]
+
+            for xpath in rating_xpaths:
+                elem = price_container.xpath(xpath)
+                if elem:
+                    rating = elem[0].text_content().strip()
+                    # 평점 형식 검증 (숫자.숫자 형식)
+                    if rating and re.match(r'^\d+\.\d+$', rating):
+                        return rating  # "4.7" 형식 반환
+            return None  # 리뷰가 없으면 None
+        except Exception as e:
+            print(f"  [ERROR] Star_Rating 추출 실패: {e}")
+            return None
+
+    def extract_count_of_reviews_from_detail(self, tree):
+        """Count of Reviews 추출 (메인 상세 페이지에서) - 컨테이너 기반"""
+        try:
+            # 1단계: 가격 컨테이너 찾기
+            container_xpaths = [
+                # 절대 경로
+                '/html/body/div[5]/div[4]/div[1]',
+                # class 기반
+                '//div[@class="order-2 t3V0AOwowrTfUzPn "]',
+                # 컨테이너 구조 기반
+                '//div[contains(@class, "order-2")]'
+            ]
+
+            price_container = None
+            for xpath in container_xpaths:
+                containers = tree.xpath(xpath)
+                if containers:
+                    price_container = containers[0]
+                    break
+
+            if price_container is None or len(price_container) == 0:
+                # 컨테이너 없으면 None 반환
+                return None
+
+            # 2단계: 컨테이너 내부에서만 리뷰 개수 추출
+            reviews_xpaths = [
+                # 절대 경로 기반 (컨테이너 내부)
+                './/div/div[3]/a/div/span[2]',
+                # class 기반 (가장 안정적)
+                './/span[@class="c-reviews order-2"]',
+                './/span[contains(@class, "c-reviews")]',
+                # aria-hidden 속성 기반
+                './/span[@aria-hidden="true"][contains(@class, "order-2")]'
+            ]
+
+            for xpath in reviews_xpaths:
+                elem = price_container.xpath(xpath)
+                if elem:
+                    text = elem[0].text_content().strip()  # "(79 reviews)" or "(1,234 reviews)"
+                    # 숫자 추출 (콤마 제거)
+                    # 패턴: (숫자,숫자 reviews) → 숫자만 추출
+                    match = re.search(r'\(([\d,]+)\s*reviews?\)', text, re.IGNORECASE)
+                    if match:
+                        # 콤마 제거 후 반환: "1,234" → "1234"
+                        count = match.group(1).replace(',', '')
+                        return count  # "79" or "1234" 형식 반환
+            return None  # 리뷰가 없으면 None
+        except Exception as e:
+            print(f"  [ERROR] Count_of_Reviews 추출 실패: {e}")
+            return None
+
     def close_specifications_dialog(self):
         """Specification 다이얼로그 닫기"""
         try:
@@ -1227,6 +1331,13 @@ class BestBuyDetailCrawler:
             savings = self.extract_savings(tree)
             print(f"  [✓] Savings: {savings}")
 
+            # 2-2. Star Rating 및 Reviews 정보 추출 (메인 페이지에서 직접 수집)
+            star_rating = self.extract_star_rating(tree)
+            print(f"  [✓] Star_Rating: {star_rating}")
+
+            count_of_reviews = self.extract_count_of_reviews_from_detail(tree)
+            print(f"  [✓] Count_of_Reviews: {count_of_reviews}")
+
             # 3. Compare similar products 추출
             mst_products = self.extract_compare_similar_products(product_url)
 
@@ -1262,29 +1373,24 @@ class BestBuyDetailCrawler:
 
             # 9. See All Customer Reviews 클릭 및 데이터 수집
             star_ratings = None
-            count_of_reviews = None
             top_mentions = None
             detailed_reviews = None
             recommendation_intent = None
 
             if self.click_see_all_reviews():
-                # 9-1. Count of reviews 수집 (리뷰 페이지에서)
-                count_of_reviews = self.extract_count_of_reviews()
-                print(f"  [✓] Count_of_Reviews: {count_of_reviews}")
-
-                # 9-2. Star ratings 수집 (리뷰 페이지에서)
+                # 9-1. Star ratings 수집 (리뷰 페이지에서 - 별점별 상세 개수)
                 star_ratings = self.extract_star_ratings_from_reviews_page()
                 print(f"  [✓] Star_Ratings: {star_ratings}")
 
-                # 9-3. Top mentions 수집 (리뷰 페이지에서)
+                # 9-2. Top mentions 수집 (리뷰 페이지에서)
                 top_mentions = self.extract_top_mentions_from_reviews_page()
                 print(f"  [✓] Top_Mentions: {top_mentions}")
 
-                # 9-4. Recommendation intent 수집 (리뷰 페이지에서)
+                # 9-3. Recommendation intent 수집 (리뷰 페이지에서)
                 recommendation_intent = self.extract_recommendation_intent_from_reviews_page()
                 print(f"  [✓] Recommendation_Intent: {recommendation_intent}")
 
-                # 9-5. Detailed reviews 수집
+                # 9-4. Detailed reviews 수집
                 detailed_reviews = self.extract_reviews()
                 print(f"  [✓] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
 
@@ -1312,7 +1418,7 @@ class BestBuyDetailCrawler:
                 shipping_availability=url_data['shipping_availability'],
                 delivery_availability=url_data['delivery_availability'],
                 sku_status=url_data['sku_status'],
-                star_rating_source=url_data['star_rating'],
+                star_rating_source=star_rating,  # 메인 페이지에서 크롤링한 값 사용 (CHANGED)
                 promotion_type=url_data['promotion_type'],
                 promotion_rank=url_data['promotion_rank'],
                 bsr_rank=url_data['bsr_rank'],

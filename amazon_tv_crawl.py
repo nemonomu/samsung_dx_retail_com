@@ -44,7 +44,7 @@ def run_crawler(script_name, stage_name):
     try:
         # Run the script with real-time output (no buffering)
         result = subprocess.run(
-            [sys.executable, script_name],
+            [sys.executable, '-u', script_name],  # -u: unbuffered output
             # Remove capture_output to enable real-time streaming
             stdout=None,  # Inherit parent's stdout
             stderr=None,  # Inherit parent's stderr

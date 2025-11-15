@@ -49,7 +49,7 @@ class IntegratedCrawler:
         try:
             # Run with real-time output (no buffering)
             result = subprocess.run(
-                [sys.executable, script_name],
+                [sys.executable, '-u', script_name],  # -u: unbuffered output
                 stdout=None,  # Inherit parent's stdout for real-time output
                 stderr=None,  # Inherit parent's stderr
                 text=True,

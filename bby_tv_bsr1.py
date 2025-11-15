@@ -320,7 +320,7 @@ class BestBuyBSRCrawler:
 
             # Check for duplicate product_url in the same batch
             cursor.execute("""
-                SELECT COUNT(*) FROM bby_tv_bsr_crawl
+                SELECT COUNT(*) FROM bby_tv_bsr1
                 WHERE batch_id = %s AND product_url = %s
             """, (self.batch_id, product_url))
 
@@ -339,7 +339,7 @@ class BestBuyBSRCrawler:
             crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + now.strftime('%f')[:4]
 
             cursor.execute("""
-                INSERT INTO bby_tv_bsr_crawl
+                INSERT INTO bby_tv_bsr1
                 (account_name, batch_id, page_type, bsr_rank, retailer_sku_name,
                  Offer, Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
                  SKU_Status, Product_url, crawl_strdatetime, calendar_week)
@@ -372,7 +372,7 @@ class BestBuyBSRCrawler:
             try:
                 cursor = self.db_conn.cursor()
                 cursor.execute("""
-                    ALTER TABLE bby_tv_bsr_crawl
+                    ALTER TABLE bby_tv_bsr1
                     ADD COLUMN IF NOT EXISTS batch_id VARCHAR(50)
                 """)
                 self.db_conn.commit()

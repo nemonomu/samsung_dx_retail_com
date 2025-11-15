@@ -499,7 +499,7 @@ class BestBuyPromotionCrawler:
 
             # 테이블 존재 확인 및 생성 (새로운 컬럼 순서로)
             cursor.execute("""
-                CREATE TABLE IF NOT EXISTS bby_tv_promotion_crawl (
+                CREATE TABLE IF NOT EXISTS bby_tv_pmt1 (
                     id SERIAL PRIMARY KEY,
                     account_name VARCHAR(50),
                     page_type VARCHAR(50),
@@ -526,7 +526,7 @@ class BestBuyPromotionCrawler:
 
             # 데이터 삽입
             insert_query = """
-                INSERT INTO bby_tv_promotion_crawl
+                INSERT INTO bby_tv_pmt1
                 (account_name, page_type, retailer_sku_name, promotion_rank, final_sku_price, original_sku_price, offer, savings,
                  promotion_type, product_url, crawl_strdatetime, calendar_week, batch_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)

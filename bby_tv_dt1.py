@@ -39,6 +39,7 @@ v1 추가 수정사항 (2025-11-15):
 import time
 import random
 import re
+import os
 import psycopg2
 from datetime import datetime
 import pytz
@@ -48,6 +49,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from lxml import html
+from data_validator import DataValidator
 
 # Import database configuration
 from config import DB_CONFIG
@@ -59,6 +61,10 @@ class BestBuyDetailCrawler:
         self.korea_tz = pytz.timezone('Asia/Seoul')
         self.batch_id = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
         self.order = 0
+
+        # Data validator 초기화
+        session_start_time = os.environ.get('SESSION_START_TIME', datetime.now().strftime('%Y%m%d%H%M'))
+        self.validator = DataValidator(session_start_time)
 
     def connect_db(self):
         """DB 연결"""
@@ -1393,6 +1399,18 @@ class BestBuyDetailCrawler:
                 detailed_reviews = self.extract_reviews()
                 print(f"  [✓] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
 
+            # 9-5. 데이터 검증 (문제 감지 및 로깅)
+            print(f"\n  [VALIDATION] Checking data quality...")
+            self.validator.validate_item(item, product_url, 'bby_tv_dt1')
+            self.validator.validate_screen_size(screen_size, product_url, 'bby_tv_dt1')
+            self.validator.validate_price(final_sku_price, 'final_sku_price', product_url, 'bby_tv_dt1')
+            if savings:  # savings는 없을 수도 있음
+                self.validator.validate_price(savings, 'savings', product_url, 'bby_tv_dt1')
+            if original_sku_price:  # original도 없을 수도 있음
+                self.validator.validate_price(original_sku_price, 'original_sku_price', product_url, 'bby_tv_dt1')
+            self.validator.validate_count(count_of_reviews, 'count_of_reviews', product_url, 'bby_tv_dt1')
+            self.validator.validate_star_rating(star_rating_source, product_url, 'bby_tv_dt1')
+
             # 10. Detail DB 저장
             self.save_to_db(
                 page_type=page_type,
@@ -1678,6 +1696,21 @@ class BestBuyDetailCrawler:
 
             # 빈 item 채우기
             self.fill_missing_items()
+
+            # 데이터 검증 요약 출력
+            summary = self.validator.get_summary()
+            if summary['total'] > 0:
+                print("\n" + "="*80)
+                print("DATA VALIDATION SUMMARY")
+                print("="*80)
+                print(f"Total Issues Detected: {summary['total']}")
+                for issue_type, count in sorted(summary['by_type'].items()):
+                    print(f"  {issue_type}: {count}")
+                print(f"\nLog file: C:\\samsung_dx_retail_com\\problems\\{self.validator.session_start_time}.txt")
+                print("="*80)
+                self.validator.write_summary()
+            else:
+                print("\n[OK] No data quality issues detected")
 
         except Exception as e:
             print(f"[ERROR] 크롤러 실행 오류: {e}")

@@ -62,31 +62,31 @@ class BestBuyPromotionCrawler:
             return False
 
     def setup_driver(self):
-        """Chrome 드라이버 설정"""
+        """Chrome driver setup"""
         try:
-            print("[INFO] Chrome 드라이버 설정 중...")
+            print("[INFO] Setting up Chrome driver...")
             self.driver = uc.Chrome()
             self.driver.maximize_window()
-            print("[OK] 드라이버 설정 완료")
+            print("[OK] Driver setup complete")
             return True
         except Exception as e:
-            print(f"[ERROR] 드라이버 설정 실패: {e}")
+            print(f"[ERROR] Driver setup failed: {e}")
             return False
 
     def navigate_to_page(self):
-        """프로모션 페이지 접속"""
+        """Navigate to promotion page"""
         try:
-            print(f"[INFO] Best Buy TV Promotion 페이지 접속...")
+            print(f"[INFO] Accessing Best Buy TV Promotion page...")
             self.driver.get(self.url)
             time.sleep(random.uniform(3, 5))
 
-            # 페이지 로드 대기
+            # Wait for page load
             wait = WebDriverWait(self.driver, 20)
-            print("[OK] 페이지 접속 완료")
+            print("[OK] Page loaded successfully")
             return True
 
         except Exception as e:
-            print(f"[ERROR] 페이지 접속 실패: {e}")
+            print(f"[ERROR] Page access failed: {e}")
             return False
 
     def extract_promotion_type_text(self, element):
@@ -122,8 +122,8 @@ class BestBuyPromotionCrawler:
             return text
 
         except Exception as e:
-            print(f"[WARNING] extract_promotion_type_text 오류: {e}")
-            # 오류 시 기본 text_content() 사용
+            print(f"[WARNING] extract_promotion_type_text error: {e}")
+            # Fallback to default text_content() on error
             return element.text_content().strip() if element is not None else ""
 
     def extract_promotion_type(self, tree):
@@ -163,14 +163,14 @@ class BestBuyPromotionCrawler:
                 print(f"[OK] Promotion Type: {promotion_type}")
                 return promotion_type
             elif h2_text:
-                print(f"[OK] Promotion Type: {h2_text} (p 텍스트 없음)")
+                print(f"[OK] Promotion Type: {h2_text} (no p text)")
                 return h2_text
             else:
-                print("[WARNING] Promotion Type을 찾을 수 없습니다.")
+                print("[WARNING] Promotion Type not found")
                 return None
 
         except Exception as e:
-            print(f"[ERROR] Promotion Type 추출 실패: {e}")
+            print(f"[ERROR] Promotion Type extraction failed: {e}")
             return None
 
     def extract_promotion_sections(self, tree):
@@ -183,9 +183,9 @@ class BestBuyPromotionCrawler:
         sections = []
 
         try:
-            # 모든 section 찾기 (facet 제외)
+            # Find all sections (exclude facet)
             all_sections = tree.xpath('//section')
-            print(f"[INFO] 총 {len(all_sections)}개 section 발견")
+            print(f"[INFO] Found {len(all_sections)} sections total")
 
             # 각 섹션이 프로모션 섹션인지 확인 (carousel 매핑 여부로 판단)
             all_carousels = tree.xpath('//ul[@class="c-carousel-list"]')
@@ -250,14 +250,14 @@ class BestBuyPromotionCrawler:
                             print(f"[OK] Section {len(sections)}: {promotion_type[:60]}...")
 
                 except Exception as e:
-                    print(f"[WARNING] 섹션 처리 중 오류 (건너뜀): {e}")
+                    print(f"[WARNING] Section processing error (skipped): {e}")
                     continue
 
-            print(f"[OK] 총 {len(sections)}개 프로모션 섹션 발견")
+            print(f"[OK] Found {len(sections)} promotion sections")
             return sections
 
         except Exception as e:
-            print(f"[ERROR] extract_promotion_sections 실패: {e}")
+            print(f"[ERROR] extract_promotion_sections failed: {e}")
             import traceback
             traceback.print_exc()
             return []
@@ -273,27 +273,27 @@ class BestBuyPromotionCrawler:
         return None
 
     def extract_products(self):
-        """제품 정보 추출 (3개 섹션, 최대 18개 SKU)"""
+        """Extract product information (3 sections, max 18 SKUs)"""
         try:
-            print("\n[INFO] 제품 정보 추출 시작...")
+            print("\n[INFO] Starting product extraction...")
 
             # 페이지 소스 가져오기
             page_source = self.driver.page_source
             tree = html.fromstring(page_source)
 
-            # 모든 프로모션 섹션 찾기
+            # Find all promotion sections
             sections = self.extract_promotion_sections(tree)
 
             if not sections:
-                print("[WARNING] 프로모션 섹션을 찾을 수 없습니다.")
+                print("[WARNING] No promotion sections found")
                 return []
 
             all_products = []
 
-            # 각 섹션별로 처리
+            # Process each section
             for section_idx, (section_elem, section_type, promotion_type) in enumerate(sections, 1):
                 try:
-                    print(f"\n[INFO] Section {section_idx} 처리 중: {promotion_type[:60]}...")
+                    print(f"\n[INFO] Processing Section {section_idx}: {promotion_type[:60]}...")
 
                     # 이 섹션에 속하는 모든 carousel 찾기 (preceding 축 기반)
                     # 섹션 이후의 모든 c-carousel-list를 찾아서
@@ -311,7 +311,7 @@ class BestBuyPromotionCrawler:
                             if nearest_section == section_elem:
                                 section_carousels.append(carousel)
 
-                    print(f"[OK] Section {section_idx}에 매핑된 carousel: {len(section_carousels)}개")
+                    print(f"[OK] Section {section_idx} mapped carousels: {len(section_carousels)}")
 
                     # 모든 carousel에서 li 아이템 수집 (최대 6개)
                     product_items = []
@@ -321,8 +321,8 @@ class BestBuyPromotionCrawler:
                         if len(product_items) >= 6:
                             break
 
-                    product_items = product_items[:6]  # 최대 6개로 제한
-                    print(f"[OK] Section {section_idx}에서 총 {len(product_items)}개 제품 수집")
+                    product_items = product_items[:6]  # Limit to max 6
+                    print(f"[OK] Section {section_idx} collected {len(product_items)} products")
 
                     # 각 제품 처리 (promotion_rank는 섹션 내에서 1-6)
                     for idx, item in enumerate(product_items[:6], 1):
@@ -396,30 +396,30 @@ class BestBuyPromotionCrawler:
                                 print(f"      URL: {product_url[:80]}...")
 
                         except Exception as e:
-                            print(f"  [WARNING] Section {section_idx} 제품 {idx} 추출 실패: {e}")
+                            print(f"  [WARNING] Section {section_idx} product {idx} extraction failed: {e}")
                             import traceback
                             traceback.print_exc()
                             continue
 
                 except Exception as e:
-                    print(f"[WARNING] Section {section_idx} 처리 실패: {e}")
+                    print(f"[WARNING] Section {section_idx} processing failed: {e}")
                     import traceback
                     traceback.print_exc()
                     continue
 
-            print(f"\n[OK] 총 {len(all_products)}개 제품 추출 완료 ({len(sections)}개 섹션)")
+            print(f"\n[OK] Extracted {len(all_products)} products total ({len(sections)} sections)")
             return all_products
 
         except Exception as e:
-            print(f"[ERROR] 제품 정보 추출 실패: {e}")
+            print(f"[ERROR] Product extraction failed: {e}")
             import traceback
             traceback.print_exc()
             return []
 
     def save_to_db(self, products):
-        """DB에 저장"""
+        """Save to database"""
         if not products:
-            print("[WARNING] 저장할 데이터가 없습니다.")
+            print("[WARNING] No data to save")
             return False
 
         try:
@@ -457,14 +457,14 @@ class BestBuyPromotionCrawler:
                     ))
                     success_count += 1
                 except Exception as e:
-                    print(f"[ERROR] 저장 실패 - Promotion Rank {product['promotion_rank']}: {e}")
+                    print(f"[ERROR] Save failed - Promotion Rank {product['promotion_rank']}: {e}")
 
             cursor.close()
-            print(f"[OK] DB 저장 완료: {success_count}/{len(products)}개")
+            print(f"[OK] DB save complete: {success_count}/{len(products)} products")
             return True
 
         except Exception as e:
-            print(f"[ERROR] DB 저장 실패: {e}")
+            print(f"[ERROR] DB save failed: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -495,13 +495,13 @@ class BestBuyPromotionCrawler:
             if products:
                 self.save_to_db(products)
 
-                # 결과 요약
+                # Summary
                 print("\n" + "="*80)
-                print("크롤링 완료!")
-                print(f"총 {len(products)}개 제품 수집")
+                print("Crawling complete!")
+                print(f"Total products collected: {len(products)}")
                 print("="*80)
             else:
-                print("\n[ERROR] 수집된 제품이 없습니다.")
+                print("\n[ERROR] No products collected")
 
             # 데이터 검증 요약 출력
             summary = self.validator.get_summary()
@@ -519,17 +519,17 @@ class BestBuyPromotionCrawler:
                 print("\n[OK] No data quality issues detected")
 
         except Exception as e:
-            print(f"[ERROR] 크롤러 실행 오류: {e}")
+            print(f"[ERROR] Crawler execution error: {e}")
             import traceback
             traceback.print_exc()
 
         finally:
             if self.driver:
                 self.driver.quit()
-                print("\n[INFO] 드라이버 종료")
+                print("\n[INFO] Driver closed")
             if self.db_conn:
                 self.db_conn.close()
-                print("[INFO] DB 연결 종료")
+                print("[INFO] DB connection closed")
 
 def main():
     crawler = BestBuyPromotionCrawler()

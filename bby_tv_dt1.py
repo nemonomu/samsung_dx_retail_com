@@ -1,37 +1,37 @@
 """
 Best Buy TV Detail Page Crawler (Modified v1)
-수집 테이블: bestbuy_tv_main_crawl, bby_tv_trend_crawl, bby_tv_promotion_crawl, bby_tv_bsr_crawl
-저장 테이블: bby_tv_crawl, bby_tv_mst
+collected table: bestbuy_tv_main_crawl, bby_tv_trend_crawl, bby_tv_promotion_crawl, bby_tv_bsr_crawl
+save table: bby_tv_crawl, bby_tv_mst
 
 수정사항:
-1. estimated_annual_electricity_use: 숫자만 추출 (예: "286 kilowatt hours" -> "286")
+1. estimated_annual_electricity_use: 숫자만 extraction (예: "286 kilowatt hours" -> "286")
 2. screen_size 컬럼 추가
 3. samsung_sku_name -> item으로 변경, item -> retailer_sku_name으로 변경
-4. 소스 테이블에서 14개 컬럼 추가 수집:
-   - 9개 데이터 컬럼: final_sku_price, savings, original_sku_price, offer,
+4. 소스 table에서 14items 컬럼 추가 collected:
+   - 9items data 컬럼: final_sku_price, savings, original_sku_price, offer,
      pick_up_availability, shipping_availability, delivery_availability, sku_status, star_rating
-   - 5개 rank/type 컬럼: promotion_type, promotion_rank, bsr_rank, main_rank, trend_rank
-   - 첫 번째 발견된 URL의 데이터 우선 (중복 URL은 첫 소스 데이터 사용)
-   - 소스 테이블에 없는 컬럼은 NULL 처리
+   - 5items rank/type 컬럼: promotion_type, promotion_rank, bsr_rank, main_rank, trend_rank
+   - first 번째 found된 URL의 data 우선 (중복 URL은 first 소스 data 사용)
+   - 소스 table에 없는 컬럼은 NULL 처리
 
 v1 추가 수정사항 (2025-11-15):
-5. 페이지 로딩 불확실성 해결:
+5. page 로딩 불확실성 해결:
    - page_load_strategy를 'none'에서 'eager'로 변경
-   - 페이지 로드 후 핵심 요소(제품명) 대기 로직 추가
-6. 다이얼로그 타임아웃 처리 개선:
-   - click_specifications_with_retry() 메서드 추가 (재시도 1회)
-   - 타임아웃 발생 시 2배 증가 (15초 -> 30초)
-   - 실패 원인 추적 가능
-7. 가격 정보 직접 수집으로 변경 (컨테이너 기반):
-   - final_sku_price, original_sku_price, savings를 소스 테이블에서 가져오지 않고 상세 페이지에서 직접 크롤링
+   - page load 후 핵심 element(제품명) wait 로직 추가
+6. dialog timeout 처리 items선:
+   - click_specifications_with_retry() 메서드 추가 (retry 1회)
+   - timeout 발생 시 2배 증가 (15sec -> 30sec)
+   - failed 원인 추적 가능
+7. 가격 정보 직접 collected으로 변경 (컨테이너 기반):
+   - final_sku_price, original_sku_price, savings를 소스 table에서 가져오지 않고 detail page에서 직접 crawling
    - extract_final_sku_price(), extract_original_sku_price(), extract_savings() 메서드 추가
-   - 2단계 추출: 1) 가격 컨테이너 찾기 (/html/body/div[5]/div[4]/div[1]) 2) 컨테이너 내부에서만 가격 추출
+   - 2단계 extraction: 1) 가격 컨테이너 찾기 (/html/body/div[5]/div[4]/div[1]) 2) 컨테이너 내부에서만 가격 extraction
    - data-testid 기반 XPath 사용 (price-block-customer-price, price-block-total-savings-text 등)
-   - 다른 요소와의 혼동 방지 (컨테이너 내부만 검색)
+   - 다른 element와의 혼동 방지 (컨테이너 내부만 검색)
    - savings는 "Save $1,200" → "$1,200" 형식으로 정규식 파싱 (콤마 처리 포함)
-8. star_rating 및 count_of_reviews 직접 수집으로 변경 (컨테이너 기반):
-   - star_rating: 소스 테이블 → 메인 페이지에서 직접 크롤링 (예: "4.7")
-   - count_of_reviews: 리뷰 페이지 → 메인 페이지에서 직접 크롤링 (예: "(79 reviews)" → "79")
+8. star_rating 및 count_of_reviews 직접 collected으로 변경 (컨테이너 기반):
+   - star_rating: 소스 table → 메인 page에서 직접 crawling (예: "4.7")
+   - count_of_reviews: review page → 메인 page에서 직접 crawling (예: "(79 reviews)" → "79")
    - extract_star_rating(), extract_count_of_reviews_from_detail() 메서드 추가
    - 동일한 가격 컨테이너 사용 (/html/body/div[5]/div[4]/div[1])
    - 콤마 처리 포함 (예: "(1,234 reviews)" → "1234")
@@ -62,12 +62,12 @@ class BestBuyDetailCrawler:
         self.batch_id = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
         self.order = 0
 
-        # Data validator 초기화
+        # Data validator sec기화
         session_start_time = os.environ.get('SESSION_START_TIME', datetime.now().strftime('%Y%m%d%H%M'))
         self.validator = DataValidator(session_start_time)
 
     def connect_db(self):
-        """DB 연결"""
+        """DB connection"""
         try:
             self.db_conn = psycopg2.connect(**DB_CONFIG)
             self.db_conn.autocommit = True
@@ -78,9 +78,9 @@ class BestBuyDetailCrawler:
             return False
 
     def setup_driver(self):
-        """Chrome 드라이버 설정"""
+        """Chrome driver setup"""
         try:
-            print("[INFO] Chrome 드라이버 설정 중...")
+            print("[INFO] Setting up Chrome driver...")
 
             # Chrome options with page load strategy
             options = uc.ChromeOptions()
@@ -90,14 +90,14 @@ class BestBuyDetailCrawler:
             self.driver.set_page_load_timeout(120)  # Increased to 120 seconds
             self.driver.maximize_window()
 
-            print("[OK] 드라이버 설정 완료 (page_load_strategy=eager, timeout=120s)")
+            print("[OK] Driver setup complete (page_load_strategy=eager, timeout=120s)")
             return True
         except Exception as e:
-            print(f"[ERROR] 드라이버 설정 실패: {e}")
+            print(f"[ERROR] Driver setup failed: {e}")
             return False
 
     def get_recent_urls(self):
-        """최신 batch_id의 product URLs와 추가 데이터 가져오기"""
+        """최신 batch_id의 product URLs와 추가 data 가져오기"""
         try:
             cursor = self.db_conn.cursor()
             urls = []
@@ -148,14 +148,14 @@ class BestBuyDetailCrawler:
 
             print(f"[INFO] Latest batch_id - Main: {main_batch_id}, Trend: {trend_batch_id}, Promotion: {promo_batch_id}, BSR: {bsr_batch_id}")
 
-            # 수집 순서: main → bsr → promotion → trend (우선순위 순서)
-            # 각 테이블의 rank 순서대로 정렬
-            # 중복 URL은 rank 정보 병합 (크롤링은 한 번만)
+            # collected 순서: main → bsr → promotion → trend (우선순위 순서)
+            # 각 table의 rank 순서대로 정렬
+            # 중복 URL은 rank 정보 병합 (crawling은 한 번만)
 
             # Dictionary to store merged URL data: {url: {page_type, ranks, data...}}
             url_data_map = {}
 
-            # 1. bestbuy_tv_main_crawl에서 해당 batch의 URLs와 데이터 가져오기
+            # 1. bestbuy_tv_main_crawl에서 해당 batch의 URLs와 data 가져오기
             if main_batch_id:
                 cursor.execute("""
                     SELECT DISTINCT product_url, offer,
@@ -188,9 +188,9 @@ class BestBuyDetailCrawler:
                             'promotion_rank': None,
                             'promotion_type': None
                         }
-                print(f"[OK] Main URLs (batch {main_batch_id}): {len(main_urls)}개")
+                print(f"[OK] Main URLs (batch {main_batch_id}): {len(main_urls)} items")
 
-            # 2. bby_tv_bsr_crawl에서 해당 batch의 URLs와 데이터 가져오기
+            # 2. bby_tv_bsr_crawl에서 해당 batch의 URLs와 data 가져오기
             if bsr_batch_id:
                 cursor.execute("""
                     SELECT DISTINCT product_url, offer,
@@ -227,9 +227,9 @@ class BestBuyDetailCrawler:
                             'promotion_rank': None,
                             'promotion_type': None
                         }
-                print(f"[OK] BSR URLs (batch {bsr_batch_id}): {len(bsr_urls)}개")
+                print(f"[OK] BSR URLs (batch {bsr_batch_id}): {len(bsr_urls)} items")
 
-            # 3. bby_tv_promotion_crawl에서 해당 batch의 URLs와 데이터 가져오기
+            # 3. bby_tv_promotion_crawl에서 해당 batch의 URLs와 data 가져오기
             if promo_batch_id:
                 cursor.execute("""
                     SELECT DISTINCT product_url, offer, promotion_type, promotion_rank
@@ -265,9 +265,9 @@ class BestBuyDetailCrawler:
                             'promotion_rank': row[3],
                             'promotion_type': row[2]
                         }
-                print(f"[OK] Promotion URLs (batch {promo_batch_id}): {len(promo_urls)}개")
+                print(f"[OK] Promotion URLs (batch {promo_batch_id}): {len(promo_urls)} items")
 
-            # 4. bby_tv_Trend_crawl에서 해당 batch의 URLs와 데이터 가져오기
+            # 4. bby_tv_Trend_crawl에서 해당 batch의 URLs와 data 가져오기
             if trend_batch_id:
                 cursor.execute("""
                     SELECT DISTINCT product_url, rank
@@ -302,7 +302,7 @@ class BestBuyDetailCrawler:
                             'promotion_rank': None,
                             'promotion_type': None
                         }
-                print(f"[OK] Trend URLs (batch {trend_batch_id}): {len(trend_urls)}개")
+                print(f"[OK] Trend URLs (batch {trend_batch_id}): {len(trend_urls)} items")
 
             cursor.close()
 
@@ -336,7 +336,7 @@ class BestBuyDetailCrawler:
             if duplicates_count > 0:
                 print(f"[INFO] Found {duplicates_count} duplicate URLs - rank information merged")
 
-            print(f"[OK] 총 {len(unique_urls)}개 unique URLs 로드 완료 (중복 제거 전: {total_loaded}개)")
+            print(f"[OK] Loaded {len(unique_urls)} unique URLs (before dedup: {total_loaded} items)")
             return unique_urls
 
         except Exception as e:
@@ -346,7 +346,7 @@ class BestBuyDetailCrawler:
             return []
 
     def extract_retailer_sku_name(self, tree):
-        """Retailer_SKU_Name 추출"""
+        """Retailer_SKU_Name extraction"""
         try:
             xpaths = [
                 '//h1[contains(@class, "h4")]',
@@ -358,14 +358,14 @@ class BestBuyDetailCrawler:
                     return elem[0].text_content().strip()
             return None
         except Exception as e:
-            print(f"  [ERROR] Retailer_SKU_Name 추출 실패: {e}")
+            print(f"  [ERROR] Retailer_SKU_Name extraction failed: {e}")
             return None
 
     def click_specifications(self):
-        """Specification 버튼 클릭"""
+        """Specification button click"""
         try:
-            print("  [INFO] Specification 버튼 클릭...")
-            # XPath를 사용한 여러 시도
+            print("  [INFO] Specification button click...")
+            # XPath를 사용한 여러 attempt
             xpaths = [
                 "//button[@class='c-button-unstyled specs-accordion font-weight-medium w-full flex justify-content-between align-items-center CiN3vihE2Ub2POwD']",
                 "//button[.//h3[text()='Specifications']]",
@@ -378,35 +378,35 @@ class BestBuyDetailCrawler:
                     self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", spec_button)
                     time.sleep(2)
                     spec_button.click()
-                    print("  [OK] Specification 클릭 성공")
-                    time.sleep(7)  # 다이얼로그 로딩 대기 증가
+                    print("  [OK] Specification click successful")
+                    time.sleep(7)  # dialog 로딩 wait 증가
                     return True
                 except:
                     continue
 
-            print("  [WARNING] Specification 버튼을 찾을 수 없습니다.")
+            print("  [WARNING] Specification button not found.")
             return False
 
         except Exception as e:
-            print(f"  [ERROR] Specification 클릭 실패: {e}")
+            print(f"  [ERROR] Specification click failed: {e}")
             return False
 
     def click_specifications_with_retry(self):
         """
-        Specifications 다이얼로그 열기 (재시도 포함)
+        Specifications dialog 열기 (retry 포함)
 
         Returns:
             (success, error):
-                (True, None): 성공
-                (False, 'dialog_timeout'): 타임아웃
-                (False, 'click_failed'): 클릭 실패
+                (True, None): successful
+                (False, 'dialog_timeout'): timeout
+                (False, 'click_failed'): click failed
         """
         max_retries = 1
         retry_count = 0
         base_timeout = 15
 
         while retry_count <= max_retries:
-            # Specifications 버튼 클릭
+            # Specifications button click
             if self.click_specifications():
                 try:
                     wait_time = base_timeout * (2 ** retry_count)  # 15s -> 30s
@@ -414,29 +414,29 @@ class BestBuyDetailCrawler:
                     wait.until(EC.presence_of_element_located(
                         (By.XPATH, '//div[contains(text(), "Model Number")]')
                     ))
-                    print(f"  [OK] 다이얼로그 로드 완료 (대기: {wait_time}초)")
+                    print(f"  [OK] dialog load complete (wait: {wait_time}sec)")
                     return True, None
 
                 except TimeoutException:
                     if retry_count < max_retries:
-                        print(f"  [WARNING] 다이얼로그 타임아웃, 재시도 {retry_count + 1}/{max_retries}...")
+                        print(f"  [WARNING] dialog timeout, retry {retry_count + 1}/{max_retries}...")
                         retry_count += 1
                         self.close_specifications_dialog()
                         time.sleep(2)
                         continue
                     else:
-                        print(f"  [ERROR] 다이얼로그 타임아웃 (재시도 실패)")
+                        print(f"  [ERROR] dialog timeout (retry failed)")
                         return False, 'dialog_timeout'
             else:
-                print(f"  [WARNING] Specifications 버튼 클릭 실패")
+                print(f"  [WARNING] Specifications button click failed")
                 return False, 'click_failed'
 
         return False, 'dialog_timeout'
 
     def extract_item(self, tree):
-        """Item (Model Number) 추출"""
+        """Item (Model Number) extraction"""
         try:
-            # 다이얼로그에서 Model Number 찾기 (여러 패턴 시도)
+            # dialog에서 Model Number 찾기 (여러 패턴 attempt)
             xpaths = [
                 # 새로운 패턴
                 '//div[contains(@class, "dB7j8sHUbncyf79K")]//div[contains(text(), "Model Number")]/following-sibling::div[@class="grow basis-none pl-300"]',
@@ -455,13 +455,13 @@ class BestBuyDetailCrawler:
                         return model_number
             return None
         except Exception as e:
-            print(f"  [ERROR] Item 추출 실패: {e}")
+            print(f"  [ERROR] Item extraction failed: {e}")
             return None
 
     def extract_electricity_use(self, tree):
-        """Estimated_Annual_Electricity_Use 추출 (숫자만)"""
+        """Estimated_Annual_Electricity_Use extraction (숫자만)"""
         try:
-            # 다이얼로그에서 Estimated Annual Electricity Use 찾기 (여러 패턴 시도)
+            # dialog에서 Estimated Annual Electricity Use 찾기 (여러 패턴 attempt)
             xpaths = [
                 # 새로운 패턴
                 '//div[contains(@class, "dB7j8sHUbncyf79K")]//div[contains(text(), "Estimated Annual Electricity Use")]/following-sibling::div[@class="grow basis-none pl-300"]',
@@ -477,18 +477,18 @@ class BestBuyDetailCrawler:
                 if elem:
                     electricity = elem[0].text_content().strip()
                     if electricity:
-                        # 숫자만 추출 (예: "286 kilowatt hours" -> "286")
+                        # 숫자만 extraction (예: "286 kilowatt hours" -> "286")
                         match = re.search(r'(\d+)', electricity)
                         if match:
                             return match.group(1)
                         return electricity  # 숫자를 찾지 못하면 원본 반환
             return None
         except Exception as e:
-            print(f"  [ERROR] Estimated_Annual_Electricity_Use 추출 실패: {e}")
+            print(f"  [ERROR] Estimated_Annual_Electricity_Use extraction failed: {e}")
             return None
 
     def extract_screen_size(self, tree):
-        """Screen Size 추출"""
+        """Screen Size extraction"""
         try:
             # XPath 패턴
             xpaths = [
@@ -504,7 +504,7 @@ class BestBuyDetailCrawler:
                 if elem:
                     screen_size_text = elem[0].text_content().strip()
                     # "65 inches" 형태로 반환 (svg 텍스트 제거)
-                    # 정규식으로 "숫자 + inches" 추출
+                    # 정규식으로 "숫자 + inches" extraction
                     match = re.search(r'(\d+\s*inches)', screen_size_text)
                     if match:
                         return match.group(1)
@@ -512,11 +512,11 @@ class BestBuyDetailCrawler:
                     return screen_size_text
             return None
         except Exception as e:
-            print(f"  [ERROR] Screen Size 추출 실패: {e}")
+            print(f"  [ERROR] Screen Size extraction failed: {e}")
             return None
 
     def extract_final_sku_price(self, tree):
-        """Final SKU Price 추출 (현재 판매 가격) - 컨테이너 기반"""
+        """Final SKU Price extraction (현재 판매 가격) - 컨테이너 기반"""
         try:
             # 1단계: 가격 컨테이너 찾기
             container_xpaths = [
@@ -536,10 +536,10 @@ class BestBuyDetailCrawler:
                     break
 
             if price_container is None or len(price_container) == 0:
-                print(f"  [WARNING] 가격 컨테이너를 찾을 수 없습니다")
+                print(f"  [WARNING] price container not found")
                 return None
 
-            # 2단계: 컨테이너 내부에서만 가격 추출
+            # 2단계: 컨테이너 내부에서만 가격 extraction
             price_xpaths = [
                 # data-testid 기반 (가장 안정적)
                 './/div[@data-testid="price-block-customer-price"]//span',
@@ -557,11 +557,11 @@ class BestBuyDetailCrawler:
                         return price  # "$89.99" 형식 반환
             return None
         except Exception as e:
-            print(f"  [ERROR] Final_SKU_Price 추출 실패: {e}")
+            print(f"  [ERROR] Final_SKU_Price extraction failed: {e}")
             return None
 
     def extract_original_sku_price(self, tree):
-        """Original SKU Price 추출 (세일 전 원가) - 컨테이너 기반"""
+        """Original SKU Price extraction (세일 전 원가) - 컨테이너 기반"""
         try:
             # 1단계: 가격 컨테이너 찾기
             container_xpaths = [
@@ -581,10 +581,10 @@ class BestBuyDetailCrawler:
                     break
 
             if price_container is None or len(price_container) == 0:
-                # 컨테이너 없으면 None 반환 (경고 없음 - 정상 케이스일 수 있음)
+                # 컨테이너 없으면 None 반환 (경고 none - 정상 케이스일 수 있음)
                 return None
 
-            # 2단계: 컨테이너 내부에서만 원가 추출
+            # 2단계: 컨테이너 내부에서만 원가 extraction
             price_xpaths = [
                 # data-lu-target 기반 (가장 안정적)
                 './/span[@data-lu-target="comp_value"]',
@@ -603,11 +603,11 @@ class BestBuyDetailCrawler:
                         return price  # "$149.99" 형식 반환
             return None  # 세일이 아니면 None
         except Exception as e:
-            print(f"  [ERROR] Original_SKU_Price 추출 실패: {e}")
+            print(f"  [ERROR] Original_SKU_Price extraction failed: {e}")
             return None
 
     def extract_savings(self, tree):
-        """Savings 추출 (할인 금액) - 컨테이너 기반"""
+        """Savings extraction (할인 금액) - 컨테이너 기반"""
         try:
             # 1단계: 가격 컨테이너 찾기
             container_xpaths = [
@@ -630,7 +630,7 @@ class BestBuyDetailCrawler:
                 # 컨테이너 없으면 None 반환
                 return None
 
-            # 2단계: 컨테이너 내부에서만 할인 금액 추출
+            # 2단계: 컨테이너 내부에서만 할인 금액 extraction
             savings_xpaths = [
                 # data-testid 기반 (가장 안정적)
                 './/span[@data-testid="price-block-total-savings-text"]',
@@ -644,17 +644,17 @@ class BestBuyDetailCrawler:
                 elem = price_container.xpath(xpath)
                 if elem:
                     text = elem[0].text_content().strip()  # "Save $1,200"
-                    # "$숫자" 패턴 추출 (콤마 포함 정규식 사용)
+                    # "$숫자" 패턴 extraction (콤마 포함 정규식 사용)
                     match = re.search(r'\$[\d,]+(?:\.\d{2})?', text)
                     if match:
                         return match.group()  # "$1,200.00" 형식 반환
             return None  # 세일이 아니면 None
         except Exception as e:
-            print(f"  [ERROR] Savings 추출 실패: {e}")
+            print(f"  [ERROR] Savings extraction failed: {e}")
             return None
 
     def extract_star_rating(self, tree):
-        """Star Rating 추출 (평점 점수) - 컨테이너 기반"""
+        """Star Rating extraction (평점 점수) - 컨테이너 기반"""
         try:
             # 1단계: 가격 컨테이너 찾기
             container_xpaths = [
@@ -674,10 +674,10 @@ class BestBuyDetailCrawler:
                     break
 
             if price_container is None or len(price_container) == 0:
-                # 컨테이너 없으면 None 반환 (리뷰가 없는 상품일 수 있음)
+                # 컨테이너 없으면 None 반환 (review가 없는 상품일 수 있음)
                 return None
 
-            # 2단계: 컨테이너 내부에서만 평점 추출
+            # 2단계: 컨테이너 내부에서만 평점 extraction
             rating_xpaths = [
                 # 절대 경로 기반 (컨테이너 내부)
                 './/div/div[3]/a/div/span[1]',
@@ -695,13 +695,13 @@ class BestBuyDetailCrawler:
                     # 평점 형식 검증 (숫자.숫자 형식)
                     if rating and re.match(r'^\d+\.\d+$', rating):
                         return rating  # "4.7" 형식 반환
-            return None  # 리뷰가 없으면 None
+            return None  # review가 없으면 None
         except Exception as e:
-            print(f"  [ERROR] Star_Rating 추출 실패: {e}")
+            print(f"  [ERROR] Star_Rating extraction failed: {e}")
             return None
 
     def extract_count_of_reviews_from_detail(self, tree):
-        """Count of Reviews 추출 (메인 상세 페이지에서) - 컨테이너 기반"""
+        """Count of Reviews extraction (메인 detail page에서) - 컨테이너 기반"""
         try:
             # 1단계: 가격 컨테이너 찾기
             container_xpaths = [
@@ -724,7 +724,7 @@ class BestBuyDetailCrawler:
                 # 컨테이너 없으면 None 반환
                 return None
 
-            # 2단계: 컨테이너 내부에서만 리뷰 개수 추출
+            # 2단계: 컨테이너 내부에서만 review items count extraction
             reviews_xpaths = [
                 # 절대 경로 기반 (컨테이너 내부)
                 './/div/div[3]/a/div/span[2]',
@@ -739,22 +739,22 @@ class BestBuyDetailCrawler:
                 elem = price_container.xpath(xpath)
                 if elem:
                     text = elem[0].text_content().strip()  # "(79 reviews)" or "(1,234 reviews)"
-                    # 숫자 추출 (콤마 제거)
-                    # 패턴: (숫자,숫자 reviews) → 숫자만 추출
+                    # 숫자 extraction (콤마 제거)
+                    # 패턴: (숫자,숫자 reviews) → 숫자만 extraction
                     match = re.search(r'\(([\d,]+)\s*reviews?\)', text, re.IGNORECASE)
                     if match:
                         # 콤마 제거 후 반환: "1,234" → "1234"
                         count = match.group(1).replace(',', '')
                         return count  # "79" or "1234" 형식 반환
-            return None  # 리뷰가 없으면 None
+            return None  # review가 없으면 None
         except Exception as e:
-            print(f"  [ERROR] Count_of_Reviews 추출 실패: {e}")
+            print(f"  [ERROR] Count_of_Reviews extraction failed: {e}")
             return None
 
     def close_specifications_dialog(self):
-        """Specification 다이얼로그 닫기"""
+        """Specification dialog close"""
         try:
-            print("  [INFO] Specification 다이얼로그 닫기...")
+            print("  [INFO] Specification dialog close...")
             xpaths = [
                 '//button[@data-testid="brix-sheet-closeButton"]',
                 '//button[@aria-label="Close Sheet"]',
@@ -765,46 +765,46 @@ class BestBuyDetailCrawler:
                 try:
                     close_button = self.driver.find_element(By.XPATH, xpath)
                     close_button.click()
-                    print("  [OK] 다이얼로그 닫기 성공")
+                    print("  [OK] dialog close successful")
                     time.sleep(2)
                     return True
                 except:
                     continue
 
-            print("  [WARNING] 다이얼로그 닫기 버튼을 찾을 수 없습니다.")
+            print("  [WARNING] dialog close button not found.")
             return False
 
         except Exception as e:
-            print(f"  [ERROR] 다이얼로그 닫기 실패: {e}")
+            print(f"  [ERROR] dialog close failed: {e}")
             return False
 
     def extract_similar_products(self, tree):
-        """Compare similar products 데이터 추출"""
+        """Compare similar products data extraction"""
         try:
             similar_names = []
             pros_list = []
             cons_list = []
 
-            # Retailer_SKU_Name_similar 추출
+            # Retailer_SKU_Name_similar extraction
             name_elements = tree.xpath('//span[@class="clamp" and starts-with(@id, "compare-title-")]')
-            for elem in name_elements[:4]:  # 최대 4개
+            for elem in name_elements[:4]:  # 최대 4items
                 similar_names.append(elem.text_content().strip())
 
-            # Pros 추출
+            # Pros extraction
             pros_elements = tree.xpath('//tr[@class="flex"]//td[.//svg[@aria-label="Advantage Icon"]]//span[@class="text-3 min-w-0 flex flex-wrap"]')
-            for elem in pros_elements[:4]:  # 최대 4개
+            for elem in pros_elements[:4]:  # 최대 4items
                 pros_list.append(elem.text_content().strip())
 
-            # Cons 추출
+            # Cons extraction
             cons_elements = tree.xpath('//tr[@class="flex"]//td[.//svg[@aria-label="Disadvantage Icon"]]//span[@class="text-3 min-w-0 flex flex-wrap"]')
-            for elem in cons_elements[:4]:  # 최대 4개
+            for elem in cons_elements[:4]:  # 최대 4items
                 text = elem.text_content().strip()
                 if text and text != '—':
                     cons_list.append(text)
                 else:
                     cons_list.append(None)
 
-            # 부족한 경우 None으로 채우기
+            # 부족한 경우 None으로 fill
             while len(similar_names) < 4:
                 similar_names.append(None)
             while len(pros_list) < 4:
@@ -815,13 +815,13 @@ class BestBuyDetailCrawler:
             return similar_names[:4], pros_list[:4], cons_list[:4]
 
         except Exception as e:
-            print(f"  [ERROR] Similar products 추출 실패: {e}")
+            print(f"  [ERROR] Similar products extraction failed: {e}")
             return [None]*4, [None]*4, [None]*4
 
     def extract_star_ratings_from_reviews_page(self):
-        """Count_of_Star_Ratings 추출 (See All Customer Reviews 페이지에서)"""
+        """Count_of_Star_Ratings extraction (See All Customer Reviews page에서)"""
         try:
-            time.sleep(3)  # 페이지 로딩 대기
+            time.sleep(3)  # page 로딩 wait
             ratings = {}
             # XPath 패턴 (5점부터 1점까지)
             xpaths = [
@@ -832,7 +832,7 @@ class BestBuyDetailCrawler:
                 '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[5]/div/label/span[5]'   # 1점
             ]
 
-            # 5점부터 1점까지 순서로 추출
+            # 5점부터 1점까지 순서로 extraction
             for idx, xpath in enumerate(xpaths):
                 star = 5 - idx  # 5, 4, 3, 2, 1
                 try:
@@ -851,11 +851,11 @@ class BestBuyDetailCrawler:
             return rating_str if rating_str else None
 
         except Exception as e:
-            print(f"  [ERROR] Star ratings 추출 실패: {e}")
+            print(f"  [ERROR] Star ratings extraction failed: {e}")
             return None
 
     def extract_count_of_reviews(self):
-        """Count_of_Reviews 추출 (See All Customer Reviews 페이지에서)"""
+        """Count_of_Reviews extraction (See All Customer Reviews page에서)"""
         try:
             # XPath 패턴
             xpaths = [
@@ -871,7 +871,7 @@ class BestBuyDetailCrawler:
                 try:
                     elem = self.driver.find_element(By.XPATH, xpath)
                     text = elem.text.strip()
-                    # 숫자만 추출 (예: "(84 Reviews)" -> "84")
+                    # 숫자만 extraction (예: "(84 Reviews)" -> "84")
                     match = re.search(r'\((\d+)\s*Reviews?\)', text)
                     if match:
                         return match.group(1)
@@ -881,15 +881,15 @@ class BestBuyDetailCrawler:
             return None
 
         except Exception as e:
-            print(f"  [ERROR] Count of reviews 추출 실패: {e}")
+            print(f"  [ERROR] Count of reviews extraction failed: {e}")
             return None
 
     def extract_top_mentions_from_reviews_page(self):
-        """Top_Mentions 추출 (See All Customer Reviews 페이지에서)"""
+        """Top_Mentions extraction (See All Customer Reviews page에서)"""
         try:
             # XPath 패턴 (ID가 동적이므로 class 기반으로 찾기)
             xpaths = [
-                # "Highly rated by customers for" 섹션의 span.text-nowrap들
+                # "Highly rated by customers for" section의 span.text-nowrap들
                 '//div[contains(@class, "customer-review-pros-stats")]//span[@class="text-nowrap"]',
                 # 더 넓은 패턴
                 '//div[contains(., "Highly rated by customers for")]//span[@class="text-nowrap"]'
@@ -911,22 +911,22 @@ class BestBuyDetailCrawler:
                     continue
 
             if mentions:
-                # 첫 번째 항목만 반환 (예: "Picture Quality")
+                # first 번째 항목만 반환 (예: "Picture Quality")
                 return mentions[0]
 
             return None
 
         except Exception as e:
-            print(f"  [ERROR] Top mentions 추출 실패: {e}")
+            print(f"  [ERROR] Top mentions extraction failed: {e}")
             return None
 
     def click_see_all_reviews(self):
-        """See All Customer Reviews 버튼 클릭"""
+        """See All Customer Reviews button click"""
         try:
-            print("  [INFO] See All Customer Reviews 버튼 찾는 중...")
+            print("  [INFO] See All Customer Reviews button searching...")
 
-            # 페이지를 천천히 스크롤하면서 버튼이 나타날 때까지 대기
-            print("  [INFO] 페이지 스크롤 시작...")
+            # page를 천천히 스크롤하면서 button이 나타날 때까지 wait
+            print("  [INFO] page starting scroll...")
             scroll_height = self.driver.execute_script("return document.body.scrollHeight")
             current_position = 0
             step = 400  # 400px씩 스크롤 (더 천천히)
@@ -937,62 +937,62 @@ class BestBuyDetailCrawler:
                 '//button[contains(@class, "Op9coqeII1kYHR9Q")]'
             ]
 
-            # 스크롤하면서 버튼 찾기
+            # 스크롤하면서 button 찾기
             while current_position < scroll_height:
-                # 각 스크롤 위치에서 버튼 찾기 시도
+                # 각 스크롤 위치에서 button 찾기 attempt
                 for xpath in xpaths:
                     try:
                         button = self.driver.find_element(By.XPATH, xpath)
-                        print("  [OK] See All Customer Reviews 버튼 발견")
+                        print("  [OK] See All Customer Reviews button found")
                         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
                         time.sleep(2)
 
-                        # JavaScript로 클릭 시도
+                        # JavaScript로 click attempt
                         try:
                             self.driver.execute_script("arguments[0].click();", button)
-                            print("  [OK] See All Customer Reviews 클릭 성공")
-                            time.sleep(5)  # 리뷰 페이지 로딩 대기
+                            print("  [OK] See All Customer Reviews click successful")
+                            time.sleep(5)  # review page 로딩 wait
                             return True
                         except Exception as click_err:
-                            print(f"  [WARNING] 클릭 실패 (JS): {click_err}, 일반 클릭 시도")
-                            # 일반 클릭 시도
+                            print(f"  [WARNING] click failed (JS): {click_err}, trying regular click")
+                            # trying regular click
                             button.click()
-                            print("  [OK] See All Customer Reviews 클릭 성공 (일반)")
+                            print("  [OK] See All Customer Reviews click successful (regular)")
                             time.sleep(5)
                             return True
 
                     except Exception as e:
-                        # 버튼을 찾지 못한 경우만 continue
+                        # button을 찾지 못한 경우만 continue
                         if "no such element" not in str(e).lower():
-                            print(f"  [DEBUG] 버튼 처리 실패: {e}")
+                            print(f"  [DEBUG] button processing failed: {e}")
                         continue
 
-                # 버튼을 못 찾으면 계속 스크롤
+                # button을 못 찾으면 계속 스크롤
                 current_position += step
                 self.driver.execute_script(f"window.scrollTo(0, {current_position});")
-                time.sleep(1)  # 스크롤 후 대기 시간
+                time.sleep(1)  # 스크롤 후 wait 시간
 
-            print("  [WARNING] See All Customer Reviews 버튼을 찾을 수 없습니다.")
+            print("  [WARNING] See All Customer Reviews button not found.")
             return False
 
         except Exception as e:
-            print(f"  [ERROR] See All Customer Reviews 클릭 실패: {e}")
+            print(f"  [ERROR] See All Customer Reviews click failed: {e}")
             return False
 
     def extract_reviews(self):
-        """리뷰 20개 수집 (페이지네이션 포함)"""
+        """review 20items collected (page네이션 포함)"""
         try:
-            time.sleep(3)  # 페이지 로딩 대기
+            time.sleep(3)  # page 로딩 wait
             reviews = []
             collected = 0
             page = 1
 
             while collected < 20:
-                # 페이지 소스 가져오기
+                # page 소스 가져오기
                 page_source = self.driver.page_source
                 tree = html.fromstring(page_source)
 
-                # 리뷰 추출
+                # review extraction
                 review_elements = tree.xpath('//li[@class="review-item"]//div[@class="ugc-review-body"]//p[@class="pre-white-space"]')
 
                 for elem in review_elements:
@@ -1002,34 +1002,34 @@ class BestBuyDetailCrawler:
                     if review_text:
                         reviews.append(review_text)
                         collected += 1
-                        print(f"    [리뷰 {collected}/20] {review_text[:50]}...")
+                        print(f"    [review {collected}/20] {review_text[:50]}...")
 
-                # 20개 수집 완료하면 종료
+                # 20items collected complete하면 closed
                 if collected >= 20:
                     break
 
-                # 다음 페이지 버튼 찾기
+                # next page button 찾기
                 try:
                     next_button = self.driver.find_element(By.XPATH, '//li[contains(@class, "page next")]//a')
-                    print(f"  [INFO] 다음 페이지로 이동 중... (Page {page + 1})")
+                    print(f"  [INFO] Navigating to next page... (Page {page + 1})")
                     self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
                     time.sleep(2)
                     next_button.click()
                     time.sleep(4)
                     page += 1
                 except:
-                    print("  [INFO] 다음 페이지 버튼이 없습니다. 수집 종료.")
+                    print("  [INFO] next page button not found. collected closed.")
                     break
 
-            # 리뷰를 구분자로 연결
+            # review를 구분자로 connection
             return " | ".join(reviews) if reviews else None
 
         except Exception as e:
-            print(f"  [ERROR] 리뷰 수집 실패: {e}")
+            print(f"  [ERROR] review collected failed: {e}")
             return None
 
     def extract_recommendation_intent_from_reviews_page(self):
-        """Recommendation_Intent 추출 (See All Customer Reviews 페이지에서)"""
+        """Recommendation_Intent extraction (See All Customer Reviews page에서)"""
         try:
             # XPath 패턴
             xpaths = [
@@ -1056,21 +1056,21 @@ class BestBuyDetailCrawler:
             return None
 
         except Exception as e:
-            print(f"  [ERROR] Recommendation intent 추출 실패: {e}")
+            print(f"  [ERROR] Recommendation intent extraction failed: {e}")
             return None
 
     def extract_compare_similar_products(self, current_url):
-        """Compare similar products 섹션 데이터 추출 (첫 페이지 로딩 개선)"""
+        """Compare similar products section data extraction (first page 로딩 items선)"""
         max_retries = 2
 
         for retry in range(max_retries):
             try:
                 if retry > 0:
-                    print(f"  [RETRY {retry}/{max_retries}] Compare similar products 재시도...")
+                    print(f"  [RETRY {retry}/{max_retries}] Compare similar products retry...")
                 else:
-                    print("  [INFO] Compare similar products 섹션 찾는 중...")
+                    print("  [INFO] Compare similar products section searching...")
 
-                # 페이지 상단으로 이동 후 30%까지 스크롤
+                # page 상단으로 이동 후 30%까지 스크롤
                 self.driver.execute_script("window.scrollTo(0, 0);")
                 time.sleep(1)
 
@@ -1078,59 +1078,59 @@ class BestBuyDetailCrawler:
                 scroll_to = int(total_height * 0.3)
                 self.driver.execute_script(f"window.scrollTo(0, {scroll_to});")
 
-                # 첫 페이지 여부 확인
+                # first page 여부 확인
                 is_first_page = (self.order == 1)
 
-                # 타임아웃 설정: 첫 페이지는 30초, 나머지는 15초
+                # timeout 설정: first page는 30sec, 나머지는 15sec
                 timeout = 30 if is_first_page else 15
 
                 if is_first_page:
-                    print(f"  [INFO] 첫 페이지 감지 - 긴 대기 시간 적용 (최대 {timeout}초)")
+                    print(f"  [INFO] first page detected - applying long wait time (max {timeout}sec)")
 
-                # WebDriverWait로 product-title 요소가 로드될 때까지 명시적 대기
+                # WebDriverWait로 product-title element가 load될 때까지 명시적 wait
                 try:
                     wait = WebDriverWait(self.driver, timeout)
                     wait.until(EC.presence_of_element_located(
                         (By.XPATH, '//div[@class="product-title font-weight-normal pb-100 body-copy-lg min-h-600"]')
                     ))
-                    print(f"  [OK] Compare similar products 요소 로드 완료")
+                    print(f"  [OK] Compare similar products element load complete")
 
-                    # 요소가 로드된 후 안정화를 위한 추가 대기
+                    # element가 load된 후 안정화를 위한 추가 wait
                     additional_wait = 5 if is_first_page else 3
                     time.sleep(additional_wait)
 
                 except Exception as wait_error:
-                    print(f"  [WARNING] 요소 대기 시간 초과: {wait_error}")
+                    print(f"  [WARNING] element wait time exceeded: {wait_error}")
                     if retry < max_retries - 1:
-                        # 다음 재시도를 위해 페이지 새로고침
-                        print("  [INFO] 페이지 새로고침 후 재시도...")
+                        # next retry를 위해 page refresh
+                        print("  [INFO] page refresh and retry...")
                         self.driver.refresh()
                         time.sleep(10)
                         continue
                     else:
-                        # 마지막 시도였다면 None 반환
+                        # 마지막 attempt였다면 None 반환
                         return None
 
-                # 페이지 소스 가져오기
+                # page 소스 가져오기
                 page_source = self.driver.page_source
                 tree = html.fromstring(page_source)
 
-                # 4개 제품 데이터 저장
+                # 4items 제품 data save
                 products = []
 
                 # product-title div들 찾기
                 product_divs = tree.xpath('//div[@class="product-title font-weight-normal pb-100 body-copy-lg min-h-600"]')
 
                 if len(product_divs) < 4:
-                    print(f"  [WARNING] 제품이 부족합니다. (찾은 개수: {len(product_divs)})")
+                    print(f"  [WARNING] insufficient products. (found items count: {len(product_divs)})")
                     if retry < max_retries - 1:
-                        # 재시도
+                        # retry
                         time.sleep(5)
                         continue
                     else:
                         return None
 
-                # 첫 번째 제품 (현재 페이지)
+                # first 번째 제품 (현재 page)
                 first_product = {
                     'product_url': current_url,
                     'product_name': None,
@@ -1138,7 +1138,7 @@ class BestBuyDetailCrawler:
                     'cons': None
                 }
 
-                # 첫 번째 제품명 추출
+                # first 번째 제품명 extraction
                 span_elem = product_divs[0].xpath('.//span[@class="clamp"]')
                 if span_elem:
                     first_product['product_name'] = span_elem[0].text_content().strip()
@@ -1155,7 +1155,7 @@ class BestBuyDetailCrawler:
                             'cons': None
                         }
 
-                        # a 태그에서 URL과 제품명 추출
+                        # a 태그에서 URL과 제품명 extraction
                         a_elem = product_divs[i].xpath('.//a[@class="clamp"]')
                         if a_elem:
                             href = a_elem[0].get('href')
@@ -1165,14 +1165,14 @@ class BestBuyDetailCrawler:
 
                         products.append(product)
 
-                # Pros 추출 (tr[2]/td[1~4])
+                # Pros extraction (tr[2]/td[1~4])
                 for i in range(1, 5):
                     pros_xpath = f'/html/body/div[5]/div[6]/div/table/tbody/tr[2]/td[{i}]/span/span'
                     pros_elem = tree.xpath(pros_xpath)
                     if pros_elem and i-1 < len(products):
                         products[i-1]['pros'] = pros_elem[0].text_content().strip()
 
-                # Cons 추출 (tr[4]/td[1~4])
+                # Cons extraction (tr[4]/td[1~4])
                 for i in range(1, 5):
                     cons_xpath = f'/html/body/div[5]/div[6]/div/table/tbody/tr[4]/td[{i}]/span/span'
                     cons_elem = tree.xpath(cons_xpath)
@@ -1181,13 +1181,13 @@ class BestBuyDetailCrawler:
                         # '—' 같은 값은 None으로 처리
                         products[i-1]['cons'] = text if text and text != '—' else None
 
-                print(f"  [OK] Compare similar products 데이터 추출 완료 (4개)")
+                print(f"  [OK] Compare similar products data extraction complete (4items)")
                 return products
 
             except Exception as e:
-                print(f"  [ERROR] Compare similar products 추출 실패 (시도 {retry + 1}/{max_retries}): {e}")
+                print(f"  [ERROR] Compare similar products extraction failed (attempt {retry + 1}/{max_retries}): {e}")
                 if retry < max_retries - 1:
-                    print("  [INFO] 재시도 중...")
+                    print("  [INFO] Retrying...")
                     time.sleep(5)
                     continue
                 else:
@@ -1205,7 +1205,7 @@ class BestBuyDetailCrawler:
 
             cursor = self.db_conn.cursor()
 
-            # 가장 최근 데이터에서 retailer_sku_name과 product_name이 일치하는 것 찾기
+            # 가장 최근 data에서 retailer_sku_name과 product_name이 일치하는 것 찾기
             cursor.execute("""
                 SELECT item
                 FROM bby_tv_crawl
@@ -1223,15 +1223,15 @@ class BestBuyDetailCrawler:
             return None
 
         except Exception as e:
-            print(f"  [ERROR] Item 조회 실패 ({product_name}): {e}")
+            print(f"  [ERROR] Item lookup failed ({product_name}): {e}")
             return None
 
     def save_to_mst_table(self, products, current_item):
-        """bby_tv_mst 테이블에 4개 제품 데이터 저장"""
+        """bby_tv_mst table에 4items 제품 data save"""
         try:
             cursor = self.db_conn.cursor()
 
-            # 테이블 존재 확인 및 생성
+            # table 존재 확인 및 생성
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS bby_tv_mst (
                     id SERIAL PRIMARY KEY,
@@ -1252,17 +1252,17 @@ class BestBuyDetailCrawler:
             # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
 
-            # 각 제품 저장
+            # 각 제품 save
             for idx, product in enumerate(products):
                 # item 결정
                 if idx == 0:
-                    # 첫 번째 제품은 현재 페이지의 item
+                    # first 번째 제품은 현재 page의 item
                     mst_item = current_item
                 else:
                     # 2-4번째 제품은 DB에서 찾기
                     mst_item = self.get_item_by_product_name(product['product_name'])
 
-                # 데이터 삽입
+                # data 삽입
                 insert_query = """
                     INSERT INTO bby_tv_mst
                     (account_name, item, product_url, pros, cons, product_name, update_date, calendar_week)
@@ -1283,50 +1283,50 @@ class BestBuyDetailCrawler:
                 print(f"    [MST {idx+1}/4] {product['product_name'][:50]}... (item: {mst_item})")
 
             cursor.close()
-            print(f"  [✓] MST 테이블 저장 완료 (4개)")
+            print(f"  [✓] MST table save complete (4items)")
             return True
 
         except Exception as e:
-            print(f"  [ERROR] MST 테이블 저장 실패: {e}")
+            print(f"  [ERROR] MST table save failed: {e}")
             import traceback
             traceback.print_exc()
             return False
 
     def scrape_detail_page(self, url_data):
-        """상세 페이지 크롤링 (개선된 로딩 + 다이얼로그 처리)"""
+        """detail page crawling (items선된 로딩 + dialog 처리)"""
         try:
             self.order += 1
             page_type = url_data['page_type']
             product_url = url_data['product_url']
             print(f"\n[{self.order}] [{page_type}] {product_url[:80]}...")
 
-            # 페이지 접속
+            # page 접속
             self.driver.get(product_url)
 
-            # ADDED: 핵심 요소 로드 대기 (최대 20초)
+            # ADDED: 핵심 element load wait (최대 20sec)
             try:
                 wait = WebDriverWait(self.driver, 20)
                 wait.until(EC.presence_of_element_located(
                     (By.XPATH, '//h1[contains(@class, "h4") or contains(@class, "heading")]')  # 제품명
                 ))
-                print(f"  [OK] 페이지 로드 완료")
+                print(f"  [OK] page load complete")
             except TimeoutException:
-                print(f"  [ERROR] 페이지 로딩 타임아웃")
+                print(f"  [ERROR] page loading timeout")
                 return False
 
-            # 페이지 소스 가져오기
+            # page 소스 가져오기
             page_source = self.driver.page_source
             tree = html.fromstring(page_source)
 
-            # 1. Retailer_SKU_Name 추출
+            # 1. Retailer_SKU_Name extraction
             retailer_sku_name = self.extract_retailer_sku_name(tree)
             print(f"  [✓] Retailer_SKU_Name: {retailer_sku_name}")
 
-            # 2. Screen Size 추출 (메인 페이지에서)
+            # 2. Screen Size extraction (메인 page에서)
             screen_size = self.extract_screen_size(tree)
             print(f"  [✓] Screen Size: {screen_size}")
 
-            # 2-1. Price 정보 추출 (메인 페이지에서 직접 수집)
+            # 2-1. Price 정보 extraction (메인 page에서 직접 collected)
             final_sku_price = self.extract_final_sku_price(tree)
             print(f"  [✓] Final_SKU_Price: {final_sku_price}")
 
@@ -1336,17 +1336,17 @@ class BestBuyDetailCrawler:
             savings = self.extract_savings(tree)
             print(f"  [✓] Savings: {savings}")
 
-            # 2-2. Star Rating 및 Reviews 정보 추출 (메인 페이지에서 직접 수집)
+            # 2-2. Star Rating 및 Reviews 정보 extraction (메인 page에서 직접 collected)
             star_rating = self.extract_star_rating(tree)
             print(f"  [✓] Star_Rating: {star_rating}")
 
             count_of_reviews = self.extract_count_of_reviews_from_detail(tree)
             print(f"  [✓] Count_of_Reviews: {count_of_reviews}")
 
-            # 3. Compare similar products 추출
+            # 3. Compare similar products extraction
             mst_products = self.extract_compare_similar_products(product_url)
 
-            # 4. Specification 버튼 클릭 (재시도 로직 적용)
+            # 4. Specification button click (retry 로직 적용)
             item = None
             electricity_use = None
 
@@ -1354,52 +1354,52 @@ class BestBuyDetailCrawler:
 
             if success:
                 time.sleep(3)
-                # 다이얼로그 소스 가져오기
+                # dialog 소스 가져오기
                 dialog_source = self.driver.page_source
                 dialog_tree = html.fromstring(dialog_source)
 
-                # 5. Item 추출
+                # 5. Item extraction
                 item = self.extract_item(dialog_tree)
                 print(f"  [✓] Item: {item}")
 
-                # 6. Estimated_Annual_Electricity_Use 추출 (숫자만)
+                # 6. Estimated_Annual_Electricity_Use extraction (숫자만)
                 electricity_use = self.extract_electricity_use(dialog_tree)
                 print(f"  [✓] Estimated_Annual_Electricity_Use: {electricity_use}")
 
-                # 7. 다이얼로그 닫기
+                # 7. dialog close
                 self.close_specifications_dialog()
             else:
-                print(f"  [ERROR] Specifications 다이얼로그 실패: {error}")
+                print(f"  [ERROR] Specifications dialog failed: {error}")
                 item = None
 
-            # 8. MST 테이블에 저장 (item이 있고 mst_products가 있을 때)
+            # 8. MST table에 save (item이 있고 mst_products가 있을 때)
             if mst_products and item:
                 self.save_to_mst_table(mst_products, item)
 
-            # 9. See All Customer Reviews 클릭 및 데이터 수집
+            # 9. See All Customer Reviews click 및 data collected
             star_ratings = None
             top_mentions = None
             detailed_reviews = None
             recommendation_intent = None
 
             if self.click_see_all_reviews():
-                # 9-1. Star ratings 수집 (리뷰 페이지에서 - 별점별 상세 개수)
+                # 9-1. Star ratings collected (review page에서 - 별점별 detail items count)
                 star_ratings = self.extract_star_ratings_from_reviews_page()
                 print(f"  [✓] Star_Ratings: {star_ratings}")
 
-                # 9-2. Top mentions 수집 (리뷰 페이지에서)
+                # 9-2. Top mentions collected (review page에서)
                 top_mentions = self.extract_top_mentions_from_reviews_page()
                 print(f"  [✓] Top_Mentions: {top_mentions}")
 
-                # 9-3. Recommendation intent 수집 (리뷰 페이지에서)
+                # 9-3. Recommendation intent collected (review page에서)
                 recommendation_intent = self.extract_recommendation_intent_from_reviews_page()
                 print(f"  [✓] Recommendation_Intent: {recommendation_intent}")
 
-                # 9-4. Detailed reviews 수집
+                # 9-4. Detailed reviews collected
                 detailed_reviews = self.extract_reviews()
                 print(f"  [✓] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
 
-            # 9-5. 데이터 검증 (문제 감지 및 로깅)
+            # 9-5. data 검증 (문제 감지 및 로깅)
             print(f"\n  [VALIDATION] Checking data quality...")
             self.validator.validate_item(item, product_url, 'bby_tv_dt1')
             self.validator.validate_screen_size(screen_size, product_url, 'bby_tv_dt1')
@@ -1411,7 +1411,7 @@ class BestBuyDetailCrawler:
             self.validator.validate_count(count_of_reviews, 'count_of_reviews', product_url, 'bby_tv_dt1')
             self.validator.validate_star_rating(star_rating_source, product_url, 'bby_tv_dt1')
 
-            # 10. Detail DB 저장
+            # 10. Detail DB save
             self.save_to_db(
                 page_type=page_type,
                 order=self.order,
@@ -1425,17 +1425,17 @@ class BestBuyDetailCrawler:
                 detailed_reviews=detailed_reviews,
                 recommendation_intent=recommendation_intent,
                 product_url=product_url,
-                # 가격 정보는 크롤링한 값 사용 (CHANGED)
+                # 가격 정보는 crawling한 값 사용 (CHANGED)
                 final_sku_price=final_sku_price,
                 savings=savings,
                 original_sku_price=original_sku_price,
-                # 소스 테이블의 추가 데이터 (가격 제외)
+                # 소스 table의 추가 data (가격 제외)
                 offer=url_data['offer'],
                 pick_up_availability=url_data['pick_up_availability'],
                 shipping_availability=url_data['shipping_availability'],
                 delivery_availability=url_data['delivery_availability'],
                 sku_status=url_data['sku_status'],
-                star_rating_source=star_rating,  # 메인 페이지에서 크롤링한 값 사용 (CHANGED)
+                star_rating_source=star_rating,  # 메인 page에서 crawling한 값 사용 (CHANGED)
                 promotion_type=url_data['promotion_type'],
                 promotion_rank=url_data['promotion_rank'],
                 bsr_rank=url_data['bsr_rank'],
@@ -1446,7 +1446,7 @@ class BestBuyDetailCrawler:
             return True
 
         except Exception as e:
-            print(f"  [ERROR] 상세 페이지 크롤링 실패: {e}")
+            print(f"  [ERROR] detail page crawling failed: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -1458,7 +1458,7 @@ class BestBuyDetailCrawler:
                    pick_up_availability, shipping_availability, delivery_availability,
                    sku_status, star_rating_source, promotion_type, promotion_rank,
                    bsr_rank, main_rank, trend_rank):
-        """DB에 저장"""
+        """DB에 save"""
         try:
             cursor = self.db_conn.cursor()
 
@@ -1469,7 +1469,7 @@ class BestBuyDetailCrawler:
             now = datetime.now()
             crawl_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
 
-            # 데이터 삽입
+            # data 삽입
             insert_query = """
                 INSERT INTO bby_tv_crawl
                 (account_name, batch_id, page_type, "order", retailer_sku_name, item,
@@ -1592,19 +1592,19 @@ class BestBuyDetailCrawler:
             ))
 
             cursor.close()
-            print(f"  [✓] DB 저장 완료 (bby_tv_crawl + tv_retail_com)")
+            print(f"  [✓] DB save complete (bby_tv_crawl + tv_retail_com)")
             return True
 
         except Exception as e:
-            print(f"  [ERROR] DB 저장 실패: {e}")
+            print(f"  [ERROR] DB save failed: {e}")
             import traceback
             traceback.print_exc()
             return False
 
     def fill_missing_items(self):
-        """빈 item을 이전 세션 데이터로 채우기"""
+        """empty item을 이전 세션 data로 fill"""
         try:
-            print("\n[INFO] 빈 item 채우는 중...")
+            print("\n[INFO] empty item filling...")
             cursor = self.db_conn.cursor()
 
             # 현재 세션에서 item이 NULL인 레코드 찾기
@@ -1618,11 +1618,11 @@ class BestBuyDetailCrawler:
             empty_items = cursor.fetchall()
 
             if not empty_items:
-                print("[OK] 빈 item 없음")
+                print("[OK] empty item none")
                 cursor.close()
                 return
 
-            print(f"[INFO] 빈 item {len(empty_items)}개 발견")
+            print(f"[INFO] empty item {len(empty_items)}items found")
 
             updated_count = 0
             for record_id, product_name in empty_items:
@@ -1651,23 +1651,23 @@ class BestBuyDetailCrawler:
             self.db_conn.commit()
             cursor.close()
 
-            print(f"[OK] {updated_count}/{len(empty_items)}개 item 채움 완료")
+            print(f"[OK] {updated_count}/{len(empty_items)}items item filled complete")
             return True
 
         except Exception as e:
-            print(f"[ERROR] item 채우기 실패: {e}")
+            print(f"[ERROR] item fill failed: {e}")
             import traceback
             traceback.print_exc()
             return False
 
     def run(self):
-        """메인 실행"""
+        """메인 execution"""
         try:
             print("="*80)
             print(f"Best Buy TV Detail Page Crawler (Modified v1) (Batch ID: {self.batch_id})")
             print("="*80)
 
-            # DB 연결
+            # DB connection
             if not self.connect_db():
                 return
 
@@ -1681,23 +1681,23 @@ class BestBuyDetailCrawler:
             if not self.setup_driver():
                 return
 
-            # 각 URL 크롤링
+            # 각 URL crawling
             success_count = 0
             for url_data in urls:
                 if self.scrape_detail_page(url_data):
                     success_count += 1
 
-                # 페이지 간 딜레이
+                # page 간 딜레이
                 time.sleep(random.uniform(3, 5))
 
             print("\n" + "="*80)
-            print(f"크롤링 완료! 성공: {success_count}/{len(urls)}개")
+            print(f"crawling complete! successful: {success_count}/{len(urls)}items")
             print("="*80)
 
-            # 빈 item 채우기
+            # empty item fill
             self.fill_missing_items()
 
-            # 데이터 검증 요약 출력
+            # data 검증 요약 출력
             summary = self.validator.get_summary()
             if summary['total'] > 0:
                 print("\n" + "="*80)
@@ -1713,17 +1713,17 @@ class BestBuyDetailCrawler:
                 print("\n[OK] No data quality issues detected")
 
         except Exception as e:
-            print(f"[ERROR] 크롤러 실행 오류: {e}")
+            print(f"[ERROR] crawler execution error: {e}")
             import traceback
             traceback.print_exc()
 
         finally:
             if self.driver:
                 self.driver.quit()
-                print("\n[INFO] 드라이버 종료")
+                print("\n[INFO] Driver closed")
             if self.db_conn:
                 self.db_conn.close()
-                print("[INFO] DB 연결 종료")
+                print("[INFO] DB connection closed")
 
 def main():
     crawler = BestBuyDetailCrawler()

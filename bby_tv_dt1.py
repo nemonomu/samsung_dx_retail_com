@@ -226,8 +226,7 @@ class BestBuyDetailCrawler:
             # 3. bby_tv_promotion_crawl에서 해당 batch의 URLs와 데이터 가져오기
             if promo_batch_id:
                 cursor.execute("""
-                    SELECT DISTINCT product_url, final_sku_price, original_sku_price, offer, savings,
-                           promotion_type, promotion_rank
+                    SELECT DISTINCT product_url, offer, promotion_type, promotion_rank
                     FROM bby_tv_pmt1
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
@@ -238,17 +237,17 @@ class BestBuyDetailCrawler:
                     url = row[0]
                     if url in url_data_map:
                         # URL already exists - just add promotion_rank and promotion_type
-                        url_data_map[url]['promotion_rank'] = row[6]
-                        url_data_map[url]['promotion_type'] = row[5]
+                        url_data_map[url]['promotion_rank'] = row[3]
+                        url_data_map[url]['promotion_type'] = row[2]
                     else:
                         # New URL from promotion
                         url_data_map[url] = {
                             'page_type': 'promotion',
                             'product_url': url,
-                            'final_sku_price': row[1],
-                            'savings': row[4],
-                            'original_sku_price': row[2],
-                            'offer': row[3],
+                            'final_sku_price': None,
+                            'savings': None,
+                            'original_sku_price': None,
+                            'offer': row[1],
                             'pick_up_availability': None,
                             'shipping_availability': None,
                             'delivery_availability': None,
@@ -257,8 +256,8 @@ class BestBuyDetailCrawler:
                             'main_rank': None,
                             'bsr_rank': None,
                             'trend_rank': None,
-                            'promotion_rank': row[6],
-                            'promotion_type': row[5]
+                            'promotion_rank': row[3],
+                            'promotion_type': row[2]
                         }
                 print(f"[OK] Promotion URLs (batch {promo_batch_id}): {len(promo_urls)}개")
 

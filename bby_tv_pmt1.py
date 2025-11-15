@@ -10,8 +10,7 @@ https://www.bestbuy.com/site/all-tv-home-theater-on-sale/tvs-on-sale/pcmcat17206
 
 수집 데이터:
 - page_type, retailer_sku_name, promotion_rank (섹션 내 1-6)
-- final_sku_price, original_sku_price, offer, savings
-- promotion_type (동적 추출), product_url
+- offer, promotion_type (동적 추출), product_url
 - crawl_datetime, calendar_week, batch_id
 
 견고성:
@@ -267,31 +266,6 @@ class BestBuyPromotionCrawler:
             return match.group(0)
         return None
 
-    def validate_savings(self, final_price, original_price, savings):
-        """Savings 검증: original - final = savings"""
-        try:
-            if not final_price or not original_price or not savings:
-                return True  # 값이 없으면 검증 스킵
-
-            # 숫자로 변환 ($, 콤마 제거)
-            final = float(final_price.replace(',', '').replace('$', ''))
-            original = float(original_price.replace(',', '').replace('$', ''))
-            saving = float(savings.replace(',', '').replace('$', ''))
-
-            # 계산된 savings
-            calculated = original - final
-
-            # 소수점 2자리까지 비교
-            if abs(calculated - saving) < 0.01:
-                return True
-            else:
-                print(f"    [WARNING] Savings 불일치: original({original}) - final({final}) = {calculated}, but savings = {saving}")
-                return False
-
-        except Exception as e:
-            print(f"    [ERROR] Savings 검증 실패: {e}")
-            return False
-
     def extract_products(self):
         """제품 정보 추출 (3개 섹션, 최대 18개 SKU)"""
         try:
@@ -382,36 +356,6 @@ class BestBuyPromotionCrawler:
                                         product_url = f"https://www.bestbuy.com{product_url}"
                                     break
 
-                            # final_sku_price 추출
-                            final_price_xpaths = [
-                                './/div[@id="top-deal-customer-price"]',
-                                './/div[@data-testid="top-deal-customer-price"]'
-                            ]
-                            final_price = None
-                            for xpath in final_price_xpaths:
-                                elem = item.xpath(xpath)
-                                if elem:
-                                    price_text = elem[0].text_content().strip()
-                                    final_price = self.extract_price_from_text(price_text)
-                                    if final_price:
-                                        final_price = f"${final_price}"
-                                    break
-
-                            # original_sku_price 추출
-                            original_price_xpaths = [
-                                './/div[@id="top-deal-regular-price"]',
-                                './/div[@data-testid="top-deal-regular-price"]'
-                            ]
-                            original_price = None
-                            for xpath in original_price_xpaths:
-                                elem = item.xpath(xpath)
-                                if elem:
-                                    price_text = elem[0].text_content().strip()
-                                    original_price = self.extract_price_from_text(price_text)
-                                    if original_price:
-                                        original_price = f"${original_price}"
-                                    break
-
                             # offer 추출 (숫자만)
                             offer_xpaths = [
                                 './/button[@id="offer-link"]//div',
@@ -428,43 +372,18 @@ class BestBuyPromotionCrawler:
                                         offer = match.group(1)
                                     break
 
-                            # savings 추출
-                            savings_xpaths = [
-                                './/div[@id="top-deal-buck-total-savings"]',
-                                './/div[@data-testid="top-deal-buck-total-savings"]'
-                            ]
-                            savings = None
-                            for xpath in savings_xpaths:
-                                elem = item.xpath(xpath)
-                                if elem:
-                                    savings_text = elem[0].text_content().strip()
-                                    # 숫자만 추출하고 $ 붙이기 (예: "$55 off" -> "$55")
-                                    savings = self.extract_price_from_text(savings_text)
-                                    if savings:
-                                        savings = f"${savings}"
-                                    break
-
-                            # savings 검증
-                            if final_price and original_price and savings:
-                                is_valid = self.validate_savings(final_price, original_price, savings)
-                                if not is_valid:
-                                    print(f"    [INFO] Savings 검증 실패했지만 계속 진행")
-
                             if product_name and product_url:
                                 product = {
                                     'page_type': 'Top deals',
                                     'retailer_sku_name': product_name,
                                     'promotion_rank': promotion_rank,
-                                    'final_sku_price': final_price,
-                                    'original_sku_price': original_price,
                                     'offer': offer,
-                                    'savings': savings,
                                     'promotion_type': promotion_type,
                                     'product_url': product_url
                                 }
                                 all_products.append(product)
                                 print(f"  [S{section_idx}-{promotion_rank}] {product_name[:50]}...")
-                                print(f"      Price: {final_price} (Was: {original_price}, Save: {savings}, Offers: {offer})")
+                                print(f"      Offers: {offer}")
                                 print(f"      URL: {product_url[:80]}...")
 
                         except Exception as e:
@@ -507,9 +426,9 @@ class BestBuyPromotionCrawler:
             # 데이터 삽입
             insert_query = """
                 INSERT INTO bby_tv_pmt1
-                (account_name, page_type, retailer_sku_name, promotion_rank, final_sku_price, original_sku_price, offer, savings,
+                (account_name, page_type, retailer_sku_name, promotion_rank, offer,
                  promotion_type, product_url, crawl_datetime, calendar_week, batch_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
 
             success_count = 0
@@ -520,10 +439,7 @@ class BestBuyPromotionCrawler:
                         product['page_type'],
                         product['retailer_sku_name'],
                         product['promotion_rank'],
-                        product['final_sku_price'],
-                        product['original_sku_price'],
                         product['offer'],
-                        product['savings'],
                         product['promotion_type'],
                         product['product_url'],
                         crawl_datetime,

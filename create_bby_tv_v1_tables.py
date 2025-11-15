@@ -68,10 +68,7 @@ def create_tables():
                 page_type VARCHAR(50),
                 retailer_sku_name TEXT,
                 promotion_rank INTEGER,
-                final_sku_price VARCHAR(50),
-                original_sku_price VARCHAR(50),
                 offer VARCHAR(50),
-                savings VARCHAR(50),
                 promotion_type TEXT,
                 product_url TEXT,
                 crawl_datetime VARCHAR(50),
@@ -131,7 +128,7 @@ def create_tables():
         print("\nCreated tables:")
         print("  1. bby_tv_main1 (13 columns)")
         print("  2. bby_tv_bsr1 (13 columns)")
-        print("  3. bby_tv_pmt1 (14 columns)")
+        print("  3. bby_tv_pmt1 (10 columns)")
         print("  4. bby_tv_crawl (30 columns)")
 
     except Exception as e:

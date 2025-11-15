@@ -12,7 +12,7 @@ https://www.bestbuy.com/site/all-tv-home-theater-on-sale/tvs-on-sale/pcmcat17206
 - page_type, retailer_sku_name, promotion_rank (섹션 내 1-6)
 - final_sku_price, original_sku_price, offer, savings
 - promotion_type (동적 추출), product_url
-- crawl_strdatetime, calendar_week, batch_id
+- crawl_datetime, calendar_week, batch_id
 
 견고성:
 - facet 섹션 자동 제외
@@ -497,38 +497,18 @@ class BestBuyPromotionCrawler:
         try:
             cursor = self.db_conn.cursor()
 
-            # 테이블 존재 확인 및 생성 (새로운 컬럼 순서로)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS bby_tv_pmt1 (
-                    id SERIAL PRIMARY KEY,
-                    account_name VARCHAR(50),
-                    page_type VARCHAR(50),
-                    retailer_sku_name TEXT,
-                    promotion_rank INTEGER,
-                    final_sku_price VARCHAR(50),
-                    original_sku_price VARCHAR(50),
-                    offer VARCHAR(50),
-                    savings VARCHAR(50),
-                    promotion_type TEXT,
-                    product_url TEXT,
-                    crawl_strdatetime VARCHAR(20),
-                    calendar_week VARCHAR(10),
-                    batch_id VARCHAR(50)
-                )
-            """)
-
             # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
 
-            # Calculate crawl_strdatetime (format: YYYYMMDDHHMISS + microseconds 4 digits)
+            # Calculate crawl_datetime (format: YYYY-MM-DD HH:MM:SS)
             now = datetime.now()
-            crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + now.strftime('%f')[:4]
+            crawl_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
 
             # 데이터 삽입
             insert_query = """
                 INSERT INTO bby_tv_pmt1
                 (account_name, page_type, retailer_sku_name, promotion_rank, final_sku_price, original_sku_price, offer, savings,
-                 promotion_type, product_url, crawl_strdatetime, calendar_week, batch_id)
+                 promotion_type, product_url, crawl_datetime, calendar_week, batch_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
 
@@ -546,7 +526,7 @@ class BestBuyPromotionCrawler:
                         product['savings'],
                         product['promotion_type'],
                         product['product_url'],
-                        crawl_strdatetime,
+                        crawl_datetime,
                         calendar_week,
                         self.batch_id
                     ))

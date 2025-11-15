@@ -334,18 +334,18 @@ class BestBuyBSRCrawler:
             # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
 
-            # Calculate crawl_strdatetime (format: YYYYMMDDHHMISS + microseconds 4 digits)
+            # Calculate crawl_datetime (format: YYYY-MM-DD HH:MM:SS)
             now = datetime.now()
-            crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + now.strftime('%f')[:4]
+            crawl_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
 
             cursor.execute("""
                 INSERT INTO bby_tv_bsr1
                 (account_name, batch_id, page_type, bsr_rank, retailer_sku_name,
                  Offer, Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
-                 SKU_Status, Product_url, crawl_strdatetime, calendar_week)
+                 SKU_Status, Product_url, crawl_datetime, calendar_week)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, ('Bestbuy', self.batch_id, page_type, bsr_rank, retailer_sku_name,
-                  offer, pickup, shipping, delivery, sku_status, product_url, crawl_strdatetime, calendar_week))
+                  offer, pickup, shipping, delivery, sku_status, product_url, crawl_datetime, calendar_week))
 
             self.db_conn.commit()
             cursor.close()
@@ -367,33 +367,6 @@ class BestBuyBSRCrawler:
             # Connect to database
             if not self.connect_db():
                 return
-
-            # Create table if not exists (copy structure from bby_tv_bsr_crawl)
-            try:
-                cursor = self.db_conn.cursor()
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS bby_tv_bsr1 (
-                        id SERIAL PRIMARY KEY,
-                        account_name VARCHAR(50),
-                        batch_id VARCHAR(50),
-                        page_type VARCHAR(50),
-                        bsr_rank INTEGER,
-                        retailer_sku_name TEXT,
-                        Offer VARCHAR(50),
-                        Pick_Up_Availability TEXT,
-                        Shipping_Availability TEXT,
-                        Delivery_Availability TEXT,
-                        SKU_Status VARCHAR(50),
-                        Product_url TEXT,
-                        crawl_strdatetime VARCHAR(50),
-                        calendar_week VARCHAR(10)
-                    )
-                """)
-                self.db_conn.commit()
-                cursor.close()
-                print("[OK] Table created/verified (bby_tv_bsr1)")
-            except Exception as e:
-                print(f"[WARNING] Could not create table: {e}")
 
             # Load page URLs
             page_urls = self.load_page_urls()

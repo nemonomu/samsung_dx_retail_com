@@ -282,6 +282,9 @@ class BestBuyBSRCrawler:
                     status_elem = container.xpath('.//div[@class="sponsored"]')
                     sku_status = "Sponsored" if status_elem else None
 
+                    # Validate data quality
+                    self.validator.validate_item(product_name, product_url, 'bby_tv_bsr1')
+
                     # Save to database
                     # 저장 성공 시에만 total_collected 증가
                     if self.save_to_db(

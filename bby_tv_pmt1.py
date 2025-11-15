@@ -379,6 +379,9 @@ class BestBuyPromotionCrawler:
                                     break
 
                             if product_name and product_url:
+                                # Validate data quality
+                                self.validator.validate_item(product_name, product_url, 'bby_tv_pmt1')
+
                                 product = {
                                     'page_type': 'Top deals',
                                     'retailer_sku_name': product_name,

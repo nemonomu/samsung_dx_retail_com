@@ -882,7 +882,7 @@ class AmazonDetailCrawler:
                 (account_name, batch_id, page_type, product_url, Retailer_SKU_Name, Star_Rating,
                  SKU_Popularity, Retailer_Membership_Discounts, item,
                  Rank_1, Rank_2, screen_size, count_of_reviews, Count_of_Star_Ratings,
-                 Summarized_Review_Content, Detailed_Review_Content, calendar_week, crawl_strdatetime,
+                 Summarized_Review_Content, Detailed_Review_Content, calendar_week, crawl_datetime,
                  main_rank, bsr_rank, final_sku_price, original_sku_price)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (

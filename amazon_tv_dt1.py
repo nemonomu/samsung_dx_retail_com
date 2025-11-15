@@ -689,17 +689,47 @@ class AmazonDetailCrawler:
             membership_discount_raw = self.extract_text_safe(tree, self.xpaths.get('membership_discount'))
             membership_discount = self.clean_membership_discount(membership_discount_raw)
 
-            # Item (formerly Samsung_SKU_Name) - try multiple approaches
-            item = self.extract_text_safe(tree, self.xpaths.get('samsung_sku_name'))
+            # Item (formerly Samsung_SKU_Name) - Priority: SKU number > Model Number
+            # Priority 1: SKU number (Technical Details 새 구조)
+            sku_number_xpaths = [
+                '//td[p/strong[text()="SKU number"]]/following-sibling::td/p',
+                '//td[.//strong[contains(text(), "SKU number")]]/following-sibling::td',
+                '//tr[td//strong[contains(text(), "SKU number")]]/td[2]/p',
+                '//tr[td//strong[contains(text(), "SKU number")]]/td[2]'
+            ]
+
+            # Priority 2: Model Number (기존 구조)
+            model_number_xpaths = [
+                '//th[contains(text(), "Model Number")]/following-sibling::td',
+                '//*[@id="productDetails_expanderTables_depthRightSections"]//th[contains(text(), "Model Number")]/following-sibling::td',
+                '//td[p/strong[text()="Model Number"]]/following-sibling::td/p',
+                '//td[.//strong[contains(text(), "Model Number")]]/following-sibling::td'
+            ]
+
+            item = None
+
+            # Try SKU number first (Priority 1)
+            for xpath in sku_number_xpaths:
+                if xpath:
+                    extracted = self.extract_text_safe(tree, xpath)
+                    if extracted and len(extracted) > 0:
+                        item = extracted.strip()
+                        print(f"  [OK] Extracted item from 'SKU number': {item}")
+                        break
+
+            # If SKU number not found, try Model Number (Priority 2)
             if not item:
-                # Find by th text "Model Number" in Item details section
-                item = self.extract_text_safe(tree, '//th[contains(text(), "Model Number")]/following-sibling::td')
+                for xpath in model_number_xpaths:
+                    if xpath:
+                        extracted = self.extract_text_safe(tree, xpath)
+                        if extracted and len(extracted) > 0:
+                            item = extracted.strip()
+                            print(f"  [OK] Extracted item from 'Model Number': {item}")
+                            break
+
+            # If still not found, log warning
             if not item:
-                # Try fixed XPath for Item details section
-                item = self.extract_text_safe(tree, '//*[@id="productDetails_expanderTables_depthRightSections"]//th[contains(text(), "Model Number")]/following-sibling::td')
-            if not item:
-                # Old fallback XPath for different page structure
-                item = self.extract_text_safe(tree, '//*[@id="detailBullets_feature_div"]/ul/li[2]/span/span[2]')
+                print(f"  [WARNING] Could not extract item (SKU/Model Number)")
 
             # Ranks - try multiple approaches
             rank_1_raw = self.extract_text_safe(tree, self.xpaths.get('rank_1'))

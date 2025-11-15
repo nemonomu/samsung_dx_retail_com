@@ -48,7 +48,8 @@ def run_crawler(script_name, stage_name):
             capture_output=True,
             text=True,
             encoding='utf-8',
-            errors='replace'
+            errors='replace',
+            timeout=3600  # 1 hour timeout
         )
 
         # Print the output in real-time style
@@ -68,6 +69,11 @@ def run_crawler(script_name, stage_name):
             print(f"[INFO] Elapsed time: {elapsed_time:.1f} seconds")
             return False
 
+    except subprocess.TimeoutExpired:
+        elapsed_time = time.time() - start_time
+        print(f"\n[ERROR] {stage_name} timed out after 1 hour")
+        print(f"[INFO] Elapsed time: {elapsed_time:.1f} seconds")
+        return False
     except Exception as e:
         elapsed_time = time.time() - start_time
         print(f"\n[ERROR] {stage_name} failed with exception: {e}")
@@ -106,8 +112,14 @@ def create_failure_log(failed_stages):
 
 def main():
     """Main execution function"""
+    # Generate batch_id and session_start_time for consistency
+    batch_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+    session_start_time = datetime.now().strftime('%Y%m%d%H%M')
+
     print_separator()
     print("Amazon TV Crawler - Integrated Sequential Execution")
+    print(f"Batch ID: {batch_id}")
+    print(f"Session ID: {session_start_time}")
     print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print_separator()
 

@@ -1347,7 +1347,7 @@ class WalmartDetailCrawler:
                  Number_of_ppl_purchased_yesterday, Number_of_ppl_added_to_carts,
                  SKU_Popularity, Savings, Discount_Type, Shipping_Info,
                  Count_of_Star_Ratings, Retailer_SKU_Name_similar, Detailed_Review_Content,
-                 calendar_week, crawl_strdatetime,
+                 calendar_week, crawl_datetime,
                  final_sku_price, original_sku_price, pick_up_availability,
                  shipping_availability, delivery_availability, sku_status,
                  retailer_membership_discounts, available_quantity_for_purchase,

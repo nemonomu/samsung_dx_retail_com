@@ -1297,9 +1297,13 @@ class BestBuyDetailCrawler:
             self.order += 1
             page_type = url_data['page_type']
             product_url = url_data['product_url']
-            print(f"\n[{self.order}] [{page_type}] {product_url[:80]}...")
+
+            print(f"\n{'='*80}")
+            print(f"[{self.order}] [{page_type.upper()}] Accessing: {product_url[:80]}...")
+            print(f"[INFO] Page type: {page_type} | Main rank: {url_data.get('main_rank', 'N/A')} | BSR rank: {url_data.get('bsr_rank', 'N/A')}")
 
             # page 접속
+            print(f"  [INFO] Loading page...")
             self.driver.get(product_url)
 
             # ADDED: 핵심 element load wait (최대 20sec)
@@ -1458,6 +1462,10 @@ class BestBuyDetailCrawler:
                    bsr_rank, main_rank):
         """DB에 save"""
         try:
+            print(f"  [DB] Saving to database...")
+            print(f"       Product: {retailer_sku_name[:60] if retailer_sku_name else 'N/A'}...")
+            print(f"       Item (SKU): {item if item else 'N/A'}")
+
             cursor = self.db_conn.cursor()
 
             # Calculate calendar week
@@ -1588,13 +1596,18 @@ class BestBuyDetailCrawler:
             ))
 
             cursor.close()
-            print(f"  [✓] DB save complete (bby_tv_crawl + tv_retail_com)")
+            print(f"  [DB] ✓ Successfully saved to bby_tv_crawl + tv_retail_com")
             return True
 
         except Exception as e:
-            print(f"  [ERROR] DB save failed: {e}")
-            import traceback
-            traceback.print_exc()
+            # 모든 에러를 명확하게 출력 (중복 키 포함)
+            if 'duplicate key' in str(e):
+                print(f"  [WARNING] Duplicate key - product already exists in DB")
+                print(f"            URL: {product_url[:80] if product_url else 'N/A'}...")
+            else:
+                print(f"  [ERROR] DB save failed: {e}")
+                import traceback
+                traceback.print_exc()
             return False
 
     def fill_missing_items(self):

@@ -1175,8 +1175,9 @@ class WalmartDetailCrawler:
             available_quantity_for_purchase = url_data.get('available_quantity_for_purchase')
             inventory_status = url_data.get('inventory_status')
 
-            rank_display = f"Main:{main_rank}" if main_rank else f"BSR:{bsr_rank}"
-            print(f"\n[{page_type.upper()}][{rank_display}] Accessing: {url[:80]}...")
+            print(f"\n{'='*80}")
+            print(f"[{page_type.upper()}] Accessing: {url[:80]}...")
+            print(f"[INFO] Page type: {page_type} | Main rank: {main_rank if main_rank else 'N/A'} | BSR rank: {bsr_rank if bsr_rank else 'N/A'}")
 
             # Check if window is still alive, restart if crashed
             try:
@@ -1190,8 +1191,11 @@ class WalmartDetailCrawler:
                 self.setup_driver()
                 print(f"  [OK] Driver restarted successfully")
 
+            print(f"  [INFO] Loading page...")
             self.driver.get(url)
             time.sleep(random.uniform(4, 6))
+
+            print(f"  [INFO] Page loaded, extracting data...")
 
             page_source = self.driver.page_source
             tree = html.fromstring(page_source)
@@ -1320,6 +1324,10 @@ class WalmartDetailCrawler:
         """Save collected data to database"""
         cursor = None
         try:
+            print(f"  [DB] Saving to database...")
+            print(f"       Product: {data.get('Retailer_SKU_Name', 'N/A')[:60]}...")
+            print(f"       Item (SKU): {data.get('item', 'N/A')}")
+
             # Temporarily disable autocommit for transaction
             self.db_conn.autocommit = False
 
@@ -1464,6 +1472,8 @@ class WalmartDetailCrawler:
             # Re-enable autocommit
             self.db_conn.autocommit = True
 
+            print(f"  [DB] ✓ Successfully saved to Walmart_tv_detail_crawled + tv_retail_com")
+
             return True
 
         except Exception as e:
@@ -1482,8 +1492,14 @@ class WalmartDetailCrawler:
             # Re-enable autocommit
             self.db_conn.autocommit = True
 
-            if 'duplicate key' not in str(e):
-                print(f"[ERROR] Failed to save to DB: {e}")
+            # 모든 에러를 명확하게 출력 (중복 키 포함)
+            if 'duplicate key' in str(e):
+                print(f"  [WARNING] Duplicate key - product already exists in DB")
+                print(f"            URL: {data.get('product_url', 'N/A')[:80]}...")
+            else:
+                print(f"  [ERROR] Failed to save to DB: {e}")
+                import traceback
+                traceback.print_exc()
 
             return False
 

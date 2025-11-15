@@ -653,10 +653,14 @@ class AmazonDetailCrawler:
             page_type = url_data['page_type']
             url = url_data['url']
 
-            print(f"\n[{page_type.upper()}] Accessing: {url[:80]}...")
+            print(f"\n{'='*80}")
+            print(f"[{page_type.upper()}] Accessing: {url[:80]}...")
+            print(f"[INFO] Page type: {page_type} | Main rank: {url_data.get('main_rank', 'N/A')} | BSR rank: {url_data.get('bsr_rank', 'N/A')}")
 
             self.driver.get(url)
             time.sleep(random.uniform(3, 5))
+
+            print(f"  [INFO] Page loaded, extracting data...")
 
             # Click "Item details" section to expand it (needed for item, rank_1, rank_2)
             try:
@@ -690,12 +694,24 @@ class AmazonDetailCrawler:
             membership_discount = self.clean_membership_discount(membership_discount_raw)
 
             # Item (formerly Samsung_SKU_Name) - Priority: SKU number > Model Number
-            # Priority 1: SKU number (Technical Details 새 구조)
+            # Priority 1: SKU number (Technical Details container - multiple structures)
             sku_number_xpaths = [
+                # Highest priority: Technical Details container (div[@id="tech"])
+                '//div[@id="tech"]//td[p/strong[text()="SKU number"]]/following-sibling::td/p',
+                '//div[@id="tech"]//td[.//strong[contains(text(), "SKU number")]]/following-sibling::td',
+                '//div[@id="tech"]//tr[td//strong[contains(text(), "SKU number")]]/td[2]/p',
+                '//div[@id="tech"]//tr[td//strong[contains(text(), "SKU number")]]/td[2]',
+
+                # Fallback: General table structure (any location)
                 '//td[p/strong[text()="SKU number"]]/following-sibling::td/p',
                 '//td[.//strong[contains(text(), "SKU number")]]/following-sibling::td',
                 '//tr[td//strong[contains(text(), "SKU number")]]/td[2]/p',
-                '//tr[td//strong[contains(text(), "SKU number")]]/td[2]'
+                '//tr[td//strong[contains(text(), "SKU number")]]/td[2]',
+
+                # Additional fallbacks for robust extraction
+                '//table[@class="a-bordered"]//td[p/strong[text()="SKU number"]]/following-sibling::td/p',
+                '//strong[text()="SKU number"]/ancestor::td/following-sibling::td/p',
+                '//strong[contains(text(), "SKU number")]/ancestor::td/following-sibling::td'
             ]
 
             # Priority 2: Model Number (기존 구조)
@@ -844,6 +860,10 @@ class AmazonDetailCrawler:
         """Save collected data to database"""
         cursor = None
         try:
+            print(f"  [DB] Saving to database...")
+            print(f"       Product: {data.get('Retailer_SKU_Name', 'N/A')[:60]}...")
+            print(f"       Item (SKU): {data.get('item', 'N/A')}")
+
             # Temporarily disable autocommit for transaction
             self.db_conn.autocommit = False
 
@@ -976,6 +996,8 @@ class AmazonDetailCrawler:
             # Re-enable autocommit
             self.db_conn.autocommit = True
 
+            print(f"  [DB] ✓ Successfully saved to amazon_tv_detail_crawled + tv_retail_com")
+
             return True
 
         except Exception as e:
@@ -994,8 +1016,14 @@ class AmazonDetailCrawler:
             # Re-enable autocommit
             self.db_conn.autocommit = True
 
-            if 'duplicate key' not in str(e):
-                print(f"[ERROR] Failed to save to DB: {e}")
+            # 모든 에러를 명확하게 출력 (중복 키 포함)
+            if 'duplicate key' in str(e):
+                print(f"  [WARNING] Duplicate key - product already exists in DB")
+                print(f"            URL: {data.get('product_url', 'N/A')[:80]}...")
+            else:
+                print(f"  [ERROR] Failed to save to DB: {e}")
+                import traceback
+                traceback.print_exc()
 
             return False
 

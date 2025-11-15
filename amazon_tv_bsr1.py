@@ -255,6 +255,43 @@ class AmazonBSRCrawler:
 
         return True
 
+    def check_and_handle_sorry_page(self, max_retries=3):
+        """Check for sorry/robot check page and refresh if needed
+
+        Returns:
+            bool: True if page is OK, False if still sorry page after retries
+        """
+        for attempt in range(max_retries):
+            page_source = self.driver.page_source.lower()
+            title = self.driver.title.lower()
+
+            # Check for sorry/robot check page (check first 2000 chars for performance)
+            is_sorry_page = (
+                'sorry' in title or
+                'robot check' in title or
+                'sorry' in page_source[:2000] or
+                'robot check' in page_source[:2000]
+            )
+
+            if is_sorry_page:
+                print(f"  [WARNING] Sorry/Robot check page detected (attempt {attempt + 1}/{max_retries})")
+                if attempt < max_retries - 1:
+                    print(f"  [INFO] Refreshing page in 3-5 seconds...")
+                    time.sleep(random.uniform(3, 5))  # Wait before refresh
+                    self.driver.refresh()
+                    print(f"  [INFO] Page refreshed, waiting for load...")
+                    time.sleep(random.uniform(4, 6))  # Wait after refresh
+                    continue
+                else:
+                    print(f"  [ERROR] Still sorry page after {max_retries} retries, skipping this page...")
+                    return False
+            else:
+                if attempt > 0:
+                    print(f"  [OK] Page loaded successfully after {attempt} refresh(es)")
+                return True  # Page is OK
+
+        return False
+
     def scrape_page(self, url, page_number):
         """Scrape a single BSR page"""
         try:
@@ -264,6 +301,11 @@ class AmazonBSRCrawler:
             # Wait longer for initial page load
             print("[INFO] Waiting for page to load...")
             time.sleep(random.uniform(8, 12))
+
+            # Check and handle sorry page with refresh retries
+            if not self.check_and_handle_sorry_page(max_retries=3):
+                print(f"[SKIP] Skipping page {page_number} due to persistent sorry/robot check page")
+                return False
 
             # Check for throttling and handle it
             if not self.check_and_handle_throttling(page_number, url):

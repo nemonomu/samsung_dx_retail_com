@@ -23,6 +23,7 @@ v1 수정사항:
 import time
 import random
 import re
+import os
 import psycopg2
 from datetime import datetime
 import pytz
@@ -34,6 +35,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from lxml import html
+from data_validator import DataValidator
 
 # Import database configuration
 from config import DB_CONFIG
@@ -45,6 +47,10 @@ class BestBuyTVCrawler:
         self.db_conn = None
         self.total_collected = 0
         self.error_messages = []
+
+        # Data validator 초기화
+        session_start_time = os.environ.get('SESSION_START_TIME', datetime.now().strftime('%Y%m%d%H%M'))
+        self.validator = DataValidator(session_start_time)
         self.korea_tz = pytz.timezone('Asia/Seoul')
         self.batch_id = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
 
@@ -398,6 +404,21 @@ class BestBuyTVCrawler:
                 print("\nErrors encountered:")
                 for error in self.error_messages:
                     print(f"  - {error}")
+
+            # 데이터 검증 요약 출력
+            summary = self.validator.get_summary()
+            if summary['total'] > 0:
+                print("\n" + "="*80)
+                print("DATA VALIDATION SUMMARY")
+                print("="*80)
+                print(f"Total Issues Detected: {summary['total']}")
+                for issue_type, count in sorted(summary['by_type'].items()):
+                    print(f"  {issue_type}: {count}")
+                print(f"\nLog file: C:\\samsung_dx_retail_com\\problems\\{self.validator.session_start_time}.txt")
+                print("="*80)
+                self.validator.write_summary()
+            else:
+                print("\n[OK] No data quality issues detected")
 
         except Exception as e:
             print(f"[ERROR] Crawler failed: {e}")

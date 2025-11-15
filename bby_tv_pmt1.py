@@ -24,6 +24,7 @@ https://www.bestbuy.com/site/all-tv-home-theater-on-sale/tvs-on-sale/pcmcat17206
 import time
 import random
 import re
+import os
 import psycopg2
 from datetime import datetime
 import pytz
@@ -32,6 +33,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from lxml import html, etree
+from data_validator import DataValidator
 
 # Import database configuration
 from config import DB_CONFIG
@@ -43,6 +45,10 @@ class BestBuyPromotionCrawler:
         self.korea_tz = pytz.timezone('Asia/Seoul')
         self.batch_id = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
         self.url = "https://www.bestbuy.com/site/all-tv-home-theater-on-sale/tvs-on-sale/pcmcat1720647543741.c?id=pcmcat1720647543741"
+
+        # Data validator 초기화
+        session_start_time = os.environ.get('SESSION_START_TIME', datetime.now().strftime('%Y%m%d%H%M'))
+        self.validator = DataValidator(session_start_time)
 
     def connect_db(self):
         """DB 연결"""
@@ -493,6 +499,21 @@ class BestBuyPromotionCrawler:
                 print("="*80)
             else:
                 print("\n[ERROR] 수집된 제품이 없습니다.")
+
+            # 데이터 검증 요약 출력
+            summary = self.validator.get_summary()
+            if summary['total'] > 0:
+                print("\n" + "="*80)
+                print("DATA VALIDATION SUMMARY")
+                print("="*80)
+                print(f"Total Issues Detected: {summary['total']}")
+                for issue_type, count in sorted(summary['by_type'].items()):
+                    print(f"  {issue_type}: {count}")
+                print(f"\nLog file: C:\\samsung_dx_retail_com\\problems\\{self.validator.session_start_time}.txt")
+                print("="*80)
+                self.validator.write_summary()
+            else:
+                print("\n[OK] No data quality issues detected")
 
         except Exception as e:
             print(f"[ERROR] 크롤러 실행 오류: {e}")

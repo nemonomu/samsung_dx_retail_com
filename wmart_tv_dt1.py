@@ -919,30 +919,56 @@ class WalmartDetailCrawler:
                 return None
 
             # Step 3: Extract Model from the dialog
+            # Priority: Model name > Model
             page_source = self.driver.page_source
             tree = html.fromstring(page_source)
 
+            # Priority 1: Try to extract "Model name" first
+            model_name_xpaths = [
+                "//h3[text()='Model name']/following-sibling::div//span",
+                "//h3[contains(text(), 'Model name')]/following-sibling::div/div/span",
+                "//div[contains(@class, 'pb2')]//h3[text()='Model name']/following-sibling::div//span"
+            ]
+
+            # Priority 2: If "Model name" not found, try "Model"
             model_xpaths = [
                 "//h3[text()='Model']/following-sibling::div//span",
                 "//h3[contains(text(), 'Model')]/following-sibling::div/div/span",
-                "/html/body/div[2]/div/div[2]/div[1]/div/div[2]/div/div/div[7]/div/span",
                 "//div[contains(@class, 'pb2')]//h3[text()='Model']/following-sibling::div//span"
             ]
 
             model = None
-            for xpath in model_xpaths:
+
+            # Try Model name first (Priority 1)
+            for xpath in model_name_xpaths:
                 if xpath:
                     extracted = self.extract_text_safe(tree, xpath)
                     # Validate: Model should be relatively short and not contain page elements
                     if extracted and 3 < len(extracted) < 50:
                         model_lower = extracted.lower()
-                        if not any(keyword in model_lower for keyword in ['skip to main', 'sign in', 'pickup', 'delivery', 'department', 'close']):
+                        if not any(keyword in model_lower for keyword in ['skip to main', 'sign in', 'pickup', 'delivery', 'department', 'close', 'nits', '1080p', '4k', 'hz']):
                             model = extracted
                             # Remove parentheses if model is entirely wrapped: "(SC-1311)" -> "SC-1311"
                             if model.startswith('(') and model.endswith(')'):
                                 model = model[1:-1]
-                            print(f"  [OK] Extracted Model from XPath: {model}")
+                            print(f"  [OK] Extracted Model from 'Model name': {model}")
                             break
+
+            # If Model name not found, try Model (Priority 2)
+            if not model:
+                for xpath in model_xpaths:
+                    if xpath:
+                        extracted = self.extract_text_safe(tree, xpath)
+                        # Validate: Model should be relatively short and not contain page elements
+                        if extracted and 3 < len(extracted) < 50:
+                            model_lower = extracted.lower()
+                            if not any(keyword in model_lower for keyword in ['skip to main', 'sign in', 'pickup', 'delivery', 'department', 'close', 'nits', '1080p', '4k', 'hz']):
+                                model = extracted
+                                # Remove parentheses if model is entirely wrapped: "(SC-1311)" -> "SC-1311"
+                                if model.startswith('(') and model.endswith(')'):
+                                    model = model[1:-1]
+                                print(f"  [OK] Extracted Model from 'Model': {model}")
+                                break
 
             # Step 4: Close the dialog by clicking X button
             try:

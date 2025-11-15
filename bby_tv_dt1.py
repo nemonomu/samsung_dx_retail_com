@@ -524,7 +524,7 @@ class BestBuyDetailCrawler:
                     price_container = containers[0]
                     break
 
-            if not price_container:
+            if price_container is None or len(price_container) == 0:
                 print(f"  [WARNING] 가격 컨테이너를 찾을 수 없습니다")
                 return None
 
@@ -569,7 +569,7 @@ class BestBuyDetailCrawler:
                     price_container = containers[0]
                     break
 
-            if not price_container:
+            if price_container is None or len(price_container) == 0:
                 # 컨테이너 없으면 None 반환 (경고 없음 - 정상 케이스일 수 있음)
                 return None
 
@@ -615,7 +615,7 @@ class BestBuyDetailCrawler:
                     price_container = containers[0]
                     break
 
-            if not price_container:
+            if price_container is None or len(price_container) == 0:
                 # 컨테이너 없으면 None 반환
                 return None
 
@@ -1102,7 +1102,7 @@ class BestBuyDetailCrawler:
                 FROM bby_tv_detail_crawled
                 WHERE retailer_sku_name = %s
                 AND item IS NOT NULL
-                ORDER BY crawl_strdatetime DESC
+                ORDER BY crawl_datetime DESC
                 LIMIT 1
             """, (product_name,))
 
@@ -1351,7 +1351,7 @@ class BestBuyDetailCrawler:
                 INSERT INTO bby_tv_detail_crawled
                 (account_name, batch_id, page_type, "order", retailer_sku_name, item,
                  Estimated_Annual_Electricity_Use, screen_size, count_of_reviews, Count_of_Star_Ratings, Top_Mentions,
-                 Detailed_Review_Content, Recommendation_Intent, product_url, crawl_strdatetime, calendar_week,
+                 Detailed_Review_Content, Recommendation_Intent, product_url, crawl_datetime, calendar_week,
                  final_sku_price, savings, original_sku_price, offer, pick_up_availability, shipping_availability,
                  delivery_availability, sku_status, star_rating, promotion_type, promotion_rank,
                  bsr_rank, main_rank, trend_rank)

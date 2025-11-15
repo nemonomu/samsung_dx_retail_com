@@ -47,9 +47,11 @@ class IntegratedCrawler:
         print("="*80)
 
         try:
+            # Run with real-time output (no buffering)
             result = subprocess.run(
                 [sys.executable, script_name],
-                capture_output=True,
+                stdout=None,  # Inherit parent's stdout for real-time output
+                stderr=None,  # Inherit parent's stderr
                 text=True,
                 timeout=3600  # 1 hour timeout
             )
@@ -58,7 +60,6 @@ class IntegratedCrawler:
             duration = (end_time - start_time).total_seconds()
 
             if result.returncode == 0:
-                print(result.stdout)
                 print("\n" + "-"*80)
                 print(f"[SUCCESS] {description}")
                 print(f"End Time: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -66,9 +67,7 @@ class IntegratedCrawler:
                 print("-"*80)
                 return True, duration
             else:
-                print(f"[FAILED] {description} - Exit code {result.returncode}")
-                print("STDOUT:", result.stdout)
-                print("STDERR:", result.stderr)
+                print(f"\n[FAILED] {description} - Exit code {result.returncode}")
                 print(f"Duration: {duration:.2f} seconds")
                 return False, duration
 

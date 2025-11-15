@@ -42,21 +42,17 @@ def run_crawler(script_name, stage_name):
     print(f"[INFO] Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
     try:
-        # Run the script and capture output
+        # Run the script with real-time output (no buffering)
         result = subprocess.run(
             [sys.executable, script_name],
-            capture_output=True,
+            # Remove capture_output to enable real-time streaming
+            stdout=None,  # Inherit parent's stdout
+            stderr=None,  # Inherit parent's stderr
             text=True,
             encoding='utf-8',
             errors='replace',
             timeout=3600  # 1 hour timeout
         )
-
-        # Print the output in real-time style
-        if result.stdout:
-            print(result.stdout)
-        if result.stderr:
-            print(result.stderr, file=sys.stderr)
 
         elapsed_time = time.time() - start_time
 

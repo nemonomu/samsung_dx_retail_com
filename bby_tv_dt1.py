@@ -632,11 +632,11 @@ class BestBuyDetailCrawler:
             for xpath in savings_xpaths:
                 elem = price_container.xpath(xpath)
                 if elem:
-                    text = elem[0].text_content().strip()  # "Save $60"
-                    # "$숫자" 패턴 추출 (정규식 사용)
-                    match = re.search(r'\$\d+(?:\.\d{2})?', text)
+                    text = elem[0].text_content().strip()  # "Save $1,200"
+                    # "$숫자" 패턴 추출 (콤마 포함 정규식 사용)
+                    match = re.search(r'\$[\d,]+(?:\.\d{2})?', text)
                     if match:
-                        return match.group()  # "$60" 형식 반환
+                        return match.group()  # "$1,200.00" 형식 반환
             return None  # 세일이 아니면 None
         except Exception as e:
             print(f"  [ERROR] Savings 추출 실패: {e}")

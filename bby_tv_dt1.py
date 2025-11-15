@@ -1198,7 +1198,7 @@ class BestBuyDetailCrawler:
             try:
                 wait = WebDriverWait(self.driver, 20)
                 wait.until(EC.presence_of_element_located(
-                    (By.XPATH, '//h1[@class="heading-5 v-fw-regular"]')  # 제품명
+                    (By.XPATH, '//h1[contains(@class, "h4") or contains(@class, "heading")]')  # 제품명
                 ))
                 print(f"  [OK] 페이지 로드 완료")
             except TimeoutException:

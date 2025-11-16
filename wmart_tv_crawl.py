@@ -51,7 +51,7 @@ def run_crawler(script_name, stage_name):
             text=True,
             encoding='utf-8',
             errors='replace',
-            timeout=3600  # 1 hour timeout
+            timeout=21600  # 6 hours timeout
         )
 
         elapsed_time = time.time() - start_time
@@ -67,7 +67,7 @@ def run_crawler(script_name, stage_name):
 
     except subprocess.TimeoutExpired:
         elapsed_time = time.time() - start_time
-        print(f"\n[ERROR] {stage_name} timed out after 1 hour")
+        print(f"\n[ERROR] {stage_name} timed out after 6 hours")
         print(f"[INFO] Elapsed time: {elapsed_time:.1f} seconds")
         return False
     except Exception as e:

@@ -209,7 +209,7 @@ class WalmartDetailCrawler:
             # Convert dictionary to list (maintains insertion order: main first, then bsr)
             all_urls = list(url_data_map.values())
 
-            # Count duplicates
+            # Count duplicates from source tables
             total_loaded = 0
             if main1_batch_id:
                 cursor = self.db_conn.cursor()
@@ -231,8 +231,45 @@ class WalmartDetailCrawler:
             if duplicates > 0:
                 print(f"[INFO] Found {duplicates} duplicate URLs - rank information merged")
 
-            print(f"[OK] Total unique URLs: {len(all_urls)}")
-            return all_urls
+            print(f"[OK] Total unique URLs from main1/main2/bsr: {len(all_urls)}")
+
+            # Filter out already processed URLs from today's batches
+            print("[INFO] Checking for already processed URLs (today's batches only)...")
+            cursor = self.db_conn.cursor()
+
+            # Get today's date prefix for batch_id filtering (YYYYMMDD)
+            # Note: Walmart_tv_detail_crawled doesn't have batch_id column, so we filter by crawl_datetime
+            today_start = datetime.now().strftime('%Y-%m-%d 00:00:00')
+
+            # Get all distinct processed URLs from today's batches in Walmart_tv_detail_crawled
+            cursor.execute("""
+                SELECT DISTINCT product_url
+                FROM Walmart_tv_detail_crawled
+                WHERE product_url IS NOT NULL
+                  AND crawl_datetime >= %s
+            """, (today_start,))
+
+            already_processed_urls = {row[0] for row in cursor.fetchall()}
+            cursor.close()
+
+            print(f"[INFO] Found {len(already_processed_urls)} already processed URLs in today's batches")
+
+            # Filter out already processed URLs
+            new_urls = [url_data for url_data in all_urls
+                        if url_data['url'] not in already_processed_urls]
+
+            # Summary
+            already_processed_count = len(all_urls) - len(new_urls)
+            print(f"[INFO] Already processed (skipped): {already_processed_count}")
+            print(f"[OK] New URLs to process: {len(new_urls)}")
+
+            if len(new_urls) == 0:
+                if len(all_urls) > 0:
+                    print("[WARNING] All URLs have been processed already in today's batches!")
+                else:
+                    print("[ERROR] No URLs found!")
+
+            return new_urls
 
         except Exception as e:
             print(f"[ERROR] Failed to load product URLs: {e}")

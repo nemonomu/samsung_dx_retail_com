@@ -53,7 +53,7 @@ class IntegratedCrawler:
                 stdout=None,  # Inherit parent's stdout for real-time output
                 stderr=None,  # Inherit parent's stderr
                 text=True,
-                timeout=3600  # 1 hour timeout
+                timeout=21600  # 6 hours timeout
             )
 
             end_time = datetime.now()
@@ -72,8 +72,8 @@ class IntegratedCrawler:
                 return False, duration
 
         except subprocess.TimeoutExpired:
-            print(f"[FAILED] {description} - Timed out after 1 hour")
-            return False, 3600
+            print(f"[FAILED] {description} - Timed out after 6 hours")
+            return False, 21600
         except Exception as e:
             print(f"[FAILED] {description} - Error: {e}")
             return False, 0

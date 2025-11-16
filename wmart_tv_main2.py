@@ -22,8 +22,8 @@ class WalmartTVCrawler:
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
-        self.max_skus = 300
-        self.sequential_id = 1  # ID counter for 1-300
+        self.max_skus = 9999  # No limit (dt1 will limit to 300)
+        self.sequential_id = 1  # ID counter
         self.batch_id = int(time.time())  # Batch ID for this session
 
     def connect_db(self):

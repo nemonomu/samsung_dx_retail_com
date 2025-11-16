@@ -61,6 +61,8 @@ class BestBuyDetailCrawler:
         self.korea_tz = pytz.timezone('Asia/Seoul')
         self.batch_id = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
         self.order = 0
+        self.total_collected = 0
+        self.max_skus = 300  # Maximum SKUs to collect (final limit)
 
         # Data validator sec기화
         session_start_time = os.environ.get('SESSION_START_TIME', datetime.now().strftime('%Y%m%d%H%M'))
@@ -1515,6 +1517,9 @@ class BestBuyDetailCrawler:
                 main_rank=url_data['main_rank']
             )
 
+            # Increment total collected after successful save
+            self.total_collected += 1
+
             return True
 
         except Exception as e:
@@ -1764,6 +1769,13 @@ class BestBuyDetailCrawler:
             # 각 URL crawling
             success_count = 0
             for url_data in urls:
+                # Check if we've reached the maximum SKU limit
+                if self.total_collected >= self.max_skus:
+                    print(f"\n{'='*80}")
+                    print(f"[INFO] Reached maximum SKU limit ({self.max_skus})")
+                    print(f"[INFO] Stopping collection. Total collected: {self.total_collected}")
+                    break
+
                 if self.scrape_detail_page(url_data):
                     success_count += 1
 

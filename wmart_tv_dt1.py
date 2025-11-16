@@ -27,6 +27,7 @@ class WalmartDetailCrawler:
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
+        self.max_skus = 300  # Maximum SKUs to collect (final limit)
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -1574,6 +1575,13 @@ class WalmartDetailCrawler:
 
             # Scrape each detail page
             for idx, url_data in enumerate(product_urls, 1):
+                # Check if we've reached the maximum SKU limit
+                if self.total_collected >= self.max_skus:
+                    print(f"\n{'='*80}")
+                    print(f"[INFO] Reached maximum SKU limit ({self.max_skus})")
+                    print(f"[INFO] Stopping collection. Total collected: {self.total_collected}")
+                    break
+
                 print(f"\n{'='*80}")
                 print(f"Processing {idx}/{len(product_urls)}")
 

@@ -2,6 +2,7 @@ import time
 import random
 import psycopg2
 from datetime import datetime
+import pytz
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -22,7 +23,9 @@ class WalmartTVBSRCrawler:
         self.total_collected = 0
         self.max_skus = 100  # BSR 1-100
         self.sequential_id = 1  # ID counter for 1-100
-        self.batch_id = int(time.time())  # Batch ID for this session
+        # Generate batch_id using Korea timezone
+        korea_tz = pytz.timezone('Asia/Seoul')
+        self.batch_id = datetime.now(korea_tz).strftime('%Y%m%d_%H%M%S')
 
     def connect_db(self):
         """Connect to PostgreSQL database"""

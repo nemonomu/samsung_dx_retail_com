@@ -78,10 +78,21 @@ class BestBuyTVCrawler:
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--lang=en-US,en;q=0.9')
 
+        # Performance optimization: block unnecessary resources
+        chrome_options.add_argument('--blink-settings=imagesEnabled=false')  # Disable images
+        chrome_options.add_argument('--disable-images')
+
+        # Page load strategy: eager (DOM ready, don't wait for all resources)
+        chrome_options.page_load_strategy = 'eager'
+
         prefs = {
             "profile.default_content_setting_values.notifications": 2,
             "credentials_enable_service": False,
-            "profile.password_manager_enabled": False
+            "profile.password_manager_enabled": False,
+            # Block images via prefs as well
+            "profile.managed_default_content_settings.images": 2,
+            # Disable CSS (optional - may affect element detection)
+            # "profile.managed_default_content_settings.stylesheets": 2,
         }
         chrome_options.add_experimental_option("prefs", prefs)
 
@@ -148,20 +159,20 @@ class BestBuyTVCrawler:
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
             self.driver.get(url)
 
-            print("[INFO] Waiting for page to load...")
-            time.sleep(random.uniform(5, 8))
-
-            # Wait for product list to load
+            # Wait for product list to load (optimized)
             try:
                 self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "product-list-item")))
                 print("[OK] Product list loaded")
+                # Brief wait after element appears
+                time.sleep(random.uniform(2, 3))
             except Exception as e:
                 print(f"[WARNING] Product list not found: {e}")
+                time.sleep(random.uniform(2, 3))
 
             # Aggressive scroll to trigger lazy loading of all products
             print("[INFO] Performing aggressive scroll to load all products...")
 
-            # First pass - scroll down to bottom multiple times
+            # First pass - scroll down to bottom multiple times (optimized)
             for scroll_round in range(3):
                 print(f"[DEBUG] Scroll round {scroll_round + 1}/3")
                 scroll_height = self.driver.execute_script("return document.body.scrollHeight")
@@ -171,7 +182,7 @@ class BestBuyTVCrawler:
                 while current_position < scroll_height:
                     current_position += screen_height
                     self.driver.execute_script(f"window.scrollTo(0, {current_position});")
-                    time.sleep(2)
+                    time.sleep(0.8)  # Reduced from 2 seconds
 
                     # Check if new content loaded
                     new_scroll_height = self.driver.execute_script("return document.body.scrollHeight")
@@ -181,17 +192,17 @@ class BestBuyTVCrawler:
 
                 # Scroll to absolute bottom
                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(3)
+                time.sleep(1.5)  # Reduced from 3 seconds
                 print(f"[DEBUG] Completed scroll round {scroll_round + 1}, final height: {scroll_height}")
 
-            # Scroll back to top slowly
+            # Scroll back to top
             print("[INFO] Scrolling back to top...")
             self.driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(5)
+            time.sleep(2)  # Reduced from 5 seconds
 
-            # Wait for all content to settle
+            # Wait for all content to settle (optimized)
             print("[INFO] Waiting for content to fully render...")
-            time.sleep(8)
+            time.sleep(3)  # Reduced from 8 seconds
 
             # Get page source and parse with lxml
             page_source = self.driver.page_source

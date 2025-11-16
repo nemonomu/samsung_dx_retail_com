@@ -1412,7 +1412,7 @@ class BestBuyDetailCrawler:
             if original_sku_price:  # original도 없을 수도 있음
                 self.validator.validate_price(original_sku_price, 'original_sku_price', product_url, 'bby_tv_dt1')
             self.validator.validate_count(count_of_reviews, 'count_of_reviews', product_url, 'bby_tv_dt1')
-            self.validator.validate_star_rating(star_rating_source, product_url, 'bby_tv_dt1')
+            self.validator.validate_star_rating(star_rating, product_url, 'bby_tv_dt1')
 
             # 10. Detail DB save
             self.save_to_db(

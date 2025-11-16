@@ -10,7 +10,7 @@ save table: bby_tv_crawl, bby_tv_mst
 4. 소스 table에서 13items 컬럼 추가 collected:
    - 9items data 컬럼: final_sku_price, savings, original_sku_price, offer,
      pick_up_availability, shipping_availability, delivery_availability, sku_status, star_rating
-   - 4items rank/type 컬럼: promotion_type, promotion_position, bsr_rank, main_rank
+   - 4items rank/type 컬럼: promotion_type, promotion_rank, bsr_rank, main_rank
    - first 번째 found된 URL의 data 우선 (중복 URL은 first 소스 data 사용)
    - 소스 table에 없는 컬럼은 NULL 처리
 
@@ -233,18 +233,18 @@ class BestBuyDetailCrawler:
             # 3. bby_tv_promotion_crawl에서 해당 batch의 URLs와 data 가져오기
             if promo_batch_id:
                 cursor.execute("""
-                    SELECT DISTINCT product_url, offer, promotion_type, promotion_position
+                    SELECT DISTINCT product_url, offer, promotion_type, promotion_rank
                     FROM bby_tv_pmt1
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
-                    ORDER BY promotion_position
+                    ORDER BY promotion_rank
                 """, (promo_batch_id,))
                 promo_urls = cursor.fetchall()
                 for row in promo_urls:
                     url = row[0]
                     if url in url_data_map:
                         # URL already exists - just add promotion_position and promotion_type
-                        url_data_map[url]['promotion_position'] = row[3]
+                        url_data_map[url]['promotion_position'] = row[3]  # promotion_rank -> promotion_position
                         url_data_map[url]['promotion_type'] = row[2]
                     else:
                         # New URL from promotion
@@ -262,7 +262,7 @@ class BestBuyDetailCrawler:
                             'star_rating': None,
                             'main_rank': None,
                             'bsr_rank': None,
-                            'promotion_position': row[3],
+                            'promotion_position': row[3],  # promotion_rank -> promotion_position
                             'promotion_type': row[2]
                         }
                 print(f"[OK] Promotion URLs (batch {promo_batch_id}): {len(promo_urls)} items")
@@ -299,7 +299,7 @@ class BestBuyDetailCrawler:
             #                 'main_rank': None,
             #                 'bsr_rank': None,
             #                 'trend_rank': row[1],
-            #                 'promotion_position': None,
+            #                 'promotion_rank': None,
             #                 'promotion_type': None
             #             }
             #     print(f"[OK] Trend URLs (batch {trend_batch_id}): {len(trend_urls)} items")

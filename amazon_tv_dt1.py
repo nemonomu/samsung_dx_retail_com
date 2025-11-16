@@ -449,23 +449,29 @@ class AmazonDetailCrawler:
             return None
 
     def extract_model_year(self, tree):
-        """Extract model year from item details dialog"""
+        """Extract model year from item details dialog or compare table (fallback)"""
         try:
-            # Find table row with "Model Year" header
+            # Find model year - priority order
             xpaths = [
+                # Highest priority: Technical Details - Model Year
                 '//tr[.//th[contains(text(), "Model Year")]]/td[@class="a-size-base prodDetAttrValue"]',
                 '//table[@id="productDetails_techSpec_section_1"]//tr[.//th[contains(text(), "Model Year")]]/td',
                 '//table//tr[.//th[contains(text(), "Model Year")]]/td',
-                '//*[@id="productDetails_expanderTables_depthRightSections"]//tr[.//th[contains(text(), "Model Year")]]/td'
+                '//*[@id="productDetails_expanderTables_depthRightSections"]//tr[.//th[contains(text(), "Model Year")]]/td',
+
+                # Fallback: Compare table - RELEASE YEAR (when Model Year not found)
+                '//div[@id="compare"]//tr[.//th//span[contains(text(), "RELEASE YEAR")]]//td[contains(@class, "page-asin")]//span[@class="ucc-v2-widget__table__col__container__attribute__value"]',
+                '//div[@id="compare"]//table//tr[th//span[text()="RELEASE YEAR"]]//td[contains(@class, "page-asin")]//span',
+                '//div[@id="compare"]//tr[th[contains(., "RELEASE YEAR")]]//td[contains(@class, "page-asin")]//span'
             ]
 
             for xpath in xpaths:
                 year_text = self.extract_text_safe(tree, xpath)
                 if year_text:
-                    # Clean and return (e.g., "2025" -> "2025")
+                    # Clean and return (e.g., "2025" -> "2025", "2022/2023" -> "2022/2023")
                     year_text = year_text.strip()
-                    # Validate it's a 4-digit year
-                    if re.match(r'^\d{4}$', year_text):
+                    # Validate it's a 4-digit year or year range (e.g., 2024 or 2022/2023)
+                    if re.match(r'^\d{4}(/\d{4})?$', year_text):
                         return year_text
 
             return None

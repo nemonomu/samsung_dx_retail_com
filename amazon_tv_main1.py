@@ -28,8 +28,8 @@ class AmazonTVCrawler:
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
-        self.max_skus = 300
-        self.sequential_id = 1  # ID counter for 1-300
+        self.max_skus = 400
+        self.sequential_id = 1  # ID counter for 1-400
         self.batch_id = None  # Batch ID for this crawling session
 
     def connect_db(self):
@@ -443,7 +443,7 @@ class AmazonTVCrawler:
             return True  # Continue to next page
 
     def save_to_db(self, data):
-        """Save collected data with collection order (1-300)"""
+        """Save collected data with collection order (1-400)"""
         cursor = None
         try:
             # Temporarily disable autocommit for transaction

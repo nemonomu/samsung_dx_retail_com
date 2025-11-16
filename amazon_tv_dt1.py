@@ -33,6 +33,7 @@ class AmazonDetailCrawler:
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
+        self.max_skus = 300  # Maximum SKUs to collect (final limit)
         # Generate batch_id using Korea timezone
         korea_tz = pytz.timezone('Asia/Seoul')
         self.batch_id = datetime.now(korea_tz).strftime('%Y%m%d_%H%M%S')
@@ -1164,6 +1165,13 @@ class AmazonDetailCrawler:
             print(f"[INFO] Total pages to scrape: {len(product_urls)}")
 
             for idx, url_data in enumerate(product_urls, 1):
+                # Check if we've reached the maximum SKU limit
+                if self.total_collected >= self.max_skus:
+                    print(f"\n{'='*80}")
+                    print(f"[INFO] Reached maximum SKU limit ({self.max_skus})")
+                    print(f"[INFO] Stopping collection. Total collected: {self.total_collected}")
+                    break
+
                 print(f"\n{'='*80}")
                 print(f"Processing {idx}/{len(product_urls)}")
 
@@ -1175,7 +1183,9 @@ class AmazonDetailCrawler:
                 time.sleep(delay)
 
             print("\n" + "="*80)
-            print(f"Detail Crawling completed! Total collected: {self.total_collected}/{len(product_urls)}")
+            print(f"Detail Crawling completed!")
+            print(f"Total collected: {self.total_collected} (max limit: {self.max_skus})")
+            print(f"URLs processed: {min(idx, len(product_urls))}/{len(product_urls)}")
             print("="*80)
 
         except Exception as e:

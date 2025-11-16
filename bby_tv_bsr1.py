@@ -205,16 +205,19 @@ class BestBuyBSRCrawler:
 
             # Find all product containers
             # Base container: li with class "product-list-item product-list-item-gridView"
-            containers = tree.xpath('//li[contains(@class, "product-list-item") and contains(@class, "product-list-item-gridView")]')
-            print(f"[INFO] Found {len(containers)} product containers")
+            # Filter to only include containers with actual product links
+            all_containers = tree.xpath('//li[contains(@class, "product-list-item") and contains(@class, "product-list-item-gridView")]')
+
+            # Filter containers that have product links (more reliable)
+            containers = [c for c in all_containers if c.xpath('.//a[@class="product-list-item-link"]')]
+            print(f"[INFO] Found {len(all_containers)} total containers, {len(containers)} with product links")
 
             collected_count = 0
 
-            # Save HTML for debugging if first page
-            if page_number == 1:
-                with open(f'bestbuy_page_{page_number}_debug.html', 'w', encoding='utf-8') as f:
-                    f.write(page_source)
-                print(f"[DEBUG] Saved page source to bestbuy_page_{page_number}_debug.html")
+            # Save HTML for debugging (all pages for troubleshooting)
+            with open(f'bestbuy_bsr_page_{page_number}_debug.html', 'w', encoding='utf-8') as f:
+                f.write(page_source)
+            print(f"[DEBUG] Saved page source to bestbuy_bsr_page_{page_number}_debug.html")
 
             for idx, container in enumerate(containers, 1):
                 # 100개 도달하면 수집 중단
@@ -224,23 +227,40 @@ class BestBuyBSRCrawler:
 
                 try:
                     # Extract product name (Retailer_SKU_Name)
-                    # Try multiple possible XPaths
-                    product_name_elem = container.xpath('.//h2[contains(@class, "product-title")]')
-                    if not product_name_elem:
-                        product_name_elem = container.xpath('.//a[@class="product-list-item-link"]//h2')
-                    if not product_name_elem:
-                        product_name_elem = container.xpath('.//div[@class="sku-block-content-title"]//h2')
+                    # Try multiple possible XPaths (ordered by reliability)
+                    product_name = None
+                    product_name_xpaths = [
+                        './/h2[contains(@class, "product-title")]',
+                        './/a[@class="product-list-item-link"]//h2',
+                        './/div[@class="sku-block-content-title"]//h2',
+                        './/h2[@class="sku-title"]',
+                        './/div[contains(@class, "sku-title")]//h2',
+                        './/a[contains(@class, "product-title")]//h2',
+                        './/div[contains(@class, "information")]//h2',
+                        './/h2',  # Last resort: any h2 in container
+                        './/a[@class="product-list-item-link"]/@title',  # Link title attribute
+                        './/a[@class="product-list-item-link"]/@aria-label',  # Accessibility label
+                    ]
 
-                    product_name = product_name_elem[0].text_content().strip() if product_name_elem else None
+                    for xpath in product_name_xpaths:
+                        try:
+                            product_name_elem = container.xpath(xpath)
+                            if product_name_elem:
+                                if isinstance(product_name_elem[0], str):
+                                    product_name = product_name_elem[0].strip()
+                                else:
+                                    product_name = product_name_elem[0].text_content().strip()
+                                if product_name:  # Found non-empty name
+                                    break
+                        except:
+                            continue
 
                     if not product_name:
-                        # Save container HTML for debugging (first 5 skipped items on any page)
-                        if page_number <= 3:  # Only for first 3 pages
-                            container_html = html.tostring(container, encoding='unicode', pretty_print=True)
-                            with open(f'bestbuy_page{page_number}_container_{idx}_debug.html', 'w', encoding='utf-8') as f:
-                                f.write(container_html)
-                            print(f"  [DEBUG] Saved container {idx} to bestbuy_page{page_number}_container_{idx}_debug.html")
-                        print(f"  [SKIP {idx}] No product name found")
+                        # Save container HTML for debugging (all failed items)
+                        container_html = html.tostring(container, encoding='unicode', pretty_print=True)
+                        with open(f'bestbuy_bsr_page{page_number}_container_{idx}_debug.html', 'w', encoding='utf-8') as f:
+                            f.write(container_html)
+                        print(f"  [SKIP {idx}] No product name found (debug file saved)")
                         continue
 
                     # Extract product URL

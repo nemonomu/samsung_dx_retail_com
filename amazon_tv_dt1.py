@@ -468,10 +468,23 @@ class AmazonDetailCrawler:
             for xpath in xpaths:
                 year_text = self.extract_text_safe(tree, xpath)
                 if year_text:
-                    # Clean and return (e.g., "2025" -> "2025", "2022/2023" -> "2022/2023")
                     year_text = year_text.strip()
-                    # Validate it's a 4-digit year or year range (e.g., 2024 or 2022/2023)
-                    if re.match(r'^\d{4}(/\d{4})?$', year_text):
+
+                    # Handle year range format (e.g., "2022/2023" -> "2023")
+                    if '/' in year_text:
+                        try:
+                            # Split and extract all year numbers
+                            years = year_text.split('/')
+                            year_numbers = [int(y.strip()) for y in years if y.strip().isdigit() and len(y.strip()) == 4]
+                            if year_numbers:
+                                # Return the higher (more recent) year
+                                year_text = str(max(year_numbers))
+                        except (ValueError, AttributeError):
+                            # If parsing fails, continue to next xpath
+                            continue
+
+                    # Validate it's a 4-digit year
+                    if re.match(r'^\d{4}$', year_text):
                         return year_text
 
             return None

@@ -433,12 +433,22 @@ class AmazonDetailCrawler:
                 '//tr[contains(@class, "po-display.size")]//td[@class="a-span9"]//span[@class="a-size-base po-break-word"]',
                 '//table[@class="a-normal a-spacing-small"]//tr[contains(@class, "po-display.size")]//td[@class="a-span9"]//span[@class="a-size-base po-break-word"]',
                 '//*[@id="poExpander"]/div[1]/div/table/tbody/tr[2]/td[2]/span',  # tr[2] typically contains Screen Size
-                '//tr[contains(@class, "po-display.size")]//span[@class="a-size-base po-break-word"]'
+                '//tr[contains(@class, "po-display.size")]//span[@class="a-size-base po-break-word"]',
+                # Lowest priority: inline-twister Size selector (format: "50-inch")
+                '//*[@id="inline-twister-expanded-dimension-text-size_name"]'
             ]
 
             for xpath in xpaths:
                 size_text = self.extract_text_safe(tree, xpath)
                 if size_text:
+                    # Handle "50-inch" format -> "50 inches"
+                    if '-inch' in size_text.lower():
+                        # Extract number from "50-inch" or "50-Inch"
+                        import re
+                        match = re.search(r'(\d+)-inch', size_text.lower())
+                        if match:
+                            return f"{match.group(1)} inches"
+
                     # "32 Inches" -> "32 inches"
                     return size_text.lower()
 

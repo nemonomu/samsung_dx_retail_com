@@ -781,21 +781,36 @@ class AmazonDetailCrawler:
 
             # Priority 2: SKU number (Technical Details container)
             sku_number_xpaths = [
-                # Highest priority: Technical Details container (div[@id="tech"])
+                # Highest priority: Technical Details container (div[@id="tech"]) - "SKU Number" (capital N)
+                '//div[@id="tech"]//td[p/strong[text()="SKU Number"]]/following-sibling::td/p',
+                '//div[@id="tech"]//td[.//strong[contains(text(), "SKU Number")]]/following-sibling::td',
+                '//div[@id="tech"]//tr[td//strong[contains(text(), "SKU Number")]]/td[2]/p',
+                '//div[@id="tech"]//tr[td//strong[contains(text(), "SKU Number")]]/td[2]',
+
+                # Technical Details container - "SKU number" (lowercase n)
                 '//div[@id="tech"]//td[p/strong[text()="SKU number"]]/following-sibling::td/p',
                 '//div[@id="tech"]//td[.//strong[contains(text(), "SKU number")]]/following-sibling::td',
                 '//div[@id="tech"]//tr[td//strong[contains(text(), "SKU number")]]/td[2]/p',
                 '//div[@id="tech"]//tr[td//strong[contains(text(), "SKU number")]]/td[2]',
 
-                # Fallback: General table structure (any location)
+                # Fallback: General table structure - "SKU Number" (capital N)
+                '//td[p/strong[text()="SKU Number"]]/following-sibling::td/p',
+                '//td[.//strong[contains(text(), "SKU Number")]]/following-sibling::td',
+                '//tr[td//strong[contains(text(), "SKU Number")]]/td[2]/p',
+                '//tr[td//strong[contains(text(), "SKU Number")]]/td[2]',
+
+                # Fallback: General table structure - "SKU number" (lowercase n)
                 '//td[p/strong[text()="SKU number"]]/following-sibling::td/p',
                 '//td[.//strong[contains(text(), "SKU number")]]/following-sibling::td',
                 '//tr[td//strong[contains(text(), "SKU number")]]/td[2]/p',
                 '//tr[td//strong[contains(text(), "SKU number")]]/td[2]',
 
                 # Additional fallbacks for robust extraction
+                '//table[@class="a-bordered"]//td[p/strong[text()="SKU Number"]]/following-sibling::td/p',
                 '//table[@class="a-bordered"]//td[p/strong[text()="SKU number"]]/following-sibling::td/p',
+                '//strong[text()="SKU Number"]/ancestor::td/following-sibling::td/p',
                 '//strong[text()="SKU number"]/ancestor::td/following-sibling::td/p',
+                '//strong[contains(text(), "SKU Number")]/ancestor::td/following-sibling::td',
                 '//strong[contains(text(), "SKU number")]/ancestor::td/following-sibling::td'
             ]
 

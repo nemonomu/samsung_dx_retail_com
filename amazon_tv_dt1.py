@@ -181,13 +181,22 @@ class AmazonDetailCrawler:
                 main_rows = cursor.fetchall()
                 for url, main_rank, number_of_units_purchased_past_month in main_rows:
                     asin = self.extract_asin(url)  # Extract ASIN for duplicate detection
+
+                    # Clean number_of_units_purchased_past_month: remove commas and convert to int
+                    clean_units = None
+                    if number_of_units_purchased_past_month:
+                        try:
+                            clean_units = int(str(number_of_units_purchased_past_month).replace(',', '').strip())
+                        except (ValueError, AttributeError):
+                            clean_units = None
+
                     if asin not in url_data_map:
                         url_data_map[asin] = {
                             'page_type': 'main',
                             'url': url,  # Store full URL
                             'main_rank': main_rank,
                             'bsr_rank': None,
-                            'number_of_units_purchased_past_month': number_of_units_purchased_past_month
+                            'number_of_units_purchased_past_month': clean_units
                         }
                 print(f"[OK] Loaded {len(main_rows)} main URLs")
             else:

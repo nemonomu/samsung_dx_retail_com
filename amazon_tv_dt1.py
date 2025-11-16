@@ -5,7 +5,7 @@ import psycopg2
 import pickle
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -245,25 +245,26 @@ class AmazonDetailCrawler:
 
             print(f"[OK] Total unique URLs from main/bsr: {len(all_urls)}")
 
-            # Filter out already processed URLs from today's batches
-            print("[INFO] Checking for already processed URLs (today's batches only)...")
+            # Filter out already processed URLs from last 6 hours
+            print("[INFO] Checking for already processed URLs (last 6 hours)...")
             cursor = self.db_conn.cursor()
 
-            # Get today's date prefix for batch_id filtering (YYYYMMDD)
-            today_prefix = datetime.now().strftime('%Y%m%d')
+            # Get timestamp for 6 hours ago
+            six_hours_ago = datetime.now() - timedelta(hours=6)
+            six_hours_ago_str = six_hours_ago.strftime('%Y-%m-%d %H:%M:%S')
 
-            # Get all distinct processed URLs from today's batches in amazon_tv_detail_crawled
+            # Get all distinct processed URLs from last 6 hours in amazon_tv_detail_crawled
             cursor.execute("""
                 SELECT DISTINCT product_url
                 FROM amazon_tv_detail_crawled
                 WHERE product_url IS NOT NULL
-                  AND batch_id LIKE %s
-            """, (f'{today_prefix}%',))
+                  AND crawl_datetime >= %s
+            """, (six_hours_ago_str,))
 
             already_processed_urls = {row[0] for row in cursor.fetchall()}
             cursor.close()
 
-            print(f"[INFO] Found {len(already_processed_urls)} already processed URLs in today's batches")
+            print(f"[INFO] Found {len(already_processed_urls)} already processed URLs in last 6 hours")
 
             # Filter out already processed URLs
             new_urls = [url_data for url_data in all_urls
@@ -276,7 +277,7 @@ class AmazonDetailCrawler:
 
             if len(new_urls) == 0:
                 if len(all_urls) > 0:
-                    print("[WARNING] All URLs have been processed already in today's batches!")
+                    print("[WARNING] All URLs have been processed already in last 6 hours!")
                 else:
                     print("[ERROR] No product URLs found! Please check:")
                     print("  1. amazon_tv_main_crawled table has data with valid batch_id")

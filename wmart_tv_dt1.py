@@ -8,7 +8,7 @@ Collects detailed product information from URLs stored in:
 import time
 import random
 import psycopg2
-from datetime import datetime
+from datetime import datetime, timedelta
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -233,26 +233,26 @@ class WalmartDetailCrawler:
 
             print(f"[OK] Total unique URLs from main1/main2/bsr: {len(all_urls)}")
 
-            # Filter out already processed URLs from today's batches
-            print("[INFO] Checking for already processed URLs (today's batches only)...")
+            # Filter out already processed URLs from last 6 hours
+            print("[INFO] Checking for already processed URLs (last 6 hours)...")
             cursor = self.db_conn.cursor()
 
-            # Get today's date prefix for batch_id filtering (YYYYMMDD)
-            # Note: Walmart_tv_detail_crawled doesn't have batch_id column, so we filter by crawl_datetime
-            today_start = datetime.now().strftime('%Y-%m-%d 00:00:00')
+            # Get timestamp for 6 hours ago
+            six_hours_ago = datetime.now() - timedelta(hours=6)
+            six_hours_ago_str = six_hours_ago.strftime('%Y-%m-%d %H:%M:%S')
 
-            # Get all distinct processed URLs from today's batches in Walmart_tv_detail_crawled
+            # Get all distinct processed URLs from last 6 hours in Walmart_tv_detail_crawled
             cursor.execute("""
                 SELECT DISTINCT product_url
                 FROM Walmart_tv_detail_crawled
                 WHERE product_url IS NOT NULL
                   AND crawl_datetime >= %s
-            """, (today_start,))
+            """, (six_hours_ago_str,))
 
             already_processed_urls = {row[0] for row in cursor.fetchall()}
             cursor.close()
 
-            print(f"[INFO] Found {len(already_processed_urls)} already processed URLs in today's batches")
+            print(f"[INFO] Found {len(already_processed_urls)} already processed URLs in last 6 hours")
 
             # Filter out already processed URLs
             new_urls = [url_data for url_data in all_urls
@@ -265,7 +265,7 @@ class WalmartDetailCrawler:
 
             if len(new_urls) == 0:
                 if len(all_urls) > 0:
-                    print("[WARNING] All URLs have been processed already in today's batches!")
+                    print("[WARNING] All URLs have been processed already in last 6 hours!")
                 else:
                     print("[ERROR] No URLs found!")
 

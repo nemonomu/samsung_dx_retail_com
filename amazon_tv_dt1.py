@@ -438,6 +438,32 @@ class AmazonDetailCrawler:
             print(f"  [WARNING] Failed to extract screen size: {e}")
             return None
 
+    def extract_model_year(self, tree):
+        """Extract model year from item details dialog"""
+        try:
+            # Find table row with "Model Year" header
+            xpaths = [
+                '//tr[.//th[contains(text(), "Model Year")]]/td[@class="a-size-base prodDetAttrValue"]',
+                '//table[@id="productDetails_techSpec_section_1"]//tr[.//th[contains(text(), "Model Year")]]/td',
+                '//table//tr[.//th[contains(text(), "Model Year")]]/td',
+                '//*[@id="productDetails_expanderTables_depthRightSections"]//tr[.//th[contains(text(), "Model Year")]]/td'
+            ]
+
+            for xpath in xpaths:
+                year_text = self.extract_text_safe(tree, xpath)
+                if year_text:
+                    # Clean and return (e.g., "2025" -> "2025")
+                    year_text = year_text.strip()
+                    # Validate it's a 4-digit year
+                    if re.match(r'^\d{4}$', year_text):
+                        return year_text
+
+            return None
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract model year: {e}")
+            return None
+
     def extract_count_of_reviews(self, tree):
         """Extract count of reviews (format: '1,484')"""
         try:
@@ -816,6 +842,9 @@ class AmazonDetailCrawler:
             # Extract screen_size (NEW)
             screen_size = self.extract_screen_size(tree)
 
+            # Extract model_year (NEW)
+            model_year = self.extract_model_year(tree)
+
             # Extract count_of_reviews (NEW)
             count_of_reviews = self.extract_count_of_reviews(tree)
 
@@ -855,6 +884,7 @@ class AmazonDetailCrawler:
                 'Rank_1': rank_1,
                 'Rank_2': rank_2,
                 'screen_size': screen_size,
+                'model_year': model_year,  # Extracted from item details dialog
                 'count_of_reviews': count_of_reviews,
                 'Count_of_Star_Ratings': count_of_star_ratings,
                 'Summarized_Review_Content': summarized_review_content,
@@ -984,9 +1014,9 @@ class AmazonDetailCrawler:
                  detailed_review_content, summarized_review_content, top_mentions, recommendation_intent,
                  main_rank, bsr_rank, rank_1, rank_2, promotion_position, trend_rank,
                  number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, retailer_sku_name_similar,
-                 estimated_annual_electricity_use, promotion_type, number_of_units_purchased_past_month,
+                 estimated_annual_electricity_use, promotion_type, number_of_units_purchased_past_month, model_year,
                  calendar_week, crawl_datetime)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 data['item'],
                 'Amazon',  # account_name
@@ -1027,6 +1057,7 @@ class AmazonDetailCrawler:
                 None,  # estimated_annual_electricity_use (Amazon doesn't have this)
                 None,  # promotion_type (Amazon doesn't have this)
                 data.get('number_of_units_purchased_past_month'),  # From main_crawled
+                data.get('model_year'),  # From item details dialog
                 calendar_week,
                 crawl_datetime
             ))

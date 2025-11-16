@@ -557,6 +557,29 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Screen Size extraction failed: {e}")
             return None
 
+    def extract_model_year(self, tree):
+        """Extract model year from specifications - general dialog"""
+        try:
+            # Find div with "Model Year" text and get the next sibling div
+            xpaths = [
+                '//div[contains(text(), "Model Year")]/following-sibling::div',
+                '//div[text()="Model Year"]/../div[contains(@class, "grow basis-none")]',
+                '//div[contains(@class, "font-weight-medium") and contains(text(), "Model Year")]/../div[contains(@class, "grow basis-none pl-300")]'
+            ]
+
+            for xpath in xpaths:
+                elem = tree.xpath(xpath)
+                if elem:
+                    year_text = elem[0].text_content().strip()
+                    # Validate it's a 4-digit year
+                    if re.match(r'^\d{4}$', year_text):
+                        return year_text
+
+            return None
+        except Exception as e:
+            print(f"  [ERROR] Model Year extraction failed: {e}")
+            return None
+
     def extract_final_sku_price(self, tree):
         """Final SKU Price extraction (현재 판매 가격) - 컨테이너 기반"""
         try:
@@ -1372,6 +1395,10 @@ class BestBuyDetailCrawler:
             screen_size = self.extract_screen_size(tree)
             print(f"  [✓] Screen Size: {screen_size}")
 
+            # 2-0. Model Year extraction (specifications - general dialog에서)
+            model_year = self.extract_model_year(tree)
+            print(f"  [✓] Model Year: {model_year}")
+
             # 2-1. Price 정보 extraction (메인 page에서 직접 collected)
             final_sku_price = self.extract_final_sku_price(tree)
             print(f"  [✓] Final_SKU_Price: {final_sku_price}")
@@ -1593,9 +1620,9 @@ class BestBuyDetailCrawler:
                  detailed_review_content, summarized_review_content, top_mentions, recommendation_intent,
                  main_rank, bsr_rank, rank_1, rank_2, promotion_position,
                  number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, retailer_sku_name_similar,
-                 estimated_annual_electricity_use, promotion_type,
+                 estimated_annual_electricity_use, promotion_type, model_year,
                  calendar_week, crawl_datetime)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 item,
                 'Bestbuy',  # account_name
@@ -1634,6 +1661,7 @@ class BestBuyDetailCrawler:
                 None,  # retailer_sku_name_similar (BestBuy doesn't have this)
                 electricity_use,
                 promotion_type,
+                model_year,
                 calendar_week,
                 crawl_datetime
             ))

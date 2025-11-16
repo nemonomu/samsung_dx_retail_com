@@ -154,15 +154,15 @@ class BestBuyBSRCrawler:
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
             self.driver.get(url)
 
+            print("[INFO] Waiting for page to load...")
+            time.sleep(random.uniform(5, 8))
+
             # Wait for product list to load
             try:
                 self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "product-list-item")))
                 print("[OK] Product list loaded")
-                # Wait for content to stabilize
-                time.sleep(random.uniform(3, 4))
             except Exception as e:
                 print(f"[WARNING] Product list not found: {e}")
-                time.sleep(random.uniform(3, 4))
 
             # Aggressive scroll to trigger lazy loading of all products
             print("[INFO] Performing aggressive scroll to load all products...")
@@ -177,7 +177,7 @@ class BestBuyBSRCrawler:
                 while current_position < scroll_height:
                     current_position += screen_height
                     self.driver.execute_script(f"window.scrollTo(0, {current_position});")
-                    time.sleep(1.5)  # Conservative timing for lazy loading
+                    time.sleep(2)
 
                     # Check if new content loaded
                     new_scroll_height = self.driver.execute_script("return document.body.scrollHeight")
@@ -187,17 +187,17 @@ class BestBuyBSRCrawler:
 
                 # Scroll to absolute bottom
                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2.5)  # Wait for final content to load
+                time.sleep(3)
                 print(f"[DEBUG] Completed scroll round {scroll_round + 1}, final height: {scroll_height}")
 
-            # Scroll back to top
+            # Scroll back to top slowly
             print("[INFO] Scrolling back to top...")
             self.driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(4)  # Wait for scroll to complete
+            time.sleep(5)
 
             # Wait for all content to settle
             print("[INFO] Waiting for content to fully render...")
-            time.sleep(6)  # Ensure all lazy-loaded content is rendered
+            time.sleep(8)
 
             # Get page source and parse with lxml
             page_source = self.driver.page_source

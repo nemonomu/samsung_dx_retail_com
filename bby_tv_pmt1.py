@@ -78,18 +78,11 @@ class BestBuyPromotionCrawler:
         try:
             print(f"[INFO] Accessing Best Buy TV Promotion page...")
             self.driver.get(self.url)
+            time.sleep(random.uniform(3, 5))
 
             # Wait for page load
             wait = WebDriverWait(self.driver, 20)
-            # Wait for section elements to ensure page is fully loaded
-            try:
-                wait.until(EC.presence_of_element_located((By.TAG_NAME, "section")))
-                print("[OK] Page loaded successfully")
-                time.sleep(2)  # Wait for dynamic content to render
-            except:
-                print("[OK] Page loaded (fallback)")
-                time.sleep(random.uniform(3, 4))
-
+            print("[OK] Page loaded successfully")
             return True
 
         except Exception as e:

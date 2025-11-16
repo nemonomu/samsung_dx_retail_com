@@ -761,7 +761,15 @@ class AmazonDetailCrawler:
             membership_discount = self.clean_membership_discount(membership_discount_raw)
 
             # Item (formerly Samsung_SKU_Name) - Priority: SKU number > Model Number
-            # Priority 1: SKU number (Technical Details container - multiple structures)
+            # Priority 1: ASIN (item details dialog - highest priority)
+            asin_xpaths = [
+                '//tr[.//th[contains(text(), "ASIN")]]/td[@class="a-size-base prodDetAttrValue"]',
+                '//table//tr[.//th[contains(text(), "ASIN")]]/td',
+                '//*[@id="productDetails_expanderTables_depthRightSections"]//tr[.//th[contains(text(), "ASIN")]]/td',
+                '//th[contains(text(), "ASIN")]/following-sibling::td'
+            ]
+
+            # Priority 2: SKU number (Technical Details container)
             sku_number_xpaths = [
                 # Highest priority: Technical Details container (div[@id="tech"])
                 '//div[@id="tech"]//td[p/strong[text()="SKU number"]]/following-sibling::td/p',
@@ -781,7 +789,7 @@ class AmazonDetailCrawler:
                 '//strong[contains(text(), "SKU number")]/ancestor::td/following-sibling::td'
             ]
 
-            # Priority 2: Model Number (기존 구조)
+            # Priority 3: Model Number (fallback)
             model_number_xpaths = [
                 '//th[contains(text(), "Model Number")]/following-sibling::td',
                 '//*[@id="productDetails_expanderTables_depthRightSections"]//th[contains(text(), "Model Number")]/following-sibling::td',
@@ -791,16 +799,26 @@ class AmazonDetailCrawler:
 
             item = None
 
-            # Try SKU number first (Priority 1)
-            for xpath in sku_number_xpaths:
+            # Try ASIN first (Priority 1)
+            for xpath in asin_xpaths:
                 if xpath:
                     extracted = self.extract_text_safe(tree, xpath)
                     if extracted and len(extracted) > 0:
                         item = extracted.strip()
-                        print(f"  [OK] Extracted item from 'SKU number': {item}")
+                        print(f"  [OK] Extracted item from 'ASIN': {item}")
                         break
 
-            # If SKU number not found, try Model Number (Priority 2)
+            # If ASIN not found, try SKU number (Priority 2)
+            if not item:
+                for xpath in sku_number_xpaths:
+                    if xpath:
+                        extracted = self.extract_text_safe(tree, xpath)
+                        if extracted and len(extracted) > 0:
+                            item = extracted.strip()
+                            print(f"  [OK] Extracted item from 'SKU number': {item}")
+                            break
+
+            # If SKU number not found, try Model Number (Priority 3)
             if not item:
                 for xpath in model_number_xpaths:
                     if xpath:
@@ -812,7 +830,7 @@ class AmazonDetailCrawler:
 
             # If still not found, log warning
             if not item:
-                print(f"  [WARNING] Could not extract item (SKU/Model Number)")
+                print(f"  [WARNING] Could not extract item (ASIN/SKU/Model Number)")
 
             # Ranks - try multiple approaches
             rank_1_raw = self.extract_text_safe(tree, self.xpaths.get('rank_1'))

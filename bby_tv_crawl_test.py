@@ -1,0 +1,168 @@
+"""
+Best Buy TV Integrated Crawler (TEST VERSION)
+테스트 크롤러: main1 (3개) → bsr1 (3개) → dt1 순차 실행
+
+실행 순서:
+1. bby_tv_main1.py: Main page crawling → bby_tv_main1 table (3개만 수집)
+2. bby_tv_bsr1.py: Best-selling page crawling → bby_tv_bsr1 table (3개만 수집)
+3. bby_tv_dt1.py: Detail page crawling → bby_tv_crawl + tv_retail_com tables
+
+저장 테이블:
+- bby_tv_main1: Main listing data
+- bby_tv_bsr1: Best-selling listing data
+- bby_tv_crawl: Detail page data
+- tv_retail_com: Unified retail data
+"""
+import subprocess
+import sys
+import time
+import os
+from datetime import datetime
+
+class IntegratedCrawler:
+    def __init__(self):
+        self.batch_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.session_start_time = datetime.now().strftime('%Y%m%d%H%M')  # YYYYMMDDHHMM
+        self.overall_start_time = datetime.now()
+        self.results = {
+            'main1': {'success': None, 'duration': None},
+            'bsr1': {'success': None, 'duration': None},
+            'dt1': {'success': None, 'duration': None}
+        }
+
+        # 환경변수 설정 (각 크롤러가 사용)
+        os.environ['SESSION_START_TIME'] = self.session_start_time
+        # TEST MODE: 수집 개수 제한 (main: 3, bsr: 3)
+        os.environ['TEST_MODE'] = '1'
+        os.environ['TEST_MAX_PRODUCTS'] = '3'
+
+    def run_crawler(self, script_name, description):
+        """Run a crawler script and return success status with timing"""
+        start_time = datetime.now()
+
+        print("\n" + "="*80)
+        print(f"Starting: {description}")
+        print(f"Start Time: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print("="*80)
+
+        try:
+            # Run with real-time output (no buffering)
+            result = subprocess.run(
+                [sys.executable, '-u', script_name],  # -u: unbuffered output
+                stdout=None,  # Inherit parent's stdout for real-time output
+                stderr=None,  # Inherit parent's stderr
+                text=True,
+                timeout=21600  # 6 hours timeout
+            )
+
+            end_time = datetime.now()
+            duration = (end_time - start_time).total_seconds()
+
+            if result.returncode == 0:
+                print("\n" + "-"*80)
+                print(f"[SUCCESS] {description}")
+                print(f"End Time: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                print(f"Duration: {duration:.2f} seconds ({duration/60:.2f} minutes)")
+                print("-"*80)
+                return True, duration
+            else:
+                print(f"\n[FAILED] {description} - Exit code {result.returncode}")
+                print(f"Duration: {duration:.2f} seconds")
+                return False, duration
+
+        except subprocess.TimeoutExpired:
+            print(f"[FAILED] {description} - Timed out after 6 hours")
+            return False, 21600
+        except Exception as e:
+            print(f"[FAILED] {description} - Error: {e}")
+            return False, 0
+
+    def run(self):
+        """Run all crawlers in sequence"""
+        print("="*80)
+        print(f"Best Buy TV Integrated Crawler (TEST MODE - 3 products each)")
+        print(f"Batch ID: {self.batch_id}")
+        print(f"Session ID: {self.session_start_time}")
+        print(f"Overall Start Time: {self.overall_start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print("="*80)
+
+        # Step 1: Main page crawler (3 products)
+        success, duration = self.run_crawler(
+            'bby_tv_main1.py',
+            'Main Page Crawler (bby_tv_main1.py) - 3 products'
+        )
+        self.results['main1']['success'] = success
+        self.results['main1']['duration'] = duration
+
+        if not success:
+            print("\n[WARNING] Main crawler failed, but continuing with other crawlers...")
+
+        time.sleep(5)  # Brief pause between crawlers
+
+        # Step 2: Best-selling page crawler (3 products)
+        success, duration = self.run_crawler(
+            'bby_tv_bsr1.py',
+            'Best-Selling Page Crawler (bby_tv_bsr1.py) - 3 products'
+        )
+        self.results['bsr1']['success'] = success
+        self.results['bsr1']['duration'] = duration
+
+        if not success:
+            print("\n[WARNING] BSR crawler failed, but continuing with detail crawler...")
+
+        time.sleep(5)
+
+        # Step 3: Detail page crawler (uses URLs from above)
+        success, duration = self.run_crawler(
+            'bby_tv_dt1.py',
+            'Detail Page Crawler (bby_tv_dt1.py)'
+        )
+        self.results['dt1']['success'] = success
+        self.results['dt1']['duration'] = duration
+
+        # Calculate overall duration
+        overall_end_time = datetime.now()
+        total_duration = (overall_end_time - self.overall_start_time).total_seconds()
+
+        # Final summary
+        print("\n" + "="*80)
+        print("FINAL SUMMARY (TEST MODE)")
+        print("="*80)
+        print(f"Batch ID: {self.batch_id}")
+        print(f"Session ID: {self.session_start_time}")
+        print(f"Overall Start Time: {self.overall_start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Overall End Time: {overall_end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Total Duration: {total_duration:.2f} seconds ({total_duration/60:.2f} minutes)")
+        print("\nCrawler Results:")
+        print(f"  Main Crawler (bby_tv_main1):      {'SUCCESS' if self.results['main1']['success'] else 'FAILED':8s} ({self.results['main1']['duration']:.2f}s)")
+        print(f"  BSR Crawler (bby_tv_bsr1):        {'SUCCESS' if self.results['bsr1']['success'] else 'FAILED':8s} ({self.results['bsr1']['duration']:.2f}s)")
+        print(f"  Detail Crawler (bby_tv_dt1):      {'SUCCESS' if self.results['dt1']['success'] else 'FAILED':8s} ({self.results['dt1']['duration']:.2f}s)")
+        print("="*80)
+
+        # Return overall success status
+        return all(r['success'] for r in self.results.values())
+
+def main():
+    """Main execution"""
+    try:
+        crawler = IntegratedCrawler()
+        success = crawler.run()
+
+        if success:
+            print("\n[✓] All crawlers completed successfully")
+            sys.exit(0)
+        else:
+            print("\n[✗] Some crawlers failed - check logs above")
+            sys.exit(1)
+
+    except KeyboardInterrupt:
+        print("\n[!] Interrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n[!] Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

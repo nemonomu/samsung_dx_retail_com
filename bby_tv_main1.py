@@ -48,6 +48,12 @@ class BestBuyTVCrawler:
         self.total_collected = 0
         self.error_messages = []
 
+        # Check for TEST_MODE
+        if os.environ.get('TEST_MODE') == '1':
+            self.max_products = int(os.environ.get('TEST_MAX_PRODUCTS', '3'))
+        else:
+            self.max_products = 300
+
         # Data validator 초기화
         session_start_time = os.environ.get('SESSION_START_TIME', datetime.now().strftime('%Y%m%d%H%M'))
         self.validator = DataValidator(session_start_time)
@@ -220,9 +226,9 @@ class BestBuyTVCrawler:
             print(f"[DEBUG] Saved page source to bestbuy_page_{page_number}_debug.html")
 
             for idx, container in enumerate(containers, 1):
-                # 300개 도달하면 수집 중단
-                if self.total_collected >= 300:
-                    print(f"[INFO] Reached maximum 300 products. Stopping collection.")
+                # max_products 도달하면 수집 중단
+                if self.total_collected >= self.max_products:
+                    print(f"[INFO] Reached maximum {self.max_products} products. Stopping collection.")
                     break
 
                 try:
@@ -334,9 +340,9 @@ class BestBuyTVCrawler:
 
             print(f"[PAGE {page_number}] Collected {collected_count} products (Total: {self.total_collected})")
 
-            # 300개에 도달했으면 더 이상 수집하지 않음
-            if self.total_collected >= 300:
-                print(f"[INFO] Maximum 300 products reached. Stopping page collection.")
+            # max_products에 도달했으면 더 이상 수집하지 않음
+            if self.total_collected >= self.max_products:
+                print(f"[INFO] Maximum {self.max_products} products reached. Stopping page collection.")
                 return False
 
             return True
@@ -415,9 +421,9 @@ class BestBuyTVCrawler:
             # Scrape each page
             for page_number, url in page_urls:
                 if not self.scrape_page(url, page_number):
-                    # scrape_page returns False if 300 products reached or error occurred
-                    if self.total_collected >= 300:
-                        print(f"[INFO] Stopping page collection - reached maximum 300 products")
+                    # scrape_page returns False if max_products reached or error occurred
+                    if self.total_collected >= self.max_products:
+                        print(f"[INFO] Stopping page collection - reached maximum {self.max_products} products")
                         break
                     else:
                         print(f"[WARNING] Failed to scrape page {page_number}, continuing...")

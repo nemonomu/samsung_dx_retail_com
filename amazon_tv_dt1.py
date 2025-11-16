@@ -171,7 +171,7 @@ class AmazonDetailCrawler:
             if main_batch_id:
                 print(f"[INFO] Loading main URLs from batch {main_batch_id}...")
                 cursor.execute("""
-                    SELECT product_url, main_rank
+                    SELECT product_url, main_rank, number_of_units_purchased_past_month
                     FROM amazon_tv_main_crawled
                     WHERE batch_id = %s
                       AND product_url IS NOT NULL
@@ -179,14 +179,15 @@ class AmazonDetailCrawler:
                     ORDER BY main_rank
                 """, (main_batch_id,))
                 main_rows = cursor.fetchall()
-                for url, main_rank in main_rows:
+                for url, main_rank, number_of_units_purchased_past_month in main_rows:
                     asin = self.extract_asin(url)  # Extract ASIN for duplicate detection
                     if asin not in url_data_map:
                         url_data_map[asin] = {
                             'page_type': 'main',
                             'url': url,  # Store full URL
                             'main_rank': main_rank,
-                            'bsr_rank': None
+                            'bsr_rank': None,
+                            'number_of_units_purchased_past_month': number_of_units_purchased_past_month
                         }
                 print(f"[OK] Loaded {len(main_rows)} main URLs")
             else:
@@ -215,7 +216,8 @@ class AmazonDetailCrawler:
                             'page_type': 'bsr',
                             'url': url,  # Store full URL
                             'main_rank': None,
-                            'bsr_rank': bsr_rank
+                            'bsr_rank': bsr_rank,
+                            'number_of_units_purchased_past_month': None  # BSR doesn't have this
                         }
                 print(f"[OK] Loaded {len(bsr_rows)} BSR URLs")
             else:
@@ -245,26 +247,32 @@ class AmazonDetailCrawler:
 
             print(f"[OK] Total unique URLs from main/bsr: {len(all_urls)}")
 
-            # Filter out already processed URLs from last 6 hours
-            print("[INFO] Checking for already processed URLs (last 6 hours)...")
+            # Filter out already processed URLs from current session (based on main batch start time)
+            print("[INFO] Checking for already processed URLs (current session)...")
             cursor = self.db_conn.cursor()
 
-            # Get timestamp for 6 hours ago
-            six_hours_ago = datetime.now() - timedelta(hours=6)
-            six_hours_ago_str = six_hours_ago.strftime('%Y-%m-%d %H:%M:%S')
+            # Use main batch_id as session start time
+            if main_batch_id:
+                session_start_time = datetime.strptime(main_batch_id, '%Y%m%d_%H%M%S')
+                session_start_str = session_start_time.strftime('%Y-%m-%d %H:%M:%S')
 
-            # Get all distinct processed URLs from last 6 hours in amazon_tv_detail_crawled
-            cursor.execute("""
-                SELECT DISTINCT product_url
-                FROM amazon_tv_detail_crawled
-                WHERE product_url IS NOT NULL
-                  AND crawl_datetime >= %s
-            """, (six_hours_ago_str,))
+                print(f"[INFO] Session start time (from main batch): {session_start_str}")
 
-            already_processed_urls = {row[0] for row in cursor.fetchall()}
+                # Get all distinct processed URLs from current session in amazon_tv_detail_crawled
+                cursor.execute("""
+                    SELECT DISTINCT product_url
+                    FROM amazon_tv_detail_crawled
+                    WHERE product_url IS NOT NULL
+                      AND crawl_datetime >= %s
+                """, (session_start_str,))
+
+                already_processed_urls = {row[0] for row in cursor.fetchall()}
+                print(f"[INFO] Found {len(already_processed_urls)} already processed URLs in current session")
+            else:
+                already_processed_urls = set()
+                print(f"[WARNING] No main batch_id found, skipping duplicate check")
+
             cursor.close()
-
-            print(f"[INFO] Found {len(already_processed_urls)} already processed URLs in last 6 hours")
 
             # Filter out already processed URLs
             new_urls = [url_data for url_data in all_urls
@@ -277,7 +285,7 @@ class AmazonDetailCrawler:
 
             if len(new_urls) == 0:
                 if len(all_urls) > 0:
-                    print("[WARNING] All URLs have been processed already in last 6 hours!")
+                    print("[WARNING] All URLs have been processed already in current session!")
                 else:
                     print("[ERROR] No product URLs found! Please check:")
                     print("  1. amazon_tv_main_crawled table has data with valid batch_id")
@@ -853,6 +861,7 @@ class AmazonDetailCrawler:
                 'Detailed_Review_Content': detailed_review_content,
                 'main_rank': url_data.get('main_rank'),
                 'bsr_rank': url_data.get('bsr_rank'),
+                'number_of_units_purchased_past_month': url_data.get('number_of_units_purchased_past_month'),  # From main_crawled
                 'final_sku_price': final_sku_price,  # Extracted from detail page
                 'original_sku_price': original_sku_price,  # Extracted from detail page
                 'savings': savings  # Calculated from prices
@@ -973,11 +982,11 @@ class AmazonDetailCrawler:
                  pick_up_availability, shipping_availability, delivery_availability, shipping_info,
                  available_quantity_for_purchase, inventory_status, sku_status, retailer_membership_discounts,
                  detailed_review_content, summarized_review_content, top_mentions, recommendation_intent,
-                 main_rank, bsr_rank, rank_1, rank_2, promotion_rank, trend_rank,
+                 main_rank, bsr_rank, rank_1, rank_2, promotion_position, trend_rank,
                  number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, retailer_sku_name_similar,
-                 estimated_annual_electricity_use, promotion_type,
+                 estimated_annual_electricity_use, promotion_type, number_of_units_purchased_past_month,
                  calendar_week, crawl_datetime)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 data['item'],
                 'Amazon',  # account_name
@@ -1010,13 +1019,14 @@ class AmazonDetailCrawler:
                 data['bsr_rank'],
                 data['Rank_1'],
                 data['Rank_2'],
-                None,  # promotion_rank (Amazon doesn't have this)
+                None,  # promotion_position (Amazon doesn't have this)
                 None,  # trend_rank (Amazon doesn't have this)
                 None,  # number_of_ppl_purchased_yesterday (Amazon doesn't have this)
                 None,  # number_of_ppl_added_to_carts (Amazon doesn't have this)
                 None,  # retailer_sku_name_similar (Amazon doesn't have this)
                 None,  # estimated_annual_electricity_use (Amazon doesn't have this)
                 None,  # promotion_type (Amazon doesn't have this)
+                data.get('number_of_units_purchased_past_month'),  # From main_crawled
                 calendar_week,
                 crawl_datetime
             ))

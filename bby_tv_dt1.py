@@ -10,7 +10,7 @@ save table: bby_tv_crawl, bby_tv_mst
 4. 소스 table에서 13items 컬럼 추가 collected:
    - 9items data 컬럼: final_sku_price, savings, original_sku_price, offer,
      pick_up_availability, shipping_availability, delivery_availability, sku_status, star_rating
-   - 4items rank/type 컬럼: promotion_type, promotion_rank, bsr_rank, main_rank
+   - 4items rank/type 컬럼: promotion_type, promotion_position, bsr_rank, main_rank
    - first 번째 found된 URL의 data 우선 (중복 URL은 first 소스 data 사용)
    - 소스 table에 없는 컬럼은 NULL 처리
 
@@ -185,7 +185,7 @@ class BestBuyDetailCrawler:
                             'star_rating': None,
                             'main_rank': row[6],
                             'bsr_rank': None,
-                            'promotion_rank': None,
+                            'promotion_position': None,
                             'promotion_type': None
                         }
                 print(f"[OK] Main URLs (batch {main_batch_id}): {len(main_urls)} items")
@@ -223,7 +223,7 @@ class BestBuyDetailCrawler:
                             'star_rating': None,
                             'main_rank': None,
                             'bsr_rank': row[6],
-                            'promotion_rank': None,
+                            'promotion_position': None,
                             'promotion_type': None
                         }
                 print(f"[OK] BSR URLs (batch {bsr_batch_id}): {len(bsr_urls)} items")
@@ -231,18 +231,18 @@ class BestBuyDetailCrawler:
             # 3. bby_tv_promotion_crawl에서 해당 batch의 URLs와 data 가져오기
             if promo_batch_id:
                 cursor.execute("""
-                    SELECT DISTINCT product_url, offer, promotion_type, promotion_rank
+                    SELECT DISTINCT product_url, offer, promotion_type, promotion_position
                     FROM bby_tv_pmt1
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
-                    ORDER BY promotion_rank
+                    ORDER BY promotion_position
                 """, (promo_batch_id,))
                 promo_urls = cursor.fetchall()
                 for row in promo_urls:
                     url = row[0]
                     if url in url_data_map:
-                        # URL already exists - just add promotion_rank and promotion_type
-                        url_data_map[url]['promotion_rank'] = row[3]
+                        # URL already exists - just add promotion_position and promotion_type
+                        url_data_map[url]['promotion_position'] = row[3]
                         url_data_map[url]['promotion_type'] = row[2]
                     else:
                         # New URL from promotion
@@ -260,7 +260,7 @@ class BestBuyDetailCrawler:
                             'star_rating': None,
                             'main_rank': None,
                             'bsr_rank': None,
-                            'promotion_rank': row[3],
+                            'promotion_position': row[3],
                             'promotion_type': row[2]
                         }
                 print(f"[OK] Promotion URLs (batch {promo_batch_id}): {len(promo_urls)} items")
@@ -297,7 +297,7 @@ class BestBuyDetailCrawler:
             #                 'main_rank': None,
             #                 'bsr_rank': None,
             #                 'trend_rank': row[1],
-            #                 'promotion_rank': None,
+            #                 'promotion_position': None,
             #                 'promotion_type': None
             #             }
             #     print(f"[OK] Trend URLs (batch {trend_batch_id}): {len(trend_urls)} items")
@@ -337,26 +337,32 @@ class BestBuyDetailCrawler:
 
             print(f"[OK] Total unique URLs from main/bsr/promo: {len(all_urls)}")
 
-            # Filter out already processed URLs from last 6 hours
-            print("[INFO] Checking for already processed URLs (last 6 hours)...")
+            # Filter out already processed URLs from current session (based on main batch start time)
+            print("[INFO] Checking for already processed URLs (current session)...")
             cursor = self.db_conn.cursor()
 
-            # Get timestamp for 6 hours ago
-            six_hours_ago = datetime.now() - timedelta(hours=6)
-            six_hours_ago_str = six_hours_ago.strftime('%Y-%m-%d %H:%M:%S')
+            # Use main batch_id as session start time
+            if main_batch_id:
+                session_start_time = datetime.strptime(main_batch_id, '%Y%m%d_%H%M%S')
+                session_start_str = session_start_time.strftime('%Y-%m-%d %H:%M:%S')
 
-            # Get all distinct processed URLs from last 6 hours in bby_tv_crawl
-            cursor.execute("""
-                SELECT DISTINCT product_url
-                FROM bby_tv_crawl
-                WHERE product_url IS NOT NULL
-                  AND crawl_datetime >= %s
-            """, (six_hours_ago_str,))
+                print(f"[INFO] Session start time (from main batch): {session_start_str}")
 
-            already_processed_urls = {row[0] for row in cursor.fetchall()}
+                # Get all distinct processed URLs from current session in bby_tv_crawl
+                cursor.execute("""
+                    SELECT DISTINCT product_url
+                    FROM bby_tv_crawl
+                    WHERE product_url IS NOT NULL
+                      AND crawl_datetime >= %s
+                """, (session_start_str,))
+
+                already_processed_urls = {row[0] for row in cursor.fetchall()}
+                print(f"[INFO] Found {len(already_processed_urls)} already processed URLs in current session")
+            else:
+                already_processed_urls = set()
+                print(f"[WARNING] No main batch_id found, skipping duplicate check")
+
             cursor.close()
-
-            print(f"[INFO] Found {len(already_processed_urls)} already processed URLs in last 6 hours")
 
             # Filter out already processed URLs
             new_urls = [url_data for url_data in all_urls
@@ -369,7 +375,7 @@ class BestBuyDetailCrawler:
 
             if len(new_urls) == 0:
                 if len(all_urls) > 0:
-                    print("[WARNING] All URLs have been processed already in last 6 hours!")
+                    print("[WARNING] All URLs have been processed already in current session!")
                 else:
                     print("[ERROR] No URLs found!")
 
@@ -1477,7 +1483,7 @@ class BestBuyDetailCrawler:
                 sku_status=url_data['sku_status'],
                 star_rating_source=star_rating,  # 메인 page에서 crawling한 값 사용 (CHANGED)
                 promotion_type=url_data['promotion_type'],
-                promotion_rank=url_data['promotion_rank'],
+                promotion_position=url_data['promotion_position'],
                 bsr_rank=url_data['bsr_rank'],
                 main_rank=url_data['main_rank']
             )
@@ -1495,7 +1501,7 @@ class BestBuyDetailCrawler:
                    recommendation_intent, product_url,
                    final_sku_price, savings, original_sku_price, offer,
                    pick_up_availability, shipping_availability, delivery_availability,
-                   sku_status, star_rating_source, promotion_type, promotion_rank,
+                   sku_status, star_rating_source, promotion_type, promotion_position,
                    bsr_rank, main_rank):
         """DB에 save"""
         try:
@@ -1519,7 +1525,7 @@ class BestBuyDetailCrawler:
                  Estimated_Annual_Electricity_Use, screen_size, count_of_reviews, Count_of_Star_Ratings, Top_Mentions,
                  Detailed_Review_Content, Recommendation_Intent, product_url, crawl_datetime, calendar_week,
                  final_sku_price, savings, original_sku_price, offer, pick_up_availability, shipping_availability,
-                 delivery_availability, sku_status, star_rating, promotion_type, promotion_rank,
+                 delivery_availability, sku_status, star_rating, promotion_type, promotion_position,
                  bsr_rank, main_rank)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
@@ -1551,7 +1557,7 @@ class BestBuyDetailCrawler:
                 sku_status,
                 star_rating_source,
                 promotion_type,
-                promotion_rank,
+                promotion_position,
                 bsr_rank,
                 main_rank
             ))
@@ -1585,7 +1591,7 @@ class BestBuyDetailCrawler:
                  pick_up_availability, shipping_availability, delivery_availability, shipping_info,
                  available_quantity_for_purchase, inventory_status, sku_status, retailer_membership_discounts,
                  detailed_review_content, summarized_review_content, top_mentions, recommendation_intent,
-                 main_rank, bsr_rank, rank_1, rank_2, promotion_rank,
+                 main_rank, bsr_rank, rank_1, rank_2, promotion_position,
                  number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, retailer_sku_name_similar,
                  estimated_annual_electricity_use, promotion_type,
                  calendar_week, crawl_datetime)
@@ -1622,7 +1628,7 @@ class BestBuyDetailCrawler:
                 bsr_rank,
                 None,  # rank_1 (BestBuy doesn't have this)
                 None,  # rank_2 (BestBuy doesn't have this)
-                promotion_rank,
+                promotion_position,
                 None,  # number_of_ppl_purchased_yesterday (BestBuy doesn't have this)
                 None,  # number_of_ppl_added_to_carts (BestBuy doesn't have this)
                 None,  # retailer_sku_name_similar (BestBuy doesn't have this)

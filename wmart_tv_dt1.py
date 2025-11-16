@@ -233,26 +233,32 @@ class WalmartDetailCrawler:
 
             print(f"[OK] Total unique URLs from main1/main2/bsr: {len(all_urls)}")
 
-            # Filter out already processed URLs from last 6 hours
-            print("[INFO] Checking for already processed URLs (last 6 hours)...")
+            # Filter out already processed URLs from current session (based on main1 batch start time)
+            print("[INFO] Checking for already processed URLs (current session)...")
             cursor = self.db_conn.cursor()
 
-            # Get timestamp for 6 hours ago
-            six_hours_ago = datetime.now() - timedelta(hours=6)
-            six_hours_ago_str = six_hours_ago.strftime('%Y-%m-%d %H:%M:%S')
+            # Use main1 batch_id as session start time (main1 is always first)
+            if main1_batch_id:
+                session_start_time = datetime.strptime(main1_batch_id, '%Y%m%d_%H%M%S')
+                session_start_str = session_start_time.strftime('%Y-%m-%d %H:%M:%S')
 
-            # Get all distinct processed URLs from last 6 hours in Walmart_tv_detail_crawled
-            cursor.execute("""
-                SELECT DISTINCT product_url
-                FROM Walmart_tv_detail_crawled
-                WHERE product_url IS NOT NULL
-                  AND crawl_datetime >= %s
-            """, (six_hours_ago_str,))
+                print(f"[INFO] Session start time (from main1 batch): {session_start_str}")
 
-            already_processed_urls = {row[0] for row in cursor.fetchall()}
+                # Get all distinct processed URLs from current session in Walmart_tv_detail_crawled
+                cursor.execute("""
+                    SELECT DISTINCT product_url
+                    FROM Walmart_tv_detail_crawled
+                    WHERE product_url IS NOT NULL
+                      AND crawl_datetime >= %s
+                """, (session_start_str,))
+
+                already_processed_urls = {row[0] for row in cursor.fetchall()}
+                print(f"[INFO] Found {len(already_processed_urls)} already processed URLs in current session")
+            else:
+                already_processed_urls = set()
+                print(f"[WARNING] No main1 batch_id found, skipping duplicate check")
+
             cursor.close()
-
-            print(f"[INFO] Found {len(already_processed_urls)} already processed URLs in last 6 hours")
 
             # Filter out already processed URLs
             new_urls = [url_data for url_data in all_urls
@@ -265,7 +271,7 @@ class WalmartDetailCrawler:
 
             if len(new_urls) == 0:
                 if len(all_urls) > 0:
-                    print("[WARNING] All URLs have been processed already in last 6 hours!")
+                    print("[WARNING] All URLs have been processed already in current session!")
                 else:
                     print("[ERROR] No URLs found!")
 
@@ -1453,7 +1459,7 @@ class WalmartDetailCrawler:
                  pick_up_availability, shipping_availability, delivery_availability, shipping_info,
                  available_quantity_for_purchase, inventory_status, sku_status, retailer_membership_discounts,
                  detailed_review_content, summarized_review_content, top_mentions, recommendation_intent,
-                 main_rank, bsr_rank, rank_1, rank_2, promotion_rank, trend_rank,
+                 main_rank, bsr_rank, rank_1, rank_2, promotion_position, trend_rank,
                  number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, retailer_sku_name_similar,
                  estimated_annual_electricity_use, promotion_type,
                  calendar_week, crawl_datetime)
@@ -1490,7 +1496,7 @@ class WalmartDetailCrawler:
                 data['bsr_rank'],
                 None,  # rank_1 (Walmart doesn't have this)
                 None,  # rank_2 (Walmart doesn't have this)
-                None,  # promotion_rank (Walmart doesn't have this)
+                None,  # promotion_position (Walmart doesn't have this)
                 None,  # trend_rank (Walmart doesn't have this)
                 data['Number_of_ppl_purchased_yesterday'],
                 data['Number_of_ppl_added_to_carts'],

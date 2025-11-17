@@ -425,9 +425,10 @@ class AmazonDetailCrawler:
 
         return None
 
-    def extract_screen_size(self, tree):
+    def extract_screen_size(self, tree, retailer_sku_name=None):
         """Extract screen size (format: '32 inches')
         Ensures proper formatting with 'inches' suffix
+        Falls back to extracting from retailer_sku_name if not found in tree
         """
         try:
             # Use po-display.size class to find Screen Size row (most reliable)
@@ -472,6 +473,16 @@ class AmazonDetailCrawler:
 
                     # If no valid screen size format found, continue to next XPath
                     continue
+
+            # Fallback: Extract from retailer_sku_name if provided
+            if retailer_sku_name:
+                import re
+                # Look for patterns like "25 inch", "116 inch", "22 inches", "15.6 inches"
+                match = re.search(r'(\d+\.?\d*)\s*inch(?:es)?', retailer_sku_name, re.IGNORECASE)
+                if match:
+                    size_number = match.group(1)
+                    print(f"  [INFO] Extracted screen_size from retailer_sku_name: {size_number} inches")
+                    return f"{size_number} inches"
 
             return None
 
@@ -869,8 +880,8 @@ class AmazonDetailCrawler:
                 rank_2_raw = self.extract_text_safe(tree, '//*[@id="detailBullets_feature_div"]/ul/li[7]/span/ul')
             rank_2 = self.clean_rank(rank_2_raw)
 
-            # Extract screen_size (NEW)
-            screen_size = self.extract_screen_size(tree)
+            # Extract screen_size (NEW) - pass retailer_sku_name as fallback
+            screen_size = self.extract_screen_size(tree, retailer_sku_name)
 
             # Extract model_year (NEW)
             model_year = self.extract_model_year(tree)

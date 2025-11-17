@@ -445,19 +445,33 @@ class AmazonDetailCrawler:
                 if size_text:
                     import re
 
+                    size_text = size_text.strip()
+
+                    # Skip invalid values (like "tilt", "fix", etc.)
+                    # Screen size must contain a number
+                    if not re.search(r'\d', size_text):
+                        continue
+
                     # Handle "50-inch" format -> "50 inches"
                     if '-inch' in size_text.lower():
                         # Extract number from "50-inch" or "50-Inch"
-                        match = re.search(r'(\d+)-inch', size_text.lower())
+                        match = re.search(r'(\d+\.?\d*)-inch', size_text.lower())
                         if match:
                             return f"{match.group(1)} inches"
+                        continue
 
-                    # Check if it's a number (integer or decimal like "43" or "15.6") -> "X inches"
-                    if re.match(r'^\d+\.?\d*$', size_text.strip()):
-                        return f"{size_text.strip()} inches"
+                    # Check if it's just a number (integer or decimal like "43" or "15.6") -> "X inches"
+                    if re.match(r'^\d+\.?\d*$', size_text):
+                        return f"{size_text} inches"
 
-                    # "32 Inches" -> "32 inches"
-                    return size_text.lower()
+                    # Handle "32 Inches" or "15.6 inches" format
+                    # Extract number + "inch/inches" pattern
+                    match = re.search(r'(\d+\.?\d*)\s*inch', size_text.lower())
+                    if match:
+                        return f"{match.group(1)} inches"
+
+                    # If no valid screen size format found, continue to next XPath
+                    continue
 
             return None
 

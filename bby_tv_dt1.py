@@ -838,10 +838,10 @@ class BestBuyDetailCrawler:
             for xpath in reviews_xpaths:
                 elem = price_container.xpath(xpath)
                 if elem:
-                    text = elem[0].text_content().strip()  # "(79 reviews)" or "(1,234 reviews)"
+                    text = elem[0].text_content().strip()  # "(79 reviews)" or "(1,234 reviews)" or "(50 reviews from philips.com)"
                     # 숫자 extraction (콤마 제거)
-                    # 패턴: (숫자,숫자 reviews) → 숫자만 extraction
-                    match = re.search(r'\(([\d,]+)\s*reviews?\)', text, re.IGNORECASE)
+                    # 패턴: (숫자,숫자 reviews 추가텍스트) → 숫자만 extraction
+                    match = re.search(r'\(([\d,]+)\s*reviews?[^)]*\)', text, re.IGNORECASE)
                     if match:
                         # 콤마 제거 후 반환: "1,234" → "1234"
                         count = match.group(1).replace(',', '')

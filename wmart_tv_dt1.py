@@ -970,16 +970,23 @@ class WalmartDetailCrawler:
             return None
 
     def extract_sku_from_lg_xpath(self):
-        """Extract SKU using LG-specific XPath"""
+        """Extract SKU using LG-specific XPath (from main page)"""
         try:
             page_source = self.driver.page_source
             tree = html.fromstring(page_source)
 
-            lg_xpath = '//*[@id="inpage_container"]/div[2]/div/div/div/div[1]'
-            sku = self.extract_text_safe(tree, lg_xpath)
+            # Try multiple LG-specific XPaths
+            lg_xpaths = [
+                '//div[@class="flix-model-name"]',  # New: flix-model-name class
+                '//*[@id="inpage_container"]/div[2]/div/div/div/div[1]',  # Original
+                '//div[contains(@class, "flix-model-name")]'  # Flexible
+            ]
 
-            if sku and 5 <= len(sku) <= 20:
-                return sku
+            for xpath in lg_xpaths:
+                sku = self.extract_text_safe(tree, xpath)
+                if sku and 5 <= len(sku) <= 20:
+                    print(f"  [INFO] Extracted SKU from LG XPath: {sku}")
+                    return sku
 
             return None
 

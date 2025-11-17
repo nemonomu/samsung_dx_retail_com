@@ -660,10 +660,61 @@ class AmazonDetailCrawler:
 
     def extract_final_sku_price(self, tree):
         """Extract final SKU price from detail page
-        If price not found, check for 'Currently unavailable.' text as fallback
+        Priority order: Special cases first, then normal price extraction
         """
         try:
-            # Try main container first
+            import re
+
+            # PRIORITY 1: Check for "Currently unavailable."
+            currently_unavailable_xpaths = [
+                '//*[@id="outOfStock"]/div/div[1]/span[1]',
+                '//*[@id="availability"]/span[2]/span',
+                '//span[@class="a-color-price a-text-bold"]',
+                '//span[@class="a-size-medium a-color-success"]'
+            ]
+
+            for xpath in currently_unavailable_xpaths:
+                text = self.extract_text_safe(tree, xpath)
+                if text and 'currently unavailable' in text.lower():
+                    return "Currently unavailable."
+
+            # PRIORITY 2: Check for "No featured offers available"
+            no_offers_xpaths = [
+                '//*[@id="fod-cx-message-with-learn-more"]/span[1]',
+                '//span[@id="fod-cx-message-with-learn-more"]/span[1]',
+                '//span[contains(text(), "No featured offers available")]'
+            ]
+
+            for xpath in no_offers_xpaths:
+                text = self.extract_text_safe(tree, xpath)
+                if text and 'no featured offers available' in text.lower():
+                    return "No featured offers available"
+
+            # PRIORITY 3: Check for "See price in cart"
+            see_price_xpaths = [
+                '//*[@id="corePriceDisplay_desktop_feature_div"]/table/tbody/tr/td[2]/span/a',
+                '//a[contains(text(), "See price in cart")]',
+                '//span[@class="a-declarative"]//a[contains(text(), "See price in cart")]'
+            ]
+
+            for xpath in see_price_xpaths:
+                text = self.extract_text_safe(tree, xpath)
+                if text and 'see price in cart' in text.lower():
+                    return "See price in cart"
+
+            # PRIORITY 4: Check for "Price higher than typical"
+            price_higher_xpaths = [
+                '//*[@id="fod-cx-message-with-learn-more"]/span[1]',
+                '//span[@id="fod-cx-message-with-learn-more"]/span[1]',
+                '//span[contains(text(), "Price higher than typical")]'
+            ]
+
+            for xpath in price_higher_xpaths:
+                text = self.extract_text_safe(tree, xpath)
+                if text and 'price higher than typical' in text.lower():
+                    return "Price higher than typical"
+
+            # NORMAL EXTRACTION: Try to extract regular price
             xpaths = [
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[1]',  # New primary xpath
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[3]/span[2]',  # Main container
@@ -678,18 +729,11 @@ class AmazonDetailCrawler:
                 if price_text:
                     # Extract only "$XXX.XX" or "$X,XXX.XX" format
                     # Remove "with X percent savings" and other extra text
-                    import re
                     match = re.search(r'\$[\d,]+\.?\d*', price_text)
                     if match:
                         return match.group()
                     # Fallback: return original if no price pattern found
                     return price_text.strip()
-
-            # Fallback: Check for "Currently unavailable." text
-            availability_xpath = '//*[@id="availability"]/span[2]/span'
-            availability_text = self.extract_text_safe(tree, availability_xpath)
-            if availability_text and 'currently unavailable' in availability_text.lower():
-                return availability_text.strip()
 
             return None
 

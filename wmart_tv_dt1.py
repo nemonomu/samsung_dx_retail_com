@@ -341,23 +341,53 @@ class WalmartDetailCrawler:
         except Exception as e:
             return None
 
+    def get_price_container(self, tree):
+        """Get the main price container to avoid picking prices from other sections like 'top deals'
+        Returns: price container element or None
+        """
+        try:
+            # Try to find the main product price container
+            # Common containers: product details section, hero section, main content
+            container_xpaths = [
+                '//div[@data-testid="price-wrap"]',
+                '//div[contains(@class, "prod-PriceSection")]',
+                '//div[contains(@class, "price-section")]',
+                '//section[contains(@class, "product-price")]',
+                '//div[@id="product-details"]//div[contains(@class, "price")]'
+            ]
+
+            for xpath in container_xpaths:
+                containers = tree.xpath(xpath)
+                if containers:
+                    return containers[0]
+
+            # If no specific container found, return None
+            # This will fall back to searching entire page
+            return None
+        except:
+            return None
+
     def extract_final_price(self, tree):
-        """Extract final price from detail page
+        """Extract final price from detail page (container-based)
         Example: <span itemprop="price" data-seo-id="hero-price">Now $238.00</span>
         Returns: $238.00
         """
         try:
-            # Try multiple XPath strategies
+            # Try to get price container first
+            price_container = self.get_price_container(tree)
+            search_context = price_container if price_container is not None else tree
+
+            # Try multiple XPath strategies (relative to container if available)
             xpaths = [
-                '//span[@itemprop="price"][@data-seo-id="hero-price"]',
-                '//span[@itemprop="price"]',
-                '//span[@data-seo-id="hero-price"]',
-                '//span[contains(@class, "price-wrap")]//span[contains(text(), "$")]'
+                './/span[@itemprop="price"][@data-seo-id="hero-price"]',
+                './/span[@itemprop="price"]',
+                './/span[@data-seo-id="hero-price"]',
+                './/span[contains(@class, "price-wrap")]//span[contains(text(), "$")]'
             ]
 
             for xpath in xpaths:
                 try:
-                    elements = tree.xpath(xpath)
+                    elements = search_context.xpath(xpath)
                     if elements:
                         text = elements[0].text_content().strip()
                         # Extract price (e.g., "Now $238.00" -> "$238.00")
@@ -371,32 +401,48 @@ class WalmartDetailCrawler:
         except Exception as e:
             return None
 
-    def extract_original_price(self, tree):
-        """Extract original/strike-through price from detail page
-        Example: <span aria-hidden="true" data-seo-id="strike-through-price">$298.00</span>
-        Returns: $298.00
+    def extract_original_price(self, tree, savings):
+        """Extract original/strike-through price from detail page (container-based)
+        Only extract if savings exists (to avoid picking prices from other sections)
+
+        Args:
+            tree: HTML tree
+            savings: savings value from extract_text_safe (e.g., "$60.00")
+
+        Returns: $298.00 or None
         """
         try:
-            # Try multiple XPath strategies
+            # Only extract original price if there's a savings/discount
+            if not savings:
+                return None
+
+            # Try to get price container first
+            price_container = self.get_price_container(tree)
+            search_context = price_container if price_container is not None else tree
+
+            # Try multiple XPath strategies (relative to container if available)
             xpaths = [
-                '//span[@data-seo-id="strike-through-price"]',
-                '//span[contains(@class, "strike")]',
-                '//span[@aria-hidden="true"][contains(@class, "strike")]',
-                '//del//span[contains(text(), "$")]'
+                './/span[@data-seo-id="strike-through-price"]',
+                './/span[contains(@class, "strike")]',
+                './/span[@aria-hidden="true"][contains(@class, "strike")]',
+                './/del//span[contains(text(), "$")]'
             ]
 
             for xpath in xpaths:
                 try:
-                    elements = tree.xpath(xpath)
+                    elements = search_context.xpath(xpath)
                     if elements:
                         text = elements[0].text_content().strip()
                         # Extract price (e.g., "$298.00")
                         price_match = re.search(r'\$[\d,]+\.?\d*', text)
                         if price_match:
-                            print(f"       Original Price: {price_match.group(0)}")
+                            print(f"       Original Price: {price_match.group(0)} (with savings: {savings})")
                             return price_match.group(0)
                 except:
                     continue
+
+            # If savings exists but no strike-through price found, log it
+            print(f"       Original Price: Not found (but savings exists: {savings})")
             return None
         except Exception as e:
             return None
@@ -1250,9 +1296,9 @@ class WalmartDetailCrawler:
             discount_type = self.extract_text_safe(tree, self.xpaths.get('discount_type'))
             savings = self.extract_text_safe(tree, self.xpaths.get('savings'))
 
-            # Extract prices from detail page
+            # Extract prices from detail page (original_price only if savings exists)
             final_sku_price = self.extract_final_price(tree)
-            original_sku_price = self.extract_original_price(tree)
+            original_sku_price = self.extract_original_price(tree, savings)
 
             # Extract and classify all badges (BEFORE Model extraction)
             badges = self.extract_badges(tree)
@@ -1460,11 +1506,11 @@ class WalmartDetailCrawler:
                  pick_up_availability, shipping_availability, delivery_availability, shipping_info,
                  available_quantity_for_purchase, inventory_status, sku_status, retailer_membership_discounts,
                  detailed_review_content, summarized_review_content, top_mentions, recommendation_intent,
-                 main_rank, bsr_rank, rank_1, rank_2, promotion_position, trend_rank,
-                 number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, retailer_sku_name_similar,
-                 estimated_annual_electricity_use, promotion_type,
+                 main_rank, bsr_rank, trend_rank, rank_1, rank_2, promotion_position,
+                 number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, number_of_units_purchased_past_month, retailer_sku_name_similar,
+                 estimated_annual_electricity_use, promotion_type, model_year,
                  calendar_week, crawl_datetime)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 data['item'],
                 'Walmart',  # account_name
@@ -1495,15 +1541,17 @@ class WalmartDetailCrawler:
                 None,  # recommendation_intent (Walmart doesn't have this)
                 data['main_rank'],
                 data['bsr_rank'],
+                None,  # trend_rank (Walmart doesn't have this)
                 None,  # rank_1 (Walmart doesn't have this)
                 None,  # rank_2 (Walmart doesn't have this)
                 None,  # promotion_position (Walmart doesn't have this)
-                None,  # trend_rank (Walmart doesn't have this)
                 data['Number_of_ppl_purchased_yesterday'],
                 data['Number_of_ppl_added_to_carts'],
+                None,  # number_of_units_purchased_past_month (Walmart doesn't have this)
                 data['Retailer_SKU_Name_similar'],
                 None,  # estimated_annual_electricity_use (Walmart doesn't have this)
                 None,  # promotion_type (Walmart doesn't have this)
+                None,  # model_year (Walmart doesn't have this)
                 calendar_week,
                 crawl_datetime
             ))

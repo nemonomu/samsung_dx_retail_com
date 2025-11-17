@@ -1022,235 +1022,30 @@ class WalmartDetailCrawler:
         return intersection / union if union > 0 else 0.0
 
     def click_specifications_and_get_model(self):
-        """Click Specifications > Arrow > More details > Extract Model > Fallback to URL/Name > Close dialog
+        """Extract item from product URL - last segment after final slash
 
-        Smart selection logic:
-        - If Model name is similar to retailer_sku_name (>70% similarity) → use Model
-        - If Model is similar to retailer_sku_name (>70% similarity) → use Model name
-        - Otherwise → prefer shorter/cleaner value (likely the actual model number)
+        Example:
+        https://www.walmart.com/ip/TCL-50-Class-Q6-50Q651G-4K-UHD-HDR-QLED-Smart-TV-with-Google-TV-NEW-2024/5373842535
+        -> Returns: 5373842535
         """
         try:
-            print(f"  [INFO] Attempting to extract Model from Specifications...")
+            print(f"  [INFO] Extracting item from product URL...")
 
-            # Scroll down to load Specifications section
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight / 2);")
-            time.sleep(2)
+            # Get current URL
+            current_url = self.driver.current_url
 
-            # Step 1: Find and click Specifications arrow button
-            specs_arrow_clicked = False
-            specs_arrow_xpaths = [
-                "//button[@aria-label='Specifications']",
-                "//button[@aria-label='Specifications']//i[contains(@class, 'ChevronDown')]",
-                "//h2[contains(text(), 'Specifications')]/parent::*/following-sibling::div//button"
-            ]
+            # Extract last segment after final "/"
+            item = current_url.rstrip('/').split('/')[-1]
 
-            for xpath in specs_arrow_xpaths:
-                try:
-                    arrow_btn = self.driver.find_element(By.XPATH, xpath)
-                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", arrow_btn)
-                    time.sleep(1)
-
-                    # Click arrow to expand
-                    self.driver.execute_script("arguments[0].click();", arrow_btn)
-                    time.sleep(2)
-                    specs_arrow_clicked = True
-                    print(f"  [OK] Clicked Specifications arrow button")
-                    break
-                except Exception as e:
-                    continue
-
-            if not specs_arrow_clicked:
-                print(f"  [WARNING] Could not find or click Specifications arrow")
-                return None
-
-            # Step 2: Find and click "More details" button
-            more_details_clicked = False
-            more_details_xpaths = [
-                "//button[@aria-label='More details']",
-                "//button[contains(text(), 'More details')]",
-                "//button[contains(., 'More details')]"
-            ]
-
-            for xpath in more_details_xpaths:
-                try:
-                    more_details_btn = self.driver.find_element(By.XPATH, xpath)
-                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", more_details_btn)
-                    time.sleep(1)
-
-                    # Click to open dialog
-                    self.driver.execute_script("arguments[0].click();", more_details_btn)
-                    time.sleep(5)  # Wait for dialog to fully load and render
-                    more_details_clicked = True
-                    print(f"  [OK] Clicked More details button - Dialog opened")
-                    break
-                except:
-                    continue
-
-            if not more_details_clicked:
-                print(f"  [WARNING] Could not find or click More details button")
-                return None
-
-            # Step 3: Extract BOTH "Model name" and "Model" from the dialog
-            page_source = self.driver.page_source
-            tree = html.fromstring(page_source)
-
-            # XPaths for "Model name"
-            model_name_xpaths = [
-                "//h3[normalize-space()='Model name']/following-sibling::div//span",
-                "//div[@class='pb2'][.//h3[normalize-space()='Model name']]/div//span",
-                "//h3[text()='Model name']/following-sibling::div//span",
-                "//h3[contains(text(), 'Model name')]/following-sibling::div/div/span",
-                "//div[contains(@class, 'pb2')]//h3[text()='Model name']/following-sibling::div//span"
-            ]
-
-            # XPaths for "Model"
-            model_xpaths = [
-                "//h3[normalize-space()='Model']/following-sibling::div//span",
-                "//div[@class='pb2'][.//h3[normalize-space()='Model']]/div//span",
-                "//h3[text()='Model']/following-sibling::div//span",
-                "//h3[contains(text(), 'Model')]/following-sibling::div/div/span",
-                "//div[contains(@class, 'pb2')]//h3[text()='Model']/following-sibling::div//span"
-            ]
-
-            # Extract Model name
-            model_name_value = None
-            for xpath in model_name_xpaths:
-                if xpath:
-                    extracted = self.extract_text_safe(tree, xpath)
-                    if extracted:
-                        # Remove parentheses if entirely wrapped: "(SC-1311)" -> "SC-1311"
-                        if extracted.startswith('(') and extracted.endswith(')'):
-                            extracted = extracted[1:-1]
-                        # Validate using is_invalid_sku
-                        if not self.is_invalid_sku(extracted):
-                            model_name_value = extracted
-                            break
-
-            # Extract Model
-            model_value = None
-            for xpath in model_xpaths:
-                if xpath:
-                    extracted = self.extract_text_safe(tree, xpath)
-                    if extracted:
-                        # Remove parentheses if entirely wrapped: "(SC-1311)" -> "SC-1311"
-                        if extracted.startswith('(') and extracted.endswith(')'):
-                            extracted = extracted[1:-1]
-                        # Validate using is_invalid_sku
-                        if not self.is_invalid_sku(extracted):
-                            model_value = extracted
-                            break
-
-            # Step 3.5: Smart selection based on similarity to retailer_sku_name
-            # Get retailer_sku_name from current page
-            retailer_sku_name = self.extract_text_safe(tree, self.xpaths.get('product_name'))
-
-            model = None
-            selection_reason = ""
-
-            if model_name_value and model_value and retailer_sku_name:
-                # Both values exist - calculate similarity
-                similarity_model_name = self.calculate_similarity(model_name_value, retailer_sku_name)
-                similarity_model = self.calculate_similarity(model_value, retailer_sku_name)
-
-                print(f"  [DEBUG] Model name: '{model_name_value}' (similarity: {similarity_model_name:.2f})")
-                print(f"  [DEBUG] Model: '{model_value}' (similarity: {similarity_model:.2f})")
-
-                # If Model name is too similar to product name (>0.7), use Model instead
-                if similarity_model_name > 0.7 and similarity_model < 0.7:
-                    model = model_value
-                    selection_reason = f"Model name too similar to product name ({similarity_model_name:.2f}), using Model"
-                # If Model is too similar to product name (>0.7), use Model name instead
-                elif similarity_model > 0.7 and similarity_model_name < 0.7:
-                    model = model_name_value
-                    selection_reason = f"Model too similar to product name ({similarity_model:.2f}), using Model name"
-                # Both similar or both different - prefer shorter one (likely actual model number)
-                else:
-                    if len(model_name_value) <= len(model_value):
-                        model = model_name_value
-                        selection_reason = "Both available, preferring Model name (shorter)"
-                    else:
-                        model = model_value
-                        selection_reason = "Both available, preferring Model (shorter)"
-
-            elif model_name_value:
-                model = model_name_value
-                selection_reason = "Only Model name available"
-            elif model_value:
-                model = model_value
-                selection_reason = "Only Model available"
-
-            if model:
-                print(f"  [OK] Selected item: '{model}' ({selection_reason})")
+            if item:
+                print(f"  [OK] Extracted item from URL: {item}")
+                return item
             else:
-                print(f"  [WARNING] No Model name or Model found in dialog")
-
-            # Step 4: Close the dialog by clicking X button
-            try:
-                close_btn_xpaths = [
-                    "//button[@aria-label='Close dialog']",
-                    "//button[contains(@aria-label, 'Close')]",
-                    "//button[@data-dca-intent='close']"
-                ]
-
-                for xpath in close_btn_xpaths:
-                    try:
-                        close_btn = self.driver.find_element(By.XPATH, xpath)
-                        self.driver.execute_script("arguments[0].click();", close_btn)
-                        time.sleep(1)
-                        print(f"  [OK] Closed More details dialog")
-                        break
-                    except:
-                        continue
-            except Exception as e:
-                print(f"  [WARNING] Could not close dialog: {e}")
-
-            # Step 5: Validate extracted model - if invalid, try fallback methods
-            if self.is_invalid_sku(model):
-                print(f"  [WARNING] Extracted SKU '{model}' is invalid (contains resolution/spec terms), trying fallback methods...")
-
-                # Get current URL and product name for fallback
-                current_url = self.driver.current_url
-                page_source = self.driver.page_source
-                tree = html.fromstring(page_source)
-                product_name = self.extract_text_safe(tree, self.xpaths.get('product_name'))
-
-                # Fallback 1: Extract from URL
-                url_sku = self.extract_sku_from_url(current_url)
-                if url_sku and not self.is_invalid_sku(url_sku):
-                    print(f"  [OK] Extracted valid SKU from URL: {url_sku}")
-                    return url_sku
-                elif url_sku:
-                    print(f"  [WARNING] SKU from URL is invalid: {url_sku}")
-
-                # Fallback 2: Extract from product name
-                name_sku = self.extract_sku_from_product_name(product_name)
-                if name_sku and not self.is_invalid_sku(name_sku):
-                    print(f"  [OK] Extracted valid SKU from product name: {name_sku}")
-                    return name_sku
-                elif name_sku:
-                    print(f"  [WARNING] SKU from product name is invalid: {name_sku}")
-
-                # Fallback 3: LG-specific XPath (only if product name contains "LG")
-                if product_name and 'LG' in product_name.upper():
-                    lg_sku = self.extract_sku_from_lg_xpath()
-                    if lg_sku and not self.is_invalid_sku(lg_sku):
-                        print(f"  [OK] Extracted valid SKU from LG XPath: {lg_sku}")
-                        return lg_sku
-                    elif lg_sku:
-                        print(f"  [WARNING] SKU from LG XPath is invalid: {lg_sku}")
-
-                # All fallbacks failed - return None (better than invalid value)
-                print(f"  [WARNING] All SKU extraction methods failed or returned invalid values. Saving NULL for item.")
+                print(f"  [WARNING] Could not extract item from URL: {current_url}")
                 return None
-
-            if not model:
-                print(f"  [WARNING] Could not extract valid Model")
-                return None
-
-            return model
 
         except Exception as e:
-            print(f"  [ERROR] Failed to extract model: {e}")
+            print(f"  [ERROR] Failed to extract item from URL: {e}")
             import traceback
             traceback.print_exc()
             return None

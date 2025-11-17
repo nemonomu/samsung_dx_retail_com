@@ -657,7 +657,7 @@ class BestBuyDetailCrawler:
                 if elem:
                     text = elem[0].text_content().strip()
                     if "no longer available in new condition" in text.lower():
-                        return "This item is no longer available in new condition"
+                        return "This item is no longer available in new condition."
 
             return None
         except Exception as e:

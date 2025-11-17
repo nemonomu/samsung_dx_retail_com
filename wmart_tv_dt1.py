@@ -697,13 +697,17 @@ class WalmartDetailCrawler:
         try:
             # Try multiple XPath strategies to find Screen size
             xpaths = [
-                # Method 1: Use aria-label (most reliable)
+                # Method 1: Table structure - <tr><th><dt>Screen size</dt></th><td><dd>75 in</dd></td></tr>
+                "//tr[.//dt[contains(text(), 'Screen size')]]//dd",
+                # Method 2: Alternative table structure
+                "//dt[contains(text(), 'Screen size')]/ancestor::tr//dd",
+                # Method 3: Use aria-label (most reliable for div structure)
                 "//div[@aria-label[contains(., 'Screen size:')]]/@aria-label",
-                # Method 2: Find "Screen size" text and get the next sibling div
+                # Method 4: Find "Screen size" text and get the next sibling div
                 "//div[contains(@class, 'b') and contains(., 'Screen size')]/following-sibling::div//span",
-                # Method 3: Direct XPath provided by user
+                # Method 5: Direct XPath provided by user (old structure)
                 "//*[@id='ip-prod-desc-atf-div-1']/section/section[2]/div/div/div[1]/div[1]/div/div/div[2]/span",
-                # Method 4: Find within "Specifications at a glance" container
+                # Method 6: Find within "Specifications at a glance" container
                 "//h3[contains(text(), 'Specifications at a glance')]/parent::div//div[@aria-label[contains(., 'Screen size')]]/@aria-label"
             ]
 

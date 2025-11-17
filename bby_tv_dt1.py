@@ -810,6 +810,22 @@ class BestBuyDetailCrawler:
                     # 평점 형식 검증 (숫자.숫자 형식)
                     if rating and re.match(r'^\d+\.\d+$', rating):
                         return rating  # "4.7" 형식 반환
+
+            # Fallback: Check for "Not yet reviewed"
+            not_reviewed_xpaths = [
+                './/span[@aria-hidden="true"][@class="c-reviews order-2"]',
+                './/span[@class="c-reviews order-2"][contains(text(), "Not yet reviewed")]',
+                './/span[contains(@class, "c-reviews")][contains(text(), "Not yet reviewed")]',
+                './/span[contains(text(), "Not yet reviewed")]'
+            ]
+
+            for xpath in not_reviewed_xpaths:
+                elem = price_container.xpath(xpath)
+                if elem:
+                    text = elem[0].text_content().strip()
+                    if "Not yet reviewed" in text:
+                        return "Not yet reviewed"
+
             return None  # review가 없으면 None
         except Exception as e:
             print(f"  [ERROR] Star_Rating extraction failed: {e}")

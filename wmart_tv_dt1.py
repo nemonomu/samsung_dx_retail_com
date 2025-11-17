@@ -338,7 +338,8 @@ class WalmartDetailCrawler:
                     return "No ratings yet"
 
                 # Extract number before "out of"
-                match = re.search(r'([\d.]+)\s*out of', rating_text)
+                # Handles: "4.4 out of 5" or "3.9 stars out of 69 reviews"
+                match = re.search(r'([\d.]+)\s*(?:stars?\s*)?out of', rating_text, re.IGNORECASE)
                 if match:
                     return match.group(1)
 

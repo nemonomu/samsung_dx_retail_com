@@ -820,98 +820,15 @@ class AmazonDetailCrawler:
             membership_discount_raw = self.extract_text_safe(tree, self.xpaths.get('membership_discount'))
             membership_discount = self.clean_membership_discount(membership_discount_raw)
 
-            # Item (formerly Samsung_SKU_Name) - Priority: SKU number > Model Number
-            # Priority 1: ASIN (item details dialog - highest priority)
-            asin_xpaths = [
-                '//tr[.//th[contains(text(), "ASIN")]]/td[@class="a-size-base prodDetAttrValue"]',
-                '//table//tr[.//th[contains(text(), "ASIN")]]/td',
-                '//*[@id="productDetails_expanderTables_depthRightSections"]//tr[.//th[contains(text(), "ASIN")]]/td',
-                '//th[contains(text(), "ASIN")]/following-sibling::td'
-            ]
+            # Item - Extract ASIN directly from product URL
+            # Example: https://www.amazon.com/.../dp/B0DYR3D7QQ/... -> B0DYR3D7QQ
+            item = self.extract_asin(url)
 
-            # Priority 2: SKU number (Technical Details container)
-            sku_number_xpaths = [
-                # Highest priority: Technical Details container (div[@id="tech"]) - "SKU Number" (capital N)
-                '//div[@id="tech"]//td[p/strong[text()="SKU Number"]]/following-sibling::td/p',
-                '//div[@id="tech"]//td[.//strong[contains(text(), "SKU Number")]]/following-sibling::td',
-                '//div[@id="tech"]//tr[td//strong[contains(text(), "SKU Number")]]/td[2]/p',
-                '//div[@id="tech"]//tr[td//strong[contains(text(), "SKU Number")]]/td[2]',
-
-                # Technical Details container - "SKU number" (lowercase n)
-                '//div[@id="tech"]//td[p/strong[text()="SKU number"]]/following-sibling::td/p',
-                '//div[@id="tech"]//td[.//strong[contains(text(), "SKU number")]]/following-sibling::td',
-                '//div[@id="tech"]//tr[td//strong[contains(text(), "SKU number")]]/td[2]/p',
-                '//div[@id="tech"]//tr[td//strong[contains(text(), "SKU number")]]/td[2]',
-
-                # Fallback: General table structure - "SKU Number" (capital N)
-                '//td[p/strong[text()="SKU Number"]]/following-sibling::td/p',
-                '//td[.//strong[contains(text(), "SKU Number")]]/following-sibling::td',
-                '//tr[td//strong[contains(text(), "SKU Number")]]/td[2]/p',
-                '//tr[td//strong[contains(text(), "SKU Number")]]/td[2]',
-
-                # Fallback: General table structure - "SKU number" (lowercase n)
-                '//td[p/strong[text()="SKU number"]]/following-sibling::td/p',
-                '//td[.//strong[contains(text(), "SKU number")]]/following-sibling::td',
-                '//tr[td//strong[contains(text(), "SKU number")]]/td[2]/p',
-                '//tr[td//strong[contains(text(), "SKU number")]]/td[2]',
-
-                # Additional fallbacks for robust extraction
-                '//table[@class="a-bordered"]//td[p/strong[text()="SKU Number"]]/following-sibling::td/p',
-                '//table[@class="a-bordered"]//td[p/strong[text()="SKU number"]]/following-sibling::td/p',
-                '//strong[text()="SKU Number"]/ancestor::td/following-sibling::td/p',
-                '//strong[text()="SKU number"]/ancestor::td/following-sibling::td/p',
-                '//strong[contains(text(), "SKU Number")]/ancestor::td/following-sibling::td',
-                '//strong[contains(text(), "SKU number")]/ancestor::td/following-sibling::td'
-            ]
-
-            # Priority 3: Model Number (fallback)
-            model_number_xpaths = [
-                '//th[contains(text(), "Model Number")]/following-sibling::td',
-                '//*[@id="productDetails_expanderTables_depthRightSections"]//th[contains(text(), "Model Number")]/following-sibling::td',
-                '//td[p/strong[text()="Model Number"]]/following-sibling::td/p',
-                '//td[.//strong[contains(text(), "Model Number")]]/following-sibling::td'
-            ]
-
-            item = None
-
-            # Try ASIN first (Priority 1)
-            for xpath in asin_xpaths:
-                if xpath:
-                    extracted = self.extract_text_safe(tree, xpath)
-                    if extracted and len(extracted) > 0:
-                        item = extracted.strip()
-                        print(f"  [OK] Extracted item from 'ASIN': {item}")
-                        break
-
-            # If ASIN not found, try SKU number (Priority 2)
-            if not item:
-                for xpath in sku_number_xpaths:
-                    if xpath:
-                        extracted = self.extract_text_safe(tree, xpath)
-                        if extracted and len(extracted) > 0:
-                            item = extracted.strip()
-                            print(f"  [OK] Extracted item from 'SKU number': {item}")
-                            break
-
-            # If SKU number not found, try Model Number (Priority 3)
-            if not item:
-                for xpath in model_number_xpaths:
-                    if xpath:
-                        extracted = self.extract_text_safe(tree, xpath)
-                        if extracted and len(extracted) > 0:
-                            item = extracted.strip()
-                            print(f"  [OK] Extracted item from 'Model Number': {item}")
-                            break
-
-            # If still not found, try extracting ASIN from URL (Priority 4 - final fallback)
-            if not item:
-                asin_from_url = self.extract_asin(url)
-                # Validate it's a 10-character ASIN (not the full URL)
-                if asin_from_url and len(asin_from_url) == 10 and asin_from_url != url:
-                    item = asin_from_url
-                    print(f"  [OK] Extracted item from URL (ASIN): {item}")
-                else:
-                    print(f"  [WARNING] Could not extract item (ASIN/SKU/Model Number/URL)")
+            if item and len(item) == 10:
+                print(f"  [OK] Extracted item from URL (ASIN): {item}")
+            else:
+                print(f"  [WARNING] Could not extract valid ASIN from URL: {url}")
+                item = None
 
             # Ranks - try multiple approaches
             rank_1_raw = self.extract_text_safe(tree, self.xpaths.get('rank_1'))

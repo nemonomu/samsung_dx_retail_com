@@ -793,6 +793,8 @@ class WalmartDetailCrawler:
 
         sku_clean = sku.strip()
         sku_lower = sku_clean.lower()
+        # Remove all spaces for pattern matching
+        sku_no_space = sku_clean.replace(' ', '').lower()
 
         # Too short (just numbers or very short strings)
         if len(sku_clean) < 4:
@@ -823,8 +825,9 @@ class WalmartDetailCrawler:
         if ';' in sku_clean:
             return True
 
-        # Pattern 1: Refresh rate (60Hz, 120Hz, 144Hz, etc.)
-        if re.search(r'^\d+Hz$', sku_clean, re.IGNORECASE):
+        # Pattern 1: Refresh rate (60Hz, 120Hz, 144Hz, 60 Hz, 120 hz, etc.)
+        # Check both with and without spaces
+        if re.search(r'^\d+\s*hz$', sku_no_space, re.IGNORECASE):
             return True
 
         # Pattern 2: Resolution with x (3,840 x 2,160 or 3840 x 2160 or 1920 x 1080)
@@ -832,7 +835,8 @@ class WalmartDetailCrawler:
             return True
 
         # Pattern 3: Resolution format (480i, 480p, 720p, 1080i, 1080p, 2160p, etc.)
-        if re.search(r'^\d{3,4}[ip]$', sku_clean, re.IGNORECASE):
+        # Also catch with spaces: "1080 p", "720 i"
+        if re.search(r'^\d{3,4}\s*[ip]$', sku_no_space, re.IGNORECASE):
             return True
 
         # Pattern 4: Contains parentheses with resolution like (2160p), (1080p)
@@ -842,6 +846,15 @@ class WalmartDetailCrawler:
 
         # Pattern 5: Just numbers (like "75", "65", etc. - likely screen size)
         if sku_clean.isdigit():
+            return True
+
+        # Pattern 6: Number followed by unit (catch variations)
+        # 60hz, 120Hz, 4k, 8K, etc.
+        if re.search(r'^\d+\s*(hz|khz|mhz|k|p|i)$', sku_no_space, re.IGNORECASE):
+            return True
+
+        # Pattern 7: Contains "refresh" or common spec terms
+        if any(term in sku_lower for term in ['refresh', 'hertz', 'resolution', 'display']):
             return True
 
         return False

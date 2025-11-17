@@ -745,17 +745,21 @@ class WalmartDetailCrawler:
         try:
             # Try multiple XPath strategies to find Screen size
             xpaths = [
-                # Method 1: Table structure - <tr><th><dt>Screen size</dt></th><td><dd>75 in</dd></td></tr>
+                # Method 1: Definition list structure - <dl><dt>Screen size</dt><dd>75 in</dd></dl> (main page)
+                "//dl[.//dt[contains(., 'Screen size')]]//dd",
+                # Method 2: Definition list - direct sibling (main page)
+                "//dt[contains(., 'Screen size')]/following-sibling::dd",
+                # Method 3: Table structure - <tr><th><dt>Screen size</dt></th><td><dd>75 in</dd></td></tr>
                 "//tr[.//dt[contains(text(), 'Screen size')]]//dd",
-                # Method 2: Alternative table structure
+                # Method 4: Alternative table structure
                 "//dt[contains(text(), 'Screen size')]/ancestor::tr//dd",
-                # Method 3: Use aria-label (most reliable for div structure)
+                # Method 5: Use aria-label (most reliable for div structure)
                 "//div[@aria-label[contains(., 'Screen size:')]]/@aria-label",
-                # Method 4: Find "Screen size" text and get the next sibling div
+                # Method 6: Find "Screen size" text and get the next sibling div
                 "//div[contains(@class, 'b') and contains(., 'Screen size')]/following-sibling::div//span",
-                # Method 5: Direct XPath provided by user (old structure)
+                # Method 7: Direct XPath provided by user (old structure)
                 "//*[@id='ip-prod-desc-atf-div-1']/section/section[2]/div/div/div[1]/div[1]/div/div/div[2]/span",
-                # Method 6: Find within "Specifications at a glance" container
+                # Method 8: Find within "Specifications at a glance" container
                 "//h3[contains(text(), 'Specifications at a glance')]/parent::div//div[@aria-label[contains(., 'Screen size')]]/@aria-label"
             ]
 

@@ -1514,7 +1514,8 @@ class BestBuyDetailCrawler:
                 promotion_type=url_data['promotion_type'],
                 promotion_position=url_data['promotion_position'],
                 bsr_rank=url_data['bsr_rank'],
-                main_rank=url_data['main_rank']
+                main_rank=url_data['main_rank'],
+                model_year=model_year  # ADDED: model_year parameter
             )
 
             # Increment total collected after successful save
@@ -1534,7 +1535,7 @@ class BestBuyDetailCrawler:
                    final_sku_price, savings, original_sku_price, offer,
                    pick_up_availability, shipping_availability, delivery_availability,
                    sku_status, star_rating_source, promotion_type, promotion_position,
-                   bsr_rank, main_rank):
+                   bsr_rank, main_rank, model_year):
         """DB에 save"""
         try:
             print(f"  [DB] Saving to database...")

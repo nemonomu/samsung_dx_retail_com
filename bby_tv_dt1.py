@@ -1559,8 +1559,8 @@ class BestBuyDetailCrawler:
                  Detailed_Review_Content, Recommendation_Intent, product_url, crawl_datetime, calendar_week,
                  final_sku_price, savings, original_sku_price, offer, pick_up_availability, shipping_availability,
                  delivery_availability, sku_status, star_rating, promotion_type, promotion_position,
-                 bsr_rank, main_rank)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 bsr_rank, main_rank, trend_rank)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
 
             cursor.execute(insert_query, (
@@ -1592,7 +1592,8 @@ class BestBuyDetailCrawler:
                 promotion_type,
                 promotion_position,
                 bsr_rank,
-                main_rank
+                main_rank,
+                None  # trend_rank (not collected)
             ))
 
             # Also insert into unified tv_retail_com table
@@ -1624,11 +1625,11 @@ class BestBuyDetailCrawler:
                  pick_up_availability, shipping_availability, delivery_availability, shipping_info,
                  available_quantity_for_purchase, inventory_status, sku_status, retailer_membership_discounts,
                  detailed_review_content, summarized_review_content, top_mentions, recommendation_intent,
-                 main_rank, bsr_rank, rank_1, rank_2, promotion_position,
-                 number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, retailer_sku_name_similar,
+                 main_rank, bsr_rank, trend_rank, rank_1, rank_2, promotion_position,
+                 number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, number_of_units_purchased_past_month, retailer_sku_name_similar,
                  estimated_annual_electricity_use, promotion_type, model_year,
                  calendar_week, crawl_datetime)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 item,
                 'Bestbuy',  # account_name
@@ -1659,11 +1660,13 @@ class BestBuyDetailCrawler:
                 recommendation_intent,
                 main_rank,
                 bsr_rank,
+                None,  # trend_rank (not collected)
                 None,  # rank_1 (BestBuy doesn't have this)
                 None,  # rank_2 (BestBuy doesn't have this)
                 promotion_position,
                 None,  # number_of_ppl_purchased_yesterday (BestBuy doesn't have this)
                 None,  # number_of_ppl_added_to_carts (BestBuy doesn't have this)
+                None,  # number_of_units_purchased_past_month (BestBuy doesn't have this)
                 None,  # retailer_sku_name_similar (BestBuy doesn't have this)
                 electricity_use,
                 promotion_type,

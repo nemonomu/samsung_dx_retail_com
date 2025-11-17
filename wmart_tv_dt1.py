@@ -403,7 +403,9 @@ class WalmartDetailCrawler:
                 './/span[@itemprop="price"][@data-seo-id="hero-price"]',
                 './/span[@itemprop="price"]',
                 './/span[@data-seo-id="hero-price"]',
-                './/span[contains(@class, "price-wrap")]//span[contains(text(), "$")]'
+                './/span[contains(@class, "price-wrap")]//span[contains(text(), "$")]',
+                # "Starting from $X" pattern
+                './/span[contains(text(), "Starting from")]'
             ]
 
             for xpath in xpaths:
@@ -425,7 +427,7 @@ class WalmartDetailCrawler:
                 except:
                     continue
 
-            # Fallback: Look for "See price in cart" at specific locations
+            # Fallback 1: Look for "See price in cart" at specific locations
             see_price_xpaths = [
                 '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/div[1]/span[2]/span[2]/span',
                 '//span[@itemprop="price"][@data-seo-id="hero-price"][contains(text(), "See price in cart")]',
@@ -441,6 +443,26 @@ class WalmartDetailCrawler:
                         if "See price in cart" in text:
                             print(f"       Final Price: See price in cart")
                             return "See price in cart"
+                except:
+                    continue
+
+            # Fallback 2: Look for "Starting from $X" at specific locations
+            starting_from_xpaths = [
+                '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[2]/div/div/div[1]/section/div/div/div/div/div[1]/span[1]',
+                '//span[contains(text(), "Starting from")]',
+                '//div[contains(@class, "flex")]//span[contains(text(), "Starting from")]'
+            ]
+
+            for xpath in starting_from_xpaths:
+                try:
+                    elements = tree.xpath(xpath)
+                    if elements:
+                        text = elements[0].text_content().strip()
+                        # Extract price from "Starting from $1,995.00" -> "$1,995.00"
+                        price_match = re.search(r'\$[\d,]+\.?\d*', text)
+                        if price_match:
+                            print(f"       Final Price: {price_match.group(0)}")
+                            return price_match.group(0)
                 except:
                     continue
 

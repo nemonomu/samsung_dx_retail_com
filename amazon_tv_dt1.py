@@ -903,9 +903,15 @@ class AmazonDetailCrawler:
                             print(f"  [OK] Extracted item from 'Model Number': {item}")
                             break
 
-            # If still not found, log warning
+            # If still not found, try extracting ASIN from URL (Priority 4 - final fallback)
             if not item:
-                print(f"  [WARNING] Could not extract item (ASIN/SKU/Model Number)")
+                asin_from_url = self.extract_asin(url)
+                # Validate it's a 10-character ASIN (not the full URL)
+                if asin_from_url and len(asin_from_url) == 10 and asin_from_url != url:
+                    item = asin_from_url
+                    print(f"  [OK] Extracted item from URL (ASIN): {item}")
+                else:
+                    print(f"  [WARNING] Could not extract item (ASIN/SKU/Model Number/URL)")
 
             # Ranks - try multiple approaches
             rank_1_raw = self.extract_text_safe(tree, self.xpaths.get('rank_1'))

@@ -461,9 +461,11 @@ class AmazonDetailCrawler:
                             return f"{match.group(1)} inches"
                         continue
 
-                    # Check if it's just a number (integer or decimal like "43" or "15.6") -> "X inches"
-                    if re.match(r'^\d+\.?\d*$', size_text):
-                        return f"{size_text} inches"
+                    # Check if it's a number (with optional " symbol like "43", "15.6", or "50"") -> "X inches"
+                    if re.match(r'^\d+\.?\d*"?$', size_text):
+                        # Extract just the number, removing " if present
+                        size_number = re.search(r'(\d+\.?\d*)', size_text).group(1)
+                        return f"{size_number} inches"
 
                     # Handle "32 Inches" or "15.6 inches" format
                     # Extract number + "inch/inches" pattern
@@ -477,8 +479,9 @@ class AmazonDetailCrawler:
             # Fallback: Extract from retailer_sku_name if provided
             if retailer_sku_name:
                 import re
-                # Look for patterns like "25 inch", "116 inch", "22 inches", "55-Inch", "55-inches"
-                match = re.search(r'(\d+\.?\d*)[\s-]*inch(?:es)?', retailer_sku_name, re.IGNORECASE)
+                # Look for patterns: "25 inch", "55-Inch", "50"", etc.
+                # Matches: number + (space/hyphen + inch/inches OR double quote)
+                match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|")', retailer_sku_name, re.IGNORECASE)
                 if match:
                     size_number = match.group(1)
                     print(f"  [INFO] Extracted screen_size from retailer_sku_name: {size_number} inches")

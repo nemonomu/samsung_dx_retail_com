@@ -538,6 +538,40 @@ class AmazonDetailCrawler:
             print(f"  [WARNING] Failed to extract model year: {e}")
             return None
 
+    def extract_star_rating(self, tree):
+        """Extract star rating (format: '4.5' or 'No customer reviews')"""
+        try:
+            # Try to get star rating from database XPath
+            star_rating_text = self.extract_text_safe(tree, self.xpaths.get('star_rating'))
+
+            if star_rating_text:
+                # Check for "No customer reviews" first
+                if "No customer reviews" in star_rating_text:
+                    return "No customer reviews"
+
+                # Return the star rating as-is if it contains a number
+                if re.search(r'\d', star_rating_text):
+                    return star_rating_text
+
+            # Fallback: Check for "No customer reviews" at specific location
+            no_reviews_xpaths = [
+                '//*[@id="cm-cr-dp-review-header"]/h3/span',
+                '//span[@data-hook="top-customer-reviews-title"]',
+                '//div[@id="cm-cr-dp-review-header"]//span[contains(text(), "No customer reviews")]',
+                '//span[contains(text(), "No customer reviews")]'
+            ]
+
+            for xpath in no_reviews_xpaths:
+                text = self.extract_text_safe(tree, xpath)
+                if text and "No customer reviews" in text:
+                    return "No customer reviews"
+
+            return None
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract star rating: {e}")
+            return None
+
     def extract_count_of_reviews(self, tree):
         """Extract count of reviews (format: '1,484' or 'No customer reviews')"""
         try:
@@ -855,7 +889,7 @@ class AmazonDetailCrawler:
 
             # Extract data
             retailer_sku_name = self.extract_text_safe(tree, self.xpaths.get('product_name'))
-            star_rating = self.extract_text_safe(tree, self.xpaths.get('star_rating'))
+            star_rating = self.extract_star_rating(tree)
 
             # SKU_Popularity - only collect if "Amazon's Choice"
             sku_popularity_raw = self.extract_text_safe(tree, self.xpaths.get('sku_popularity'))

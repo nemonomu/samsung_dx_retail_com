@@ -742,7 +742,7 @@ class WalmartDetailCrawler:
 
     def extract_count_of_reviews(self, tree):
         """Extract total number of reviews from main page
-        Example: '248 reviews' -> 248
+        Example: '248 reviews' -> 248, '43 ratings' -> 43
         """
         try:
             # Try multiple XPath strategies to find review count
@@ -751,10 +751,16 @@ class WalmartDetailCrawler:
                 "//*[@id='item-review-section']/div[2]/div[1]/div[1]/div/a",
                 # Method 2: Find link with 'seeAllReviewsStarRating' identifier
                 "//a[@link-identifier='seeAllReviewsStarRating']",
-                # Method 3: Find link containing 'reviews' text in item-review-section
+                # Method 3: Find link with 'reviewsLink' identifier (for ratings)
+                "//a[@link-identifier='reviewsLink']",
+                # Method 4: Find link containing 'reviews' text in item-review-section
                 "//*[@id='item-review-section']//a[contains(text(), 'reviews')]",
-                # Method 4: Any link in review section containing 'review' in text
-                "//div[@id='item-review-section']//a[contains(., 'review')]"
+                # Method 5: Find link containing 'ratings' text in item-review-section
+                "//*[@id='item-review-section']//a[contains(text(), 'ratings')]",
+                # Method 6: Any link in review section containing 'review' in text
+                "//div[@id='item-review-section']//a[contains(., 'review')]",
+                # Method 7: Any link in review section containing 'rating' in text
+                "//div[@id='item-review-section']//a[contains(., 'rating')]"
             ]
 
             review_text = None
@@ -773,9 +779,9 @@ class WalmartDetailCrawler:
                 return None
 
             # Extract number from text
-            # Examples: "248 reviews" -> 248, "1,123 reviews" -> 1123, "16.4k reviews" -> 16400, "1 review" -> 1
-            # Match numbers with optional commas, decimals, and 'k' suffix
-            match = re.search(r'([\d,.k]+)\s*reviews?', review_text, re.IGNORECASE)
+            # Examples: "248 reviews" -> 248, "1,123 reviews" -> 1123, "16.4k reviews" -> 16400, "1 review" -> 1, "43 ratings" -> 43
+            # Match numbers with optional commas, decimals, and 'k' suffix, followed by 'review(s)' or 'rating(s)'
+            match = re.search(r'([\d,.k]+)\s*(reviews?|ratings?)', review_text, re.IGNORECASE)
             if match:
                 # Use parse_number_format to handle commas, decimals, and 'k' suffix
                 number_str = match.group(1)

@@ -426,7 +426,9 @@ class AmazonDetailCrawler:
         return None
 
     def extract_screen_size(self, tree):
-        """Extract screen size (format: '32 inches')"""
+        """Extract screen size (format: '32 inches')
+        Ensures proper formatting with 'inches' suffix
+        """
         try:
             # Use po-display.size class to find Screen Size row (most reliable)
             xpaths = [
@@ -441,13 +443,18 @@ class AmazonDetailCrawler:
             for xpath in xpaths:
                 size_text = self.extract_text_safe(tree, xpath)
                 if size_text:
+                    import re
+
                     # Handle "50-inch" format -> "50 inches"
                     if '-inch' in size_text.lower():
                         # Extract number from "50-inch" or "50-Inch"
-                        import re
                         match = re.search(r'(\d+)-inch', size_text.lower())
                         if match:
                             return f"{match.group(1)} inches"
+
+                    # Check if it's just a number (e.g., "43") -> "43 inches"
+                    if size_text.strip().isdigit():
+                        return f"{size_text.strip()} inches"
 
                     # "32 Inches" -> "32 inches"
                     return size_text.lower()
@@ -573,10 +580,13 @@ class AmazonDetailCrawler:
             return None
 
     def extract_final_sku_price(self, tree):
-        """Extract final SKU price from detail page (two XPath locations)"""
+        """Extract final SKU price from detail page
+        If price not found, check for 'Currently unavailable.' text as fallback
+        """
         try:
             # Try main container first
             xpaths = [
+                '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[1]',  # New primary xpath
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[3]/span[2]',  # Main container
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[3]/span[2]/span[1]',  # Main with span[1]
                 '//span[@class="a-price aok-align-center reinventPricePriceToPayMargin priceToPay"]//span[@class="a-offscreen"]',  # Generic offscreen
@@ -591,6 +601,12 @@ class AmazonDetailCrawler:
                     # Remove any extra whitespace and return
                     return price_text.strip()
 
+            # Fallback: Check for "Currently unavailable." text
+            availability_xpath = '//*[@id="availability"]/span[2]/span'
+            availability_text = self.extract_text_safe(tree, availability_xpath)
+            if availability_text and 'currently unavailable' in availability_text.lower():
+                return availability_text.strip()
+
             return None
 
         except Exception as e:
@@ -598,14 +614,14 @@ class AmazonDetailCrawler:
             return None
 
     def extract_original_sku_price(self, tree):
-        """Extract original SKU price from detail page (optional field)"""
+        """Extract original SKU price from detail page (optional field)
+        Limited to corePriceDisplay_desktop_feature_div container only to avoid picking prices from other sections
+        """
         try:
-            # Try multiple XPaths for original price
+            # Only search within corePriceDisplay_desktop_feature_div container
             xpaths = [
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/div[2]/span/span[1]/span[2]/span/span[1]',
-                '//*[@id="corePriceDisplay_desktop_feature_div"]/div[2]//span[@class="a-offscreen"]',
-                '//span[@class="a-price a-text-price"]//span[@class="a-offscreen"]',
-                '//span[@data-a-strike="true"]//span[@class="a-offscreen"]'
+                '//*[@id="corePriceDisplay_desktop_feature_div"]/div[2]//span[@class="a-offscreen"]'
             ]
 
             for xpath in xpaths:

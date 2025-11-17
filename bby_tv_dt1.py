@@ -502,6 +502,40 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Item extraction failed: {e}")
             return None
 
+    def extract_item_from_main_page(self, tree):
+        """Extract item (Model Number) from main page as fallback
+        Example HTML: <div class="disclaimer py-200"><div class="pr-150 inline-block">Model: <!-- -->NS-55F501NA26</div>...
+        Returns: NS-55F501NA26
+        """
+        try:
+            # Try multiple XPath patterns for Model field
+            xpaths = [
+                # Specific path from user
+                '/html/body/div[5]/div[4]/div[1]/div/div[2]/div[1]',
+                # More generic patterns
+                '//div[contains(@class, "disclaimer")]//div[contains(text(), "Model:")]',
+                '//div[@class="disclaimer py-200"]//div[@class="pr-150 inline-block"][contains(text(), "Model:")]'
+            ]
+
+            for xpath in xpaths:
+                elem = tree.xpath(xpath)
+                if elem:
+                    text = elem[0].text_content().strip()
+                    # Extract model number from "Model: NS-55F501NA26SKU: 6607832" format
+                    # Pattern: "Model: " 다음에 나오는 값 (SKU 전까지 또는 끝까지)
+                    import re
+                    match = re.search(r'Model:\s*([A-Z0-9\-]+)', text, re.IGNORECASE)
+                    if match:
+                        model = match.group(1).strip()
+                        print(f"  [✓] Item extracted from main page: {model}")
+                        return model
+
+            return None
+
+        except Exception as e:
+            print(f"  [ERROR] Item extraction from main page failed: {e}")
+            return None
+
     def extract_electricity_use(self, tree):
         """Estimated_Annual_Electricity_Use extraction (숫자만)"""
         try:
@@ -1435,7 +1469,14 @@ class BestBuyDetailCrawler:
 
                 # 5. Item extraction
                 item = self.extract_item(dialog_tree)
-                print(f"  [✓] Item: {item}")
+                print(f"  [✓] Item from dialog: {item}")
+
+                # If item not found in dialog, try main page as fallback
+                if not item:
+                    print(f"  [INFO] Item not found in dialog, trying main page...")
+                    item = self.extract_item_from_main_page(tree)
+                    if item:
+                        print(f"  [✓] Item from main page: {item}")
 
                 # 6. Estimated_Annual_Electricity_Use extraction (숫자만)
                 electricity_use = self.extract_electricity_use(dialog_tree)
@@ -1445,7 +1486,11 @@ class BestBuyDetailCrawler:
                 self.close_specifications_dialog()
             else:
                 print(f"  [ERROR] Specifications dialog failed: {error}")
-                item = None
+                # Fallback: Extract item from main page
+                print(f"  [INFO] Trying to extract item from main page...")
+                item = self.extract_item_from_main_page(tree)
+                if not item:
+                    print(f"  [WARNING] Item extraction from main page also failed")
 
             # 8. MST table에 save (item이 있고 mst_products가 있을 때)
             if mst_products and item:

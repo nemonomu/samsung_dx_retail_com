@@ -539,7 +539,7 @@ class AmazonDetailCrawler:
             return None
 
     def extract_count_of_reviews(self, tree):
-        """Extract count of reviews (format: '1,484')"""
+        """Extract count of reviews (format: '1,484' or 'No customer reviews')"""
         try:
             # XPath: //*[@id="acrCustomerReviewText"]
             xpaths = [
@@ -551,11 +551,28 @@ class AmazonDetailCrawler:
             for xpath in xpaths:
                 reviews_text = self.extract_text_safe(tree, xpath)
                 if reviews_text:
+                    # Check for "No customer reviews" first
+                    if "No customer reviews" in reviews_text:
+                        return "No customer reviews"
+
                     # "1,484 ratings" -> "1,484"
                     # Extract only numbers and comma
                     match = re.search(r'([\d,]+)', reviews_text)
                     if match:
                         return match.group(1)
+
+            # Fallback: Check for "No customer reviews" at specific location
+            no_reviews_xpaths = [
+                '//*[@id="cm-cr-dp-review-header"]/h3/span',
+                '//span[@data-hook="top-customer-reviews-title"]',
+                '//div[@id="cm-cr-dp-review-header"]//span[contains(text(), "No customer reviews")]',
+                '//span[contains(text(), "No customer reviews")]'
+            ]
+
+            for xpath in no_reviews_xpaths:
+                text = self.extract_text_safe(tree, xpath)
+                if text and "No customer reviews" in text:
+                    return "No customer reviews"
 
             return None
 

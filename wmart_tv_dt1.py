@@ -391,7 +391,7 @@ class WalmartDetailCrawler:
     def extract_final_price(self, tree):
         """Extract final price from detail page (container-based)
         Example: <span itemprop="price" data-seo-id="hero-price">Now $238.00</span>
-        Returns: $238.00
+        Returns: $238.00 or "See price in cart"
         """
         try:
             # Try to get price container first
@@ -411,13 +411,39 @@ class WalmartDetailCrawler:
                     elements = search_context.xpath(xpath)
                     if elements:
                         text = elements[0].text_content().strip()
-                        # Extract price (e.g., "Now $238.00" -> "$238.00")
+
+                        # Check for "See price in cart" first
+                        if "See price in cart" in text:
+                            print(f"       Final Price: See price in cart")
+                            return "See price in cart"
+
+                        # Extract dollar price (e.g., "Now $238.00" -> "$238.00")
                         price_match = re.search(r'\$[\d,]+\.?\d*', text)
                         if price_match:
                             print(f"       Final Price: {price_match.group(0)}")
                             return price_match.group(0)
                 except:
                     continue
+
+            # Fallback: Look for "See price in cart" at specific locations
+            see_price_xpaths = [
+                '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/div[1]/span[2]/span[2]/span',
+                '//span[@itemprop="price"][@data-seo-id="hero-price"][contains(text(), "See price in cart")]',
+                '//span[@data-seo-id="hero-price"][contains(text(), "See price in cart")]',
+                '//span[contains(text(), "See price in cart")]'
+            ]
+
+            for xpath in see_price_xpaths:
+                try:
+                    elements = tree.xpath(xpath)
+                    if elements:
+                        text = elements[0].text_content().strip()
+                        if "See price in cart" in text:
+                            print(f"       Final Price: See price in cart")
+                            return "See price in cart"
+                except:
+                    continue
+
             return None
         except Exception as e:
             return None

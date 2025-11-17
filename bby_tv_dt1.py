@@ -630,7 +630,7 @@ class BestBuyDetailCrawler:
                     if price and '$' in price:
                         return price  # "$89.99" 형식 반환
 
-            # Fallback: "See price in cart" 패턴 찾기
+            # Fallback 1: "See price in cart" 패턴 찾기
             see_price_xpaths = [
                 './/div[@data-testid="price-restricted-price-tap-for-price"]//span',
                 './/span[contains(text(), "See price in cart")]',
@@ -643,6 +643,21 @@ class BestBuyDetailCrawler:
                     text = elem[0].text_content().strip()
                     if "See price in cart" in text:
                         return "See price in cart"
+
+            # Fallback 2: Check for "This item is no longer available in new condition" (outside container)
+            no_longer_available_xpaths = [
+                '/html/body/div[5]/div[3]/div[1]/div/div[2]/div[4]',
+                '//div[@class="text-danger text-4 font-500 leading-4"]',
+                '//div[contains(@class, "text-danger")][contains(text(), "no longer available")]',
+                '//div[contains(text(), "This item is no longer available in new condition")]'
+            ]
+
+            for xpath in no_longer_available_xpaths:
+                elem = tree.xpath(xpath)  # Use tree, not price_container
+                if elem:
+                    text = elem[0].text_content().strip()
+                    if "no longer available in new condition" in text.lower():
+                        return "This item is no longer available in new condition"
 
             return None
         except Exception as e:

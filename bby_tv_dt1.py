@@ -839,6 +839,11 @@ class BestBuyDetailCrawler:
                 elem = price_container.xpath(xpath)
                 if elem:
                     text = elem[0].text_content().strip()  # "(79 reviews)" or "(1,234 reviews)" or "(50 reviews from philips.com)"
+
+                    # Check for "Not yet reviewed" first
+                    if "Not yet reviewed" in text:
+                        return "Not yet reviewed"
+
                     # 숫자 extraction (콤마 제거)
                     # 패턴: (숫자,숫자 reviews 추가텍스트) → 숫자만 extraction
                     match = re.search(r'\(([\d,]+)\s*reviews?[^)]*\)', text, re.IGNORECASE)
@@ -846,6 +851,21 @@ class BestBuyDetailCrawler:
                         # 콤마 제거 후 반환: "1,234" → "1234"
                         count = match.group(1).replace(',', '')
                         return count  # "79" or "1234" 형식 반환
+
+            # Fallback: Check for "Not yet reviewed" at specific XPath
+            not_reviewed_xpaths = [
+                './/div/div[3]/a/div/span',  # From user's example
+                './/span[contains(text(), "Not yet reviewed")]',
+                './/span[@class="c-reviews order-2"][contains(text(), "Not yet reviewed")]'
+            ]
+
+            for xpath in not_reviewed_xpaths:
+                elem = price_container.xpath(xpath)
+                if elem:
+                    text = elem[0].text_content().strip()
+                    if "Not yet reviewed" in text:
+                        return "Not yet reviewed"
+
             return None  # review가 없으면 None
         except Exception as e:
             print(f"  [ERROR] Count_of_Reviews extraction failed: {e}")

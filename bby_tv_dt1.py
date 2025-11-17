@@ -477,63 +477,36 @@ class BestBuyDetailCrawler:
 
         return False, 'dialog_timeout'
 
-    def extract_item(self, tree):
-        """Item (Model Number) extraction"""
-        try:
-            # dialog에서 Model Number 찾기 (여러 패턴 attempt)
-            xpaths = [
-                # 새로운 패턴
-                '//div[contains(@class, "dB7j8sHUbncyf79K")]//div[contains(text(), "Model Number")]/following-sibling::div[@class="grow basis-none pl-300"]',
-                # 기존 패턴
-                '//li[.//h4[text()="General"]]//div[.//div[text()="Model Number"]]//div[@class="grow basis-none pl-300"]',
-                '//div[contains(text(), "Model Number")]/following-sibling::div[@class="grow basis-none pl-300"]',
-                # 더 넓은 패턴
-                '//div[text()="Model Number"]/..//div[@class="grow basis-none pl-300"]',
-                '//div[contains(., "Model Number")]//div[contains(@class, "pl-300")]'
-            ]
-            for xpath in xpaths:
-                elem = tree.xpath(xpath)
-                if elem:
-                    model_number = elem[0].text_content().strip()
-                    if model_number:
-                        return model_number
-            return None
-        except Exception as e:
-            print(f"  [ERROR] Item extraction failed: {e}")
-            return None
+    def extract_item_from_url(self, url):
+        """Extract item from BestBuy product URL
 
-    def extract_item_from_main_page(self, tree):
-        """Extract item (Model Number) from main page as fallback
-        Example HTML: <div class="disclaimer py-200"><div class="pr-150 inline-block">Model: <!-- -->NS-55F501NA26</div>...
-        Returns: NS-55F501NA26
+        Examples:
+        https://www.bestbuy.com/product/roku-32-class.../J3PFCJQRY8/sku/6644457 -> J3PFCJQRY8
+        https://www.bestbuy.com/product/tcl-75-class.../J36QYTQ595 -> J36QYTQ595
+
+        Pattern: /product/[product-name]/[ITEM_ID]
         """
         try:
-            # Try multiple XPath patterns for Model field
-            xpaths = [
-                # Specific path from user
-                '/html/body/div[5]/div[4]/div[1]/div/div[2]/div[1]',
-                # More generic patterns
-                '//div[contains(@class, "disclaimer")]//div[contains(text(), "Model:")]',
-                '//div[@class="disclaimer py-200"]//div[@class="pr-150 inline-block"][contains(text(), "Model:")]'
-            ]
+            # Split URL by "/"
+            parts = url.rstrip('/').split('/')
 
-            for xpath in xpaths:
-                elem = tree.xpath(xpath)
-                if elem:
-                    text = elem[0].text_content().strip()
-                    # Extract model number from "Model: NS-55F501NA26SKU: 6607832" format
-                    # Pattern: "Model: " 다음에 나오는 값 (SKU 전까지 또는 끝까지)
-                    import re
-                    match = re.search(r'Model:\s*([A-Z0-9\-]+)', text, re.IGNORECASE)
-                    if match:
-                        model = match.group(1).strip()
-                        print(f"  [✓] Item extracted from main page: {model}")
-                        return model
+            # Find "product" in the URL
+            if 'product' in parts:
+                product_index = parts.index('product')
+                # Item ID is 2 positions after "product" (product_index + 2)
+                if len(parts) > product_index + 2:
+                    item = parts[product_index + 2]
+                    if item:
+                        print(f"  [✓] Item extracted from URL: {item}")
+                        return item
 
+            print(f"  [WARNING] Could not extract item from URL: {url}")
             return None
 
         except Exception as e:
-            print(f"  [ERROR] Item extraction from main page failed: {e}")
+            print(f"  [ERROR] Item extraction from URL failed: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def extract_electricity_use(self, tree):
@@ -1483,10 +1456,11 @@ class BestBuyDetailCrawler:
             # 3. Compare similar products extraction
             mst_products = self.extract_compare_similar_products(product_url)
 
-            # 4. Specification button click (retry 로직 적용)
-            item = None
-            electricity_use = None
+            # 4. Item extraction from URL (simplified - no dialog needed)
+            item = self.extract_item_from_url(product_url)
 
+            # Electricity use - still need to open dialog for this field
+            electricity_use = None
             success, error = self.click_specifications_with_retry()
 
             if success:
@@ -1495,30 +1469,14 @@ class BestBuyDetailCrawler:
                 dialog_source = self.driver.page_source
                 dialog_tree = html.fromstring(dialog_source)
 
-                # 5. Item extraction
-                item = self.extract_item(dialog_tree)
-                print(f"  [✓] Item from dialog: {item}")
-
-                # If item not found in dialog, try main page as fallback
-                if not item:
-                    print(f"  [INFO] Item not found in dialog, trying main page...")
-                    item = self.extract_item_from_main_page(tree)
-                    if item:
-                        print(f"  [✓] Item from main page: {item}")
-
-                # 6. Estimated_Annual_Electricity_Use extraction (숫자만)
+                # Extract Estimated_Annual_Electricity_Use (숫자만)
                 electricity_use = self.extract_electricity_use(dialog_tree)
                 print(f"  [✓] Estimated_Annual_Electricity_Use: {electricity_use}")
 
-                # 7. dialog close
+                # dialog close
                 self.close_specifications_dialog()
             else:
-                print(f"  [ERROR] Specifications dialog failed: {error}")
-                # Fallback: Extract item from main page
-                print(f"  [INFO] Trying to extract item from main page...")
-                item = self.extract_item_from_main_page(tree)
-                if not item:
-                    print(f"  [WARNING] Item extraction from main page also failed")
+                print(f"  [WARNING] Could not extract electricity_use (dialog failed): {error}")
 
             # 8. MST table에 save (item이 있고 mst_products가 있을 때)
             if mst_products and item:

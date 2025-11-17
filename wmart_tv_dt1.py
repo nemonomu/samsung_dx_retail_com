@@ -792,11 +792,32 @@ class WalmartDetailCrawler:
             return True
 
         sku_clean = sku.strip()
+        sku_lower = sku_clean.lower()
+
+        # Too short (just numbers or very short strings)
+        if len(sku_clean) < 4:
+            return True
 
         # Exact match invalid values
-        invalid_values = ['4K UHD', '4K (2160P)', '3840 x 2160', '1920 x 1080', '1080p', '1080i', '720p', '480p', '480i', 'Samsung', 'Hisense']
-        if sku_clean in invalid_values:
+        invalid_values = [
+            '4K UHD', '4K (2160P)', '3840 x 2160', '1920 x 1080',
+            '1080p', '1080i', '720p', '480p', '480i', '2160p',
+            'Samsung', 'Hisense', 'LG', 'TCL', 'Philips', 'Vizio',
+            'UHD', 'FHD', 'HD', 'QLED', 'OLED', 'LED'
+        ]
+        if sku_clean in invalid_values or sku_clean.upper() in invalid_values:
             return True
+
+        # Contains invalid keywords (resolution/spec terms)
+        invalid_keywords = [
+            '1080p', '720p', '480p', '2160p', '4k', '8k',
+            'hz', 'nits', 'uhd', 'fhd', 'qled', 'oled',
+            'skip to main', 'sign in', 'pickup', 'delivery',
+            'department', 'close', 'refresh rate', 'resolution'
+        ]
+        for keyword in invalid_keywords:
+            if keyword in sku_lower:
+                return True
 
         # Contains semicolon (multiple resolutions listed)
         if ';' in sku_clean:
@@ -818,6 +839,10 @@ class WalmartDetailCrawler:
         if '(' in sku_clean and ')' in sku_clean:
             if re.search(r'\(\d+[ip]\)', sku_clean):
                 return True
+
+        # Pattern 5: Just numbers (like "75", "65", etc. - likely screen size)
+        if sku_clean.isdigit():
+            return True
 
         return False
 
@@ -1067,12 +1092,13 @@ class WalmartDetailCrawler:
             for xpath in model_name_xpaths:
                 if xpath:
                     extracted = self.extract_text_safe(tree, xpath)
-                    if extracted and 3 < len(extracted) < 100:
-                        model_lower = extracted.lower()
-                        if not any(keyword in model_lower for keyword in ['skip to main', 'sign in', 'pickup', 'delivery', 'department', 'close']):
+                    if extracted:
+                        # Remove parentheses if entirely wrapped: "(SC-1311)" -> "SC-1311"
+                        if extracted.startswith('(') and extracted.endswith(')'):
+                            extracted = extracted[1:-1]
+                        # Validate using is_invalid_sku
+                        if not self.is_invalid_sku(extracted):
                             model_name_value = extracted
-                            if model_name_value.startswith('(') and model_name_value.endswith(')'):
-                                model_name_value = model_name_value[1:-1]
                             break
 
             # Extract Model
@@ -1080,12 +1106,13 @@ class WalmartDetailCrawler:
             for xpath in model_xpaths:
                 if xpath:
                     extracted = self.extract_text_safe(tree, xpath)
-                    if extracted and 3 < len(extracted) < 100:
-                        model_lower = extracted.lower()
-                        if not any(keyword in model_lower for keyword in ['skip to main', 'sign in', 'pickup', 'delivery', 'department', 'close']):
+                    if extracted:
+                        # Remove parentheses if entirely wrapped: "(SC-1311)" -> "SC-1311"
+                        if extracted.startswith('(') and extracted.endswith(')'):
+                            extracted = extracted[1:-1]
+                        # Validate using is_invalid_sku
+                        if not self.is_invalid_sku(extracted):
                             model_value = extracted
-                            if model_value.startswith('(') and model_value.endswith(')'):
-                                model_value = model_value[1:-1]
                             break
 
             # Step 3.5: Smart selection based on similarity to retailer_sku_name
@@ -1154,7 +1181,7 @@ class WalmartDetailCrawler:
 
             # Step 5: Validate extracted model - if invalid, try fallback methods
             if self.is_invalid_sku(model):
-                print(f"  [WARNING] Extracted SKU '{model}' is invalid, trying fallback methods...")
+                print(f"  [WARNING] Extracted SKU '{model}' is invalid (contains resolution/spec terms), trying fallback methods...")
 
                 # Get current URL and product name for fallback
                 current_url = self.driver.current_url
@@ -1164,25 +1191,31 @@ class WalmartDetailCrawler:
 
                 # Fallback 1: Extract from URL
                 url_sku = self.extract_sku_from_url(current_url)
-                if url_sku:
-                    print(f"  [OK] Extracted SKU from URL: {url_sku}")
+                if url_sku and not self.is_invalid_sku(url_sku):
+                    print(f"  [OK] Extracted valid SKU from URL: {url_sku}")
                     return url_sku
+                elif url_sku:
+                    print(f"  [WARNING] SKU from URL is invalid: {url_sku}")
 
                 # Fallback 2: Extract from product name
                 name_sku = self.extract_sku_from_product_name(product_name)
-                if name_sku:
-                    print(f"  [OK] Extracted SKU from product name: {name_sku}")
+                if name_sku and not self.is_invalid_sku(name_sku):
+                    print(f"  [OK] Extracted valid SKU from product name: {name_sku}")
                     return name_sku
+                elif name_sku:
+                    print(f"  [WARNING] SKU from product name is invalid: {name_sku}")
 
                 # Fallback 3: LG-specific XPath (only if product name contains "LG")
                 if product_name and 'LG' in product_name.upper():
                     lg_sku = self.extract_sku_from_lg_xpath()
-                    if lg_sku:
-                        print(f"  [OK] Extracted SKU from LG XPath: {lg_sku}")
+                    if lg_sku and not self.is_invalid_sku(lg_sku):
+                        print(f"  [OK] Extracted valid SKU from LG XPath: {lg_sku}")
                         return lg_sku
+                    elif lg_sku:
+                        print(f"  [WARNING] SKU from LG XPath is invalid: {lg_sku}")
 
-                # All fallbacks failed
-                print(f"  [WARNING] All SKU extraction methods failed")
+                # All fallbacks failed - return None (better than invalid value)
+                print(f"  [WARNING] All SKU extraction methods failed or returned invalid values. Saving NULL for item.")
                 return None
 
             if not model:

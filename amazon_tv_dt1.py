@@ -597,8 +597,13 @@ class AmazonDetailCrawler:
             for xpath in xpaths:
                 price_text = self.extract_text_safe(tree, xpath)
                 if price_text:
-                    # Extract "$119.99" format
-                    # Remove any extra whitespace and return
+                    # Extract only "$XXX.XX" or "$X,XXX.XX" format
+                    # Remove "with X percent savings" and other extra text
+                    import re
+                    match = re.search(r'\$[\d,]+\.?\d*', price_text)
+                    if match:
+                        return match.group()
+                    # Fallback: return original if no price pattern found
                     return price_text.strip()
 
             # Fallback: Check for "Currently unavailable." text

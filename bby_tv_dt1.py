@@ -661,8 +661,14 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Final_SKU_Price extraction failed: {e}")
             return None
 
-    def extract_original_sku_price(self, tree):
-        """Original SKU Price extraction (세일 전 원가) - 컨테이너 기반"""
+    def extract_original_sku_price(self, tree, savings=None, final_sku_price=None):
+        """Original SKU Price extraction (세일 전 원가) - 컨테이너 기반
+
+        Args:
+            tree: HTML tree
+            savings: savings value (for fallback condition check)
+            final_sku_price: final price value (for fallback condition check)
+        """
         try:
             # 1단계: 가격 컨테이너 찾기
             container_xpaths = [
@@ -702,6 +708,26 @@ class BestBuyDetailCrawler:
                     # "$" 기호가 포함되어 있고 유효한 가격인지 확인
                     if price and '$' in price:
                         return price  # "$149.99" 형식 반환
+
+            # Fallback: "Buy New: $X,XXX.XX" 패턴 찾기 (전체 페이지에서)
+            # 조건: savings와 final_sku_price를 모두 수집했을 때만 시도
+            if savings and final_sku_price:
+                buy_new_xpaths = [
+                    # User-provided specific path
+                    '/html/body/div[4]/div[4]/div[1]/div/div[4]/div/div/div/div/div[1]/div[2]/div/div/div/div/div[2]/div[2]/div/a',
+                    # data-testid based (more generic)
+                    '//a[@data-testid="price-block-regular-price-message-link"]//span',
+                    '//div[@data-testid="price-block-regular-price-link-text-wrapper"]//a//span'
+                ]
+
+                for xpath in buy_new_xpaths:
+                    elem = tree.xpath(xpath)
+                    if elem:
+                        price = elem[0].text_content().strip()
+                        if price and '$' in price:
+                            print(f"  [INFO] Original price found via 'Buy New' fallback: {price}")
+                            return price
+
             return None  # 세일이 아니면 None
         except Exception as e:
             print(f"  [ERROR] Original_SKU_Price extraction failed: {e}")
@@ -1439,11 +1465,13 @@ class BestBuyDetailCrawler:
             final_sku_price = self.extract_final_sku_price(tree)
             print(f"  [✓] Final_SKU_Price: {final_sku_price}")
 
-            original_sku_price = self.extract_original_sku_price(tree)
-            print(f"  [✓] Original_SKU_Price: {original_sku_price}")
-
             savings = self.extract_savings(tree)
             print(f"  [✓] Savings: {savings}")
+
+            # original_sku_price는 savings와 final_sku_price 추출 후에 시도
+            # (fallback 로직이 두 값을 모두 확인하기 때문)
+            original_sku_price = self.extract_original_sku_price(tree, savings, final_sku_price)
+            print(f"  [✓] Original_SKU_Price: {original_sku_price}")
 
             # 2-2. Star Rating 및 Reviews 정보 extraction (메인 page에서 직접 collected)
             star_rating = self.extract_star_rating(tree)

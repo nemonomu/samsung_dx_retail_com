@@ -852,7 +852,9 @@ class BestBuyDetailCrawler:
             return None
 
     def extract_count_of_reviews_from_detail(self, tree):
-        """Count of Reviews extraction (메인 detail page에서) - 컨테이너 기반"""
+        """Count of Reviews extraction (메인 detail page에서) - 컨테이너 기반
+        Example: '(79 reviews)' -> '79', 'Not yet reviewed' -> 0
+        """
         try:
             # 1단계: 가격 컨테이너 찾기
             container_xpaths = [
@@ -891,9 +893,9 @@ class BestBuyDetailCrawler:
                 if elem:
                     text = elem[0].text_content().strip()  # "(79 reviews)" or "(1,234 reviews)" or "(50 reviews from philips.com)"
 
-                    # Check for "Not yet reviewed" first
+                    # Check for "Not yet reviewed" first -> return 0
                     if "Not yet reviewed" in text:
-                        return "Not yet reviewed"
+                        return 0
 
                     # 숫자 extraction (콤마 제거)
                     # 패턴: (숫자,숫자 reviews 추가텍스트) → 숫자만 extraction
@@ -903,7 +905,7 @@ class BestBuyDetailCrawler:
                         count = match.group(1).replace(',', '')
                         return count  # "79" or "1234" 형식 반환
 
-            # Fallback: Check for "Not yet reviewed" at specific XPath
+            # Fallback: Check for "Not yet reviewed" at specific XPath -> return 0
             not_reviewed_xpaths = [
                 './/div/div[3]/a/div/span',  # From user's example
                 './/span[contains(text(), "Not yet reviewed")]',
@@ -915,7 +917,7 @@ class BestBuyDetailCrawler:
                 if elem:
                     text = elem[0].text_content().strip()
                     if "Not yet reviewed" in text:
-                        return "Not yet reviewed"
+                        return 0
 
             return None  # review가 없으면 None
         except Exception as e:

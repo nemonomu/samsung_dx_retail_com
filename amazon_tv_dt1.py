@@ -477,8 +477,8 @@ class AmazonDetailCrawler:
             # Fallback: Extract from retailer_sku_name if provided
             if retailer_sku_name:
                 import re
-                # Look for patterns like "25 inch", "116 inch", "22 inches", "15.6 inches"
-                match = re.search(r'(\d+\.?\d*)\s*inch(?:es)?', retailer_sku_name, re.IGNORECASE)
+                # Look for patterns like "25 inch", "116 inch", "22 inches", "55-Inch", "55-inches"
+                match = re.search(r'(\d+\.?\d*)[\s-]*inch(?:es)?', retailer_sku_name, re.IGNORECASE)
                 if match:
                     size_number = match.group(1)
                     print(f"  [INFO] Extracted screen_size from retailer_sku_name: {size_number} inches")

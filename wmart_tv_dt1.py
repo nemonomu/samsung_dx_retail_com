@@ -949,8 +949,40 @@ class WalmartDetailCrawler:
             print(f"  [DEBUG] Failed to extract SKU from LG XPath: {e}")
             return None
 
+    def calculate_similarity(self, text1, text2):
+        """Calculate similarity between two texts based on common words
+        Returns: similarity ratio (0.0 to 1.0)
+        """
+        if not text1 or not text2:
+            return 0.0
+
+        # Normalize: lowercase, remove special chars, split into words
+        import re
+        words1 = set(re.findall(r'\w+', text1.lower()))
+        words2 = set(re.findall(r'\w+', text2.lower()))
+
+        # Remove common words that don't help distinguish (like "class", "smart", "tv", etc.)
+        common_stopwords = {'class', 'smart', 'tv', 'led', 'hd', 'uhd', 'series', 'new', 'inches', 'inch', 'in'}
+        words1 = words1 - common_stopwords
+        words2 = words2 - common_stopwords
+
+        if not words1 or not words2:
+            return 0.0
+
+        # Calculate Jaccard similarity (intersection / union)
+        intersection = len(words1 & words2)
+        union = len(words1 | words2)
+
+        return intersection / union if union > 0 else 0.0
+
     def click_specifications_and_get_model(self):
-        """Click Specifications > Arrow > More details > Extract Model > Fallback to URL/Name > Close dialog"""
+        """Click Specifications > Arrow > More details > Extract Model > Fallback to URL/Name > Close dialog
+
+        Smart selection logic:
+        - If Model name is similar to retailer_sku_name (>70% similarity) → use Model
+        - If Model is similar to retailer_sku_name (>70% similarity) → use Model name
+        - Otherwise → prefer shorter/cleaner value (likely the actual model number)
+        """
         try:
             print(f"  [INFO] Attempting to extract Model from Specifications...")
 
@@ -1012,57 +1044,93 @@ class WalmartDetailCrawler:
                 print(f"  [WARNING] Could not find or click More details button")
                 return None
 
-            # Step 3: Extract Model from the dialog
-            # Priority: Model name > Model
+            # Step 3: Extract BOTH "Model name" and "Model" from the dialog
             page_source = self.driver.page_source
             tree = html.fromstring(page_source)
 
-            # Priority 1: Try to extract "Model name" first
+            # XPaths for "Model name"
             model_name_xpaths = [
                 "//h3[text()='Model name']/following-sibling::div//span",
                 "//h3[contains(text(), 'Model name')]/following-sibling::div/div/span",
                 "//div[contains(@class, 'pb2')]//h3[text()='Model name']/following-sibling::div//span"
             ]
 
-            # Priority 2: If "Model name" not found, try "Model"
+            # XPaths for "Model"
             model_xpaths = [
                 "//h3[text()='Model']/following-sibling::div//span",
                 "//h3[contains(text(), 'Model')]/following-sibling::div/div/span",
                 "//div[contains(@class, 'pb2')]//h3[text()='Model']/following-sibling::div//span"
             ]
 
-            model = None
-
-            # Try Model name first (Priority 1)
+            # Extract Model name
+            model_name_value = None
             for xpath in model_name_xpaths:
                 if xpath:
                     extracted = self.extract_text_safe(tree, xpath)
-                    # Validate: Model should be relatively short and not contain page elements
-                    if extracted and 3 < len(extracted) < 50:
+                    if extracted and 3 < len(extracted) < 100:
                         model_lower = extracted.lower()
-                        if not any(keyword in model_lower for keyword in ['skip to main', 'sign in', 'pickup', 'delivery', 'department', 'close', 'nits', '1080p', '4k', 'hz']):
-                            model = extracted
-                            # Remove parentheses if model is entirely wrapped: "(SC-1311)" -> "SC-1311"
-                            if model.startswith('(') and model.endswith(')'):
-                                model = model[1:-1]
-                            print(f"  [OK] Extracted Model from 'Model name': {model}")
+                        if not any(keyword in model_lower for keyword in ['skip to main', 'sign in', 'pickup', 'delivery', 'department', 'close']):
+                            model_name_value = extracted
+                            if model_name_value.startswith('(') and model_name_value.endswith(')'):
+                                model_name_value = model_name_value[1:-1]
                             break
 
-            # If Model name not found, try Model (Priority 2)
-            if not model:
-                for xpath in model_xpaths:
-                    if xpath:
-                        extracted = self.extract_text_safe(tree, xpath)
-                        # Validate: Model should be relatively short and not contain page elements
-                        if extracted and 3 < len(extracted) < 50:
-                            model_lower = extracted.lower()
-                            if not any(keyword in model_lower for keyword in ['skip to main', 'sign in', 'pickup', 'delivery', 'department', 'close', 'nits', '1080p', '4k', 'hz']):
-                                model = extracted
-                                # Remove parentheses if model is entirely wrapped: "(SC-1311)" -> "SC-1311"
-                                if model.startswith('(') and model.endswith(')'):
-                                    model = model[1:-1]
-                                print(f"  [OK] Extracted Model from 'Model': {model}")
-                                break
+            # Extract Model
+            model_value = None
+            for xpath in model_xpaths:
+                if xpath:
+                    extracted = self.extract_text_safe(tree, xpath)
+                    if extracted and 3 < len(extracted) < 100:
+                        model_lower = extracted.lower()
+                        if not any(keyword in model_lower for keyword in ['skip to main', 'sign in', 'pickup', 'delivery', 'department', 'close']):
+                            model_value = extracted
+                            if model_value.startswith('(') and model_value.endswith(')'):
+                                model_value = model_value[1:-1]
+                            break
+
+            # Step 3.5: Smart selection based on similarity to retailer_sku_name
+            # Get retailer_sku_name from current page
+            retailer_sku_name = self.extract_text_safe(tree, self.xpaths.get('product_name'))
+
+            model = None
+            selection_reason = ""
+
+            if model_name_value and model_value and retailer_sku_name:
+                # Both values exist - calculate similarity
+                similarity_model_name = self.calculate_similarity(model_name_value, retailer_sku_name)
+                similarity_model = self.calculate_similarity(model_value, retailer_sku_name)
+
+                print(f"  [DEBUG] Model name: '{model_name_value}' (similarity: {similarity_model_name:.2f})")
+                print(f"  [DEBUG] Model: '{model_value}' (similarity: {similarity_model:.2f})")
+
+                # If Model name is too similar to product name (>0.7), use Model instead
+                if similarity_model_name > 0.7 and similarity_model < 0.7:
+                    model = model_value
+                    selection_reason = f"Model name too similar to product name ({similarity_model_name:.2f}), using Model"
+                # If Model is too similar to product name (>0.7), use Model name instead
+                elif similarity_model > 0.7 and similarity_model_name < 0.7:
+                    model = model_name_value
+                    selection_reason = f"Model too similar to product name ({similarity_model:.2f}), using Model name"
+                # Both similar or both different - prefer shorter one (likely actual model number)
+                else:
+                    if len(model_name_value) <= len(model_value):
+                        model = model_name_value
+                        selection_reason = "Both available, preferring Model name (shorter)"
+                    else:
+                        model = model_value
+                        selection_reason = "Both available, preferring Model (shorter)"
+
+            elif model_name_value:
+                model = model_name_value
+                selection_reason = "Only Model name available"
+            elif model_value:
+                model = model_value
+                selection_reason = "Only Model available"
+
+            if model:
+                print(f"  [OK] Selected item: '{model}' ({selection_reason})")
+            else:
+                print(f"  [WARNING] No Model name or Model found in dialog")
 
             # Step 4: Close the dialog by clicking X button
             try:

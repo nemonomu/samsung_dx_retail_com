@@ -329,14 +329,34 @@ class WalmartDetailCrawler:
             return None
 
     def extract_star_rating(self, tree):
-        """Extract star rating number from '4.4 out of 5' format"""
+        """Extract star rating number from '4.4 out of 5' format or 'No ratings yet'"""
         try:
             rating_text = self.extract_text_safe(tree, self.xpaths.get('star_rating'))
             if rating_text:
+                # Check for "No ratings yet" first
+                if "No ratings yet" in rating_text:
+                    return "No ratings yet"
+
                 # Extract number before "out of"
                 match = re.search(r'([\d.]+)\s*out of', rating_text)
                 if match:
                     return match.group(1)
+
+            # If no rating found, check for "No ratings yet" at specific location
+            no_ratings_xpaths = [
+                "//*[@id='maincontent']/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[2]/div/div/span",
+                "//span[@class='gray f7 ph1 pt1'][contains(text(), 'No ratings yet')]",
+                "//span[contains(text(), 'No ratings yet')]",
+                "//*[@id='item-review-section']//span[contains(text(), 'No ratings yet')]"
+            ]
+
+            for xpath in no_ratings_xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+                    if "No ratings yet" in text:
+                        return "No ratings yet"
+
             return None
         except Exception as e:
             return None

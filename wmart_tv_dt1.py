@@ -674,8 +674,9 @@ class WalmartDetailCrawler:
 
             product_names = []
             for container in containers:
-                # Extract product name from each container
-                name_xpath = './/div/a/span/h3'
+                # Extract product name from each container (only product name, no price)
+                # Use data-automation-id="product-title" to get clean product name
+                name_xpath = './/h3[@data-automation-id="product-title"]'
                 name_elem = container.xpath(name_xpath)
                 if name_elem:
                     name = name_elem[0].text_content().strip() if hasattr(name_elem[0], 'text_content') else str(name_elem[0]).strip()

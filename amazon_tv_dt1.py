@@ -452,8 +452,8 @@ class AmazonDetailCrawler:
                         if match:
                             return f"{match.group(1)} inches"
 
-                    # Check if it's just a number (e.g., "43") -> "43 inches"
-                    if size_text.strip().isdigit():
+                    # Check if it's a number (integer or decimal like "43" or "15.6") -> "X inches"
+                    if re.match(r'^\d+\.?\d*$', size_text.strip()):
                         return f"{size_text.strip()} inches"
 
                     # "32 Inches" -> "32 inches"

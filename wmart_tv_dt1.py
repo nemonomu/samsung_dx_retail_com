@@ -1088,6 +1088,8 @@ class WalmartDetailCrawler:
 
             # XPaths for "Model name"
             model_name_xpaths = [
+                "//h3[normalize-space()='Model name']/following-sibling::div//span",
+                "//div[@class='pb2'][.//h3[normalize-space()='Model name']]/div//span",
                 "//h3[text()='Model name']/following-sibling::div//span",
                 "//h3[contains(text(), 'Model name')]/following-sibling::div/div/span",
                 "//div[contains(@class, 'pb2')]//h3[text()='Model name']/following-sibling::div//span"
@@ -1095,6 +1097,8 @@ class WalmartDetailCrawler:
 
             # XPaths for "Model"
             model_xpaths = [
+                "//h3[normalize-space()='Model']/following-sibling::div//span",
+                "//div[@class='pb2'][.//h3[normalize-space()='Model']]/div//span",
                 "//h3[text()='Model']/following-sibling::div//span",
                 "//h3[contains(text(), 'Model')]/following-sibling::div/div/span",
                 "//div[contains(@class, 'pb2')]//h3[text()='Model']/following-sibling::div//span"

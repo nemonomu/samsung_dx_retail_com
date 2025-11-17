@@ -714,6 +714,18 @@ class AmazonDetailCrawler:
                 if text and 'price higher than typical' in text.lower():
                     return "Price higher than typical"
 
+            # PRIORITY 5: Check for "To see our price, add this item to your cart."
+            add_to_cart_xpaths = [
+                '//*[@id="corePriceDisplay_desktop_feature_div"]/table/tbody/tr/td[2]',
+                '//table[@class="a-lineitem"]//td[contains(text(), "To see our price")]',
+                '//td[contains(text(), "To see our price, add this item to your cart")]'
+            ]
+
+            for xpath in add_to_cart_xpaths:
+                text = self.extract_text_safe(tree, xpath)
+                if text and 'to see our price, add this item to your cart' in text.lower():
+                    return "To see our price, add this item to your cart."
+
             # NORMAL EXTRACTION: Try to extract regular price
             xpaths = [
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[1]',  # New primary xpath

@@ -678,7 +678,20 @@ class AmazonDetailCrawler:
                 if text and 'currently unavailable' in text.lower():
                     return "Currently unavailable."
 
-            # PRIORITY 2: Check for "No featured offers available"
+            # PRIORITY 2: Check for "Price higher than typical"
+            # NOTE: Checked before "No featured offers" because they use same XPath location
+            price_higher_xpaths = [
+                '//*[@id="fod-cx-message-with-learn-more"]/span[1]',
+                '//span[@id="fod-cx-message-with-learn-more"]/span[1]',
+                '//span[contains(text(), "Price higher than typical")]'
+            ]
+
+            for xpath in price_higher_xpaths:
+                text = self.extract_text_safe(tree, xpath)
+                if text and 'price higher than typical' in text.lower():
+                    return "Price higher than typical"
+
+            # PRIORITY 3: Check for "No featured offers available"
             no_offers_xpaths = [
                 '//*[@id="fod-cx-message-with-learn-more"]/span[1]',
                 '//span[@id="fod-cx-message-with-learn-more"]/span[1]',
@@ -690,7 +703,7 @@ class AmazonDetailCrawler:
                 if text and 'no featured offers available' in text.lower():
                     return "No featured offers available"
 
-            # PRIORITY 3: Check for "See price in cart"
+            # PRIORITY 4: Check for "See price in cart"
             see_price_xpaths = [
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/table/tbody/tr/td[2]/span/a',
                 '//a[contains(text(), "See price in cart")]',
@@ -701,18 +714,6 @@ class AmazonDetailCrawler:
                 text = self.extract_text_safe(tree, xpath)
                 if text and 'see price in cart' in text.lower():
                     return "See price in cart"
-
-            # PRIORITY 4: Check for "Price higher than typical"
-            price_higher_xpaths = [
-                '//*[@id="fod-cx-message-with-learn-more"]/span[1]',
-                '//span[@id="fod-cx-message-with-learn-more"]/span[1]',
-                '//span[contains(text(), "Price higher than typical")]'
-            ]
-
-            for xpath in price_higher_xpaths:
-                text = self.extract_text_safe(tree, xpath)
-                if text and 'price higher than typical' in text.lower():
-                    return "Price higher than typical"
 
             # PRIORITY 5: Check for "To see our price, add this item to your cart."
             add_to_cart_xpaths = [

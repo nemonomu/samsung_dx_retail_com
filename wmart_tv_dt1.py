@@ -399,13 +399,12 @@ class WalmartDetailCrawler:
             search_context = price_container if price_container is not None else tree
 
             # Try multiple XPath strategies (relative to container if available)
+            # NOTE: "Starting from" is checked in Fallback 2 as LAST RESORT
             xpaths = [
                 './/span[@itemprop="price"][@data-seo-id="hero-price"]',
                 './/span[@itemprop="price"]',
                 './/span[@data-seo-id="hero-price"]',
-                './/span[contains(@class, "price-wrap")]//span[contains(text(), "$")]',
-                # "Starting from $X" pattern
-                './/span[contains(text(), "Starting from")]'
+                './/span[contains(@class, "price-wrap")]//span[contains(text(), "$")]'
             ]
 
             for xpath in xpaths:

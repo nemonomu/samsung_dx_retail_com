@@ -121,7 +121,18 @@ class SimpleExtractor:
                 if text and 'currently unavailable' in text.lower():
                     return "Currently unavailable."
 
-            # PRIORITY 2: No featured offers available
+            # PRIORITY 2: Price higher than typical
+            price_higher_xpaths = [
+                '//*[@id="fod-cx-message-with-learn-more"]/span[1]',
+                '//span[contains(text(), "Price higher than typical")]'
+            ]
+
+            for xpath in price_higher_xpaths:
+                text = self.extract_text_safe(tree, xpath)
+                if text and 'price higher than typical' in text.lower():
+                    return "Price higher than typical"
+
+            # PRIORITY 3: No featured offers available
             no_offers_xpaths = [
                 '//*[@id="fod-cx-message-with-learn-more"]/span[1]',
                 '//span[contains(text(), "No featured offers available")]'
@@ -132,7 +143,7 @@ class SimpleExtractor:
                 if text and 'no featured offers available' in text.lower():
                     return "No featured offers available"
 
-            # PRIORITY 3: See price in cart
+            # PRIORITY 4: See price in cart
             see_price_xpaths = [
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/table/tbody/tr/td[2]/span/a',
                 '//a[contains(text(), "See price in cart")]'
@@ -142,17 +153,6 @@ class SimpleExtractor:
                 text = self.extract_text_safe(tree, xpath)
                 if text and 'see price in cart' in text.lower():
                     return "See price in cart"
-
-            # PRIORITY 4: Price higher than typical
-            price_higher_xpaths = [
-                '//*[@id="fod-cx-message-with-learn-more"]/span[1]',
-                '//span[contains(text(), "Price higher than typical")]'
-            ]
-
-            for xpath in price_higher_xpaths:
-                text = self.extract_text_safe(tree, xpath)
-                if text and 'price higher than typical' in text.lower():
-                    return "Price higher than typical"
 
             # PRIORITY 5: To see our price, add this item to your cart
             add_to_cart_xpaths = [
@@ -268,7 +268,24 @@ class SimpleExtractor:
                 if text and "See price in cart" in text:
                     return "See price in cart"
 
-            # Check for "Starting from $X"
+            # Normal price extraction (try regular prices first)
+            xpaths = [
+                '//span[@itemprop="price"]',
+                '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[1]/div/span[1]',
+                '//div[@data-testid="price-wrap"]//span[@itemprop="price"]'
+            ]
+
+            for xpath in xpaths:
+                price_text = self.extract_text_safe(tree, xpath)
+                if price_text:
+                    # Skip if it contains "Starting from" (will be handled in fallback)
+                    if "Starting from" in price_text:
+                        continue
+                    match = re.search(r'\$[\d,]+\.?\d*', price_text)
+                    if match:
+                        return match.group()
+
+            # LAST RESORT: Check for "Starting from $X"
             starting_from_xpaths = [
                 '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[1]/div/span[1]',
                 '//span[contains(text(), "Starting from")]'
@@ -279,20 +296,6 @@ class SimpleExtractor:
                 if text and "Starting from" in text:
                     # Extract price: "Starting from $1,995.00" -> "$1,995.00"
                     match = re.search(r'\$[\d,]+\.?\d*', text)
-                    if match:
-                        return match.group()
-
-            # Normal price extraction
-            xpaths = [
-                '//span[@itemprop="price"]',
-                '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[1]/div/span[1]',
-                '//div[@data-testid="price-wrap"]//span[@itemprop="price"]'
-            ]
-
-            for xpath in xpaths:
-                price_text = self.extract_text_safe(tree, xpath)
-                if price_text:
-                    match = re.search(r'\$[\d,]+\.?\d*', price_text)
                     if match:
                         return match.group()
 

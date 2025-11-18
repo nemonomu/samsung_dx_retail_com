@@ -759,9 +759,10 @@ class WalmartDetailCrawler:
             print(f"  [WARNING] Failed to extract similar products: {e}")
             return None
 
-    def extract_screen_size(self, tree):
+    def extract_screen_size(self, tree, retailer_sku_name=None):
         """Extract screen size from 'Specifications at a glance' section
-        Example: '65 in' -> '65 inches'
+        Falls back to extracting from product name if not found in specifications
+        Example: '65 in' -> '65 inches', 'onn 32" Class...' -> '32 inches'
         """
         try:
             # Try multiple XPath strategies to find Screen size
@@ -797,6 +798,16 @@ class WalmartDetailCrawler:
                         break
 
             if not screen_size_text:
+                # Fallback: Extract from retailer_sku_name (product name)
+                if retailer_sku_name:
+                    # Look for patterns: "32"", "50-Inch", "98" Q Series", etc.
+                    # Matches: number + (space/hyphen + inch/inches OR double quote)
+                    match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|")', retailer_sku_name, re.IGNORECASE)
+                    if match:
+                        size_number = match.group(1)
+                        print(f"  [INFO] Screen size extracted from product name: {size_number} inches")
+                        return f"{size_number} inches"
+
                 return None
 
             # Extract number from text (including decimal)
@@ -1365,8 +1376,8 @@ class WalmartDetailCrawler:
             # Extract similar products
             similar_products = self.extract_similar_products(tree)
 
-            # Extract screen size (from main page)
-            screen_size = self.extract_screen_size(tree)
+            # Extract screen size (from main page, with fallback to product name)
+            screen_size = self.extract_screen_size(tree, retailer_sku_name)
 
             # Extract count of reviews (from main page, BEFORE navigating to reviews)
             count_of_reviews = self.extract_count_of_reviews(tree)

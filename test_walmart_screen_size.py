@@ -50,9 +50,31 @@ class WalmartScreenSizeExtractor:
 
         print("[OK] WebDriver setup complete\n")
 
-    def extract_screen_size(self, tree):
+    def extract_retailer_sku_name(self, tree):
+        """Extract product title (retailer_sku_name)"""
+        try:
+            xpaths = [
+                '//h1[@itemprop="name"]',
+                '//h1[contains(@class, "prod-ProductTitle")]',
+                '//h1'
+            ]
+
+            for xpath in xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    title = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+                    if title:
+                        return title
+
+            return None
+        except Exception as e:
+            print(f"  [ERROR] Failed to extract product name: {e}")
+            return None
+
+    def extract_screen_size(self, tree, retailer_sku_name=None):
         """Extract screen size from 'Specifications at a glance' section
-        Example: '65 in' -> '65 inches'
+        Falls back to extracting from product name if not found in specifications
+        Example: '65 in' -> '65 inches', 'onn 32" Class...' -> '32 inches'
         """
         try:
             # Try multiple XPath strategies to find Screen size
@@ -92,7 +114,21 @@ class WalmartScreenSizeExtractor:
                         break
 
             if not screen_size_text:
-                print(f"  [NONE] No screen_size text found in any XPath")
+                # Fallback: Extract from retailer_sku_name (product name)
+                if retailer_sku_name:
+                    print(f"  [FALLBACK] Trying to extract from product name: '{retailer_sku_name[:80]}...'")
+                    # Look for patterns: "32"", "50-Inch", "98" Q Series", etc.
+                    # Matches: number + (space/hyphen + inch/inches OR double quote)
+                    match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|")', retailer_sku_name, re.IGNORECASE)
+                    if match:
+                        size_number = match.group(1)
+                        result = f"{size_number} inches"
+                        print(f"  [OK] Extracted from product name: '{size_number}' -> Output: '{result}'")
+                        return result
+                    else:
+                        print(f"  [FAIL] No screen size pattern found in product name")
+
+                print(f"  [NONE] No screen_size found in XPaths or product name")
                 return None
 
             # Extract number from text (including decimal)
@@ -139,8 +175,13 @@ class WalmartScreenSizeExtractor:
 
             tree = html.fromstring(page_source)
 
-            # Extract screen_size
-            screen_size = self.extract_screen_size(tree)
+            # Extract product name first (for fallback)
+            retailer_sku_name = self.extract_retailer_sku_name(tree)
+            if retailer_sku_name:
+                print(f"\nProduct Name: {retailer_sku_name}\n")
+
+            # Extract screen_size (with fallback to product name)
+            screen_size = self.extract_screen_size(tree, retailer_sku_name)
 
             print("\n" + "-" * 120)
             print(f"FINAL RESULT: screen_size = '{screen_size}'")

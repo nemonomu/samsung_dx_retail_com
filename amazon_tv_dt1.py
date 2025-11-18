@@ -447,10 +447,12 @@ class AmazonDetailCrawler:
                     import re
 
                     size_text = size_text.strip()
+                    print(f"  [DEBUG] screen_size found: '{size_text}' (repr: {repr(size_text)})")
 
                     # Skip invalid values (like "tilt", "fix", etc.)
                     # Screen size must contain a number
                     if not re.search(r'\d', size_text):
+                        print(f"  [DEBUG] Skipped - no digit found")
                         continue
 
                     # Handle "50-inch" format -> "50 inches"

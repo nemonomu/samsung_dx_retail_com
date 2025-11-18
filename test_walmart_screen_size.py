@@ -2,15 +2,14 @@
 Test script to extract screen_size from Walmart URLs
 Logs: URL, extracted value, and output value
 No database operations - just print results
+Uses undetected-chromedriver to bypass bot detection
 """
 import time
 import re
 import sys
 from lxml import html
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+import undetected_chromedriver as uc
+from selenium.webdriver.support.ui import WebDriverWait
 
 # Set UTF-8 encoding for Windows console
 if sys.platform == 'win32':
@@ -21,17 +20,35 @@ class WalmartScreenSizeExtractor:
         self.setup_driver()
 
     def setup_driver(self):
-        """Setup Chrome driver"""
-        chrome_options = Options()
-        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        chrome_options.add_experimental_option('useAutomationExtension', False)
-        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
+        """Setup Chrome WebDriver with undetected-chromedriver (same as wmart_tv_dt1.py)"""
+        print("[INFO] Setting up undetected Chrome WebDriver...")
 
-        self.driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager().install()),
-            options=chrome_options
-        )
+        options = uc.ChromeOptions()
+
+        # Set page load strategy to 'none' - don't wait for full page load
+        options.page_load_strategy = 'none'
+
+        # Basic options
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--window-size=1920,1080')
+        options.add_argument('--lang=en-US,en;q=0.9')
+
+        # Preferences
+        prefs = {
+            "profile.default_content_setting_values.notifications": 2,
+            "credentials_enable_service": False,
+            "profile.password_manager_enabled": False,
+        }
+        options.add_experimental_option("prefs", prefs)
+
+        # Use undetected_chromedriver
+        self.driver = uc.Chrome(options=options)
+        self.driver.set_page_load_timeout(120)  # 120 seconds timeout
+        self.wait = WebDriverWait(self.driver, 20)
+
+        print("[OK] WebDriver setup complete\n")
 
     def extract_screen_size(self, tree):
         """Extract screen size from 'Specifications at a glance' section
@@ -105,10 +122,21 @@ class WalmartScreenSizeExtractor:
         print("=" * 120)
 
         try:
+            # Navigate to URL
             self.driver.get(url)
-            time.sleep(5)  # Wait for page load
 
+            # Wait for page to be interactive (page_load_strategy = 'none' means we need to wait manually)
+            print("  [INFO] Waiting for page to load...")
+            time.sleep(8)  # Wait longer for dynamic content
+
+            # Check if blocked by bot detection
             page_source = self.driver.page_source
+            if "blocked" in page_source.lower() or "captcha" in page_source.lower():
+                print("  [WARNING] Possible bot detection / CAPTCHA detected!")
+                print("  [INFO] Waiting 10 more seconds...")
+                time.sleep(10)
+                page_source = self.driver.page_source
+
             tree = html.fromstring(page_source)
 
             # Extract screen_size
@@ -125,12 +153,20 @@ class WalmartScreenSizeExtractor:
 
     def run_tests(self, urls):
         """Test all URLs"""
+        import random
+
         total = len(urls)
         for i, url in enumerate(urls, 1):
             print(f"\n\n{'#' * 120}")
             print(f"TESTING {i}/{total}")
             print(f"{'#' * 120}\n")
             self.test_url(url, index=i)
+
+            # Add random delay between requests (human-like behavior)
+            if i < total:  # Don't wait after last URL
+                delay = random.uniform(2, 5)
+                print(f"\n[INFO] Waiting {delay:.1f} seconds before next request...\n")
+                time.sleep(delay)
 
         self.driver.quit()
         print("\n" + "=" * 120)

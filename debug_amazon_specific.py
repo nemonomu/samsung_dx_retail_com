@@ -108,6 +108,20 @@ try:
     for i, text in enumerate(no_offers_spans, 1):
         print(f"  [{i}] '{text[:100]}'")
 
+    # Save full page HTML for inspection
+    print("\n" + "=" * 100)
+    print("SAVING PAGE HTML")
+    print("=" * 100)
+    with open('amazon_page_source.html', 'w', encoding='utf-8') as f:
+        f.write(page_source)
+    print("Saved to: amazon_page_source.html")
+
+    # Also check the specific element's HTML
+    fod_element = tree.xpath('//*[@id="fod-cx-message-with-learn-more"]')
+    if fod_element:
+        print("\nElement #fod-cx-message-with-learn-more HTML:")
+        print(html.tostring(fod_element[0], encoding='unicode', pretty_print=True)[:500])
+
 finally:
     driver.quit()
     print("\n[DONE]")

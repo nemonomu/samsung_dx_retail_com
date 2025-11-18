@@ -815,7 +815,7 @@ class WalmartDetailCrawler:
 
     def extract_count_of_reviews(self, tree):
         """Extract total number of reviews from main page
-        Example: '248 reviews' -> 248, '43 ratings' -> 43, 'No ratings yet' -> 'No ratings yet'
+        Example: '248 reviews' -> 248, '43 ratings' -> 43, 'No ratings yet' -> 0
         """
         try:
             # Try multiple XPath strategies to find review count
@@ -848,12 +848,12 @@ class WalmartDetailCrawler:
                     if review_text:
                         break
 
-            # Check for "No ratings yet" first
+            # Check for "No ratings yet" first -> return 0
             if review_text and "No ratings yet" in review_text:
-                return "No ratings yet"
+                return 0
 
             if not review_text:
-                # Try to find "No ratings yet" at specific location
+                # Try to find "No ratings yet" at specific location -> return 0
                 no_ratings_xpaths = [
                     "//*[@id='maincontent']/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[2]/div/div/span",
                     "//span[@class='gray f7 ph1 pt1'][contains(text(), 'No ratings yet')]",
@@ -866,7 +866,7 @@ class WalmartDetailCrawler:
                     if result:
                         text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
                         if "No ratings yet" in text:
-                            return "No ratings yet"
+                            return 0
 
                 return None
 

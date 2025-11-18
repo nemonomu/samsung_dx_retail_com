@@ -33,7 +33,7 @@ driver = webdriver.Chrome(
 )
 
 try:
-    url = "https://www.amazon.com/75-UHD-Hisense-Roku-HDR/dp/B09JVHWJS4"
+    url = "https://www.amazon.com/75-UHD-Hisense-Roku-HDR/dp/B09JVHWJS4/ref=sr_1_302?crid=RY3XOG3VC795&dib=eyJ2IjoiMSJ9.p0XO6n7rnSEC60H0oDaPZA_SCeNY16VZsysust8QGkq1gkMKVytQ8Ykq9jXtxkiGfyRgEZ27f-WOQbPavKaOoEJH5BLIUPJGU7meN-F0rn3o0iFpW2sN0ggBkxO6QPpoyghrZZ12Nrc2aIL2MFkDqh2u4Pw4bLJVq286RGYH49aLcJWrpRhM9s3e97rV8SywgkB6vAIyIvkn2PlLNP5FFeR-P_UdIx3-ecEmKZPcpjQ.fssstYNAbTks4e8c4EuoQ9cEB8v7Mnwh-41hNxXT9A8&dib_tag=se&keywords=TV&qid=1763427228&sprefix=tv%2Caps%2C287&sr=8-302&xpid=Cg0_BApgal-UM"
 
     print(f"Loading: {url}")
     driver.get(url)

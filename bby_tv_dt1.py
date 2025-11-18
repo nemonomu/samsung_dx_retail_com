@@ -1709,6 +1709,13 @@ class BestBuyDetailCrawler:
                 except:
                     count_of_reviews_int = None
 
+            # Data validation: If star_rating is "Not yet reviewed", count_of_reviews must be 0
+            if star_rating_source and "not yet reviewed" in str(star_rating_source).lower():
+                if count_of_reviews_int != 0 and count_of_reviews_int is not None:
+                    print(f"  [WARNING] Data inconsistency detected: star_rating='Not yet reviewed' but count_of_reviews={count_of_reviews_int}")
+                    print(f"  [FIX] Setting count_of_reviews to 0")
+                count_of_reviews_int = 0
+
             # Parse star_ratings to get total count
             # Example: "5stars:231 4stars:19 3stars:2 2stars:1 1star:8" -> 261
             count_of_star_ratings_int = None

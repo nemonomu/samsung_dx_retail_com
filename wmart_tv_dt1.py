@@ -811,8 +811,8 @@ class WalmartDetailCrawler:
                 return None
 
             # Extract number from text (including decimal)
-            # Examples: "Screen size: 65 in" -> "65", "64.5 in" -> "64.5"
-            match = re.search(r'([\d.]+)\s*in', screen_size_text, re.IGNORECASE)
+            # Supports: "24 in", "24 inch", "24 inches", '24"', "43"
+            match = re.search(r'([\d.]+)\s*(?:in(?:ch(?:es)?)?|")?', screen_size_text, re.IGNORECASE)
             if match:
                 size_number = match.group(1)
                 return f"{size_number} inches"

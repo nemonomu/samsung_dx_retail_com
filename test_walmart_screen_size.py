@@ -240,10 +240,22 @@ class ScreenSizeTester:
         print(f"[URL] {url}")
 
         try:
+            # Check if browser is still alive (crash detection from wmart_tv_dt1.py)
+            try:
+                _ = self.driver.current_url
+            except Exception as e:
+                print(f"  [WARNING] Browser window crashed, restarting driver...")
+                try:
+                    self.driver.quit()
+                except:
+                    pass
+                self.setup_driver()
+                print(f"  [OK] Driver restarted successfully")
+
             # Load page
             print(f"[LOADING] Accessing page...")
             self.driver.get(url)
-            time.sleep(random.uniform(4, 6))
+            time.sleep(random.uniform(4, 6))  # Random wait from wmart_tv_dt1.py
             print(f"[LOADING] ✅ Page loaded")
 
             # Get page source and parse
@@ -263,7 +275,7 @@ class ScreenSizeTester:
                 **result
             })
 
-            return result
+            return True  # Success
 
         except Exception as e:
             print(f"\n[ERROR] Test failed: {e}")
@@ -278,6 +290,8 @@ class ScreenSizeTester:
                 'method': 'Exception',
                 'status': 'failed'
             })
+
+            return False  # Failed
 
     def print_summary(self):
         """Print summary of all test results"""
@@ -312,9 +326,22 @@ class ScreenSizeTester:
 
             total = len(TEST_URLS)
             for idx, url in enumerate(TEST_URLS, 1):
-                self.test_url(url, idx, total)
+                # Retry logic from wmart_tv_dt1.py: try up to 3 times
+                max_retries = 3
+                success = False
+                for attempt in range(max_retries):
+                    result = self.test_url(url, idx, total)
+                    if result:  # Success
+                        success = True
+                        break
+                    else:  # Failed
+                        if attempt < max_retries - 1:  # Not the last attempt
+                            print(f"  [RETRY] Attempt {attempt + 1} failed, retrying... ({attempt + 2}/{max_retries})")
+                            time.sleep(random.uniform(5, 8))  # Wait before retry
+                        else:
+                            print(f"  [FAILED] All {max_retries} attempts failed for this URL")
 
-                # Wait between tests
+                # Wait between tests (from wmart_tv_dt1.py)
                 if idx < total:
                     wait_time = random.uniform(3, 5)
                     print(f"\n[WAIT] Waiting {wait_time:.1f}s before next test...")

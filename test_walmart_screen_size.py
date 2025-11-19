@@ -1,106 +1,111 @@
 """
-Test script to extract screen_size from Walmart URLs
-Logs: URL, extracted value, and output value
-No database operations - just print results
-Uses undetected-chromedriver to bypass bot detection
+Test script for Walmart screen_size extraction
+Tests the extract_screen_size() function from wmart_tv_dt1.py
+with NULL-causing URLs to identify extraction issues
 """
 import time
-import re
-import sys
-from lxml import html
+import random
 import undetected_chromedriver as uc
-from selenium.webdriver.support.ui import WebDriverWait
+from lxml import html
+import re
 
-# Set UTF-8 encoding for Windows console
-if sys.platform == 'win32':
-    sys.stdout.reconfigure(encoding='utf-8')
+# Test URLs (6 URLs provided by user)
+TEST_URLS = [
+    "https://www.walmart.com/ip/SuperSonic-43-High-Definition-Smart-TV-SC-4316STV/881809037",
+    "https://www.walmart.com/ip/Restored-Westinghouse-24-720p-LED-Roku-Smart-TV-WR24HT2212-Refurbished/3110948754",
+    "https://www.walmart.com/ip/Supersonic-SC-1926SDVD-19-inch-AC-DC-LED-SMART-TV-Built-in-DVD-Powered-by-VIDAA-LED/14071706329",
+    "https://www.walmart.com/ip/Norcent-24-Inch-720P-LED-HD-Backlight-Flat-TV-DVD-Combo-with-Multimedia-Access/539101623",
+    "https://www.walmart.com/ip/Restored-Westinghouse-32-720P-HD-Smart-Roku-TV-WR32HT2212-Refurbished/1576486772",
+    "https://www.walmart.com/ip/Restored-Westinghouse-24-720p-LED-Roku-Smart-TV-WR24HT2212-Refurbished/3110948754"
+]
 
-class WalmartScreenSizeExtractor:
+# Expected screen sizes for each URL (based on product names)
+EXPECTED_SCREEN_SIZES = {
+    "881809037": "43 inches",
+    "3110948754": "24 inches",
+    "14071706329": "19 inches",
+    "539101623": "24 inches",
+    "1576486772": "32 inches"
+}
+
+
+class ScreenSizeTester:
     def __init__(self):
-        self.setup_driver()
+        self.driver = None
+        self.test_results = []
 
     def setup_driver(self):
-        """Setup Chrome WebDriver with undetected-chromedriver (same as wmart_tv_dt1.py)"""
-        print("[INFO] Setting up undetected Chrome WebDriver...")
-
+        """Setup Chrome WebDriver"""
+        print("\n[SETUP] Initializing Chrome WebDriver...")
         options = uc.ChromeOptions()
-
-        # Set page load strategy to 'none' - don't wait for full page load
         options.page_load_strategy = 'none'
-
-        # Basic options
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-gpu')
         options.add_argument('--window-size=1920,1080')
         options.add_argument('--lang=en-US,en;q=0.9')
 
-        # Preferences
-        prefs = {
-            "profile.default_content_setting_values.notifications": 2,
-            "credentials_enable_service": False,
-            "profile.password_manager_enabled": False,
-        }
-        options.add_experimental_option("prefs", prefs)
-
-        # Use undetected_chromedriver
         self.driver = uc.Chrome(options=options)
-        self.driver.set_page_load_timeout(120)  # 120 seconds timeout
-        self.wait = WebDriverWait(self.driver, 20)
+        self.driver.set_page_load_timeout(120)
+        print("[SETUP] ✅ WebDriver initialized successfully\n")
 
-        print("[OK] WebDriver setup complete\n")
-
-    def extract_retailer_sku_name(self, tree):
-        """Extract product title (retailer_sku_name)"""
+    def extract_text_safe(self, tree, xpath):
+        """Safely extract text from XPath"""
+        if not xpath:
+            return None
         try:
-            xpaths = [
-                '//h1[@itemprop="name"]',
-                '//h1[contains(@class, "prod-ProductTitle")]',
-                '//h1'
-            ]
-
-            for xpath in xpaths:
-                result = tree.xpath(xpath)
-                if result:
-                    title = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
-                    if title:
-                        return title
-
+            elements = tree.xpath(xpath)
+            if elements:
+                if isinstance(elements[0], str):
+                    return elements[0].strip()
+                else:
+                    return elements[0].text_content().strip()
             return None
         except Exception as e:
-            print(f"  [ERROR] Failed to extract product name: {e}")
             return None
 
-    def extract_screen_size(self, tree, retailer_sku_name=None):
-        """Extract screen size from 'Specifications at a glance' section
-        Falls back to extracting from product name if not found in specifications
-        Example: '65 in' -> '65 inches', 'onn 32" Class...' -> '32 inches'
+    def extract_screen_size_with_detailed_log(self, tree, retailer_sku_name=None, url=None):
+        """Extract screen size with detailed logging for each XPath attempt
+        This is a copy of extract_screen_size() from wmart_tv_dt1.py with enhanced logging
         """
+        print(f"\n{'='*80}")
+        print(f"[TEST] Extracting screen_size...")
+        print(f"[INFO] Product Name: {retailer_sku_name or 'N/A'}")
+        print(f"[INFO] URL: {url or 'N/A'}")
+        print(f"{'='*80}")
+
+        # Extract item ID from URL for expected value lookup
+        item_id = url.rstrip('/').split('/')[-1] if url else None
+        expected_value = EXPECTED_SCREEN_SIZES.get(item_id, "Unknown")
+        print(f"[EXPECTED] Screen Size: {expected_value}")
+        print(f"{'-'*80}")
+
         try:
             # Try multiple XPath strategies to find Screen size
             xpaths = [
-                # Method 1: Definition list structure - <dl><dt>Screen size</dt><dd>75 in</dd></dl> (main page)
-                "//dl[.//dt[contains(., 'Screen size')]]//dd",
-                # Method 2: Definition list - direct sibling (main page)
-                "//dt[contains(., 'Screen size')]/following-sibling::dd",
-                # Method 3: Table structure - <tr><th><dt>Screen size</dt></th><td><dd>75 in</dd></td></tr>
-                "//tr[.//dt[contains(text(), 'Screen size')]]//dd",
+                # Method 1: Definition list structure
+                ("Method 1: Definition list", "//dl[.//dt[contains(., 'Screen size')]]//dd"),
+                # Method 2: Definition list - direct sibling
+                ("Method 2: Sibling dd", "//dt[contains(., 'Screen size')]/following-sibling::dd"),
+                # Method 3: Table structure
+                ("Method 3: Table dd", "//tr[.//dt[contains(text(), 'Screen size')]]//dd"),
                 # Method 4: Alternative table structure
-                "//dt[contains(text(), 'Screen size')]/ancestor::tr//dd",
-                # Method 5: Use aria-label (most reliable for div structure)
-                "//div[@aria-label[contains(., 'Screen size:')]]/@aria-label",
+                ("Method 4: Table ancestor", "//dt[contains(text(), 'Screen size')]/ancestor::tr//dd"),
+                # Method 5: Use aria-label
+                ("Method 5: aria-label", "//div[@aria-label[contains(., 'Screen size:')]]/@aria-label"),
                 # Method 6: Find "Screen size" text and get the next sibling div
-                "//div[contains(@class, 'b') and contains(., 'Screen size')]/following-sibling::div//span",
-                # Method 7: Direct XPath provided by user (old structure)
-                "//*[@id='ip-prod-desc-atf-div-1']/section/section[2]/div/div/div[1]/div[1]/div/div/div[2]/span",
-                # Method 8: Find within "Specifications at a glance" container
-                "//h3[contains(text(), 'Specifications at a glance')]/parent::div//div[@aria-label[contains(., 'Screen size')]]/@aria-label"
+                ("Method 6: Next sibling", "//div[contains(@class, 'b') and contains(., 'Screen size')]/following-sibling::div//span"),
+                # Method 7: Direct XPath
+                ("Method 7: Direct XPath", "//*[@id='ip-prod-desc-atf-div-1']/section/section[2]/div/div/div[1]/div[1]/div/div/div[2]/span"),
+                # Method 8: Within "Specifications at a glance" container
+                ("Method 8: Specs container", "//h3[contains(text(), 'Specifications at a glance')]/parent::div//div[@aria-label[contains(., 'Screen size')]]/@aria-label")
             ]
 
             screen_size_text = None
-            matched_xpath_num = None
+            successful_method = None
 
-            for i, xpath in enumerate(xpaths, 1):
+            print("[XPath Tests]")
+            for method_name, xpath in xpaths:
                 result = tree.xpath(xpath)
                 if result:
                     if isinstance(result[0], str):
@@ -109,185 +114,233 @@ class WalmartScreenSizeExtractor:
                         screen_size_text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
 
                     if screen_size_text:
-                        matched_xpath_num = i
-                        print(f"  [XPATH #{i}] Matched: '{screen_size_text}'")
+                        print(f"  ✅ {method_name}: Found '{screen_size_text}'")
+                        successful_method = method_name
                         break
+                    else:
+                        print(f"  ⚠️ {method_name}: Found element but empty text")
+                else:
+                    print(f"  ❌ {method_name}: Not found")
+
+            print(f"{'-'*80}")
 
             if not screen_size_text:
+                print("[Fallback] XPath extraction failed, trying regex from product name...")
                 # Fallback: Extract from retailer_sku_name (product name)
                 if retailer_sku_name:
-                    print(f"  [FALLBACK] Trying to extract from product name: '{retailer_sku_name[:80]}...'")
                     # Look for patterns: "32"", "50-Inch", "98" Q Series", etc.
-                    # Matches: number + (space/hyphen + inch/inches OR double quote)
                     match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|")', retailer_sku_name, re.IGNORECASE)
                     if match:
                         size_number = match.group(1)
-                        result = f"{size_number} inches"
-                        print(f"  [OK] Extracted from product name: '{size_number}' -> Output: '{result}'")
-                        return result
-                    else:
-                        print(f"  [FAIL] No screen size pattern found in product name")
+                        final_value = f"{size_number} inches"
+                        print(f"  ✅ Regex Pattern: Found '{size_number}' from product name")
+                        print(f"  ✅ Extracted Value: {final_value}")
 
-                print(f"  [NONE] No screen_size found in XPaths or product name")
-                return None
+                        # Compare with expected
+                        status = "✅ MATCH" if final_value == expected_value else "❌ MISMATCH"
+                        print(f"\n[RESULT] {status}")
+                        print(f"  Extracted: {final_value}")
+                        print(f"  Expected:  {expected_value}")
+                        print(f"  Method:    Regex from product name")
+
+                        return {
+                            'extracted': final_value,
+                            'expected': expected_value,
+                            'method': 'Regex from product name',
+                            'status': 'match' if final_value == expected_value else 'mismatch'
+                        }
+                    else:
+                        print(f"  ❌ Regex Pattern: No match in product name")
+                else:
+                    print(f"  ❌ Product name is None")
+
+                print(f"\n[RESULT] ❌ FAILED - Could not extract screen size")
+                print(f"  Extracted: NULL")
+                print(f"  Expected:  {expected_value}")
+                return {
+                    'extracted': None,
+                    'expected': expected_value,
+                    'method': 'Failed',
+                    'status': 'failed'
+                }
 
             # Extract number from text (including decimal)
-            # Examples: "Screen size: 65 in" -> "65", "64.5 in" -> "64.5"
+            print(f"[Parse] Parsing '{screen_size_text}'...")
             match = re.search(r'([\d.]+)\s*in', screen_size_text, re.IGNORECASE)
             if match:
                 size_number = match.group(1)
-                result = f"{size_number} inches"
-                print(f"  [OK] Extracted: '{size_number}' -> Output: '{result}'")
-                return result
+                final_value = f"{size_number} inches"
+                print(f"  ✅ Parsed: {final_value}")
+
+                # Compare with expected
+                status = "✅ MATCH" if final_value == expected_value else "❌ MISMATCH"
+                print(f"\n[RESULT] {status}")
+                print(f"  Extracted: {final_value}")
+                print(f"  Expected:  {expected_value}")
+                print(f"  Method:    {successful_method}")
+
+                return {
+                    'extracted': final_value,
+                    'expected': expected_value,
+                    'method': successful_method,
+                    'status': 'match' if final_value == expected_value else 'mismatch'
+                }
             else:
-                print(f"  [FAIL] No 'X in' pattern found in: '{screen_size_text}'")
-                return None
+                print(f"  ❌ Parse Failed: Could not extract number from '{screen_size_text}'")
+                print(f"\n[RESULT] ❌ FAILED - Parse error")
+                print(f"  Extracted: NULL")
+                print(f"  Expected:  {expected_value}")
+                return {
+                    'extracted': None,
+                    'expected': expected_value,
+                    'method': 'Parse failed',
+                    'status': 'failed'
+                }
 
         except Exception as e:
-            print(f"  [ERROR] Failed to extract screen size: {e}")
+            print(f"\n[ERROR] Exception occurred: {e}")
+            print(f"[RESULT] ❌ FAILED - Exception")
+            print(f"  Extracted: NULL")
+            print(f"  Expected:  {expected_value}")
             import traceback
             traceback.print_exc()
+            return {
+                'extracted': None,
+                'expected': expected_value,
+                'method': 'Exception',
+                'status': 'failed'
+            }
+
+    def extract_product_name(self, tree):
+        """Extract product name from page"""
+        try:
+            # Try multiple XPaths to find product name
+            xpaths = [
+                "//h1[@itemprop='name']",
+                "//h1[contains(@class, 'prod-ProductTitle')]",
+                "//*[@id='maincontent']//h1",
+                "//h1"
+            ]
+
+            for xpath in xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+                    if text:
+                        return text
+            return None
+        except:
             return None
 
-    def test_url(self, url, index=None):
-        """Test a single URL"""
-        print("=" * 120)
-        if index is not None:
-            print(f"URL #{index}")
-        print(f"URL: {url}")
-        print("=" * 120)
+    def test_url(self, url, test_num, total):
+        """Test screen_size extraction for a single URL"""
+        print(f"\n\n{'#'*80}")
+        print(f"# TEST {test_num}/{total}")
+        print(f"{'#'*80}")
+        print(f"[URL] {url}")
 
         try:
-            # Navigate to URL
+            # Load page
+            print(f"[LOADING] Accessing page...")
             self.driver.get(url)
+            time.sleep(random.uniform(4, 6))
+            print(f"[LOADING] ✅ Page loaded")
 
-            # Wait for page to be interactive (page_load_strategy = 'none' means we need to wait manually)
-            print("  [INFO] Waiting for page to load...")
-            time.sleep(8)  # Wait longer for dynamic content
-
-            # Check if blocked by bot detection
+            # Get page source and parse
             page_source = self.driver.page_source
-            if "blocked" in page_source.lower() or "captcha" in page_source.lower():
-                print("  [WARNING] Possible bot detection / CAPTCHA detected!")
-                print("  [INFO] Waiting 10 more seconds...")
-                time.sleep(10)
-                page_source = self.driver.page_source
-
             tree = html.fromstring(page_source)
 
-            # Extract product name first (for fallback)
-            retailer_sku_name = self.extract_retailer_sku_name(tree)
-            if retailer_sku_name:
-                print(f"\nProduct Name: {retailer_sku_name}\n")
+            # Extract product name
+            product_name = self.extract_product_name(tree)
 
-            # Extract screen_size (with fallback to product name)
-            screen_size = self.extract_screen_size(tree, retailer_sku_name)
+            # Extract screen size with detailed logging
+            result = self.extract_screen_size_with_detailed_log(tree, product_name, url)
 
-            print("\n" + "-" * 120)
-            print(f"FINAL RESULT: screen_size = '{screen_size}'")
-            print("-" * 120 + "\n")
+            # Store result
+            self.test_results.append({
+                'url': url,
+                'product_name': product_name,
+                **result
+            })
+
+            return result
 
         except Exception as e:
-            print(f"ERROR: {e}")
+            print(f"\n[ERROR] Test failed: {e}")
             import traceback
             traceback.print_exc()
 
-    def run_tests(self, urls):
-        """Test all URLs"""
-        import random
+            self.test_results.append({
+                'url': url,
+                'product_name': None,
+                'extracted': None,
+                'expected': EXPECTED_SCREEN_SIZES.get(url.rstrip('/').split('/')[-1], "Unknown"),
+                'method': 'Exception',
+                'status': 'failed'
+            })
 
-        total = len(urls)
-        for i, url in enumerate(urls, 1):
-            print(f"\n\n{'#' * 120}")
-            print(f"TESTING {i}/{total}")
-            print(f"{'#' * 120}\n")
-            self.test_url(url, index=i)
+    def print_summary(self):
+        """Print summary of all test results"""
+        print(f"\n\n{'='*80}")
+        print(f"SUMMARY - Test Results for {len(self.test_results)} URLs")
+        print(f"{'='*80}\n")
 
-            # Add random delay between requests (human-like behavior)
-            if i < total:  # Don't wait after last URL
-                delay = random.uniform(2, 5)
-                print(f"\n[INFO] Waiting {delay:.1f} seconds before next request...\n")
-                time.sleep(delay)
+        match_count = sum(1 for r in self.test_results if r['status'] == 'match')
+        mismatch_count = sum(1 for r in self.test_results if r['status'] == 'mismatch')
+        failed_count = sum(1 for r in self.test_results if r['status'] == 'failed')
 
-        self.driver.quit()
-        print("\n" + "=" * 120)
-        print(f"ALL TESTS COMPLETED: {total} URLs tested")
-        print("=" * 120)
+        print(f"✅ Match:    {match_count}/{len(self.test_results)}")
+        print(f"❌ Mismatch: {mismatch_count}/{len(self.test_results)}")
+        print(f"❌ Failed:   {failed_count}/{len(self.test_results)}")
+        print(f"{'-'*80}\n")
+
+        for idx, result in enumerate(self.test_results, 1):
+            status_icon = "✅" if result['status'] == 'match' else "❌"
+            print(f"{status_icon} Test {idx}:")
+            print(f"   URL:       {result['url'][:70]}...")
+            print(f"   Product:   {result['product_name'][:70] if result['product_name'] else 'N/A'}...")
+            print(f"   Extracted: {result['extracted']}")
+            print(f"   Expected:  {result['expected']}")
+            print(f"   Method:    {result['method']}")
+            print(f"   Status:    {result['status'].upper()}")
+            print()
+
+    def run(self):
+        """Run all tests"""
+        try:
+            self.setup_driver()
+
+            total = len(TEST_URLS)
+            for idx, url in enumerate(TEST_URLS, 1):
+                self.test_url(url, idx, total)
+
+                # Wait between tests
+                if idx < total:
+                    wait_time = random.uniform(3, 5)
+                    print(f"\n[WAIT] Waiting {wait_time:.1f}s before next test...")
+                    time.sleep(wait_time)
+
+            # Print summary
+            self.print_summary()
+
+        except Exception as e:
+            print(f"\n[FATAL ERROR] Test runner failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+        finally:
+            if self.driver:
+                self.driver.quit()
+                print("\n[CLEANUP] WebDriver closed")
 
 
-if __name__ == '__main__':
-    urls = [
-        "https://www.walmart.com/ip/Hisense-75-Class-U7-Series-Mini-LED-ULED-4K-UHD-Roku-Smart-TV-75H5QBR-2025-Model-QLED-Native-165Hz-1000-Nit-Dolby-Vision-IQ-Full-Array-Local-Dimming/16732218557",
-        "https://www.walmart.com/ip/Samsung-65-Class-QLED-Q6F-4K-Smart-TV-2025-QN65Q6FAAFXZA/16784312617",
-        "https://www.walmart.com/ip/VIZIO-86-Class-4K-UHD-LED-HDR-Smart-TV-New-V4K86C-0804/5195359733",
-        "https://www.walmart.com/ip/Samsung-65-Class-Crystal-UHD-U7900F-4K-Smart-TV-2025-UN65U7900FFXZA/16815105564",
-        "https://www.walmart.com/ip/onn-32-Class-HD-720P-LED-Roku-Smart-Television-100012589/314022535",
-        "https://www.walmart.com/ip/50-HISENSE-4K-GOOGLE-TV/17309421750",
-        "https://www.walmart.com/ip/Hisense-40-Class-FHD-1080P-Roku-Smart-LED-TV-40H4030F1/470905078",
-        "https://www.walmart.com/ip/onn-50-Class-4K-UHD-2160P-LED-Roku-Smart-Television-HDR-100012585/300694285",
-        "https://www.walmart.com/ip/TCL-98-Google-Smart-TV-98Q51CG/13621223713",
-        "https://www.walmart.com/ip/Samsung-55-Class-Crystal-UHD-U7900F-4K-Smart-TV-2025-UN55U7900FFXZA/16436012780",
-        "https://www.walmart.com/ip/Hisense-58-Class-4K-UHD-LED-LCD-Roku-Smart-TV-HDR-R6-Series-58R6E3/587182688",
-        "https://www.walmart.com/ip/onn-24-Class-HD-720P-LED-Roku-Smart-Television-100012590/959853005",
-        "https://www.walmart.com/ip/VIZIO-40-Class-Full-HD-1080p-LED-Smart-TV-New-VFD40M-08/5195359732",
-        "https://www.walmart.com/ip/VIZIO-55-Class-4K-UHD-LED-HDR-Smart-TV-New-V4K55M-08/5197667450",
-        "https://www.walmart.com/ip/SAMSUNG-77-Class-S90D-OLED-Smart-TV-QN77S90DAFXZA-2024/5337847611",
-        "https://www.walmart.com/ip/onn-55-Class-4K-UHD-2160P-LED-Roku-Smart-Television-HDR-100012586/201216466",
-        "https://www.walmart.com/ip/Hisense-32-Class-FHD-1080p-Smart-LED-TV-32A45K/8703258904",
-        "https://www.walmart.com/ip/Hisense-65-Class-4K-UHD-LCD-Roku-Smart-TV-HDR-R6-Series-65R6E4/771452270",
-        "https://www.walmart.com/ip/VIZIO-70-Class-4K-UHD-LED-HDR-Smart-TV-New-V4K70M-08/5197667453",
-        "https://www.walmart.com/ip/VIZIO-75-Class-4K-UHD-LED-HDR-Smart-TV-New-V4K75M-08/5195359735",
-        "https://www.walmart.com/ip/Samsung-QN65Q7FBAFXZA/14316322212",
-        "https://www.walmart.com/ip/Samsung-UN50U8000F/15083853099",
-        "https://www.walmart.com/ip/Samsung-UN65U8000F/15073169446",
-        "https://www.walmart.com/ip/Samsung-UN43U8000F/15093811177",
-        "https://www.walmart.com/ip/Samsung-75-Class-QLED-Q6F-4K-Smart-TV-2025-QN75Q6FAAFXZA/16721466651",
-        "https://www.walmart.com/ip/Hisense-75-Class-4K-UHD-LED-LCD-Roku-Smart-TV-HDR-R6-Series-75R6E4/953460510",
-        "https://www.walmart.com/ip/FPD-50-4K-UHD-LED-Google-Smart-Television-HDR/17459850344",
-        "https://www.walmart.com/ip/onn-43-Class-4K-UHD-2160P-LED-Roku-Smart-Television-HDR-100012584/428114216",
-        "https://www.walmart.com/ip/Samsung-UN85U8000F/15031766627",
-        "https://www.walmart.com/ip/Hisense-85-Class-4K-UHD-LED-LCD-Roku-Smart-TV-HDR-R6-Series-85R6E4/3491792460",
-        "https://www.walmart.com/ip/VIZIO-32-Class-Full-HD-1080p-LED-Smart-TV-New-VFD32M-0807/5337847390",
-        "https://www.walmart.com/ip/Samsung-UN70U8000F/15077158707",
-        "https://www.walmart.com/ip/Hisense-43-Class-4K-UHD-LED-LCD-Smart-Roku-TV-HDR-R6-Series-43R6E3/213300402",
-        "https://www.walmart.com/ip/Hisense-70-Class-4K-UHD-LED-LCD-Roku-Smart-TV-HDR-R6-Series-70R6E4/2484260597",
-        "https://www.walmart.com/ip/VIZIO-100-Class-Quantum-4K-QLED-HDR-Smart-TV-NEW-VQD100M-0804/7763919612",
-        "https://www.walmart.com/ip/FPD-55-4K-UHD-LED-Google-Smart-Television-HDR/17429409326",
-        "https://www.walmart.com/ip/onn-32-Class-HD-720P-Smart-LED-TV-100012589/18375223072",
-        "https://www.walmart.com/ip/Samsung-QN65QN70FAF-65-Smart-LED-LCD-TV-4K-UHDTV-qn65qn70fafxza/16300115318",
-        "https://www.walmart.com/ip/TCL-65-Class-Q6-65Q651G-4K-UHD-HDR-QLED-Smart-TV-with-Google-TV-NEW-2024/5378490185",
-        "https://www.walmart.com/ip/Hisense-55-Class-U7-Series-Mini-LED-ULED-4K-UHD-Google-Smart-TV-55U75Q-2025-Model-QLED-Native-165Hz-1000-Nit-Dolby-Vision-IQ-Full-Array-Local-Dimming/16031006937",
-        "https://www.walmart.com/ip/Vizio-D24FM-K01-24-in-D-Series-Full-HD-Smart-TV/145006565",
-        "https://www.walmart.com/ip/TCL-98-QM6K-Series-QD-Mini-LED-QLED-4K-UHD-Smart-TV-with-Google-TV-NEW-2025-98QM6K/15085365747",
-        "https://www.walmart.com/ip/LG-65-Inch-4K-HDR-Smart-Quantum-Dot-NanoCell-Mini-LED-TV-2024/5519716535",
-        "https://www.walmart.com/ip/LG-75-Inch-4K-HDR-Smart-Quantum-Dot-NanoCell-Mini-LED-TV-2024/5513854593",
-        "https://www.walmart.com/ip/Restored-Westinghouse-32-720P-HD-Smart-Roku-TV-WR32HT2212-Refurbished/1576486772",
-        "https://www.walmart.com/ip/TCL-32-Class-S-Class-720p-HD-LED-Smart-TV-with-Google-TV-32S250G-New/5084872018",
-        "https://www.walmart.com/ip/FPD-32-inch-Palette-Series-HD-720p-Smart-Google-TV-Dolby-Atmos-Hdr-10-Bluetooth/13368304057",
-        "https://www.walmart.com/ip/FPD-43-Inch-Palette-Series-1080p-Full-HD-LED-Television-Single-Piece-with-Smart-TV-Accessories/13337215414",
-        "https://www.walmart.com/ip/SYLVOX-Kitchen-TV-15-6-inch-Smart-TV-Google-System-1080P-FHD-Small-TV-Rotated-Foldable-Support-Google-Assistant-WiFi-Bluetooth-Cabinet-TV-Kitchen-Bed/5324670810",
-        "https://www.walmart.com/ip/VIZIO-43-Class-D-Series-FHD-LED-Smart-TV-2023-Online-Only-D43fM-K04/1777915686",
-        "https://www.walmart.com/ip/SAMSUNG-40-Class-N5200-Series-Full-HD-1080P-LED-Smart-Television-UN40N5200AFXZA/697559735",
-        "https://www.walmart.com/ip/Westinghouse-40-inch-Smart-TV-FHD-1080P-Xumo-TV-w-Voice-Remote-Flat-Screen-LED-Television-w-Apple-Home-kit-Wi-Fi-Mobile-Connectivity/16748318973",
-        "https://www.walmart.com/ip/Supersonic-SC-1926SDVD-19-inch-AC-DC-LED-SMART-TV-Built-in-DVD-Powered-by-VIDAA-LED/14071706329",
-        "https://www.walmart.com/ip/OLED77C5PUA-AUS/14340574575",
-        "https://www.walmart.com/ip/55-Roku-Plus-Series/15942718986",
-        "https://www.walmart.com/ip/Sceptre-50-Class-4K-UHD-LED-TV-U515CV-U/44829924",
-        "https://www.walmart.com/ip/Sony-32-Class-W830K-720p-HD-LED-HDR-TV-with-Google-TV-and-Google-Assistant-2022-Model/718083895",
-        "https://www.walmart.com/ip/VIZIO-65-Class-V-Series-4K-UHD-LED-SmartCast-Smart-TV-HDR-V655-J/292825097",
-        "https://www.walmart.com/ip/SAMSUNG-55-Class-S90C-OLED-4K-Smart-TV-QN55S90CAFXZA-2023/2472636061",
-        "https://www.walmart.com/ip/Westinghouse-QX-Series-43-Edgeless-QLED-4K-UHD-Roku-TV-WR43QX400-2024/5534601509",
-        "https://www.walmart.com/ip/SYLVOX-22-inch-Smart-RV-T-12-Vot-V-with-DVD-Player-1080P-FHD-Smart-Android-Tv-Free-Download-Apps-Support-Wif-Bluetoot-Limo-Series/3055314192",
-        "https://www.walmart.com/ip/65-Roku-Pro-Series/15941352037",
-        "https://www.walmart.com/ip/43-in-CU8000-Crystal-UHD-2160p-120-Hz-4K-HDR-Smart-LED-TV/5187633671",
-        "https://www.walmart.com/ip/RCA-32-720p-HD-Smart-LED-TV-TC-LE32K-AN2401-Android-TV/14586820804",
-        "https://www.walmart.com/ip/Norcent-24-Inch-720P-LED-HD-Backlight-Flat-TV-DVD-Combo-with-Multimedia-Access/539101623",
-        "https://www.walmart.com/ip/SuperSonic-43-High-Definition-Smart-TV-SC-4316STV/881809037",
-        "https://www.walmart.com/ip/Restored-Westinghouse-24-720p-LED-Roku-Smart-TV-WR24HT2212-Refurbished/3110948754",
-        "https://www.walmart.com/ip/SAMSUNG-50-Class-LS03B-The-Frame-QLED-4K-Smart-TV-QN50LS03BAFXZA/821644919",
-        "https://www.walmart.com/ip/SAMSUNG-55-Class-LS03B-The-Frame-QLED-4K-Smart-TV-QN55LS03BAFXZA/944779027",
-        "https://www.walmart.com/ip/SAMSUNG-65-Class-LS03B-The-Frame-QLED-4K-Smart-TV-QN65LS03BAFXZA/876051375"
-    ]
+if __name__ == "__main__":
+    print(f"\n{'='*80}")
+    print("Walmart Screen Size Extraction Test")
+    print("Testing screen_size extraction logic from wmart_tv_dt1.py")
+    print(f"{'='*80}")
 
-    extractor = WalmartScreenSizeExtractor()
-    extractor.run_tests(urls)
+    tester = ScreenSizeTester()
+    tester.run()
+
+    print("\n[DONE] All tests completed!")

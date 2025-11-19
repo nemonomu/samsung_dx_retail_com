@@ -165,8 +165,9 @@ class ScreenSizeTester:
                 }
 
             # Extract number from text (including decimal)
+            # Supports: "24 in", "24 inch", "24 inches", '24"', "43"
             print(f"[Parse] Parsing '{screen_size_text}'...")
-            match = re.search(r'([\d.]+)\s*in', screen_size_text, re.IGNORECASE)
+            match = re.search(r'([\d.]+)\s*(?:in(?:ch(?:es)?)?|")?', screen_size_text, re.IGNORECASE)
             if match:
                 size_number = match.group(1)
                 final_value = f"{size_number} inches"

@@ -1442,8 +1442,8 @@ class BestBuyDetailCrawler:
                     # first 번째 제품은 현재 page의 item
                     mst_item = current_item
                 else:
-                    # 2-4번째 제품은 DB에서 찾기
-                    mst_item = self.get_item_by_product_name(product['product_name'])
+                    # 2-4번째 제품은 URL에서 직접 추출
+                    mst_item = self.extract_item_from_url(product['product_url'])
 
                 # data 삽입
                 insert_query = """

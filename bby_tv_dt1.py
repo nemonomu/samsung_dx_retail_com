@@ -466,6 +466,16 @@ class BestBuyDetailCrawler:
                         print(f"  [WARNING] dialog timeout, retry {retry_count + 1}/{max_retries}...")
                         retry_count += 1
                         self.close_specifications_dialog()
+
+                        # Page refresh to recover from stuck state
+                        print(f"  [INFO] Refreshing page to recover from timeout...")
+                        try:
+                            self.driver.refresh()
+                            time.sleep(3)  # Wait for page reload
+                            print(f"  [OK] Page refreshed successfully")
+                        except Exception as e:
+                            print(f"  [WARNING] Page refresh failed: {e}")
+
                         time.sleep(2)
                         continue
                     else:

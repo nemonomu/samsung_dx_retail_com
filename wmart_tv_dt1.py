@@ -328,9 +328,24 @@ class WalmartDetailCrawler:
         except Exception as e:
             return None
 
-    def extract_star_rating(self, tree):
-        """Extract star rating number from '4.4 out of 5' format or 'No ratings yet'"""
+    def extract_star_rating(self, tree, page_source=None):
+        """Extract star rating number from '4.4 out of 5' format or 'No ratings yet'
+
+        Priority:
+        1. JSON data: averageOverallRating (exact value like 4.4)
+        2. XPath fallback (text parsing)
+        """
         try:
+            # Method 1: Extract from JSON data (most accurate)
+            if page_source:
+                # Try averageOverallRating first
+                match = re.search(r'"averageOverallRating":([\d.]+)', page_source)
+                if match:
+                    rating = match.group(1)
+                    print(f"  [INFO] Extracted averageOverallRating from JSON: {rating}")
+                    return rating
+
+            # Method 2: XPath fallback
             rating_text = self.extract_text_safe(tree, self.xpaths.get('star_rating'))
             if rating_text:
                 # Check for "No ratings yet" first
@@ -1354,7 +1369,7 @@ class WalmartDetailCrawler:
 
             # Extract basic data using XPaths (from initial page load)
             retailer_sku_name = self.extract_text_safe(tree, self.xpaths.get('product_name'))
-            star_rating = self.extract_star_rating(tree)
+            star_rating = self.extract_star_rating(tree, page_source)
             discount_type = self.extract_text_safe(tree, self.xpaths.get('discount_type'))
             savings = self.extract_text_safe(tree, self.xpaths.get('savings'))
 

@@ -70,10 +70,23 @@ class WalmartReviewsTest:
         except Exception as e:
             return None
 
-    def extract_star_rating(self, tree):
-        """Extract star rating number from '4.4 out of 5' format or 'No ratings yet'"""
+    def extract_star_rating(self, tree, page_source=None):
+        """Extract star rating number from '4.4 out of 5' format or 'No ratings yet'
+
+        Priority:
+        1. JSON data: averageOverallRating (exact value like 4.4)
+        2. XPath fallback (text parsing)
+        """
         try:
-            # Try multiple XPaths to find star rating
+            # Method 1: Extract from JSON data (most accurate)
+            if page_source:
+                match = re.search(r'"averageOverallRating":([\d.]+)', page_source)
+                if match:
+                    rating = match.group(1)
+                    print(f"  [INFO] Extracted averageOverallRating from JSON: {rating}")
+                    return rating
+
+            # Method 2: XPath fallback
             star_rating_xpaths = [
                 "//span[@class='w_iUH7']",
                 "//*[@id='maincontent']/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[2]/div/div/span",
@@ -218,8 +231,8 @@ class WalmartReviewsTest:
             page_source = self.driver.page_source
             tree = html.fromstring(page_source)
 
-            # Extract star_rating
-            star_rating = self.extract_star_rating(tree)
+            # Extract star_rating (pass page_source for JSON extraction)
+            star_rating = self.extract_star_rating(tree, page_source)
 
             # Extract count_of_reviews (pass star_rating and page_source for JSON extraction)
             count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source)

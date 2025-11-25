@@ -129,6 +129,74 @@ class WalmartReviewsTest:
             print(f"  [WARNING] Failed to extract star rating: {e}")
             return None
 
+    def extract_screen_size(self, tree, retailer_sku_name=None):
+        """Extract screen size from 'Specifications at a glance' section
+        Falls back to extracting from product name if not found in specifications
+        Example: '65 in' -> '65 inches', 'SAMSUNG 77" Class...' -> '77 inches'
+        """
+        try:
+            # Try multiple XPath strategies to find Screen size
+            xpaths = [
+                "//dl[.//dt[contains(., 'Screen size')]]//dd",
+                "//dt[contains(., 'Screen size')]/following-sibling::dd",
+                "//tr[.//dt[contains(text(), 'Screen size')]]//dd",
+                "//dt[contains(text(), 'Screen size')]/ancestor::tr//dd",
+                "//div[@aria-label[contains(., 'Screen size:')]]/@aria-label",
+                "//div[contains(@class, 'b') and contains(., 'Screen size')]/following-sibling::div//span",
+                "//*[@id='ip-prod-desc-atf-div-1']/section/section[2]/div/div/div[1]/div[1]/div/div/div[2]/span",
+                "//h3[contains(text(), 'Specifications at a glance')]/parent::div//div[@aria-label[contains(., 'Screen size')]]/@aria-label"
+            ]
+
+            screen_size_text = None
+            for xpath in xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    if isinstance(result[0], str):
+                        screen_size_text = result[0].strip()
+                    else:
+                        screen_size_text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+
+                    if screen_size_text:
+                        break
+
+            # Method 1: Extract from XPath result
+            if screen_size_text:
+                match = re.search(r'([\d.]+)\s*(?:in(?:ch(?:es)?)?|")?', screen_size_text, re.IGNORECASE)
+                if match:
+                    size_number = match.group(1)
+                    print(f"  [INFO] Screen size extracted from XPath: {size_number} inches")
+                    return f"{size_number} inches"
+
+            # Method 2 (Fallback): Extract from retailer_sku_name (product name)
+            if retailer_sku_name:
+                match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|")', retailer_sku_name, re.IGNORECASE)
+                if match:
+                    size_number = match.group(1)
+                    print(f"  [INFO] Screen size extracted from product name: {size_number} inches")
+                    return f"{size_number} inches"
+
+            return None
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract screen size: {e}")
+            return None
+
+    def extract_product_name(self, tree):
+        """Extract product name from page"""
+        try:
+            xpaths = [
+                "//h1[@itemprop='name']",
+                "//h1[@id='main-title']",
+                "//h1[contains(@class, 'prod-ProductTitle')]"
+            ]
+            for xpath in xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    return result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+            return None
+        except:
+            return None
+
     def extract_count_of_reviews(self, tree, star_rating=None, page_source=None):
         """Extract total number of reviews from main page
 
@@ -219,7 +287,7 @@ class WalmartReviewsTest:
             return None
 
     def test_url(self, url):
-        """Test a single URL and extract star_rating and count_of_reviews"""
+        """Test a single URL and extract star_rating, count_of_reviews, and screen_size"""
         try:
             print(f"\n{'='*80}")
             print(f"[TEST] URL: {url}")
@@ -231,20 +299,28 @@ class WalmartReviewsTest:
             page_source = self.driver.page_source
             tree = html.fromstring(page_source)
 
+            # Extract product name for screen_size fallback
+            retailer_sku_name = self.extract_product_name(tree)
+
             # Extract star_rating (pass page_source for JSON extraction)
             star_rating = self.extract_star_rating(tree, page_source)
 
             # Extract count_of_reviews (pass star_rating and page_source for JSON extraction)
             count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source)
 
+            # Extract screen_size (with fallback to product name)
+            screen_size = self.extract_screen_size(tree, retailer_sku_name)
+
             print(f"\n  [RESULT]")
             print(f"  ├─ star_rating: {star_rating}")
-            print(f"  └─ count_of_reviews: {count_of_reviews}")
+            print(f"  ├─ count_of_reviews: {count_of_reviews}")
+            print(f"  └─ screen_size: {screen_size}")
 
             return {
                 'url': url,
                 'star_rating': star_rating,
-                'count_of_reviews': count_of_reviews
+                'count_of_reviews': count_of_reviews,
+                'screen_size': screen_size
             }
 
         except Exception as e:
@@ -253,12 +329,15 @@ class WalmartReviewsTest:
                 'url': url,
                 'star_rating': None,
                 'count_of_reviews': None,
+                'screen_size': None,
                 'error': str(e)
             }
 
     def run(self):
         """Run tests on all URLs"""
         test_urls = [
+            # Priority test URL (screen_size fallback test - "77" in product name)
+            "https://www.walmart.com/ip/SAMSUNG-77-Class-S90D-OLED-Smart-TV-QN77S90DAFXZA-2024/5337847611",
             # Group 1
             "https://www.walmart.com/ip/TCL-98-Google-Smart-TV-98Q51CG/13621223713",
             "https://www.walmart.com/ip/Hisense-40-Class-FHD-1080P-Roku-Smart-LED-TV-40H4030F1/470905078",
@@ -269,7 +348,6 @@ class WalmartReviewsTest:
             "https://www.walmart.com/ip/LG-77-Class-4K-UHD-OLED-C4-Series-120-Hz-Web-OS-24-Smart-TV-with-Dolby-Vision-OLED77C4PUA/5332753048",
             "https://www.walmart.com/ip/65UA7500ZUA-AUS/14365163951",
             "https://www.walmart.com/ip/43UA7500ZUA-AUS/14350017890",
-            "https://www.walmart.com/ip/SAMSUNG-77-Class-S90D-OLED-Smart-TV-QN77S90DAFXZA-2024/5337847611",
             "https://www.walmart.com/ip/Hisense-43-Class-4K-UHD-LED-LCD-Smart-Roku-TV-HDR-R6-Series-43R6E3/213300402",
             "https://www.walmart.com/ip/TCL-98-Class-Q6-98Q651G-4K-UHD-HDR-QLED-Smart-TV-with-Google-TV-NEW-2024/5378490189",
             "https://www.walmart.com/ip/LG-86-4K-UHD-Smart-TV-120-Hz-webOS-86UQ7070ZUD/1902385530",
@@ -319,26 +397,27 @@ class WalmartReviewsTest:
                     time.sleep(delay)
 
             # Print summary
-            print("\n" + "="*80)
+            print("\n" + "="*120)
             print("TEST SUMMARY")
-            print("="*80)
-            print(f"{'No':<4} {'star_rating':<20} {'count_of_reviews':<20} {'URL':<60}")
-            print("-"*104)
+            print("="*120)
+            print(f"{'No':<4} {'star_rating':<15} {'count_of_reviews':<18} {'screen_size':<15} {'URL':<60}")
+            print("-"*120)
 
             success_count = 0
             for idx, r in enumerate(results, 1):
                 star = r.get('star_rating', 'N/A')
                 count = r.get('count_of_reviews', 'N/A')
+                screen = r.get('screen_size', 'N/A')
                 url_short = r['url'].split('/')[-1][:50] + "..." if len(r['url'].split('/')[-1]) > 50 else r['url'].split('/')[-1]
 
-                if star is not None or count is not None:
+                if star is not None or count is not None or screen is not None:
                     success_count += 1
 
-                print(f"{idx:<4} {str(star):<20} {str(count):<20} {url_short:<60}")
+                print(f"{idx:<4} {str(star):<15} {str(count):<18} {str(screen):<15} {url_short:<60}")
 
-            print("-"*104)
+            print("-"*120)
             print(f"Success: {success_count}/{len(results)}")
-            print("="*80)
+            print("="*120)
 
         except Exception as e:
             print(f"[FATAL ERROR] {e}")

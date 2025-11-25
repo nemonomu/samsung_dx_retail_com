@@ -312,6 +312,7 @@ class WalmartReviewsTest:
             screen_size = self.extract_screen_size(tree, retailer_sku_name)
 
             print(f"\n  [RESULT]")
+            print(f"  ├─ product_name: {retailer_sku_name}")
             print(f"  ├─ star_rating: {star_rating}")
             print(f"  ├─ count_of_reviews: {count_of_reviews}")
             print(f"  └─ screen_size: {screen_size}")

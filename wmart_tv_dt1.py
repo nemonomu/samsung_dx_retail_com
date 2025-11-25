@@ -797,25 +797,24 @@ class WalmartDetailCrawler:
                     if screen_size_text:
                         break
 
-            if not screen_size_text:
-                # Fallback: Extract from retailer_sku_name (product name)
-                if retailer_sku_name:
-                    # Look for patterns: "32"", "50-Inch", "98" Q Series", etc.
-                    # Matches: number + (space/hyphen + inch/inches OR double quote)
-                    match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|")', retailer_sku_name, re.IGNORECASE)
-                    if match:
-                        size_number = match.group(1)
-                        print(f"  [INFO] Screen size extracted from product name: {size_number} inches")
-                        return f"{size_number} inches"
+            # Method 1: Extract from XPath result
+            if screen_size_text:
+                # Extract number from text (including decimal)
+                # Supports: "24 in", "24 inch", "24 inches", '24"', "43"
+                match = re.search(r'([\d.]+)\s*(?:in(?:ch(?:es)?)?|")?', screen_size_text, re.IGNORECASE)
+                if match:
+                    size_number = match.group(1)
+                    return f"{size_number} inches"
 
-                return None
-
-            # Extract number from text (including decimal)
-            # Supports: "24 in", "24 inch", "24 inches", '24"', "43"
-            match = re.search(r'([\d.]+)\s*(?:in(?:ch(?:es)?)?|")?', screen_size_text, re.IGNORECASE)
-            if match:
-                size_number = match.group(1)
-                return f"{size_number} inches"
+            # Method 2 (Fallback): Extract from retailer_sku_name (product name)
+            if retailer_sku_name:
+                # Look for patterns: "32"", "50-Inch", "98" Q Series", "77" Class", etc.
+                # Matches: number + (space/hyphen + inch/inches OR double quote)
+                match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|")', retailer_sku_name, re.IGNORECASE)
+                if match:
+                    size_number = match.group(1)
+                    print(f"  [INFO] Screen size extracted from product name: {size_number} inches")
+                    return f"{size_number} inches"
 
             return None
 

@@ -824,8 +824,9 @@ class WalmartDetailCrawler:
             # Method 2 (Fallback): Extract from retailer_sku_name (product name)
             if retailer_sku_name:
                 # Look for patterns: "32"", "50-Inch", "98" Q Series", "77" Class", etc.
-                # Matches: number + (space/hyphen + inch/inches OR double quote)
-                match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|")', retailer_sku_name, re.IGNORECASE)
+                # Matches: number + (space/hyphen + inch/inches OR various quote characters)
+                # Support: " (standard), " " (unicode quotes), ″ (double prime)
+                match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|["\u201c\u201d\u2033])', retailer_sku_name, re.IGNORECASE)
                 if match:
                     size_number = match.group(1)
                     print(f"  [INFO] Screen size extracted from product name: {size_number} inches")

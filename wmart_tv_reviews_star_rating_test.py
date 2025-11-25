@@ -169,7 +169,8 @@ class WalmartReviewsTest:
 
             # Method 2 (Fallback): Extract from retailer_sku_name (product name)
             if retailer_sku_name:
-                match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|")', retailer_sku_name, re.IGNORECASE)
+                # Support various quote characters: " (standard), " " (unicode quotes), ″ (double prime)
+                match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|["\u201c\u201d\u2033])', retailer_sku_name, re.IGNORECASE)
                 if match:
                     size_number = match.group(1)
                     print(f"  [INFO] Screen size extracted from product name: {size_number} inches")

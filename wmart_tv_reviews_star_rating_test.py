@@ -116,15 +116,37 @@ class WalmartReviewsTest:
             print(f"  [WARNING] Failed to extract star rating: {e}")
             return None
 
-    def extract_count_of_reviews(self, tree, star_rating=None):
-        """Extract total number of reviews from main page"""
+    def extract_count_of_reviews(self, tree, star_rating=None, page_source=None):
+        """Extract total number of reviews from main page
+
+        Priority:
+        1. JSON data: totalReviewCount (exact value, not displayed on screen)
+        2. JSON data: numberOfReviews (alternative exact value)
+        3. XPath fallback (may get approximate values like '28K')
+        """
         try:
             # If star_rating is "No ratings yet", return 0 immediately
             if star_rating and "No ratings yet" in str(star_rating):
                 print(f"  [INFO] Star rating is 'No ratings yet', setting count_of_reviews to 0")
                 return 0
 
-            # Try multiple XPath strategies to find review count
+            # Method 1: Extract from JSON data (most accurate - gets exact count like 28040)
+            if page_source:
+                # Try totalReviewCount first (exact total review count)
+                match = re.search(r'"totalReviewCount":(\d+)', page_source)
+                if match:
+                    count = int(match.group(1))
+                    print(f"  [INFO] Extracted totalReviewCount from JSON: {count}")
+                    return count
+
+                # Try numberOfReviews as alternative
+                match = re.search(r'"numberOfReviews":(\d+)', page_source)
+                if match:
+                    count = int(match.group(1))
+                    print(f"  [INFO] Extracted numberOfReviews from JSON: {count}")
+                    return count
+
+            # Method 2: XPath fallback for pages without JSON data
             xpaths = [
                 "//*[@id='item-review-section']/div[2]/div[1]/div[1]/div/a",
                 "//a[@link-identifier='seeAllReviewsStarRating']",
@@ -169,33 +191,11 @@ class WalmartReviewsTest:
 
                 return None
 
-            # Extract number from text
+            # Extract number from text (fallback when JSON extraction fails)
             match = re.search(r'([\d,.k]+)\s*(reviews?|ratings?)', review_text, re.IGNORECASE)
             if match:
                 number_str = match.group(1)
-                # Check if 'k' is in the number (e.g., "27.9K ratings")
-                if 'k' in number_str.lower():
-                    # Fallback: Try to extract exact count from "X stars out of Y reviews" pattern
-                    stars_out_of_xpaths = [
-                        "//span[@class='w_iUH7']",
-                        "//*[@id='maincontent']/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[2]/div/div/span",
-                        "//span[contains(text(), 'stars out of')]"
-                    ]
-
-                    for xpath in stars_out_of_xpaths:
-                        result = tree.xpath(xpath)
-                        if result:
-                            text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
-                            # Extract from "4.4 stars out of 27980 reviews" -> 27980
-                            out_of_match = re.search(r'out of\s+([\d,]+)\s*reviews?', text, re.IGNORECASE)
-                            if out_of_match:
-                                exact_count = out_of_match.group(1).replace(',', '')
-                                print(f"  [INFO] Extracted exact review count from 'stars out of' pattern: {exact_count}")
-                                return int(exact_count)
-
-                    # If no exact count found, use the 'k' approximation
-                    print(f"  [INFO] Using 'k' approximation for review count: {number_str}")
-
+                print(f"  [INFO] Using XPath fallback for review count: {number_str}")
                 # Use parse_number_format to handle commas, decimals, and 'k' suffix
                 return self.parse_number_format(number_str)
 
@@ -221,8 +221,8 @@ class WalmartReviewsTest:
             # Extract star_rating
             star_rating = self.extract_star_rating(tree)
 
-            # Extract count_of_reviews (pass star_rating for "No ratings yet" handling)
-            count_of_reviews = self.extract_count_of_reviews(tree, star_rating)
+            # Extract count_of_reviews (pass star_rating and page_source for JSON extraction)
+            count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source)
 
             print(f"\n  [RESULT]")
             print(f"  ├─ star_rating: {star_rating}")

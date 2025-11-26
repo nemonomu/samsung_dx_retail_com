@@ -332,18 +332,23 @@ class WalmartDetailCrawler:
         """Extract star rating number from '4.4 out of 5' format or 'No ratings yet'
 
         Priority:
-        1. JSON data: averageOverallRating (exact value like 4.4)
+        1. JSON data: roundedAverageOverallRating (rounded value like 4.4)
         2. XPath fallback (text parsing)
+
+        Note: averageOverallRating may contain long decimals like 4.534883720930233
+              which is invalid, so we use roundedAverageOverallRating instead.
         """
         try:
-            # Method 1: Extract from JSON data (most accurate)
+            # Method 1: Extract from JSON data (use rounded value)
             if page_source:
-                # Try averageOverallRating first
-                match = re.search(r'"averageOverallRating":([\d.]+)', page_source)
+                # Try roundedAverageOverallRating first (clean value like 4.4)
+                match = re.search(r'"roundedAverageOverallRating":([\d.]+)', page_source)
                 if match:
                     rating = match.group(1)
-                    print(f"  [INFO] Extracted averageOverallRating from JSON: {rating}")
-                    return rating
+                    # Validate: should be 1 decimal place max (e.g., 4.4, 3.7)
+                    if len(rating.split('.')[-1]) <= 1 if '.' in rating else True:
+                        print(f"  [INFO] Extracted roundedAverageOverallRating from JSON: {rating}")
+                        return rating
 
             # Method 2: XPath fallback
             rating_text = self.extract_text_safe(tree, self.xpaths.get('star_rating'))
@@ -775,12 +780,27 @@ class WalmartDetailCrawler:
             return None
 
     def extract_screen_size(self, tree, retailer_sku_name=None):
-        """Extract screen size from 'Specifications at a glance' section
-        Falls back to extracting from product name if not found in specifications
-        Example: '65 in' -> '65 inches', 'onn 32" Class...' -> '32 inches'
+        """Extract screen size from product name or 'Specifications at a glance' section
+        Example: 'SAMSUNG 77" Class...' -> '77 inches', '65 in' -> '65 inches'
+
+        Priority:
+        1. Product name (most reliable - avoids Resolution like 1280x720 being extracted)
+        2. Specifications at a glance (fallback)
         """
         try:
-            # Try multiple XPath strategies to find Screen size
+            # Method 1 (Primary): Extract from retailer_sku_name (product name)
+            # This avoids extracting Resolution values like 1280 from "1280 x 720"
+            if retailer_sku_name:
+                # Look for patterns: "32"", "50-Inch", "98" Q Series", "77" Class", etc.
+                # Matches: number + (space/hyphen + inch/inches OR various quote characters)
+                # Support: " (standard), " " (unicode quotes), ″ (double prime)
+                match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|["\u201c\u201d\u2033])', retailer_sku_name, re.IGNORECASE)
+                if match:
+                    size_number = match.group(1)
+                    print(f"  [INFO] Screen size extracted from product name: {size_number} inches")
+                    return f"{size_number} inches"
+
+            # Method 2 (Fallback): Try XPath from Specifications at a glance
             xpaths = [
                 # Method 1: Definition list structure - <dl><dt>Screen size</dt><dd>75 in</dd></dl> (main page)
                 "//dl[.//dt[contains(., 'Screen size')]]//dd",
@@ -812,25 +832,16 @@ class WalmartDetailCrawler:
                     if screen_size_text:
                         break
 
-            # Method 1: Extract from XPath result
             if screen_size_text:
                 # Extract number from text (including decimal)
                 # Supports: "24 in", "24 inch", "24 inches", '24"', "43"
                 match = re.search(r'([\d.]+)\s*(?:in(?:ch(?:es)?)?|")?', screen_size_text, re.IGNORECASE)
                 if match:
                     size_number = match.group(1)
-                    return f"{size_number} inches"
-
-            # Method 2 (Fallback): Extract from retailer_sku_name (product name)
-            if retailer_sku_name:
-                # Look for patterns: "32"", "50-Inch", "98" Q Series", "77" Class", etc.
-                # Matches: number + (space/hyphen + inch/inches OR various quote characters)
-                # Support: " (standard), " " (unicode quotes), ″ (double prime)
-                match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|["\u201c\u201d\u2033])', retailer_sku_name, re.IGNORECASE)
-                if match:
-                    size_number = match.group(1)
-                    print(f"  [INFO] Screen size extracted from product name: {size_number} inches")
-                    return f"{size_number} inches"
+                    # Validate: TV screen size should be reasonable (10-150 inches)
+                    if 10 <= float(size_number) <= 150:
+                        print(f"  [INFO] Screen size extracted from XPath: {size_number} inches")
+                        return f"{size_number} inches"
 
             return None
 
@@ -843,9 +854,10 @@ class WalmartDetailCrawler:
         Example: '248 reviews' -> 248, '43 ratings' -> 43, 'No ratings yet' -> 0
 
         Priority:
-        1. JSON data: totalReviewCount (exact value, not displayed on screen)
-        2. JSON data: numberOfReviews (alternative exact value)
-        3. XPath fallback (may get approximate values like '28K')
+        1. Check "No ratings yet" first -> return 0
+        2. JSON data: totalReviewCount (exact value, not displayed on screen)
+        3. JSON data: numberOfReviews (alternative exact value)
+        4. XPath fallback (may get approximate values like '28K')
 
         Args:
             tree: HTML tree
@@ -853,10 +865,23 @@ class WalmartDetailCrawler:
             page_source: Raw HTML page source for JSON extraction
         """
         try:
-            # If star_rating is "No ratings yet", return 0 immediately
+            # Check 1: If star_rating is "No ratings yet", return 0 immediately
             if star_rating and "No ratings yet" in str(star_rating):
                 print(f"  [INFO] Star rating is 'No ratings yet', setting count_of_reviews to 0")
                 return 0
+
+            # Check 2: Look for "No ratings yet" in page source before JSON extraction
+            if page_source and "No ratings yet" in page_source:
+                # Verify it's actually displayed (not just in some config)
+                no_ratings_xpaths = [
+                    "//span[contains(text(), 'No ratings yet')]",
+                    "//*[@id='item-review-section']//span[contains(text(), 'No ratings yet')]"
+                ]
+                for xpath in no_ratings_xpaths:
+                    result = tree.xpath(xpath)
+                    if result:
+                        print(f"  [INFO] Found 'No ratings yet' on page, setting count_of_reviews to 0")
+                        return 0
 
             # Method 1: Extract from JSON data (most accurate - gets exact count like 28040)
             if page_source:

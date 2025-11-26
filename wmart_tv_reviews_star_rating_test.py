@@ -74,17 +74,23 @@ class WalmartReviewsTest:
         """Extract star rating number from '4.4 out of 5' format or 'No ratings yet'
 
         Priority:
-        1. JSON data: averageOverallRating (exact value like 4.4)
+        1. JSON data: roundedAverageOverallRating (rounded value like 4.4)
         2. XPath fallback (text parsing)
+
+        Note: averageOverallRating may contain long decimals like 4.534883720930233
+              which is invalid, so we use roundedAverageOverallRating instead.
         """
         try:
-            # Method 1: Extract from JSON data (most accurate)
+            # Method 1: Extract from JSON data (use rounded value)
             if page_source:
-                match = re.search(r'"averageOverallRating":([\d.]+)', page_source)
+                # Try roundedAverageOverallRating first (clean value like 4.4)
+                match = re.search(r'"roundedAverageOverallRating":([\d.]+)', page_source)
                 if match:
                     rating = match.group(1)
-                    print(f"  [INFO] Extracted averageOverallRating from JSON: {rating}")
-                    return rating
+                    # Validate: should be 1 decimal place max (e.g., 4.4, 3.7)
+                    if len(rating.split('.')[-1]) <= 1 if '.' in rating else True:
+                        print(f"  [INFO] Extracted roundedAverageOverallRating from JSON: {rating}")
+                        return rating
 
             # Method 2: XPath fallback
             star_rating_xpaths = [
@@ -130,12 +136,25 @@ class WalmartReviewsTest:
             return None
 
     def extract_screen_size(self, tree, retailer_sku_name=None):
-        """Extract screen size from 'Specifications at a glance' section
-        Falls back to extracting from product name if not found in specifications
-        Example: '65 in' -> '65 inches', 'SAMSUNG 77" Class...' -> '77 inches'
+        """Extract screen size from product name or 'Specifications at a glance' section
+        Example: 'SAMSUNG 77" Class...' -> '77 inches', '65 in' -> '65 inches'
+
+        Priority:
+        1. Product name (most reliable - avoids Resolution like 1280x720 being extracted)
+        2. Specifications at a glance (fallback)
         """
         try:
-            # Try multiple XPath strategies to find Screen size
+            # Method 1 (Primary): Extract from retailer_sku_name (product name)
+            # This avoids extracting Resolution values like 1280 from "1280 x 720"
+            if retailer_sku_name:
+                # Support various quote characters: " (standard), " " (unicode quotes), ″ (double prime)
+                match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|["\u201c\u201d\u2033])', retailer_sku_name, re.IGNORECASE)
+                if match:
+                    size_number = match.group(1)
+                    print(f"  [INFO] Screen size extracted from product name: {size_number} inches")
+                    return f"{size_number} inches"
+
+            # Method 2 (Fallback): Try XPath from Specifications at a glance
             xpaths = [
                 "//dl[.//dt[contains(., 'Screen size')]]//dd",
                 "//dt[contains(., 'Screen size')]/following-sibling::dd",
@@ -159,22 +178,14 @@ class WalmartReviewsTest:
                     if screen_size_text:
                         break
 
-            # Method 1: Extract from XPath result
             if screen_size_text:
                 match = re.search(r'([\d.]+)\s*(?:in(?:ch(?:es)?)?|")?', screen_size_text, re.IGNORECASE)
                 if match:
                     size_number = match.group(1)
-                    print(f"  [INFO] Screen size extracted from XPath: {size_number} inches")
-                    return f"{size_number} inches"
-
-            # Method 2 (Fallback): Extract from retailer_sku_name (product name)
-            if retailer_sku_name:
-                # Support various quote characters: " (standard), " " (unicode quotes), ″ (double prime)
-                match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|["\u201c\u201d\u2033])', retailer_sku_name, re.IGNORECASE)
-                if match:
-                    size_number = match.group(1)
-                    print(f"  [INFO] Screen size extracted from product name: {size_number} inches")
-                    return f"{size_number} inches"
+                    # Validate: TV screen size should be reasonable (10-150 inches)
+                    if 10 <= float(size_number) <= 150:
+                        print(f"  [INFO] Screen size extracted from XPath: {size_number} inches")
+                        return f"{size_number} inches"
 
             return None
 
@@ -202,15 +213,29 @@ class WalmartReviewsTest:
         """Extract total number of reviews from main page
 
         Priority:
-        1. JSON data: totalReviewCount (exact value, not displayed on screen)
-        2. JSON data: numberOfReviews (alternative exact value)
-        3. XPath fallback (may get approximate values like '28K')
+        1. Check "No ratings yet" first -> return 0
+        2. JSON data: totalReviewCount (exact value, not displayed on screen)
+        3. JSON data: numberOfReviews (alternative exact value)
+        4. XPath fallback (may get approximate values like '28K')
         """
         try:
-            # If star_rating is "No ratings yet", return 0 immediately
+            # Check 1: If star_rating is "No ratings yet", return 0 immediately
             if star_rating and "No ratings yet" in str(star_rating):
                 print(f"  [INFO] Star rating is 'No ratings yet', setting count_of_reviews to 0")
                 return 0
+
+            # Check 2: Look for "No ratings yet" in page source before JSON extraction
+            if page_source and "No ratings yet" in page_source:
+                # Verify it's actually displayed (not just in some config)
+                no_ratings_xpaths = [
+                    "//span[contains(text(), 'No ratings yet')]",
+                    "//*[@id='item-review-section']//span[contains(text(), 'No ratings yet')]"
+                ]
+                for xpath in no_ratings_xpaths:
+                    result = tree.xpath(xpath)
+                    if result:
+                        print(f"  [INFO] Found 'No ratings yet' on page, setting count_of_reviews to 0")
+                        return 0
 
             # Method 1: Extract from JSON data (most accurate - gets exact count like 28040)
             if page_source:
@@ -313,10 +338,10 @@ class WalmartReviewsTest:
             screen_size = self.extract_screen_size(tree, retailer_sku_name)
 
             print(f"\n  [RESULT]")
-            print(f"  ├─ product_name: {retailer_sku_name}")
+            print(f"  ├─ product_url: {url}")
+            print(f"  ├─ screen_size: {screen_size}")
             print(f"  ├─ star_rating: {star_rating}")
-            print(f"  ├─ count_of_reviews: {count_of_reviews}")
-            print(f"  └─ screen_size: {screen_size}")
+            print(f"  └─ count_of_reviews: {count_of_reviews}")
 
             return {
                 'url': url,
@@ -338,44 +363,14 @@ class WalmartReviewsTest:
     def run(self):
         """Run tests on all URLs"""
         test_urls = [
-            # Priority test URL (screen_size fallback test - "77" in product name)
-            "https://www.walmart.com/ip/SAMSUNG-77-Class-S90D-OLED-Smart-TV-QN77S90DAFXZA-2024/5337847611",
-            # Group 1
-            "https://www.walmart.com/ip/TCL-98-Google-Smart-TV-98Q51CG/13621223713",
-            "https://www.walmart.com/ip/Hisense-40-Class-FHD-1080P-Roku-Smart-LED-TV-40H4030F1/470905078",
-            "https://www.walmart.com/ip/VIZIO-43-Class-Full-HD-1080p-LED-Smart-TV-New-VFD43M-0804/5197667451",
-            "https://www.walmart.com/ip/Hisense-58-Class-4K-UHD-LED-LCD-Roku-Smart-TV-HDR-R6-Series-58R6E3/587182688",
-            "https://www.walmart.com/ip/TCL-55-Class-S4-55S451-4K-UHD-HDR-Smart-TV-with-Roku-TV/533225197",
-            "https://www.walmart.com/ip/VIZIO-24-Class-HD-720p-LED-Smart-TV-NEW-VHD24M-08/5197667452",
-            "https://www.walmart.com/ip/LG-77-Class-4K-UHD-OLED-C4-Series-120-Hz-Web-OS-24-Smart-TV-with-Dolby-Vision-OLED77C4PUA/5332753048",
-            "https://www.walmart.com/ip/65UA7500ZUA-AUS/14365163951",
-            "https://www.walmart.com/ip/43UA7500ZUA-AUS/14350017890",
-            "https://www.walmart.com/ip/Hisense-43-Class-4K-UHD-LED-LCD-Smart-Roku-TV-HDR-R6-Series-43R6E3/213300402",
-            "https://www.walmart.com/ip/TCL-98-Class-Q6-98Q651G-4K-UHD-HDR-QLED-Smart-TV-with-Google-TV-NEW-2024/5378490189",
-            "https://www.walmart.com/ip/LG-86-4K-UHD-Smart-TV-120-Hz-webOS-86UQ7070ZUD/1902385530",
-            "https://www.walmart.com/ip/Element-43-Class-4K-UHD-2160p-LED-XUMO-Smart-Television-HDR-E550AE43C-G/5558619060",
-            "https://www.walmart.com/ip/VIZIO-43-Class-Quantum-4K-QLED-HDR-Smart-TV-NEW-VQD43M-0801/5378440008",
-            "https://www.walmart.com/ip/LG-75-Inch-4K-HDR-Smart-Quantum-Dot-NanoCell-Mini-LED-TV-2024/5513854593",
-            "https://www.walmart.com/ip/TCL-50-Class-Q6-50Q651G-4K-UHD-HDR-QLED-Smart-TV-with-Google-TV-NEW-2024/5373842535",
-            "https://www.walmart.com/ip/Supersonic-15-In-Class-VIDAA-LED-Smart-TV-AC-DC-Compatible-SC-1520VTV/5810310139",
-            "https://www.walmart.com/ip/SAMSUNG-85-Class-Q60D-QLED-4K-Smart-TV-QN85Q60DAFXZA-2024/5340366860",
-            "https://www.walmart.com/ip/VIZIO-43-Class-D-Series-FHD-LED-Smart-TV-D43f-J04/940656766",
-            "https://www.walmart.com/ip/TCL-32-Class-S-Class-720p-HD-LED-Smart-TV-with-Google-TV-32S250G-New/5084872018",
-            "https://www.walmart.com/ip/SAMSUNG-55-Class-LS03B-The-Frame-QLED-4K-Smart-TV-QN55LS03BAFXZA/944779027",
-            "https://www.walmart.com/ip/Sony-BRAVIA-5-65-inch-Class-Mini-LED-4K-HDR-Google-TV-2025/16347258322",
-            "https://www.walmart.com/ip/SAMSUNG-85-Class-QN800D-Neo-QLED-8K-Smart-TV-QN85QN800DFXZA-2024/5369461009",
-            "https://www.walmart.com/ip/LG-86-Class-4K-UHD-QNED-Wed-OS-Smart-TV-86QNED85TUA/5440505126",
-            "https://www.walmart.com/ip/RitaRita-22-1080p-Portable-Touch-Screen-Monitor-Television-Type/5676260062",
-            "https://www.walmart.com/ip/Hisense-65-Inch-Class-U6-Series-Mini-LED-QLED-Google-Smart-TV-65U75QG-QLED-1000-Nit-Dolby-Vision-IQ-Dolby-Atmos-Full-Array-Local-Dimming/16047264086",
-            # Group 2
-            "https://www.walmart.com/ip/onn-32-Class-HD-720P-Smart-LED-TV-100012589/18375223072",
-            "https://www.walmart.com/ip/Hiro-32-720p-HD-Smart-TV-Flat-Screen-LED-Television-with-Roku-TV-and-Dolby-Audio-for-Streaming-H32C2C4/18053369522",
-            "https://www.walmart.com/ip/RCA-85-Pro-Idiom-4K-LED-TV/15194715050",
-            "https://www.walmart.com/ip/SuperSonic-43-High-Definition-Smart-TV-SC-4316STV/881809037",
-            "https://www.walmart.com/ip/Hiro-Roku-24-720p-HD-Smart-Flat-Screen-LED-Roku-TV-with-Dolby-Audio-for-Streaming-H24C2C4/18096203989",
-            "https://www.walmart.com/ip/Westinghouse-Roku-TV-40-Inch-Smart-TV-FHD-QLED-Television-w-Dolby-Digital-Wi-Fi-Mobile-App-Connectivity-Flat-Screen-Bluetooth-Compatible-w-Apple-AirP/17842772710",
             "https://www.walmart.com/ip/VIZIO-65-Class-4K-UHD-LED-HDR-Limited-Edition-Smart-TV-NEW-V4K65X-08/7772412359",
-            "https://www.walmart.com/ip/VIZIO-75-Class-4K-UHD-LED-HDR-Limited-Edition-Smart-TV-NEW-V4K75X-08/7788374178",
+            "https://www.walmart.com/ip/Onn-43-FHD-POWERED-BY-VIZIO-TV/15920553984",
+            "https://www.walmart.com/ip/Supersonic-SC-2411-12-Volt-AC-DC-Widescreen-Full-1080P-HD-LED-TV/33842028",
+            "https://www.walmart.com/ip/Supersonic-13-Portable-Digital-LED-TV-with-USB-SD-and-HDMI-Inputs-and-FM-Radio-12-Volt-ACDC-Compatible-SC-2813/411840444",
+            "https://www.walmart.com/ip/VIZIO-100-Class-Quantum-4K-QLED-HDR-Smart-TV-NEW-VQD100M-0804/7763919612",
+            "https://www.walmart.com/ip/Supersonic-SC-2411-12-Volt-AC-DC-Widescreen-Full-1080P-HD-LED-TV/33842028",
+            "https://www.walmart.com/ip/LG-43-4K-UHD-UA70-AI-Smart-TV-43UA7000/16746214961",
+            "https://www.walmart.com/ip/Westinghouse-43-inch-Smart-TV-4K-UHD-XUMO-TV-w-HDR10-Voice-Remote-Dolby-Vision-Edgeless-Flat-Screen-LED-Television-w-Apple-Home-kit-Wi-Fi-Mobile-Conn/16766210956",
         ]
 
         print("="*80)

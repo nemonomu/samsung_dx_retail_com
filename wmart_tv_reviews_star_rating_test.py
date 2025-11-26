@@ -363,14 +363,20 @@ class WalmartReviewsTest:
     def run(self):
         """Run tests on all URLs"""
         test_urls = [
-            "https://www.walmart.com/ip/VIZIO-65-Class-4K-UHD-LED-HDR-Limited-Edition-Smart-TV-NEW-V4K65X-08/7772412359",
-            "https://www.walmart.com/ip/Onn-43-FHD-POWERED-BY-VIZIO-TV/15920553984",
-            "https://www.walmart.com/ip/Supersonic-SC-2411-12-Volt-AC-DC-Widescreen-Full-1080P-HD-LED-TV/33842028",
-            "https://www.walmart.com/ip/Supersonic-13-Portable-Digital-LED-TV-with-USB-SD-and-HDMI-Inputs-and-FM-Radio-12-Volt-ACDC-Compatible-SC-2813/411840444",
-            "https://www.walmart.com/ip/VIZIO-100-Class-Quantum-4K-QLED-HDR-Smart-TV-NEW-VQD100M-0804/7763919612",
-            "https://www.walmart.com/ip/Supersonic-SC-2411-12-Volt-AC-DC-Widescreen-Full-1080P-HD-LED-TV/33842028",
-            "https://www.walmart.com/ip/LG-43-4K-UHD-UA70-AI-Smart-TV-43UA7000/16746214961",
             "https://www.walmart.com/ip/Westinghouse-43-inch-Smart-TV-4K-UHD-XUMO-TV-w-HDR10-Voice-Remote-Dolby-Vision-Edgeless-Flat-Screen-LED-Television-w-Apple-Home-kit-Wi-Fi-Mobile-Conn/16766210956",
+            "https://www.walmart.com/ip/FPD-40-Inch-Smart-LED-TV-Tizen-OS-2025-Model-AT40-P1-1080p-Full-HD-HDR10-Dolby-Audio-Built-in-WiFi-Bluetooth-2-HDMI-Voice-Remote-Google-Cast-Flat-Scr/18085052914",
+            "https://www.walmart.com/ip/LG-43-4K-UHD-UA70-AI-Smart-TV-43UA7000/16746214961",
+            "https://www.walmart.com/ip/TCL-32-Q31K-Series-1080P-FHD-QLED-Smart-TV-with-Google-TV-32Q31K/15775051070",
+            "https://www.walmart.com/ip/Hisense-55-Class-U7-Series-Mini-LED-ULED-4K-UHD-Google-Smart-TV-55U75Q-2025-Model-QLED-Native-165Hz-1000-Nit-Dolby-Vision-IQ-Full-Array-Local-Dimming/16031006937",
+            "https://www.walmart.com/ip/Restored-Westinghouse-32-720P-HD-Smart-Roku-TV-WR32HT2212-Refurbished/1576486772",
+            "https://www.walmart.com/ip/Restored-VIZIO-D-Series-24-Class-1080p-Full-Array-LED-HD-Smart-TV-D24f-J09-Refurbished/981750578",
+            "https://www.walmart.com/ip/Sony-55-class-BRAVIA-2-II-LED-4K-HDR-Smart-Google-TV-K-55S20-2025-Model/16539074131",
+            "https://www.walmart.com/ip/Restored-Westinghouse-24-720p-LED-Roku-Smart-TV-WR24HT2212-Refurbished/3110948754",
+            "https://www.walmart.com/ip/Supersonic-19-In-Class-VIDAA-LED-Smart-TV-AC-DC-Compatible-SC-1920VTV/5890920417",
+            "https://www.walmart.com/ip/OLED65B5PUA/16998272236",
+            "https://www.walmart.com/ip/Westinghouse-24-inch-Smart-TV-HD-Xumo-TV-with-Voice-Remote-Flat-Screen-LED-Television-w-Apple-Home-kit-Wi-Fi-Mobile-Connectivity/16752513510",
+            "https://www.walmart.com/ip/RCA-43-1080p-FHD-Smart-LED-TV-TC-LE43K-AN2401-Android-TV/14588607914",
+            "https://www.walmart.com/ip/LG-75-Inch-4K-HDR-Smart-Quantum-Dot-NanoCell-Mini-LED-TV-2024/5513854593",
         ]
 
         print("="*80)

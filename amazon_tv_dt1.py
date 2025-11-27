@@ -814,95 +814,29 @@ class AmazonDetailCrawler:
             return None
 
     def extract_detailed_reviews(self, product_url):
-        """Extract up to 20 detailed reviews from review pages"""
+        """Extract detailed reviews from product detail page"""
         try:
             # Get current page HTML
             tree = html.fromstring(self.driver.page_source)
 
-            # Extract "See more reviews" link
-            review_link_xpaths = [
-                '//*[@id="reviews-medley-footer"]/div[2]/a/@href',
-                '//a[@data-hook="see-all-reviews-link-foot"]/@href',
-                '//a[contains(text(), "See more reviews")]/@href'
-            ]
+            # Extract reviews from detail page review section
+            # Container: <ul id="cm-cr-dp-review-list" data-hook="top-customer-reviews-widget">
+            # Each review: <li data-hook="review">
+            # Review body: <span data-hook="review-body"> inner <span>
+            review_xpath = '//ul[@id="cm-cr-dp-review-list"]//li[@data-hook="review"]//span[@data-hook="review-body"]//span'
+            review_elements = tree.xpath(review_xpath)
 
-            review_link = None
-            for xpath in review_link_xpaths:
-                result = tree.xpath(xpath)
-                if result:
-                    review_link = result[0]
-                    break
-
-            if not review_link:
-                print("  [WARNING] Could not find review page link")
-                return None
-
-            # Navigate to review page
-            if review_link.startswith('http'):
-                review_url = review_link
-            else:
-                review_url = "https://www.amazon.com" + review_link
-
-            self.driver.get(review_url)
-            time.sleep(random.uniform(3, 4))
-
-            # Collect reviews from multiple pages
             all_reviews = []
-            page_num = 1
-            max_pages = 3  # Max 3 pages to get 20+ reviews
+            if review_elements:
+                for elem in review_elements:
+                    review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
+                    if review_text and len(review_text) > 10:
+                        all_reviews.append(review_text)
 
-            while len(all_reviews) < 20 and page_num <= max_pages:
-                tree = html.fromstring(self.driver.page_source)
-
-                # Extract reviews from current page
-                review_xpath = '//span[@data-hook="review-body"]/span'
-                review_elements = tree.xpath(review_xpath)
-
-                if review_elements:
-                    for elem in review_elements:
-                        # Check if we already have 20 reviews
-                        if len(all_reviews) >= 20:
-                            break
-
-                        review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
-                        if review_text and len(review_text) > 10:
-                            all_reviews.append(review_text)
-
-                # Check if we have enough reviews after this page
-                if len(all_reviews) >= 20:
-                    break
-
-                # Find next page link
-                next_button_xpaths = [
-                    '//a[contains(text(), "Next page")]/@href',
-                    '//*[@id="cm_cr-pagination_bar"]//li[@class="a-last"]/a/@href',
-                    '//ul[@class="a-pagination"]//li[@class="a-last"]/a/@href'
-                ]
-
-                next_link = None
-                for xpath in next_button_xpaths:
-                    result = tree.xpath(xpath)
-                    if result:
-                        next_link = result[0]
-                        break
-
-                if next_link:
-                    if next_link.startswith('http'):
-                        next_url = next_link
-                    else:
-                        next_url = "https://www.amazon.com" + next_link
-
-                    self.driver.get(next_url)
-                    time.sleep(random.uniform(2, 3))
-                    page_num += 1
-                else:
-                    break
-
-            # Limit to 20 reviews and format as "1-review, 2-review, ..."
-            reviews = all_reviews[:20]
-            if reviews:
+            # Format as "1-review, 2-review, ..."
+            if all_reviews:
                 formatted_reviews = []
-                for idx, review in enumerate(reviews, 1):
+                for idx, review in enumerate(all_reviews, 1):
                     formatted_reviews.append(f"{idx}-{review}")
                 return ", ".join(formatted_reviews)
             else:
@@ -911,6 +845,105 @@ class AmazonDetailCrawler:
         except Exception as e:
             print(f"  [WARNING] Failed to extract detailed reviews: {e}")
             return None
+
+    # def extract_detailed_reviews_from_review_page(self, product_url):
+    #     """Extract up to 20 detailed reviews from review pages (DISABLED - use detail page instead)"""
+    #     try:
+    #         # Get current page HTML
+    #         tree = html.fromstring(self.driver.page_source)
+    #
+    #         # Extract "See more reviews" link
+    #         review_link_xpaths = [
+    #             '//*[@id="reviews-medley-footer"]/div[2]/a/@href',
+    #             '//a[@data-hook="see-all-reviews-link-foot"]/@href',
+    #             '//a[contains(text(), "See more reviews")]/@href'
+    #         ]
+    #
+    #         review_link = None
+    #         for xpath in review_link_xpaths:
+    #             result = tree.xpath(xpath)
+    #             if result:
+    #                 review_link = result[0]
+    #                 break
+    #
+    #         if not review_link:
+    #             print("  [WARNING] Could not find review page link")
+    #             return None
+    #
+    #         # Navigate to review page
+    #         if review_link.startswith('http'):
+    #             review_url = review_link
+    #         else:
+    #             review_url = "https://www.amazon.com" + review_link
+    #
+    #         self.driver.get(review_url)
+    #         time.sleep(random.uniform(3, 4))
+    #
+    #         # Collect reviews from multiple pages
+    #         all_reviews = []
+    #         page_num = 1
+    #         max_pages = 3  # Max 3 pages to get 20+ reviews
+    #
+    #         while len(all_reviews) < 20 and page_num <= max_pages:
+    #             tree = html.fromstring(self.driver.page_source)
+    #
+    #             # Extract reviews from current page
+    #             review_xpath = '//span[@data-hook="review-body"]/span'
+    #             review_elements = tree.xpath(review_xpath)
+    #
+    #             if review_elements:
+    #                 for elem in review_elements:
+    #                     # Check if we already have 20 reviews
+    #                     if len(all_reviews) >= 20:
+    #                         break
+    #
+    #                     review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
+    #                     if review_text and len(review_text) > 10:
+    #                         all_reviews.append(review_text)
+    #
+    #             # Check if we have enough reviews after this page
+    #             if len(all_reviews) >= 20:
+    #                 break
+    #
+    #             # Find next page link
+    #             next_button_xpaths = [
+    #                 '//a[contains(text(), "Next page")]/@href',
+    #                 '//*[@id="cm_cr-pagination_bar"]//li[@class="a-last"]/a/@href',
+    #                 '//ul[@class="a-pagination"]//li[@class="a-last"]/a/@href'
+    #             ]
+    #
+    #             next_link = None
+    #             for xpath in next_button_xpaths:
+    #                 result = tree.xpath(xpath)
+    #                 if result:
+    #                     next_link = result[0]
+    #                     break
+    #
+    #             if next_link:
+    #                 if next_link.startswith('http'):
+    #                     next_url = next_link
+    #                 else:
+    #                     next_url = "https://www.amazon.com" + next_link
+    #
+    #                 self.driver.get(next_url)
+    #                 time.sleep(random.uniform(2, 3))
+    #                 page_num += 1
+    #             else:
+    #                 break
+    #
+    #         # Limit to 20 reviews and format as "1-review, 2-review, ..."
+    #         reviews = all_reviews[:20]
+    #         if reviews:
+    #             formatted_reviews = []
+    #             for idx, review in enumerate(reviews, 1):
+    #                 formatted_reviews.append(f"{idx}-{review}")
+    #             return ", ".join(formatted_reviews)
+    #         else:
+    #             return None
+    #
+    #     except Exception as e:
+    #         print(f"  [WARNING] Failed to extract detailed reviews: {e}")
+    #         return None
 
     def scrape_detail_page(self, url_data):
         """Scrape detail page and extract information"""
@@ -1019,7 +1052,7 @@ class AmazonDetailCrawler:
             except Exception as e:
                 print(f"  [WARNING] Summarized review not found (may not exist for this product): {str(e)[:100]}")
 
-            # Extract detailed review content (20 reviews in JSON format)
+            # Extract detailed review content from detail page
             detailed_review_content = self.extract_detailed_reviews(url)
 
             # Extract prices from detail page

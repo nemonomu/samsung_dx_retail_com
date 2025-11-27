@@ -5,6 +5,8 @@ Amazon TV Review Test - detailed_review_content extraction only
 import time
 import random
 import sys
+import os
+import pickle
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -15,6 +17,9 @@ from lxml import html
 if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
+# Cookie file path
+COOKIE_FILE = 'amazon_cookies.pkl'
+
 
 class AmazonReviewTest:
     def __init__(self):
@@ -22,18 +27,68 @@ class AmazonReviewTest:
 
     def setup_driver(self):
         """Setup Chrome driver"""
-        print("[INFO] Setting up Chrome driver...")
+        print("[INFO] Setting up Chrome WebDriver...")
         chrome_options = Options()
-        chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
         chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('--lang=en-US')
-        chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
 
+        print("[INFO] Installing ChromeDriver...")
         service = Service(ChromeDriverManager().install())
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
-        print("[OK] Chrome driver ready")
+
+        # Anti-detection scripts
+        print("[INFO] Applying anti-detection scripts...")
+        self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+            'source': '''
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            '''
+        })
+
+        print("[OK] WebDriver setup complete")
+
+        # Load cookies for login
+        self.load_cookies()
+
+    def load_cookies(self):
+        """Load cookies from file for authenticated access"""
+        print(f"[INFO] Loading cookies from {COOKIE_FILE}...")
+
+        if not os.path.exists(COOKIE_FILE):
+            print(f"[WARNING] Cookie file not found: {COOKIE_FILE}")
+            print("[WARNING] Review collection may fail without login.")
+            print("[INFO] To create cookie file, run amazon_login.py first")
+            return False
+
+        try:
+            print("[INFO] Accessing Amazon.com to set cookies...")
+            self.driver.get("https://www.amazon.com")
+            time.sleep(2)
+
+            with open(COOKIE_FILE, 'rb') as f:
+                cookies = pickle.load(f)
+                print(f"[DEBUG] Found {len(cookies)} cookies in file")
+                for cookie in cookies:
+                    try:
+                        self.driver.add_cookie(cookie)
+                    except Exception as e:
+                        print(f"[DEBUG] Failed to add cookie: {e}")
+
+            print("[INFO] Refreshing page with cookies...")
+            self.driver.refresh()
+            time.sleep(2)
+            print(f"[OK] Cookies loaded successfully")
+            return True
+
+        except Exception as e:
+            print(f"[WARNING] Failed to load cookies: {e}")
+            return False
 
     def extract_detailed_reviews(self, product_url):
         """Extract up to 20 detailed reviews from review pages"""

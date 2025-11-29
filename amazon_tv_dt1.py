@@ -1057,7 +1057,18 @@ class AmazonDetailCrawler:
 
             # Extract prices from detail page
             final_sku_price = self.extract_final_sku_price(tree)
-            original_sku_price = self.extract_original_sku_price(tree)
+            # If final_sku_price is a special text value, set original_sku_price to None
+            special_price_texts = [
+                "Currently unavailable.",
+                "Price higher than typical",
+                "No featured offers available",
+                "See price in cart",
+                "To see our price, add this item to your cart."
+            ]
+            if final_sku_price in special_price_texts:
+                original_sku_price = None
+            else:
+                original_sku_price = self.extract_original_sku_price(tree)
             savings = self.calculate_savings(final_sku_price, original_sku_price)
 
             data = {

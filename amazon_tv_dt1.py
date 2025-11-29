@@ -624,8 +624,8 @@ class AmazonDetailCrawler:
             if not total_text:
                 return None
 
-            # Extract number from "2,449 global ratings"
-            total_match = re.search(r'([\d,]+)\s*global ratings', total_text)
+            # Extract number from "2,449 global ratings" or "1 global rating"
+            total_match = re.search(r'([\d,]+)\s*global ratings?', total_text)
             if not total_match:
                 return None
 

@@ -1147,6 +1147,10 @@ class AmazonDetailCrawler:
             now = datetime.now()
             crawl_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
 
+            # If "No customer reviews", set count_of_star_ratings to "0"
+            if data['Star_Rating'] == "No customer reviews":
+                data['Count_of_Star_Ratings'] = "0"
+
             # Insert to amazon_tv_detail_crawled
             cursor.execute("""
                 INSERT INTO amazon_tv_detail_crawled

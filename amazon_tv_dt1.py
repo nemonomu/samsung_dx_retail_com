@@ -991,14 +991,15 @@ class AmazonDetailCrawler:
             membership_discount_raw = self.extract_text_safe(tree, self.xpaths.get('membership_discount'))
             membership_discount = self.clean_membership_discount(membership_discount_raw)
 
-            # Item - Extract ASIN directly from product URL
-            # Example: https://www.amazon.com/.../dp/B0DYR3D7QQ/... -> B0DYR3D7QQ
-            item = self.extract_asin(url)
+            # Item - Extract ASIN from final URL (after redirect)
+            # sspa/click URL redirects to actual product page with /dp/ASIN/
+            final_url = self.driver.current_url
+            item = self.extract_asin(final_url)
 
             if item and len(item) == 10:
                 print(f"  [OK] Extracted item from URL (ASIN): {item}")
             else:
-                print(f"  [WARNING] Could not extract valid ASIN from URL: {url}")
+                print(f"  [WARNING] Could not extract valid ASIN from URL: {final_url}")
                 item = None
 
             # Ranks - try multiple approaches
@@ -1073,7 +1074,7 @@ class AmazonDetailCrawler:
 
             data = {
                 'page_type': page_type,
-                'product_url': url,
+                'product_url': final_url,
                 'Retailer_SKU_Name': retailer_sku_name,
                 'Star_Rating': star_rating,
                 'SKU_Popularity': sku_popularity,

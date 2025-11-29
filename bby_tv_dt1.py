@@ -1684,6 +1684,10 @@ class BestBuyDetailCrawler:
             now = datetime.now()
             crawl_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
 
+            # If "Not yet reviewed", set star_ratings to "0"
+            if star_rating_source == "Not yet reviewed":
+                star_ratings = "0"
+
             # data 삽입
             insert_query = """
                 INSERT INTO bby_tv_crawl

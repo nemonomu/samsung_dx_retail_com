@@ -1223,7 +1223,7 @@ class AmazonDetailCrawler:
                 data['Retailer_SKU_Name'],
                 data['product_url'],
                 data['Star_Rating'],
-                count_of_star_ratings_int,  # Parsed from star ratings string
+                data['Count_of_Star_Ratings'],  # Keep original format: "5star:489, 4star:102, ..."
                 data['screen_size'],
                 data['SKU_Popularity'],
                 data['final_sku_price'],  # Extracted from detail page

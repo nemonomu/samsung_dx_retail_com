@@ -794,15 +794,39 @@ class BestBuyDetailCrawler:
             return None
 
     def extract_star_rating(self, tree):
-        """Star Rating extraction (평점 점수) - 컨테이너 기반"""
+        """Star Rating extraction (평점 점수) - Not yet reviewed 먼저 확인"""
         try:
-            # 1단계: 가격 컨테이너 찾기
+            # Priority 1: Check for "Not yet reviewed" first
+            not_reviewed_xpaths = [
+                '//span[contains(text(), "Not yet reviewed")]',
+                '//span[@class="c-reviews order-2"][contains(text(), "Not yet reviewed")]',
+                '//span[contains(@class, "c-reviews")][contains(text(), "Not yet reviewed")]'
+            ]
+            for xpath in not_reviewed_xpaths:
+                elem = tree.xpath(xpath)
+                if elem:
+                    text = elem[0].text_content().strip()
+                    if "Not yet reviewed" in text:
+                        return "Not yet reviewed"
+
+            # Priority 2: visually-hidden p tag
+            # <p class="visually-hidden">Rating 4.8 out of 5 stars with 286 reviews</p>
+            hidden_xpaths = [
+                '//p[@class="visually-hidden"][contains(text(), "Rating")]',
+                '//p[contains(@class, "visually-hidden")][contains(text(), "out of 5 stars")]'
+            ]
+            for xpath in hidden_xpaths:
+                elem = tree.xpath(xpath)
+                if elem:
+                    text = elem[0].text_content().strip()
+                    match = re.search(r'Rating\s+([\d.]+)\s+out of', text)
+                    if match:
+                        return match.group(1)
+
+            # Priority 3: 컨테이너 기반 extraction (fallback)
             container_xpaths = [
-                # 절대 경로
                 '/html/body/div[5]/div[4]/div[1]',
-                # class 기반
                 '//div[@class="order-2 t3V0AOwowrTfUzPn "]',
-                # 컨테이너 구조 기반
                 '//div[contains(@class, "order-2")]'
             ]
 
@@ -814,17 +838,12 @@ class BestBuyDetailCrawler:
                     break
 
             if price_container is None or len(price_container) == 0:
-                # 컨테이너 없으면 None 반환 (review가 없는 상품일 수 있음)
                 return None
 
-            # 2단계: 컨테이너 내부에서만 평점 extraction
             rating_xpaths = [
-                # 절대 경로 기반 (컨테이너 내부)
                 './/div/div[3]/a/div/span[1]',
-                # class 기반 (가장 안정적)
                 './/span[@class="font-weight-medium  font-weight-bold order-1"]',
                 './/span[contains(@class, "font-weight-bold") and contains(@class, "order-1")]',
-                # aria-hidden 속성 기반
                 './/span[@aria-hidden="true"][contains(@class, "order-1")]'
             ]
 
@@ -833,46 +852,40 @@ class BestBuyDetailCrawler:
                 if elem:
                     rating = elem[0].text_content().strip()
 
-                    # Check for "Not yet reviewed" first
                     if "Not yet reviewed" in rating:
                         return "Not yet reviewed"
 
-                    # 평점 형식 검증 (숫자.숫자 형식)
                     if rating and re.match(r'^\d+\.\d+$', rating):
-                        return rating  # "4.7" 형식 반환
+                        return rating
 
-            # Fallback: Check for "Not yet reviewed" at specific XPath
-            not_reviewed_xpaths = [
-                './/span[@aria-hidden="true"][@class="c-reviews order-2"]',
-                './/span[@class="c-reviews order-2"][contains(text(), "Not yet reviewed")]',
-                './/span[contains(@class, "c-reviews")][contains(text(), "Not yet reviewed")]',
-                './/span[contains(text(), "Not yet reviewed")]'
-            ]
-
-            for xpath in not_reviewed_xpaths:
-                elem = price_container.xpath(xpath)
-                if elem:
-                    text = elem[0].text_content().strip()
-                    if "Not yet reviewed" in text:
-                        return "Not yet reviewed"
-
-            return None  # review가 없으면 None
+            return None
         except Exception as e:
             print(f"  [ERROR] Star_Rating extraction failed: {e}")
             return None
 
     def extract_count_of_reviews_from_detail(self, tree):
-        """Count of Reviews extraction (메인 detail page에서) - 컨테이너 기반
+        """Count of Reviews extraction (메인 detail page에서) - visually-hidden 우선
         Example: '(79 reviews)' -> '79', 'Not yet reviewed' -> 0
         """
         try:
-            # 1단계: 가격 컨테이너 찾기
+            # Priority 1: visually-hidden p tag
+            # <p class="visually-hidden">Rating 4.8 out of 5 stars with 286 reviews</p>
+            hidden_xpaths = [
+                '//p[@class="visually-hidden"][contains(text(), "reviews")]',
+                '//p[contains(@class, "visually-hidden")][contains(text(), "out of 5 stars")]'
+            ]
+            for xpath in hidden_xpaths:
+                elem = tree.xpath(xpath)
+                if elem:
+                    text = elem[0].text_content().strip()
+                    match = re.search(r'with\s+([\d,]+)\s+reviews', text)
+                    if match:
+                        return match.group(1).replace(',', '')
+
+            # Priority 2: 컨테이너 기반 extraction (fallback)
             container_xpaths = [
-                # 절대 경로
                 '/html/body/div[5]/div[4]/div[1]',
-                # class 기반
                 '//div[@class="order-2 t3V0AOwowrTfUzPn "]',
-                # 컨테이너 구조 기반
                 '//div[contains(@class, "order-2")]'
             ]
 
@@ -884,40 +897,31 @@ class BestBuyDetailCrawler:
                     break
 
             if price_container is None or len(price_container) == 0:
-                # 컨테이너 없으면 None 반환
                 return None
 
-            # 2단계: 컨테이너 내부에서만 review items count extraction
             reviews_xpaths = [
-                # 절대 경로 기반 (컨테이너 내부)
                 './/div/div[3]/a/div/span[2]',
-                # class 기반 (가장 안정적)
                 './/span[@class="c-reviews order-2"]',
                 './/span[contains(@class, "c-reviews")]',
-                # aria-hidden 속성 기반
                 './/span[@aria-hidden="true"][contains(@class, "order-2")]'
             ]
 
             for xpath in reviews_xpaths:
                 elem = price_container.xpath(xpath)
                 if elem:
-                    text = elem[0].text_content().strip()  # "(79 reviews)" or "(1,234 reviews)" or "(50 reviews from philips.com)"
+                    text = elem[0].text_content().strip()
 
-                    # Check for "Not yet reviewed" first -> return 0
                     if "Not yet reviewed" in text:
                         return 0
 
-                    # 숫자 extraction (콤마 제거)
-                    # 패턴: (숫자,숫자 reviews 추가텍스트) → 숫자만 extraction
                     match = re.search(r'\(([\d,]+)\s*reviews?[^)]*\)', text, re.IGNORECASE)
                     if match:
-                        # 콤마 제거 후 반환: "1,234" → "1234"
                         count = match.group(1).replace(',', '')
-                        return count  # "79" or "1234" 형식 반환
+                        return count
 
-            # Fallback: Check for "Not yet reviewed" at specific XPath -> return 0
+            # Fallback: Check for "Not yet reviewed"
             not_reviewed_xpaths = [
-                './/div/div[3]/a/div/span',  # From user's example
+                './/div/div[3]/a/div/span',
                 './/span[contains(text(), "Not yet reviewed")]',
                 './/span[@class="c-reviews order-2"][contains(text(), "Not yet reviewed")]'
             ]
@@ -929,7 +933,7 @@ class BestBuyDetailCrawler:
                     if "Not yet reviewed" in text:
                         return 0
 
-            return None  # review가 없으면 None
+            return None
         except Exception as e:
             print(f"  [ERROR] Count_of_Reviews extraction failed: {e}")
             return None

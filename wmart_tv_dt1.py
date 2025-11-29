@@ -1628,7 +1628,7 @@ class WalmartDetailCrawler:
                 data['Retailer_SKU_Name'],
                 data['product_url'],
                 data['Star_Rating'],
-                data['Count_of_Star_Ratings'],  # Keep original format: "5star:489, 4star:102, ..."
+                count_of_star_ratings_int,  # Converted to integer (sum of all star counts)
                 data['screen_size'],
                 data['SKU_Popularity'],
                 data['final_sku_price'],

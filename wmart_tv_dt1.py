@@ -1518,6 +1518,10 @@ class WalmartDetailCrawler:
         """Save collected data to database"""
         cursor = None
         try:
+            # If star_rating is "No ratings yet", set count_of_reviews to 0
+            if data.get('Star_Rating') == "No ratings yet":
+                data['count_of_reviews'] = 0
+
             print(f"  [DB] Saving to database...")
             print(f"       Product: {data.get('Retailer_SKU_Name', 'N/A')[:60]}...")
             print(f"       Item (SKU): {data.get('item', 'N/A')}")

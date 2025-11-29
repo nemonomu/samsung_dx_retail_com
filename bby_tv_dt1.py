@@ -1501,12 +1501,27 @@ class BestBuyDetailCrawler:
                 print(f"  [ERROR] page loading timeout")
                 return False
 
-            # page 소스 가져오기
-            page_source = self.driver.page_source
-            tree = html.fromstring(page_source)
+            # page 소스 가져오기 (retry logic for failed extraction)
+            max_retries = 2
+            retailer_sku_name = None
+            tree = None
 
-            # 1. Retailer_SKU_Name extraction
-            retailer_sku_name = self.extract_retailer_sku_name(tree)
+            for attempt in range(max_retries + 1):
+                page_source = self.driver.page_source
+                tree = html.fromstring(page_source)
+
+                # 1. Retailer_SKU_Name extraction
+                retailer_sku_name = self.extract_retailer_sku_name(tree)
+
+                # Check if extraction succeeded and value is valid
+                if retailer_sku_name and retailer_sku_name != 'undefined' and len(retailer_sku_name) > 3:
+                    break
+
+                if attempt < max_retries:
+                    wait_time = 3 + (attempt * 2)  # 3초, 5초
+                    print(f"  [WARNING] Retailer_SKU_Name extraction failed, retrying in {wait_time}s... (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+
             print(f"  [✓] Retailer_SKU_Name: {retailer_sku_name}")
 
             # 2. Screen Size extraction (메인 page에서)

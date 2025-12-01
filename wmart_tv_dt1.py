@@ -901,9 +901,9 @@ class WalmartDetailCrawler:
 
             # Method 2: XPath fallback for pages without JSON data
             xpaths = [
-                # Method 1: Direct XPath provided by user
+                # Method 1: Direct XPath - <a link-identifier="seeAllReviewsStarRating" class="dark-gray" href="/reviews/product/...">4,684 reviews</a>
                 "//*[@id='item-review-section']/div[2]/div[1]/div[1]/div/a",
-                # Method 2: Find link with 'seeAllReviewsStarRating' identifier
+                # Method 2: Find link with 'seeAllReviewsStarRating' identifier (most reliable)
                 "//a[@link-identifier='seeAllReviewsStarRating']",
                 # Method 3: Find link with 'reviewsLink' identifier (for ratings)
                 "//a[@link-identifier='reviewsLink']",

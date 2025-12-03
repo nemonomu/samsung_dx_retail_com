@@ -1,7 +1,7 @@
 """
 Best Buy TV Detail Page Crawler (Modified v1)
 collected table: bby_tv_main1, bby_tv_bsr1, bby_tv_pmt1 (trend_crawl NOT used)
-save table: bby_tv_crawl, bby_tv_mst
+save table: bby_tv_crawl, tv_retail_com
 
 수정사항:
 1. estimated_annual_electricity_use: 숫자만 extraction (예: "286 kilowatt hours" -> "286")
@@ -599,6 +599,46 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Model Year extraction failed: {e}")
             return None
 
+    def extract_sku(self, tree):
+        """Extract SKU (Model Number) from Specifications dialog - General container
+
+        HTML 구조:
+        <div class="dB7j8sHUbncyf79K inline-flex w-full body-copy-lg">
+          <div class="flex grow basis-none font-weight-medium gap-50 inline-align-middle items-center">Model Number</div>
+          <div class="grow basis-none pl-300">32R3B5/32R3BX</div>
+        </div>
+
+        Returns:
+            str: SKU (Model Number) or "no sku" if not found
+        """
+        try:
+            # XPath 패턴 - Model Number 텍스트가 있는 div의 형제 div에서 값 추출
+            xpaths = [
+                # 가장 정확한 패턴 - dB7j8sHUbncyf79K 클래스 컨테이너 내에서 Model Number 찾기
+                '//div[contains(@class, "dB7j8sHUbncyf79K")][.//div[contains(text(), "Model Number")]]/div[contains(@class, "pl-300")]',
+                # 더 넓은 패턴 - Model Number 텍스트의 형제 div
+                '//div[contains(text(), "Model Number")]/following-sibling::div[contains(@class, "pl-300")]',
+                # 부모 기반 패턴
+                '//div[contains(text(), "Model Number")]/../div[contains(@class, "pl-300")]',
+                # 클래스 없이 형제 관계만
+                '//div[contains(text(), "Model Number")]/following-sibling::div'
+            ]
+
+            for xpath in xpaths:
+                elem = tree.xpath(xpath)
+                if elem:
+                    sku = elem[0].text_content().strip()
+                    if sku and len(sku) > 0:
+                        print(f"  [✓] SKU (Model Number): {sku}")
+                        return sku
+
+            print(f"  [WARNING] SKU (Model Number) not found - using 'no sku'")
+            return "no sku"
+
+        except Exception as e:
+            print(f"  [ERROR] SKU extraction failed: {e}")
+            return "no sku"
+
     def extract_final_sku_price(self, tree):
         """Final SKU Price extraction (현재 판매 가격) - 컨테이너 기반"""
         try:
@@ -1006,10 +1046,12 @@ class BestBuyDetailCrawler:
             return [None]*4, [None]*4, [None]*4
 
     def extract_star_ratings_from_reviews_page(self):
-        """Count_of_Star_Ratings extraction (See All Customer Reviews page에서)"""
+        """Count_of_Star_Ratings extraction (See All Customer Reviews page에서)
+        Returns: integer (total count) or None
+        """
         try:
             time.sleep(3)  # page 로딩 wait
-            ratings = {}
+            total_count = 0
             # XPath 패턴 (5점부터 1점까지)
             xpaths = [
                 '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[1]/div/label/span[5]',  # 5점
@@ -1021,21 +1063,15 @@ class BestBuyDetailCrawler:
 
             # 5점부터 1점까지 순서로 extraction
             for idx, xpath in enumerate(xpaths):
-                star = 5 - idx  # 5, 4, 3, 2, 1
                 try:
                     elem = self.driver.find_element(By.XPATH, xpath)
-                    count = elem.text.strip()
-                    # 1star는 단수형, 나머지는 복수형
-                    key = f"{star}star" if star == 1 else f"{star}stars"
-                    ratings[key] = count
+                    count_text = elem.text.strip()
+                    count = int(count_text) if count_text.isdigit() else 0
+                    total_count += count
                 except Exception:
-                    # 찾지 못하면 0으로 설정
-                    key = f"{star}star" if star == 1 else f"{star}stars"
-                    ratings[key] = "0"
+                    pass  # 찾지 못하면 0으로 처리 (total_count에 더하지 않음)
 
-            # 형식: "5stars:9 4stars:1 3stars:0 2stars:0 1star:2" (공백으로 구분)
-            rating_str = " ".join([f"{k}:{v}" for k, v in ratings.items()])
-            return rating_str if rating_str else None
+            return total_count if total_count > 0 else None
 
         except Exception as e:
             print(f"  [ERROR] Star ratings extraction failed: {e}")
@@ -1413,72 +1449,6 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Item lookup failed ({product_name}): {e}")
             return None
 
-    def save_to_mst_table(self, products, current_item):
-        """bby_tv_mst table에 4items 제품 data save"""
-        try:
-            cursor = self.db_conn.cursor()
-
-            # table 존재 확인 및 생성
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS bby_tv_mst (
-                    id SERIAL PRIMARY KEY,
-                    account_name VARCHAR(50),
-                    item VARCHAR(255),
-                    product_url TEXT,
-                    pros TEXT,
-                    cons TEXT,
-                    product_name TEXT,
-                    update_date VARCHAR(50),
-                    calendar_week VARCHAR(10)
-                )
-            """)
-
-            # current timestamp
-            update_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-            # Calculate calendar week
-            calendar_week = f"w{datetime.now().isocalendar().week}"
-
-            # 각 제품 save
-            for idx, product in enumerate(products):
-                # item 결정
-                if idx == 0:
-                    # first 번째 제품은 현재 page의 item
-                    mst_item = current_item
-                else:
-                    # 2-4번째 제품은 URL에서 직접 추출
-                    mst_item = self.extract_item_from_url(product['product_url'])
-
-                # data 삽입
-                insert_query = """
-                    INSERT INTO bby_tv_mst
-                    (account_name, item, product_url, pros, cons, product_name, update_date, calendar_week)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """
-
-                cursor.execute(insert_query, (
-                    'Bestbuy',
-                    mst_item,
-                    product['product_url'],
-                    product['pros'],
-                    product['cons'],
-                    product['product_name'],
-                    update_date,
-                    calendar_week
-                ))
-
-                print(f"    [MST {idx+1}/4] {product['product_name'][:50]}... (item: {mst_item})")
-
-            cursor.close()
-            print(f"  [✓] MST table save complete (4items)")
-            return True
-
-        except Exception as e:
-            print(f"  [ERROR] MST table save failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-
     def scrape_detail_page(self, url_data):
         """detail page crawling (items선된 로딩 + dialog 처리)"""
         try:
@@ -1561,8 +1531,9 @@ class BestBuyDetailCrawler:
             # 4. Item extraction from URL (simplified - no dialog needed)
             item = self.extract_item_from_url(product_url)
 
-            # Electricity use - still need to open dialog for this field
+            # Electricity use and SKU - need to open dialog for these fields
             electricity_use = None
+            sku = "no sku"
             success, error = self.click_specifications_with_retry()
 
             if success:
@@ -1575,16 +1546,15 @@ class BestBuyDetailCrawler:
                 electricity_use = self.extract_electricity_use(dialog_tree)
                 print(f"  [✓] Estimated_Annual_Electricity_Use: {electricity_use}")
 
+                # Extract SKU (Model Number) from dialog
+                sku = self.extract_sku(dialog_tree)
+
                 # dialog close
                 self.close_specifications_dialog()
             else:
-                print(f"  [WARNING] Could not extract electricity_use (dialog failed): {error}")
+                print(f"  [WARNING] Could not extract electricity_use/SKU (dialog failed): {error}")
 
-            # 8. MST table에 save (item이 있고 mst_products가 있을 때)
-            if mst_products and item:
-                self.save_to_mst_table(mst_products, item)
-
-            # 9. See All Customer Reviews click 및 data collected
+            # 8. See All Customer Reviews click 및 data collected
             star_ratings = None
             top_mentions = None
             detailed_reviews = None
@@ -1648,7 +1618,8 @@ class BestBuyDetailCrawler:
                 promotion_position=url_data['promotion_position'],
                 bsr_rank=url_data['bsr_rank'],
                 main_rank=url_data['main_rank'],
-                model_year=model_year  # ADDED: model_year parameter
+                model_year=model_year,  # ADDED: model_year parameter
+                sku=sku  # ADDED: sku parameter for tv_item_mst
             )
 
             # Increment total collected after successful save
@@ -1668,7 +1639,7 @@ class BestBuyDetailCrawler:
                    final_sku_price, savings, original_sku_price, offer,
                    pick_up_availability, shipping_availability, delivery_availability,
                    sku_status, star_rating_source, promotion_type, promotion_position,
-                   bsr_rank, main_rank, model_year):
+                   bsr_rank, main_rank, model_year, sku="no sku"):
         """DB에 save"""
         try:
             print(f"  [DB] Saving to database...")
@@ -1684,9 +1655,9 @@ class BestBuyDetailCrawler:
             now = datetime.now()
             crawl_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
 
-            # If "Not yet reviewed", set star_ratings to "0"
+            # If "Not yet reviewed", set star_ratings to 0
             if star_rating_source == "Not yet reviewed":
-                star_ratings = "0"
+                star_ratings = 0
 
             # data 삽입
             insert_query = """
@@ -1749,18 +1720,6 @@ class BestBuyDetailCrawler:
                     print(f"  [FIX] Setting count_of_reviews to 0")
                 count_of_reviews_int = 0
 
-            # Parse star_ratings to get total count
-            # Example: "5stars:231 4stars:19 3stars:2 2stars:1 1star:8" -> 261
-            count_of_star_ratings_int = None
-            if star_ratings:
-                try:
-                    import re
-                    numbers = re.findall(r':(\d+)', star_ratings)
-                    if numbers:
-                        count_of_star_ratings_int = sum(int(n) for n in numbers)
-                except:
-                    count_of_star_ratings_int = None
-
             cursor.execute("""
                 INSERT INTO tv_retail_com
                 (item, account_name, page_type, count_of_reviews, retailer_sku_name, product_url,
@@ -1782,7 +1741,7 @@ class BestBuyDetailCrawler:
                 retailer_sku_name,
                 product_url,
                 star_rating_source,
-                star_ratings,  # Original format: "5stars:231 4stars:19 ..."
+                star_ratings,  # Now integer (total count)
                 screen_size,
                 None,  # sku_popularity (BestBuy doesn't have this)
                 final_sku_price,
@@ -1819,8 +1778,17 @@ class BestBuyDetailCrawler:
                 crawl_datetime
             ))
 
+            # Insert into tv_item_mst (item 중복 시 무시)
+            if item:
+                cursor.execute("""
+                    INSERT INTO tv_item_mst (item, product_url, sku, account_name)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (item) DO NOTHING
+                """, (item, product_url, sku, 'Bestbuy'))
+                print(f"  [DB] ✓ tv_item_mst insert attempted (item: {item}, sku: {sku})")
+
             cursor.close()
-            print(f"  [DB] ✓ Successfully saved to bby_tv_crawl + tv_retail_com")
+            print(f"  [DB] ✓ Successfully saved to bby_tv_crawl + tv_retail_com + tv_item_mst")
             return True
 
         except Exception as e:
@@ -1832,65 +1800,6 @@ class BestBuyDetailCrawler:
                 print(f"  [ERROR] DB save failed: {e}")
                 import traceback
                 traceback.print_exc()
-            return False
-
-    def fill_missing_items(self):
-        """empty item을 이전 세션 data로 fill"""
-        try:
-            print("\n[INFO] empty item filling...")
-            cursor = self.db_conn.cursor()
-
-            # 현재 세션에서 item이 NULL인 레코드 찾기
-            cursor.execute("""
-                SELECT id, product_name
-                FROM bby_tv_mst
-                WHERE item IS NULL
-                AND product_name IS NOT NULL
-            """)
-
-            empty_items = cursor.fetchall()
-
-            if not empty_items:
-                print("[OK] empty item none")
-                cursor.close()
-                return
-
-            print(f"[INFO] empty item {len(empty_items)}items found")
-
-            updated_count = 0
-            for record_id, product_name in empty_items:
-                # 이전 세션에서 같은 product_name을 가진 레코드의 item 찾기
-                cursor.execute("""
-                    SELECT item
-                    FROM bby_tv_mst
-                    WHERE product_name = %s
-                    AND item IS NOT NULL
-                    ORDER BY id DESC
-                    LIMIT 1
-                """, (product_name,))
-
-                result = cursor.fetchone()
-                if result:
-                    item_value = result[0]
-                    # UPDATE
-                    cursor.execute("""
-                        UPDATE bby_tv_mst
-                        SET item = %s
-                        WHERE id = %s
-                    """, (item_value, record_id))
-                    updated_count += 1
-                    print(f"  [✓] Updated: {product_name[:50]}... → item: {item_value}")
-
-            self.db_conn.commit()
-            cursor.close()
-
-            print(f"[OK] {updated_count}/{len(empty_items)}items item filled complete")
-            return True
-
-        except Exception as e:
-            print(f"[ERROR] item fill failed: {e}")
-            import traceback
-            traceback.print_exc()
             return False
 
     def run(self):
@@ -1933,9 +1842,6 @@ class BestBuyDetailCrawler:
             print("\n" + "="*80)
             print(f"crawling complete! successful: {success_count}/{len(urls)}items")
             print("="*80)
-
-            # empty item fill
-            self.fill_missing_items()
 
             # data 검증 요약 출력
             summary = self.validator.get_summary()

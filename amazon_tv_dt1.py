@@ -540,6 +540,43 @@ class AmazonDetailCrawler:
             print(f"  [WARNING] Failed to extract model year: {e}")
             return None
 
+    def extract_sku(self, tree):
+        """Extract SKU (Model Number) from Item details container
+        Same location as Model Year, Rank_1, Rank_2
+
+        Example HTML:
+        <tr>
+            <th class="a-color-secondary a-size-base prodDetSectionEntry">Model Number</th>
+            <td class="a-size-base prodDetAttrValue">HG50AU800NF</td>
+        </tr>
+
+        Returns: SKU string or "no sku" if not found
+        """
+        try:
+            xpaths = [
+                # Primary: Item details - Model Number
+                '//tr[.//th[contains(text(), "Model Number")]]/td[@class="a-size-base prodDetAttrValue"]',
+                '//table[@id="productDetails_techSpec_section_1"]//tr[.//th[contains(text(), "Model Number")]]/td',
+                '//table//tr[.//th[contains(text(), "Model Number")]]/td',
+                '//*[@id="productDetails_expanderTables_depthRightSections"]//tr[.//th[contains(text(), "Model Number")]]/td',
+                # Alternative patterns
+                '//th[contains(text(), "Model Number")]/following-sibling::td',
+                '//th[contains(@class, "prodDetSectionEntry") and contains(text(), "Model Number")]/following-sibling::td'
+            ]
+
+            for xpath in xpaths:
+                sku_text = self.extract_text_safe(tree, xpath)
+                if sku_text:
+                    sku_text = sku_text.strip()
+                    if sku_text and len(sku_text) >= 3:
+                        return sku_text
+
+            return "no sku"
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract SKU: {e}")
+            return "no sku"
+
     def extract_star_rating(self, tree):
         """Extract star rating (format: '4.5' or 'No customer reviews')"""
         try:
@@ -617,7 +654,9 @@ class AmazonDetailCrawler:
             return None
 
     def extract_count_of_star_ratings(self, tree):
-        """Extract star ratings count (format: 5star:1788, 4star:318, ...)"""
+        """Extract total star rating count (sum of all star ratings)
+        Returns: integer (e.g., 2449) or None
+        """
         try:
             # Get total count from "2,449 global ratings"
             total_text = self.extract_text_safe(tree, '//*[@id="cm_cr_dp_d_rating_histogram"]/div[3]')
@@ -630,31 +669,7 @@ class AmazonDetailCrawler:
                 return None
 
             total_count = int(total_match.group(1).replace(',', ''))
-
-            # Extract percentages for each star rating (5 to 1) from aria-label
-            star_counts = []
-            for i in range(1, 6):  # li[1] to li[5]
-                xpath = f'//*[@id="histogramTable"]/li[{i}]/span/a/@aria-label'
-                aria_label = self.extract_text_safe(tree, xpath)
-
-                if aria_label:
-                    # Extract percentage from "73 percent of reviews have 5 stars"
-                    percent_match = re.search(r'(\d+)\s*percent', aria_label)
-                    if percent_match:
-                        percentage = int(percent_match.group(1))
-                        count = int(total_count * percentage / 100)
-                        star_counts.append(count)
-                    else:
-                        star_counts.append(0)
-                else:
-                    star_counts.append(0)
-
-            # Format: 5star:count, 4star:count, ...
-            if len(star_counts) == 5:
-                result = f"5star:{star_counts[0]}, 4star:{star_counts[1]}, 3star:{star_counts[2]}, 2star:{star_counts[3]}, 1star:{star_counts[4]}"
-                return result
-
-            return None
+            return total_count
 
         except Exception as e:
             print(f"  [WARNING] Failed to extract star ratings count: {e}")
@@ -1033,6 +1048,10 @@ class AmazonDetailCrawler:
             # Extract model_year (NEW)
             model_year = self.extract_model_year(tree)
 
+            # Extract SKU (Model Number) for tv_item_mst
+            sku = self.extract_sku(tree)
+            print(f"  [✓] SKU (Model Number): {sku}")
+
             # Extract count_of_reviews (NEW)
             count_of_reviews = self.extract_count_of_reviews(tree)
 
@@ -1080,6 +1099,7 @@ class AmazonDetailCrawler:
                 'SKU_Popularity': sku_popularity,
                 'Retailer_Membership_Discounts': membership_discount,
                 'item': item,
+                'sku': sku,  # Model Number for tv_item_mst
                 'Rank_1': rank_1,
                 'Rank_2': rank_2,
                 'screen_size': screen_size,
@@ -1147,9 +1167,9 @@ class AmazonDetailCrawler:
             now = datetime.now()
             crawl_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
 
-            # If "No customer reviews", set count_of_star_ratings to "0"
+            # If "No customer reviews", set count_of_star_ratings to 0
             if data['Star_Rating'] == "No customer reviews":
-                data['Count_of_Star_Ratings'] = "0"
+                data['Count_of_Star_Ratings'] = 0
 
             # Insert to amazon_tv_detail_crawled
             cursor.execute("""
@@ -1194,19 +1214,6 @@ class AmazonDetailCrawler:
                 except:
                     count_of_reviews_int = None
 
-            # Parse count_of_star_ratings to get total count
-            # Example: "5star:2634, 4star:445, 3star:148, 2star:74, 1star:408" -> 3709
-            count_of_star_ratings_int = None
-            if data['Count_of_Star_Ratings']:
-                try:
-                    import re
-                    # Extract numbers after colons (handle both comma and space separators)
-                    numbers = re.findall(r':(\d+)', str(data['Count_of_Star_Ratings']))
-                    if numbers:
-                        count_of_star_ratings_int = sum(int(n) for n in numbers)
-                except:
-                    count_of_star_ratings_int = None
-
             cursor.execute("""
                 INSERT INTO tv_retail_com
                 (item, account_name, page_type, count_of_reviews, retailer_sku_name, product_url,
@@ -1228,7 +1235,7 @@ class AmazonDetailCrawler:
                 data['Retailer_SKU_Name'],
                 data['product_url'],
                 data['Star_Rating'],
-                data['Count_of_Star_Ratings'],  # Original format: "5star:489, 4star:102, ..."
+                data['Count_of_Star_Ratings'],  # Now integer (total count)
                 data['screen_size'],
                 data['SKU_Popularity'],
                 data['final_sku_price'],  # Extracted from detail page
@@ -1265,6 +1272,20 @@ class AmazonDetailCrawler:
                 crawl_datetime
             ))
 
+            # Insert into tv_item_mst (with duplicate check on item)
+            if data.get('item'):
+                cursor.execute("""
+                    INSERT INTO tv_item_mst (item, product_url, sku, account_name)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (item) DO NOTHING
+                """, (
+                    data['item'],
+                    data['product_url'],
+                    data.get('sku', 'no sku'),
+                    'Amazon'
+                ))
+                print(f"  [DB] ✓ tv_item_mst insert attempted (item: {data['item']}, sku: {data.get('sku', 'no sku')})")
+
             # Commit transaction
             self.db_conn.commit()
 
@@ -1273,7 +1294,8 @@ class AmazonDetailCrawler:
             # Re-enable autocommit
             self.db_conn.autocommit = True
 
-            print(f"  [DB] ✓ Successfully saved to amazon_tv_detail_crawled + tv_retail_com")
+            print(f"  [DB] ✓ Successfully saved to amazon_tv_detail_crawled + tv_retail_com + tv_item_mst")
+            print(f"       SKU: {data.get('sku', 'no sku')}")
 
             return True
 

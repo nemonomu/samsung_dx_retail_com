@@ -562,7 +562,9 @@ class WalmartDetailCrawler:
             return None
 
     def extract_count_of_star_ratings(self, tree):
-        """Extract star rating counts in format '5star:489, 4star:102, 3star:28, 2star:19, 1star:47'"""
+        """Extract total star rating count (sum of all star ratings)
+        Returns: integer (e.g., 685) or None
+        """
         try:
             # Get total ratings count for fallback calculation
             total_text = self.extract_text_safe(tree, self.xpaths.get('total_ratings'))
@@ -635,15 +637,9 @@ class WalmartDetailCrawler:
                 if count is not None:
                     star_counts[star_num] = count
 
-            # Format as "5star:X, 4star:X, ..."
+            # Return total sum of all star ratings as integer
             if star_counts:
-                result_parts = []
-                for star_num in range(5, 0, -1):
-                    if star_num in star_counts:
-                        result_parts.append(f"{star_num}star:{star_counts[star_num]}")
-
-                if result_parts:
-                    return ', '.join(result_parts)
+                return sum(star_counts.values())
 
             return None
 
@@ -1106,47 +1102,158 @@ class WalmartDetailCrawler:
             return None
 
     def extract_sku_from_product_name(self, product_name):
-        """Extract SKU from retailer_sku_name"""
+        """Extract SKU (model number) from retailer_sku_name
+
+        Priority:
+        1. Parentheses pattern: (VQD50M-08), (70PUL7553/F7), (43Q651G)
+        2. After dash at end: - OLED55C4PUA, - 43QNED80TUC
+        3. After comma (model only): K-50S30, 2024 Model -> K-50S30
+        4. Last word if looks like model: QN50LS03BAFXZA, 58R6E3
+        5. Series name fallback: QLED Q7F, Select Series 4K
+        """
         try:
             if not product_name:
                 return None
 
-            # Pattern 1: Comma-separated at the end (e.g., "... , S32VAFW")
+            import re
+
+            # Exclude words that are NOT model numbers
+            exclude_words = ['HD', 'UHD', 'LED', 'LCD', 'OLED', 'QLED', '4K', '8K', 'TV',
+                           'Model', 'Series', 'Class', 'Smart', 'NEW', 'Inch', 'Refurbished',
+                           '2024', '2025', '2023', '2022', '2021', '2020']
+
+            def is_valid_model(text):
+                """Check if text looks like a valid model number"""
+                if not text or len(text) < 4:
+                    return False
+                # Should not be in exclude list
+                if text.upper() in [w.upper() for w in exclude_words]:
+                    return False
+                # Should contain both letters and numbers OR be alphanumeric with special chars
+                has_letter = any(c.isalpha() for c in text)
+                has_number = any(c.isdigit() for c in text)
+                # Model numbers typically have letters+numbers or just numbers (8+ digits)
+                if has_letter and has_number:
+                    return True
+                if text.isdigit() and len(text) >= 8:  # Pure numeric like 100150805
+                    return True
+                return False
+
+            # Pattern 1: In parentheses (highest priority)
+            # e.g., (VQD50M-08), (70PUL7553/F7), (43Q651G), (100150805)
+            paren_matches = re.findall(r'\(([A-Za-z0-9/_-]+)\)', product_name)
+            for match in paren_matches:
+                # Skip year patterns like (NEW 2024)
+                if match.upper() in exclude_words or re.match(r'^NEW\s*\d{4}$', match, re.IGNORECASE):
+                    continue
+                if is_valid_model(match):
+                    return match
+
+            # Pattern 2: After " - " at the end
+            # e.g., "... - OLED55C4PUA", "... - 43QNED80TUC"
+            if ' - ' in product_name:
+                after_dash = product_name.split(' - ')[-1].strip()
+                # Get first word after dash (model is usually first)
+                first_word = after_dash.split()[0] if after_dash.split() else after_dash
+                first_word = first_word.strip('.,;:')
+                if is_valid_model(first_word):
+                    return first_word
+
+            # Pattern 3: After comma (check if it's a model, not "2024 Model")
+            # e.g., "Sony 50" ... K-50S30, 2024 Model" -> K-50S30
             if ',' in product_name:
                 parts = product_name.split(',')
-                last_part = parts[-1].strip()
-                # Check if last part looks like a model (letters + numbers, no spaces)
-                if last_part and not ' ' in last_part:
-                    has_letter = any(c.isalpha() for c in last_part)
-                    has_number = any(c.isdigit() for c in last_part)
-                    if has_letter and has_number and 5 <= len(last_part) <= 20:
-                        return last_part
+                # Check second-to-last part if last part contains "Model" or year
+                for i in range(len(parts) - 1, -1, -1):
+                    part = parts[i].strip()
+                    # Skip if contains "Model" or is just a year
+                    if 'Model' in part or re.match(r'^\d{4}$', part):
+                        continue
+                    # Get first word of this part
+                    first_word = part.split()[0] if part.split() else part
+                    first_word = first_word.strip('.,;:')
+                    if is_valid_model(first_word):
+                        return first_word
 
-            # Pattern 2: In parentheses (e.g., "... (85QD6N)")
-            import re
-            paren_match = re.search(r'\(([A-Z0-9]+)\)', product_name)
-            if paren_match:
-                model = paren_match.group(1)
-                if 5 <= len(model) <= 20:
-                    return model
-
-            # Pattern 3: At the end after space (e.g., "... UN65DU8000")
+            # Pattern 4: Last word if looks like model number
+            # e.g., "SAMSUNG 50" ... QN50LS03BAFXZA"
             words = product_name.split()
             if words:
                 last_word = words[-1].strip('.,;:')
-                # Check if it looks like a model
-                has_letter = any(c.isalpha() for c in last_word)
-                has_number = any(c.isdigit() for c in last_word)
-                if has_letter and has_number and 5 <= len(last_word) <= 20:
-                    # Make sure it's not a common word
-                    if last_word.upper() not in ['HD', 'UHD', 'LED', 'LCD', '4K', 'TV']:
-                        return last_word
+                if is_valid_model(last_word):
+                    return last_word
 
-            return None
+            # Pattern 5: Series name fallback (when no model number found)
+            # e.g., "Samsung 43" Class QLED Q7F 4K..." -> "QLED Q7F"
+            # Look for patterns like "Q7F", "S3", "C4", "R6" etc.
+            series_match = re.search(r'\b([A-Z]\d+[A-Z]?)\b', product_name)
+            if series_match:
+                series = series_match.group(1)
+                # Check if there's a prefix like QLED, OLED
+                prefix_match = re.search(r'(QLED|OLED|LED|UHD)\s+' + re.escape(series), product_name)
+                if prefix_match:
+                    return f"{prefix_match.group(1)} {series}"
+                return series
+
+            # No SKU found
+            return "no sku"
 
         except Exception as e:
             print(f"  [DEBUG] Failed to extract SKU from product name: {e}")
             return None
+
+    def extract_sku_from_specifications(self):
+        """Extract SKU from Specifications dialog - Model field
+        XPath: //tr[th/dt[text()='Model']]/td/dd
+        """
+        try:
+            page_source = self.driver.page_source
+            tree = html.fromstring(page_source)
+
+            # Try multiple XPaths for Model field
+            model_xpaths = [
+                "//tr[th/dt[text()='Model']]/td/dd",
+                "//tr[contains(., 'Model')]/td/dd",
+                "//th[dt[text()='Model']]/following-sibling::td/dd",
+                "//dt[text()='Model']/ancestor::th/following-sibling::td/dd"
+            ]
+
+            for xpath in model_xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    model = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+                    if model and len(model) >= 4:
+                        print(f"  [INFO] Extracted SKU from Specifications: {model}")
+                        return model
+
+            return None
+
+        except Exception as e:
+            print(f"  [DEBUG] Failed to extract SKU from Specifications: {e}")
+            return None
+
+    def extract_sku(self, product_name):
+        """Extract SKU - try product name first, then Specifications dialog
+
+        Args:
+            product_name: Retailer SKU Name (product title)
+
+        Returns:
+            SKU string or "no sku" if not found
+        """
+        # Priority 1: Extract from product name
+        sku = self.extract_sku_from_product_name(product_name)
+        if sku and sku != "no sku":
+            print(f"  [INFO] Extracted SKU from product name: {sku}")
+            return sku
+
+        # Priority 2: Extract from Specifications dialog
+        sku = self.extract_sku_from_specifications()
+        if sku:
+            return sku
+
+        # No SKU found
+        return "no sku"
 
     def extract_sku_from_lg_xpath(self):
         """Extract SKU using LG-specific XPath (from main page)"""
@@ -1594,19 +1701,6 @@ class WalmartDetailCrawler:
                 except:
                     count_of_reviews_int = None
 
-            # Parse count_of_star_ratings to get total count
-            # Example: "5star:142, 4star:14, 3star:7, 2star:2, 1star:4" -> 169
-            count_of_star_ratings_int = None
-            if data['Count_of_Star_Ratings']:
-                try:
-                    import re
-                    # Extract numbers after colons (handle both comma and space separators)
-                    numbers = re.findall(r':(\d+)', str(data['Count_of_Star_Ratings']))
-                    if numbers:
-                        count_of_star_ratings_int = sum(int(n) for n in numbers)
-                except:
-                    count_of_star_ratings_int = None
-
             cursor.execute("""
                 INSERT INTO tv_retail_com
                 (item, account_name, page_type, count_of_reviews, retailer_sku_name, product_url,
@@ -1628,7 +1722,7 @@ class WalmartDetailCrawler:
                 data['Retailer_SKU_Name'],
                 data['product_url'],
                 data['Star_Rating'],
-                data['Count_of_Star_Ratings'],  # Original format: "5star:489, 4star:102, ..."
+                data['Count_of_Star_Ratings'],  # Now integer (total count)
                 data['screen_size'],
                 data['SKU_Popularity'],
                 data['final_sku_price'],
@@ -1665,6 +1759,23 @@ class WalmartDetailCrawler:
                 crawl_datetime
             ))
 
+            # Insert into tv_item_mst (with duplicate check on item)
+            # Extract SKU from product name
+            sku = self.extract_sku(data['Retailer_SKU_Name'])
+
+            if data.get('item'):
+                cursor.execute("""
+                    INSERT INTO tv_item_mst (item, product_url, sku, account_name)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (item) DO NOTHING
+                """, (
+                    data['item'],
+                    data['product_url'],
+                    sku,
+                    'Walmart'
+                ))
+                print(f"  [DB] ✓ tv_item_mst insert attempted (item: {data['item']}, sku: {sku})")
+
             # Commit transaction
             self.db_conn.commit()
 
@@ -1673,7 +1784,8 @@ class WalmartDetailCrawler:
             # Re-enable autocommit
             self.db_conn.autocommit = True
 
-            print(f"  [DB] ✓ Successfully saved to Walmart_tv_detail_crawled + tv_retail_com")
+            print(f"  [DB] ✓ Successfully saved to Walmart_tv_detail_crawled + tv_retail_com + tv_item_mst")
+            print(f"       SKU: {sku}")
 
             return True
 

@@ -851,9 +851,9 @@ class WalmartDetailCrawler:
 
         Priority:
         1. Check "No ratings yet" first -> return 0
-        2. JSON data: totalReviewCount (exact value, not displayed on screen)
-        3. JSON data: numberOfReviews (alternative exact value)
-        4. XPath fallback (may get approximate values like '28K')
+        2. "Showing 1-3 of 4,686 reviews" pattern (div[7]/div[1])
+        3. "View all reviews (4,686)" button (div[8]/button)
+        4. "4,686 reviews" link (seeAllReviewsStarRating)
 
         Args:
             tree: HTML tree
@@ -866,9 +866,8 @@ class WalmartDetailCrawler:
                 print(f"  [INFO] Star rating is 'No ratings yet', setting count_of_reviews to 0")
                 return 0
 
-            # Check 2: Look for "No ratings yet" in page source before JSON extraction
+            # Check 2: Look for "No ratings yet" in page source
             if page_source and "No ratings yet" in page_source:
-                # Verify it's actually displayed (not just in some config)
                 no_ratings_xpaths = [
                     "//span[contains(text(), 'No ratings yet')]",
                     "//*[@id='item-review-section']//span[contains(text(), 'No ratings yet')]"
@@ -879,83 +878,90 @@ class WalmartDetailCrawler:
                         print(f"  [INFO] Found 'No ratings yet' on page, setting count_of_reviews to 0")
                         return 0
 
-            # Method 1: Extract from JSON data (most accurate - gets exact count like 28040)
-            if page_source:
-                # Try totalReviewCount first (exact total review count)
-                match = re.search(r'"totalReviewCount":(\d+)', page_source)
-                if match:
-                    count = int(match.group(1))
-                    print(f"  [INFO] Extracted totalReviewCount from JSON: {count}")
-                    return count
-
-                # Try numberOfReviews as alternative
-                match = re.search(r'"numberOfReviews":(\d+)', page_source)
-                if match:
-                    count = int(match.group(1))
-                    print(f"  [INFO] Extracted numberOfReviews from JSON: {count}")
-                    return count
-
-            # Method 2: XPath fallback for pages without JSON data
-            xpaths = [
-                # Method 1: Direct XPath - <a link-identifier="seeAllReviewsStarRating" class="dark-gray" href="/reviews/product/...">4,684 reviews</a>
-                "//*[@id='item-review-section']/div[2]/div[1]/div[1]/div/a",
-                # Method 2: Find link with 'seeAllReviewsStarRating' identifier (most reliable)
-                "//a[@link-identifier='seeAllReviewsStarRating']",
-                # Method 3: Find link with 'reviewsLink' identifier (for ratings)
-                "//a[@link-identifier='reviewsLink']",
-                # Method 4: Find link containing 'reviews' text in item-review-section
-                "//*[@id='item-review-section']//a[contains(text(), 'reviews')]",
-                # Method 5: Find link containing 'ratings' text in item-review-section
-                "//*[@id='item-review-section']//a[contains(text(), 'ratings')]",
-                # Method 6: Any link in review section containing 'review' in text
-                "//div[@id='item-review-section']//a[contains(., 'review')]",
-                # Method 7: Any link in review section containing 'rating' in text
-                "//div[@id='item-review-section']//a[contains(., 'rating')]"
+            # Priority 1: Extract from "Showing 1-3 of 4,686 reviews" pattern
+            # XPath: //*[@id="item-review-section"]/div[7]/div[1]
+            showing_xpaths = [
+                '//*[@id="item-review-section"]/div[7]/div[1]',
+                '//*[@id="item-review-section"]//div[@role="heading" and contains(text(), "Showing")]',
+                '//div[@role="heading" and contains(text(), "Showing") and contains(text(), "reviews")]'
             ]
-
-            review_text = None
-            for xpath in xpaths:
+            for xpath in showing_xpaths:
                 result = tree.xpath(xpath)
                 if result:
-                    if isinstance(result[0], str):
-                        review_text = result[0].strip()
-                    else:
-                        review_text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+                    # Pattern: "Showing 1-3 of 4,686 reviews" -> extract 4,686
+                    match = re.search(r'of\s+([\d,]+)\s+reviews?', text, re.IGNORECASE)
+                    if match:
+                        count_str = match.group(1).replace(',', '')
+                        count = int(count_str)
+                        print(f"  [INFO] Extracted count from 'Showing X of Y reviews': {count}")
+                        return count
 
-                    if review_text:
-                        break
+            # Priority 2: Extract from "View all reviews (4,686)" button
+            # XPath: //*[@id="item-review-section"]/div[8]/button
+            view_all_xpaths = [
+                '//*[@id="item-review-section"]/div[8]/button',
+                '//button[contains(text(), "View all reviews")]',
+                '//*[@id="item-review-section"]//button[contains(text(), "View all reviews")]'
+            ]
+            for xpath in view_all_xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+                    # Pattern: "View all reviews (4,686)" -> extract 4,686
+                    match = re.search(r'\(([\d,]+)\)', text)
+                    if match:
+                        count_str = match.group(1).replace(',', '')
+                        count = int(count_str)
+                        print(f"  [INFO] Extracted count from 'View all reviews' button: {count}")
+                        return count
 
-            # Check for "No ratings yet" first -> return 0
-            if review_text and "No ratings yet" in review_text:
-                return 0
+            # Priority 3: Extract from "4,686 reviews" link
+            # XPath: //*[@id="item-review-section"]/div[2]/div[1]/div[1]/div/a
+            reviews_link_xpaths = [
+                "//*[@id='item-review-section']/div[2]/div[1]/div[1]/div/a",
+                "//a[@link-identifier='seeAllReviewsStarRating']"
+            ]
+            for xpath in reviews_link_xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+                    # Pattern: "4,686 reviews" -> extract 4,686
+                    match = re.search(r'([\d,]+)\s+reviews?', text, re.IGNORECASE)
+                    if match:
+                        count_str = match.group(1).replace(',', '')
+                        count = int(count_str)
+                        print(f"  [INFO] Extracted count from reviews link: {count}")
+                        return count
 
-            if not review_text:
-                # Try to find "No ratings yet" at specific location -> return 0
-                no_ratings_xpaths = [
-                    "//*[@id='maincontent']/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[2]/div/div/span",
-                    "//span[@class='gray f7 ph1 pt1'][contains(text(), 'No ratings yet')]",
-                    "//span[contains(text(), 'No ratings yet')]",
-                    "//*[@id='item-review-section']//span[contains(text(), 'No ratings yet')]"
-                ]
-
-                for xpath in no_ratings_xpaths:
-                    result = tree.xpath(xpath)
-                    if result:
-                        text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
-                        if "No ratings yet" in text:
-                            return 0
-
-                return None
-
-            # Extract number from text (fallback when JSON extraction fails)
-            match = re.search(r'([\d,.k]+)\s*(reviews?|ratings?)', review_text, re.IGNORECASE)
-            if match:
-                number_str = match.group(1)
-                print(f"  [INFO] Using XPath fallback for review count: {number_str}")
-                # Use parse_number_format to handle commas, decimals, and 'k' suffix
-                return self.parse_number_format(number_str)
+            # Fallback: Check for "No ratings yet" -> return 0
+            no_ratings_xpaths = [
+                "//span[contains(text(), 'No ratings yet')]",
+                "//*[@id='item-review-section']//span[contains(text(), 'No ratings yet')]"
+            ]
+            for xpath in no_ratings_xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    return 0
 
             return None
+
+            # === DEPRECATED: JSON extraction methods (commented out) ===
+            # # Method 1: Extract from JSON data (most accurate - gets exact count like 28040)
+            # if page_source:
+            #     # Try totalReviewCount first (exact total review count)
+            #     match = re.search(r'"totalReviewCount":(\d+)', page_source)
+            #     if match:
+            #         count = int(match.group(1))
+            #         print(f"  [INFO] Extracted totalReviewCount from JSON: {count}")
+            #         return count
+            #
+            #     # Try numberOfReviews as alternative
+            #     match = re.search(r'"numberOfReviews":(\d+)', page_source)
+            #     if match:
+            #         count = int(match.group(1))
+            #         print(f"  [INFO] Extracted numberOfReviews from JSON: {count}")
+            #         return count
 
         except Exception as e:
             print(f"  [WARNING] Failed to extract count of reviews: {e}")

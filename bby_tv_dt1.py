@@ -1741,7 +1741,7 @@ class BestBuyDetailCrawler:
                 retailer_sku_name,
                 product_url,
                 star_rating_source,
-                star_ratings,  # Now integer (total count)
+                count_of_reviews_int,  # count_of_star_ratings = count_of_reviews
                 screen_size,
                 None,  # sku_popularity (BestBuy doesn't have this)
                 final_sku_price,

@@ -1553,17 +1553,26 @@ class WalmartDetailCrawler:
             # Extract shipping info (combine 2 parts)
             shipping_info = self.extract_shipping_info(tree)
 
-            # Extract count of star ratings
-            count_of_star_ratings = self.extract_count_of_star_ratings(tree)
-
             # Extract similar products
             similar_products = self.extract_similar_products(tree)
 
             # Extract screen size (from main page, with fallback to product name)
             screen_size = self.extract_screen_size(tree, retailer_sku_name)
 
-            # Extract count of reviews (from main page, BEFORE navigating to reviews)
-            # Pass star_rating and page_source for JSON extraction
+            # Scroll to review section for lazy loading content
+            try:
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight * 0.7);")
+                time.sleep(2)
+                # Update page_source and tree after scroll
+                page_source = self.driver.page_source
+                tree = html.fromstring(page_source)
+            except:
+                pass
+
+            # Extract count of star ratings (from review section)
+            count_of_star_ratings = self.extract_count_of_star_ratings(tree)
+
+            # Extract count of reviews (from review section)
             count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source)
 
             # Click Specifications and get Model (after static content extraction)

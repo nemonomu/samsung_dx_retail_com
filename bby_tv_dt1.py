@@ -53,6 +53,8 @@ from data_validator import DataValidator
 
 # Import database configuration
 from config import DB_CONFIG
+import pandas as pd
+from alert_monitor import monitor_and_alert
 
 class BestBuyDetailCrawler:
     def __init__(self):
@@ -1857,6 +1859,26 @@ class BestBuyDetailCrawler:
                 self.validator.write_summary()
             else:
                 print("\n[OK] No data quality issues detected")
+
+            # Send alert email
+            try:
+                cursor = self.db_conn.cursor()
+                cursor.execute("""
+                    SELECT final_sku_price, count_of_reviews, count_of_star_ratings,
+                           star_rating, retailer_sku_name, screen_size
+                    FROM tv_retail_com
+                    WHERE account_name = 'Bestbuy'
+                    AND crawl_datetime >= NOW() - INTERVAL '1 day'
+                """)
+                rows = cursor.fetchall()
+                columns = ['final_sku_price', 'count_of_reviews', 'count_of_star_ratings',
+                          'star_rating', 'retailer_sku_name', 'screen_size']
+                results_df = pd.DataFrame(rows, columns=columns)
+                cursor.close()
+
+                monitor_and_alert('bestbuy', len(urls), results_df)
+            except Exception as e:
+                print(f"[WARNING] Failed to send alert: {e}")
 
         except Exception as e:
             print(f"[ERROR] crawler execution error: {e}")

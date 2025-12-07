@@ -26,6 +26,8 @@ COOKIE_FILE = 'amazon_cookies.pkl'
 
 # Import database configuration
 from config import DB_CONFIG
+import pandas as pd
+from alert_monitor import monitor_and_alert
 
 class AmazonDetailCrawler:
     def __init__(self):
@@ -483,7 +485,7 @@ class AmazonDetailCrawler:
                 import re
                 # Look for patterns: "25 inch", "55-Inch", "50"", etc.
                 # Matches: number + (space/hyphen + inch/inches OR double quote)
-                match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|")', retailer_sku_name, re.IGNORECASE)
+                match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|"|\'\'?)', retailer_sku_name, re.IGNORECASE)
                 if match:
                     size_number = match.group(1)
                     print(f"  [INFO] Extracted screen_size from retailer_sku_name: {size_number} inches")
@@ -1384,6 +1386,26 @@ class AmazonDetailCrawler:
             print(f"Total collected: {self.total_collected} (max limit: {self.max_skus})")
             print(f"URLs processed: {min(idx, len(product_urls))}/{len(product_urls)}")
             print("="*80)
+
+            # Send alert email
+            try:
+                cursor = self.db_conn.cursor()
+                cursor.execute("""
+                    SELECT final_sku_price, count_of_reviews, count_of_star_ratings,
+                           star_rating, retailer_sku_name, screen_size
+                    FROM tv_retail_com
+                    WHERE account_name = 'Amazon'
+                    AND crawl_datetime >= NOW() - INTERVAL '1 day'
+                """)
+                rows = cursor.fetchall()
+                columns = ['final_sku_price', 'count_of_reviews', 'count_of_star_ratings',
+                          'star_rating', 'retailer_sku_name', 'screen_size']
+                results_df = pd.DataFrame(rows, columns=columns)
+                cursor.close()
+
+                monitor_and_alert('amazon', len(product_urls), results_df)
+            except Exception as e:
+                print(f"[WARNING] Failed to send alert: {e}")
 
         except Exception as e:
             print(f"\n[ERROR] Crawler failed: {e}")

@@ -187,7 +187,7 @@ class AmazonTestCrawler:
 
             # Fallback: Extract from retailer_sku_name if provided
             if retailer_sku_name:
-                match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|")', retailer_sku_name, re.IGNORECASE)
+                match = re.search(r'(\d+\.?\d*)(?:[\s-]*inch(?:es)?|"|\'\'?)', retailer_sku_name, re.IGNORECASE)
                 if match:
                     size_number = match.group(1)
                     print(f"  [INFO] Extracted screen_size from product name: {size_number} inches")

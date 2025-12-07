@@ -19,6 +19,8 @@ import re
 
 # Import database configuration
 from config import DB_CONFIG
+import pandas as pd
+from alert_monitor import monitor_and_alert
 
 class WalmartDetailCrawler:
     def __init__(self):
@@ -1890,6 +1892,26 @@ class WalmartDetailCrawler:
             print("\n" + "="*80)
             print(f"Detail Crawling completed! Total collected: {self.total_collected}/{len(product_urls)}")
             print("="*80)
+
+            # Send alert email
+            try:
+                cursor = self.db_conn.cursor()
+                cursor.execute("""
+                    SELECT final_sku_price, count_of_reviews, count_of_star_ratings,
+                           star_rating, retailer_sku_name, screen_size
+                    FROM tv_retail_com
+                    WHERE account_name = 'Walmart'
+                    AND crawl_datetime >= NOW() - INTERVAL '1 day'
+                """)
+                rows = cursor.fetchall()
+                columns = ['final_sku_price', 'count_of_reviews', 'count_of_star_ratings',
+                          'star_rating', 'retailer_sku_name', 'screen_size']
+                results_df = pd.DataFrame(rows, columns=columns)
+                cursor.close()
+
+                monitor_and_alert('walmart', len(product_urls), results_df)
+            except Exception as e:
+                print(f"[WARNING] Failed to send alert: {e}")
 
         except Exception as e:
             print(f"[ERROR] Crawler failed: {e}")

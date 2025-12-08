@@ -84,16 +84,10 @@ class BestBuyTVCrawler:
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--lang=en-US,en;q=0.9')
 
-        # Performance optimization: block unnecessary resources (images only)
-        chrome_options.add_argument('--blink-settings=imagesEnabled=false')
-        chrome_options.add_argument('--disable-images')
-
         prefs = {
             "profile.default_content_setting_values.notifications": 2,
             "credentials_enable_service": False,
             "profile.password_manager_enabled": False,
-            # Block images to reduce bandwidth
-            "profile.managed_default_content_settings.images": 2,
         }
         chrome_options.add_experimental_option("prefs", prefs)
 

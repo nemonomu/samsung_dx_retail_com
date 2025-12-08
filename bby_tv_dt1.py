@@ -1110,13 +1110,21 @@ class BestBuyDetailCrawler:
             return None
 
     def extract_top_mentions_from_reviews_page(self):
-        """Top_Mentions extraction (See All Customer Reviews page에서)"""
+        """Top_Mentions extraction (See All Customer Reviews page에서)
+        Returns: 콤마로 구분된 모든 mentions (예: "Picture Quality, Setup, Size")
+        """
         try:
-            # XPath 패턴 (ID가 동적이므로 class 기반으로 찾기)
+            # XPath 패턴 - 제공된 HTML 구조 기반
+            # /html/body/div[5]/div[8]/div[2]/aside/ul/li/a
             xpaths = [
-                # "Highly rated by customers for" section의 span.text-nowrap들
-                '//div[contains(@class, "customer-review-pros-stats")]//span[@class="text-nowrap"]',
+                # 제공된 XPath 기반 - ul 내 모든 li의 a 태그
+                '/html/body/div[5]/div[8]/div[2]/aside/ul/li/a',
+                # class 기반 패턴 - list-unstyled ul 내 a 태그
+                '//ul[@class="list-unstyled"]/li/a[contains(@class, "v-text-tech-black")]',
                 # 더 넓은 패턴
+                '//ul[@class="list-unstyled"]/li/a',
+                # 기존 패턴 (fallback)
+                '//div[contains(@class, "customer-review-pros-stats")]//span[@class="text-nowrap"]',
                 '//div[contains(., "Highly rated by customers for")]//span[@class="text-nowrap"]'
             ]
 
@@ -1127,17 +1135,21 @@ class BestBuyDetailCrawler:
                     if elements:
                         for elem in elements:
                             text = elem.text.strip()
-                            # 콤마나 기타 불필요한 문자 제거
-                            text = text.replace(',', '').strip()
                             if text:
-                                mentions.append(text)
+                                # 숫자와 괄호 제거 (예: "Picture Quality (1014)" -> "Picture Quality")
+                                # "&nbsp;" 처리 및 괄호+숫자 패턴 제거 (콤마 포함 숫자도 처리)
+                                clean_text = re.sub(r'\s*\([\d,]+\)\s*$', '', text)
+                                # 앞뒤 공백 및 특수문자 정리
+                                clean_text = clean_text.replace('\xa0', ' ').strip()
+                                if clean_text:
+                                    mentions.append(clean_text)
                         break
                 except Exception:
                     continue
 
             if mentions:
-                # first 번째 항목만 반환 (예: "Picture Quality")
-                return mentions[0]
+                # 모든 mentions를 콤마로 구분하여 반환
+                return ', '.join(mentions)
 
             return None
 

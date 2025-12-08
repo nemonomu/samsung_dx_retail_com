@@ -440,6 +440,11 @@ class WalmartDetailCrawler:
                             print(f"       Final Price: See price in cart")
                             return "See price in cart"
 
+                        # Check for "Not Available"
+                        if "Not Available" in text:
+                            print(f"       Final Price: Not Available")
+                            return "Not Available"
+
                         # Extract dollar price (e.g., "Now $238.00" -> "$238.00")
                         price_match = re.search(r'\$[\d,]+\.?\d*', text)
                         if price_match:
@@ -484,6 +489,24 @@ class WalmartDetailCrawler:
                         if price_match:
                             print(f"       Final Price: {price_match.group(0)}")
                             return price_match.group(0)
+                except:
+                    continue
+
+            # Fallback 3: Look for "Not Available" at specific locations
+            not_available_xpaths = [
+                '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/section[1]/div/div/div/div/div/div[2]/div/div',
+                '//div[contains(@class, "gray") and contains(text(), "Not Available")]',
+                '//div[contains(text(), "Not Available")]'
+            ]
+
+            for xpath in not_available_xpaths:
+                try:
+                    elements = tree.xpath(xpath)
+                    if elements:
+                        text = elements[0].text_content().strip()
+                        if "Not Available" in text:
+                            print(f"       Final Price: Not Available")
+                            return "Not Available"
                 except:
                     continue
 

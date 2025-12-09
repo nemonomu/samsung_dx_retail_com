@@ -15,12 +15,15 @@ Best Buy TV Integrated Crawler
 - bby_tv_pmt1: Promotion listing data
 - bby_tv_crawl: Detail page data (copy structure from bby_tv_detail_crawled)
 - tv_retail_com: Unified retail data
+
+Sends email notification on completion or failure.
 """
 import subprocess
 import sys
 import time
 import os
 from datetime import datetime
+from alert_monitor import send_crawl_alert
 
 class IntegratedCrawler:
     def __init__(self):
@@ -159,9 +162,24 @@ class IntegratedCrawler:
 
 def main():
     """Main execution"""
+    crawler = None
     try:
         crawler = IntegratedCrawler()
         success = crawler.run()
+
+        # Calculate total duration
+        total_duration = (datetime.now() - crawler.overall_start_time).total_seconds()
+
+        # Collect failed stages
+        failed_stages = [name for name, result in crawler.results.items() if not result['success']]
+
+        # Send email notification
+        send_crawl_alert(
+            retailer='BestBuy',
+            results=crawler.results,
+            failed_stages=failed_stages,
+            elapsed_time=total_duration
+        )
 
         if success:
             print("\n[✓] All crawlers completed successfully")
@@ -172,11 +190,27 @@ def main():
 
     except KeyboardInterrupt:
         print("\n[!] Interrupted by user")
+        # Send alert for interruption
+        send_crawl_alert(
+            retailer='BestBuy',
+            results=crawler.results if crawler else {},
+            failed_stages=['Interrupted by user'],
+            elapsed_time=0,
+            error_message='Crawler interrupted by user'
+        )
         sys.exit(1)
     except Exception as e:
         print(f"\n[!] Fatal error: {e}")
         import traceback
         traceback.print_exc()
+        # Send alert for fatal error
+        send_crawl_alert(
+            retailer='BestBuy',
+            results=crawler.results if crawler else {},
+            failed_stages=['Fatal error'],
+            elapsed_time=0,
+            error_message=str(e)
+        )
         sys.exit(1)
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ Executes main1 -> main2 -> bsr -> dt1 in sequence
 
 If at least one of (main1, main2, bsr) succeeds, dt1 will run.
 If any step fails, creates a failure log at C:\\samsung_dx_retail_com\\failed_wmart\\
+Sends email notification on completion or failure.
 """
 
 import subprocess
@@ -11,6 +12,7 @@ import sys
 import time
 import os
 from datetime import datetime
+from alert_monitor import send_crawl_alert
 
 
 def print_separator():
@@ -108,101 +110,136 @@ def create_failure_log(failed_stages):
 
 def main():
     """Main execution function"""
-    # Generate batch_id and session_start_time for consistency
-    batch_id = datetime.now().strftime('%Y%m%d_%H%M%S')
-    session_start_time = datetime.now().strftime('%Y%m%d%H%M')
-
-    print_separator()
-    print("Walmart TV Crawler - Integrated Sequential Execution")
-    print(f"Batch ID: {batch_id}")
-    print(f"Session ID: {session_start_time}")
-    print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print_separator()
-
-    overall_start_time = time.time()
-
-    # Stage definitions: (script_name, display_name)
-    stages = [
-        ("wmart_tv_main1.py", "Main Crawler Part 1 (Pages 1-5)"),
-        ("wmart_tv_main2.py", "Main Crawler Part 2 (Pages 6-10)"),
-        ("wmart_tv_bsr.py", "BSR Crawler"),
-        ("wmart_tv_dt1.py", "Detail Crawler")
-    ]
-
+    # Initialize variables for exception handling
     results = {}
     failed_stages = []
+    overall_start_time = time.time()
 
-    # Execute main1, main2, bsr
-    for i, (script, name) in enumerate(stages[:3], 1):
-        print_stage_header(name, i, 4)
-        success = run_crawler(script, name)
-        results[script] = success
+    try:
+        # Generate batch_id and session_start_time for consistency
+        batch_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+        session_start_time = datetime.now().strftime('%Y%m%d%H%M')
 
-        if not success:
-            failed_stages.append(script)
+        print_separator()
+        print("Walmart TV Crawler - Integrated Sequential Execution")
+        print(f"Batch ID: {batch_id}")
+        print(f"Session ID: {session_start_time}")
+        print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print_separator()
 
-        # Wait 5 seconds between stages for driver cleanup
-        if i < 3:
-            print(f"\n[INFO] Waiting 5 seconds for driver cleanup...")
+        # Stage definitions: (script_name, display_name)
+        stages = [
+            ("wmart_tv_main1.py", "Main Crawler Part 1 (Pages 1-5)"),
+            ("wmart_tv_main2.py", "Main Crawler Part 2 (Pages 6-10)"),
+            ("wmart_tv_bsr.py", "BSR Crawler"),
+            ("wmart_tv_dt1.py", "Detail Crawler")
+        ]
+
+        # Execute main1, main2, bsr
+        for i, (script, name) in enumerate(stages[:3], 1):
+            print_stage_header(name, i, 4)
+            success = run_crawler(script, name)
+            results[script] = success
+
+            if not success:
+                failed_stages.append(script)
+
+            # Wait 5 seconds between stages for driver cleanup
+            if i < 3:
+                print(f"\n[INFO] Waiting 5 seconds for driver cleanup...")
+                time.sleep(5)
+
+        # Check if at least one of main1/main2/bsr succeeded
+        main_stages_success = any([results["wmart_tv_main1.py"],
+                                    results["wmart_tv_main2.py"],
+                                    results["wmart_tv_bsr.py"]])
+
+        # Execute dt1 only if at least one main stage succeeded
+        if main_stages_success:
+            print(f"\n[INFO] At least one main stage succeeded. Proceeding to detail crawler...")
             time.sleep(5)
 
-    # Check if at least one of main1/main2/bsr succeeded
-    main_stages_success = any([results["wmart_tv_main1.py"],
-                                results["wmart_tv_main2.py"],
-                                results["wmart_tv_bsr.py"]])
+            print_stage_header(stages[3][1], 4, 4)
+            success = run_crawler(stages[3][0], stages[3][1])
+            results[stages[3][0]] = success
 
-    # Execute dt1 only if at least one main stage succeeded
-    if main_stages_success:
-        print(f"\n[INFO] At least one main stage succeeded. Proceeding to detail crawler...")
-        time.sleep(5)
-
-        print_stage_header(stages[3][1], 4, 4)
-        success = run_crawler(stages[3][0], stages[3][1])
-        results[stages[3][0]] = success
-
-        if not success:
-            failed_stages.append(stages[3][0])
-    else:
-        print(f"\n[WARNING] All main stages (main1, main2, bsr) failed. Skipping detail crawler.")
-        results["wmart_tv_dt1.py"] = None  # Not executed
-
-    # Create failure log if any stage failed
-    if failed_stages:
-        create_failure_log(failed_stages)
-
-    # Print final summary
-    overall_elapsed = time.time() - overall_start_time
-    print_separator()
-    print("EXECUTION SUMMARY")
-    print_separator()
-    print(f"{'Stage':<40} {'Status':<15}")
-    print("-" * 80)
-
-    for script, name in stages:
-        status = results.get(script)
-        if status is True:
-            status_str = "SUCCESS"
-        elif status is False:
-            status_str = "FAILED"
+            if not success:
+                failed_stages.append(stages[3][0])
         else:
-            status_str = "SKIPPED"
+            print(f"\n[WARNING] All main stages (main1, main2, bsr) failed. Skipping detail crawler.")
+            results["wmart_tv_dt1.py"] = None  # Not executed
 
-        print(f"{name:<40} {status_str:<15}")
+        # Create failure log if any stage failed
+        if failed_stages:
+            create_failure_log(failed_stages)
 
-    print("-" * 80)
-    print(f"Total elapsed time: {overall_elapsed:.1f} seconds ({overall_elapsed/60:.1f} minutes)")
-    print(f"End time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        # Print final summary
+        overall_elapsed = time.time() - overall_start_time
+        print_separator()
+        print("EXECUTION SUMMARY")
+        print_separator()
+        print(f"{'Stage':<40} {'Status':<15}")
+        print("-" * 80)
 
-    if failed_stages:
-        print(f"\n[WARNING] {len(failed_stages)} stage(s) failed")
-        print(f"Failed stages: {', '.join(failed_stages)}")
-    else:
-        print(f"\n[OK] All executed stages completed successfully!")
+        for script, name in stages:
+            status = results.get(script)
+            if status is True:
+                status_str = "SUCCESS"
+            elif status is False:
+                status_str = "FAILED"
+            else:
+                status_str = "SKIPPED"
 
-    print_separator()
+            print(f"{name:<40} {status_str:<15}")
 
-    # Return exit code
-    return 0 if not failed_stages else 1
+        print("-" * 80)
+        print(f"Total elapsed time: {overall_elapsed:.1f} seconds ({overall_elapsed/60:.1f} minutes)")
+        print(f"End time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+        if failed_stages:
+            print(f"\n[WARNING] {len(failed_stages)} stage(s) failed")
+            print(f"Failed stages: {', '.join(failed_stages)}")
+        else:
+            print(f"\n[OK] All executed stages completed successfully!")
+
+        print_separator()
+
+        # Send email notification
+        send_crawl_alert(
+            retailer='Walmart',
+            results=results,
+            failed_stages=failed_stages,
+            elapsed_time=overall_elapsed
+        )
+
+        # Return exit code
+        return 0 if not failed_stages else 1
+
+    except KeyboardInterrupt:
+        print("\n[!] Interrupted by user")
+        overall_elapsed = time.time() - overall_start_time
+        send_crawl_alert(
+            retailer='Walmart',
+            results=results,
+            failed_stages=['Interrupted by user'],
+            elapsed_time=overall_elapsed,
+            error_message='Crawler interrupted by user'
+        )
+        return 1
+
+    except Exception as e:
+        print(f"\n[!] Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
+        overall_elapsed = time.time() - overall_start_time
+        send_crawl_alert(
+            retailer='Walmart',
+            results=results,
+            failed_stages=['Fatal error'],
+            elapsed_time=overall_elapsed,
+            error_message=str(e)
+        )
+        return 1
 
 
 if __name__ == "__main__":

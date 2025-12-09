@@ -298,3 +298,194 @@ def monitor_and_alert(retailer_code, target_count, results_df, error_message=Non
     except Exception as e:
         logger.error(f"Monitoring error: {e}")
         return False
+
+
+def send_crawl_alert(retailer, results, failed_stages, elapsed_time, error_message=None):
+    """
+    Send crawling completion/failure email alert for integrated crawlers.
+
+    Args:
+        retailer: Retailer name (e.g., 'Amazon', 'Walmart', 'BestBuy')
+        results: Dictionary of stage results {stage_name: success_bool or {'success': bool, 'duration': float}}
+        failed_stages: List of failed stage names
+        elapsed_time: Total elapsed time in seconds
+        error_message: Additional error message (optional)
+
+    Returns:
+        bool: Email send success status
+
+    Usage example:
+        from alert_monitor import send_crawl_alert
+
+        # After crawling complete
+        send_crawl_alert(
+            retailer='Amazon',
+            results={'main1': True, 'bsr1': False, 'dt1': True},
+            failed_stages=['bsr1'],
+            elapsed_time=3600.5
+        )
+
+        # On fatal error
+        send_crawl_alert(
+            retailer='Amazon',
+            results={},
+            failed_stages=['Fatal error'],
+            elapsed_time=0,
+            error_message='ChromeDriver initialization failed'
+        )
+    """
+    try:
+        korea_tz = pytz.timezone('Asia/Seoul')
+        now = datetime.now(korea_tz)
+
+        # Determine alert level
+        is_critical = len(failed_stages) > 0 or error_message is not None
+
+        # Generate email subject
+        if is_critical:
+            subject = f"[CRITICAL] {retailer} TV Crawler Alert - {now.strftime('%Y-%m-%d %H:%M')}"
+        else:
+            subject = f"[OK] {retailer} TV Crawler Report - {now.strftime('%Y-%m-%d %H:%M')}"
+
+        # Build results table rows
+        results_rows = ""
+        for stage_name, result in results.items():
+            # Handle both dict format {'success': bool, 'duration': float} and simple bool format
+            if isinstance(result, dict):
+                success = result.get('success', False)
+                duration = result.get('duration')
+                if success is None:
+                    status = '<span style="color: #6c757d;">SKIPPED</span>'
+                elif success:
+                    status = '<span style="color: #28a745;">SUCCESS</span>'
+                else:
+                    status = '<span style="color: #dc3545;">FAILED</span>'
+                duration_str = f"{duration:.1f}s" if duration is not None else "N/A"
+            else:
+                # Simple bool or None
+                if result is None:
+                    status = '<span style="color: #6c757d;">SKIPPED</span>'
+                elif result:
+                    status = '<span style="color: #28a745;">SUCCESS</span>'
+                else:
+                    status = '<span style="color: #dc3545;">FAILED</span>'
+                duration_str = "N/A"
+
+            results_rows += f"""
+                <tr>
+                    <td>{stage_name}</td>
+                    <td>{status}</td>
+                    <td>{duration_str}</td>
+                </tr>
+            """
+
+        # Generate email body (HTML)
+        html_content = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: 'Malgun Gothic', Arial, sans-serif; }}
+                .critical {{ color: #dc3545; font-weight: bold; }}
+                .success {{ color: #28a745; font-weight: bold; }}
+                table {{ border-collapse: collapse; width: 100%; margin: 10px 0; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                th {{ background-color: #4CAF50; color: white; }}
+                tr:nth-child(even) {{ background-color: #f2f2f2; }}
+                .header {{ background-color: #333; color: white; padding: 15px; }}
+                .section {{ margin: 20px 0; }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h2>{retailer} TV Crawler Report</h2>
+                <p>Time: {now.strftime('%Y-%m-%d %H:%M:%S')} (KST)</p>
+            </div>
+
+            <div class="section">
+                <h3>Execution Summary</h3>
+                <table>
+                    <tr>
+                        <th>Item</th>
+                        <th>Value</th>
+                    </tr>
+                    <tr>
+                        <td>Total Elapsed Time</td>
+                        <td>{elapsed_time:.1f} seconds ({elapsed_time/60:.1f} minutes)</td>
+                    </tr>
+                    <tr>
+                        <td>Overall Status</td>
+                        <td>{'<span class="critical">FAILED</span>' if is_critical else '<span class="success">SUCCESS</span>'}</td>
+                    </tr>
+                </table>
+            </div>
+
+            <div class="section">
+                <h3>Stage Results</h3>
+                <table>
+                    <tr>
+                        <th>Stage</th>
+                        <th>Status</th>
+                        <th>Duration</th>
+                    </tr>
+                    {results_rows}
+                </table>
+            </div>
+        """
+
+        # Add error message section if present
+        if error_message:
+            html_content += f"""
+            <div class="section">
+                <h3>Error Details</h3>
+                <div style="background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; padding: 10px; color: #721c24;">
+                    {error_message}
+                </div>
+            </div>
+            """
+
+        # Add failed stages section if present
+        if failed_stages:
+            failed_list = "".join([f"<li>{stage}</li>" for stage in failed_stages])
+            html_content += f"""
+            <div class="section">
+                <h3>Failed Stages</h3>
+                <ul class="critical">
+                    {failed_list}
+                </ul>
+            </div>
+            """
+
+        html_content += """
+            <div class="section">
+                <p style="color: #666; font-size: 12px;">
+                    This email was sent automatically. If issues persist, please check the crawler logs.
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+
+        # Create email
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = EMAIL_CONFIG['sender_email']
+        msg['To'] = EMAIL_CONFIG['receiver_email']
+
+        msg.attach(MIMEText(html_content, 'html'))
+
+        # Send email
+        with smtplib.SMTP(EMAIL_CONFIG['smtp_server'], EMAIL_CONFIG['smtp_port']) as server:
+            server.starttls()
+            server.login(EMAIL_CONFIG['sender_email'], EMAIL_CONFIG['sender_password'])
+            server.sendmail(
+                EMAIL_CONFIG['sender_email'],
+                EMAIL_CONFIG['receiver_email'],
+                msg.as_string()
+            )
+
+        logger.info(f"Crawl alert email sent: {subject}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to send crawl alert email: {e}")
+        return False

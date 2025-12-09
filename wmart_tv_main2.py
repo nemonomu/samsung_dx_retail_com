@@ -165,15 +165,15 @@ class WalmartTVCrawler:
             print(f"[WARNING] CAPTCHA check failed: {e}")
             return True
 
-    def scrape_page(self, url, page_number, retry_count=0):
+    def scrape_page(self, url, page_number, retry_count=0, is_first_page=False):
         """Scrape a single page"""
         max_retries = 2
 
         try:
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
 
-            # For page 1, navigate naturally through browse page
-            if page_number == 1 and retry_count == 0:
+            # For first page in this session, navigate naturally through browse page
+            if is_first_page and retry_count == 0:
                 print("[INFO] Navigating to Walmart browse page first...")
                 try:
                     # Try browse electronics category first
@@ -263,7 +263,7 @@ class WalmartTVCrawler:
                         self.driver.refresh()
                         time.sleep(random.uniform(10, 15))
 
-                        return self.scrape_page(url, page_number, retry_count + 1)
+                        return self.scrape_page(url, page_number, retry_count + 1, is_first_page=False)
                     else:
                         print(f"[ERROR] Failed to bypass robot detection after {max_retries} retries")
                         print("[INFO] Saving page source for debugging...")
@@ -633,6 +633,7 @@ class WalmartTVCrawler:
                 return
 
             # Scrape each page with retry logic
+            is_first_page = True  # Flag for browse page warmup on first page
             for page_number, url in page_urls:
                 if self.total_collected >= self.max_skus:
                     break
@@ -647,8 +648,11 @@ class WalmartTVCrawler:
                             print(f"\n[RETRY] Attempting page {page_number} again (attempt {retry_attempt + 1}/{max_page_retries + 1})")
                             time.sleep(random.uniform(10, 15))
 
-                        if self.scrape_page(url, page_number):
+                        # Only do warmup on first attempt of first page
+                        do_warmup = is_first_page and retry_attempt == 0
+                        if self.scrape_page(url, page_number, retry_count=0, is_first_page=do_warmup):
                             page_success = True
+                            is_first_page = False  # Only first page gets warmup
                             break
                         else:
                             # scrape_page returned False (robot detection failed)

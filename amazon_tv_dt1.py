@@ -1002,20 +1002,20 @@ class AmazonDetailCrawler:
                         tree = html.fromstring(self.driver.page_source)
                         review_elements = tree.xpath(review_xpath)
 
-                        # Collect reviews but check for duplicates
-                        first_page_reviews = set(all_reviews)  # Store first page reviews for duplicate check
+                        print(f"  [DEBUG] Review page 2: found {len(review_elements)} review elements")
 
+                        # Collect reviews from second page (no duplicate check - pages are different)
+                        page2_count = 0
                         if review_elements:
                             for elem in review_elements[:10]:  # Max 10 from second page
                                 if len(all_reviews) >= 20:
                                     break
                                 review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
                                 if review_text and len(review_text) > 10:
-                                    # Skip if duplicate from first page
-                                    if review_text not in first_page_reviews:
-                                        all_reviews.append(review_text)
+                                    all_reviews.append(review_text)
+                                    page2_count += 1
 
-                        print(f"  [INFO] Review page 2: collected {len(all_reviews)} reviews total")
+                        print(f"  [INFO] Review page 2: added {page2_count} reviews, total {len(all_reviews)} reviews")
                 else:
                     print(f"  [WARNING] Could not find next page link")
 

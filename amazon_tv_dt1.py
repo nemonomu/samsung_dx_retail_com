@@ -874,9 +874,11 @@ class AmazonDetailCrawler:
             tree = html.fromstring(self.driver.page_source)
 
             # Extract "See more reviews" link
+            # Priority: data-hook attribute is most reliable
             review_link_xpaths = [
-                '//*[@id="reviews-medley-footer"]/div[2]/a/@href',
-                '//a[@data-hook="see-all-reviews-link-foot"]/@href',
+                '//a[@data-hook="see-all-reviews-link-foot"]/@href',  # Most reliable - data-hook attribute
+                '//*[@id="reviews-medley-footer"]//a[contains(@href, "product-reviews")]/@href',  # Footer container
+                '//*[@id="reviews-medley-footer"]/div[2]/a/@href',  # Legacy structure
                 '//a[contains(text(), "See more reviews")]/@href',
                 '//a[contains(text(), "See all reviews")]/@href',
                 '//a[contains(@href, "product-reviews")]/@href'

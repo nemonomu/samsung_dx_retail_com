@@ -1,5 +1,6 @@
 # Configuration files with sensitive information
 config.py
+amazon_login.py
 
 # Python cache
 __pycache__/

@@ -13,8 +13,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 COOKIE_FILE = 'amazon_cookies.pkl'
 
 # Amazon credentials (CHANGE THESE!)
-AMAZON_EMAIL = 'lch6322@gmail.com'
-AMAZON_PASSWORD = 'ehdxoxkd'
+AMAZON_EMAIL = 'your-email@example.com'
+AMAZON_PASSWORD = 'your-password'
 
 def setup_driver():
     """Setup Chrome WebDriver"""

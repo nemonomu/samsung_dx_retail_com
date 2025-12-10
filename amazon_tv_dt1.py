@@ -898,25 +898,20 @@ class AmazonDetailCrawler:
                 print("  [WARNING] Could not find review page link, falling back to detail page reviews")
                 return self.extract_detailed_reviews(product_url), None
 
-            # Extract ASIN from review link and build consistent URL
-            # This ensures sortBy=helpful is used from the start
+            # Extract ASIN from review link
             asin_match = re.search(r'/product-reviews/([A-Z0-9]{10})', review_link)
             if asin_match:
                 asin = asin_match.group(1)
-                # Build clean review URL with sortBy=helpful from the start
-                review_url = f"https://www.amazon.com/product-reviews/{asin}?reviewerType=all_reviews&sortBy=helpful&pageNumber=1"
                 print(f"  [DEBUG] Extracted ASIN from review link: {asin}")
             else:
-                # Fallback: use original link with sortBy=helpful added
-                print(f"  [WARNING] Could not extract ASIN from review link, using original link")
-                if review_link.startswith('http'):
-                    review_url = review_link
-                else:
-                    review_url = "https://www.amazon.com" + review_link
-                # Add sortBy=helpful to fallback URL
-                if 'sortBy=' not in review_url:
-                    review_url += '&sortBy=helpful' if '?' in review_url else '?sortBy=helpful'
-                asin = None  # Mark as None for page 2 handling
+                asin = None
+                print(f"  [WARNING] Could not extract ASIN from review link")
+
+            # Use original review link (Amazon requires specific ref parameter for pagination)
+            if review_link.startswith('http'):
+                review_url = review_link
+            else:
+                review_url = "https://www.amazon.com" + review_link
 
             print(f"  [INFO] Navigating to review page: {review_url}")
             self.driver.get(review_url)
@@ -984,22 +979,10 @@ class AmazonDetailCrawler:
                     count_int = 0
 
             # If more than 10 reviews exist, go to next page for more
-            if count_int > 10 and len(all_reviews) > 0:
-                # Build page 2 URL
-                if asin:
-                    # Use ASIN to build consistent URL
-                    next_url = f"https://www.amazon.com/product-reviews/{asin}?reviewerType=all_reviews&sortBy=helpful&pageNumber=2"
-                else:
-                    # Fallback: modify current URL to page 2
-                    current_url = self.driver.current_url
-                    if 'pageNumber=1' in current_url:
-                        next_url = current_url.replace('pageNumber=1', 'pageNumber=2')
-                    elif 'pageNumber=' not in current_url:
-                        next_url = current_url + ('&pageNumber=2' if '?' in current_url else '?pageNumber=2')
-                    else:
-                        print(f"  [WARNING] Could not build page 2 URL, skipping")
-                        next_url = None
-
+            if count_int > 10 and len(all_reviews) > 0 and asin:
+                # Build page 2 URL with Amazon's required ref format
+                # Format: /product-reviews/{ASIN}/ref=cm_cr_arp_d_paging_btm_next_2?ie=UTF8&reviewerType=all_reviews&pageNumber=2
+                next_url = f"https://www.amazon.com/product-reviews/{asin}/ref=cm_cr_arp_d_paging_btm_next_2?ie=UTF8&reviewerType=all_reviews&pageNumber=2"
                 if next_url:
                     print(f"  [INFO] Navigating to review page 2: {next_url}")
                     self.driver.get(next_url)

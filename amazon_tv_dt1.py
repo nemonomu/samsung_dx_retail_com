@@ -979,13 +979,17 @@ class AmazonDetailCrawler:
                     count_int = 0
 
             # If more than 10 reviews exist, go to next page for more
-            if count_int > 10 and len(all_reviews) > 0 and asin:
-                # Build page 2 URL with Amazon's required ref format
-                # Format: /product-reviews/{ASIN}/ref=cm_cr_arp_d_paging_btm_next_2?ie=UTF8&reviewerType=all_reviews&pageNumber=2
-                next_url = f"https://www.amazon.com/product-reviews/{asin}/ref=cm_cr_arp_d_paging_btm_next_2?ie=UTF8&reviewerType=all_reviews&pageNumber=2"
-                if next_url:
-                    print(f"  [INFO] Navigating to review page 2: {next_url}")
-                    self.driver.get(next_url)
+            if count_int > 10 and len(all_reviews) > 0:
+                # Click "Next page" button (Amazon requires actual click for pagination to work)
+                try:
+                    # Scroll to bottom of page to ensure Next button is visible
+                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(1)
+
+                    # Find and click Next page button
+                    next_button = self.driver.find_element(By.XPATH, '//li[@class="a-last"]/a')
+                    print(f"  [INFO] Clicking Next page button...")
+                    self.driver.execute_script("arguments[0].click();", next_button)
                     time.sleep(random.uniform(3, 5))
 
                     # Verify we're on page 2
@@ -1023,6 +1027,9 @@ class AmazonDetailCrawler:
                     if duplicates > 0:
                         print(f"  [WARNING] Found {duplicates} duplicate reviews on page 2")
                     print(f"  [INFO] Review page 2: added {page2_count} reviews, total {len(all_reviews)} reviews")
+
+                except Exception as e:
+                    print(f"  [WARNING] Could not navigate to page 2: {e}")
 
             # Navigate back to product page
             print(f"  [INFO] Navigating back to product page...")

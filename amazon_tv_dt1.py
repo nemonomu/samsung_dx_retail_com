@@ -924,39 +924,37 @@ class AmazonDetailCrawler:
                             print(f"  [OK] Extracted count_of_reviews from review page: {count_of_reviews}")
                             break
 
-            # Collect reviews from multiple pages
+            # Collect reviews from first page (max 10 reviews per page)
             all_reviews = []
-            page_num = 1
-            max_pages = 3  # Max 3 pages to get 20+ reviews
+            tree = html.fromstring(self.driver.page_source)
 
-            while len(all_reviews) < 20 and page_num <= max_pages:
-                tree = html.fromstring(self.driver.page_source)
+            # Extract reviews from first page
+            review_xpath = '//span[@data-hook="review-body"]/span'
+            review_elements = tree.xpath(review_xpath)
 
-                # Extract reviews from current page
-                review_xpath = '//span[@data-hook="review-body"]/span'
-                review_elements = tree.xpath(review_xpath)
+            if review_elements:
+                for elem in review_elements[:10]:  # Max 10 from first page
+                    review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
+                    if review_text and len(review_text) > 10:
+                        all_reviews.append(review_text)
 
-                if review_elements:
-                    for elem in review_elements:
-                        # Check if we already have 20 reviews
-                        if len(all_reviews) >= 20:
-                            break
+            print(f"  [INFO] Review page 1: collected {len(all_reviews)} reviews")
 
-                        review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
-                        if review_text and len(review_text) > 10:
-                            all_reviews.append(review_text)
+            # Check if we need to go to next page (count_of_reviews > 10)
+            count_int = 0
+            if count_of_reviews:
+                try:
+                    count_int = int(str(count_of_reviews).replace(',', ''))
+                except:
+                    count_int = 0
 
-                print(f"  [INFO] Review page {page_num}: collected {len(all_reviews)} reviews so far")
-
-                # Check if we have enough reviews after this page
-                if len(all_reviews) >= 20:
-                    break
-
+            # If more than 10 reviews exist and we collected 10, go to next page
+            if count_int > 10 and len(all_reviews) >= 10:
                 # Find next page link
                 next_button_xpaths = [
-                    '//a[contains(text(), "Next page")]/@href',
-                    '//*[@id="cm_cr-pagination_bar"]//li[@class="a-last"]/a/@href',
-                    '//ul[@class="a-pagination"]//li[@class="a-last"]/a/@href'
+                    '//*[@id="cm_cr-pagination_bar"]/ul/li[@class="a-last"]/a/@href',
+                    '//li[@class="a-last"]/a[contains(text(), "Next page")]/@href',
+                    '//a[contains(text(), "Next page")]/@href'
                 ]
 
                 next_link = None
@@ -972,11 +970,23 @@ class AmazonDetailCrawler:
                     else:
                         next_url = "https://www.amazon.com" + next_link
 
+                    print(f"  [INFO] Navigating to review page 2: {next_url[:80]}...")
                     self.driver.get(next_url)
                     time.sleep(random.uniform(2, 3))
-                    page_num += 1
-                else:
-                    break
+
+                    # Extract reviews from second page
+                    tree = html.fromstring(self.driver.page_source)
+                    review_elements = tree.xpath(review_xpath)
+
+                    if review_elements:
+                        for elem in review_elements[:10]:  # Max 10 from second page
+                            if len(all_reviews) >= 20:
+                                break
+                            review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
+                            if review_text and len(review_text) > 10:
+                                all_reviews.append(review_text)
+
+                    print(f"  [INFO] Review page 2: collected {len(all_reviews)} reviews total")
 
             # Navigate back to product page
             print(f"  [INFO] Navigating back to product page...")

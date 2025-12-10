@@ -864,7 +864,11 @@ class AmazonDetailCrawler:
             return None
 
     def extract_detailed_reviews_from_review_page(self, product_url):
-        """Extract up to 20 detailed reviews from review pages"""
+        """Extract up to 20 detailed reviews and count_of_reviews from review pages
+
+        Returns:
+            tuple: (detailed_review_content, count_of_reviews)
+        """
         try:
             # Get current page HTML
             tree = html.fromstring(self.driver.page_source)
@@ -885,7 +889,7 @@ class AmazonDetailCrawler:
 
             if not review_link:
                 print("  [WARNING] Could not find review page link, falling back to detail page reviews")
-                return self.extract_detailed_reviews(product_url)
+                return self.extract_detailed_reviews(product_url), None
 
             # Navigate to review page
             if review_link.startswith('http'):
@@ -896,6 +900,29 @@ class AmazonDetailCrawler:
             print(f"  [INFO] Navigating to review page: {review_url[:80]}...")
             self.driver.get(review_url)
             time.sleep(random.uniform(3, 4))
+
+            # Extract count_of_reviews from review page
+            # XPath: //*[@id="filter-info-section"]/div or div[@data-hook="cr-filter-info-review-rating-count"]
+            count_of_reviews = None
+            tree = html.fromstring(self.driver.page_source)
+
+            count_xpaths = [
+                '//*[@id="filter-info-section"]/div',
+                '//div[@data-hook="cr-filter-info-review-rating-count"]',
+                '//div[contains(@data-hook, "review-rating-count")]'
+            ]
+
+            for xpath in count_xpaths:
+                count_elements = tree.xpath(xpath)
+                if count_elements:
+                    count_text = count_elements[0].text_content().strip() if hasattr(count_elements[0], 'text_content') else str(count_elements[0]).strip()
+                    if count_text:
+                        # Extract number from "385 customer reviews" or "1,234 customer reviews"
+                        match = re.search(r'([\d,]+)\s*customer\s*reviews?', count_text, re.IGNORECASE)
+                        if match:
+                            count_of_reviews = match.group(1)
+                            print(f"  [OK] Extracted count_of_reviews from review page: {count_of_reviews}")
+                            break
 
             # Collect reviews from multiple pages
             all_reviews = []
@@ -963,14 +990,14 @@ class AmazonDetailCrawler:
                 for idx, review in enumerate(reviews, 1):
                     formatted_reviews.append(f"{idx}-{review}")
                 print(f"  [OK] Collected {len(reviews)} detailed reviews from review page")
-                return ", ".join(formatted_reviews)
+                return ", ".join(formatted_reviews), count_of_reviews
             else:
                 print("  [WARNING] No reviews found on review page, falling back to detail page reviews")
-                return self.extract_detailed_reviews(product_url)
+                return self.extract_detailed_reviews(product_url), count_of_reviews
 
         except Exception as e:
             print(f"  [WARNING] Failed to extract detailed reviews from review page: {e}")
-            return self.extract_detailed_reviews(product_url)
+            return self.extract_detailed_reviews(product_url), None
 
     def scrape_detail_page(self, url_data):
         """Scrape detail page and extract information"""
@@ -1064,9 +1091,6 @@ class AmazonDetailCrawler:
             sku = self.extract_sku(tree)
             print(f"  [✓] SKU (Model Number): {sku}")
 
-            # Extract count_of_reviews (NEW)
-            count_of_reviews = self.extract_count_of_reviews(tree)
-
             # Extract count of star ratings
             count_of_star_ratings = self.extract_count_of_star_ratings(tree)
 
@@ -1084,11 +1108,15 @@ class AmazonDetailCrawler:
             except Exception as e:
                 print(f"  [WARNING] Summarized review not found (may not exist for this product): {str(e)[:100]}")
 
-            # Extract detailed review content from review page (up to 20 reviews)
-            detailed_review_content = self.extract_detailed_reviews_from_review_page(url)
+            # Extract detailed review content and count_of_reviews from review page (up to 20 reviews)
+            detailed_review_content, count_of_reviews = self.extract_detailed_reviews_from_review_page(url)
 
             # Re-parse page source after returning from review page
             tree = html.fromstring(self.driver.page_source)
+
+            # Fallback: If count_of_reviews not found from review page, try detail page
+            if not count_of_reviews:
+                count_of_reviews = self.extract_count_of_reviews(tree)
 
             # Extract prices from detail page
             final_sku_price = self.extract_final_sku_price(tree)

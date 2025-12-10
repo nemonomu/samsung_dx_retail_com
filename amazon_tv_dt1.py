@@ -877,15 +877,20 @@ class AmazonDetailCrawler:
             review_link_xpaths = [
                 '//*[@id="reviews-medley-footer"]/div[2]/a/@href',
                 '//a[@data-hook="see-all-reviews-link-foot"]/@href',
-                '//a[contains(text(), "See more reviews")]/@href'
+                '//a[contains(text(), "See more reviews")]/@href',
+                '//a[contains(text(), "See all reviews")]/@href',
+                '//a[contains(@href, "product-reviews")]/@href'
             ]
 
             review_link = None
-            for xpath in review_link_xpaths:
+            for idx, xpath in enumerate(review_link_xpaths, 1):
                 result = tree.xpath(xpath)
                 if result:
                     review_link = result[0]
+                    print(f"  [DEBUG] Found review link with XPath #{idx}: {review_link[:80]}...")
                     break
+                else:
+                    print(f"  [DEBUG] XPath #{idx} not found")
 
             if not review_link:
                 print("  [WARNING] Could not find review page link, falling back to detail page reviews")
@@ -917,8 +922,16 @@ class AmazonDetailCrawler:
                 if count_elements:
                     count_text = count_elements[0].text_content().strip() if hasattr(count_elements[0], 'text_content') else str(count_elements[0]).strip()
                     if count_text:
-                        # Extract number from "385 customer reviews" or "1,234 customer reviews"
+                        print(f"  [DEBUG] count_text found: {count_text[:100]}...")
+                        # Try multiple patterns
+                        # Pattern 1: "385 customer reviews" or "1,234 customer reviews"
                         match = re.search(r'([\d,]+)\s*customer\s*reviews?', count_text, re.IGNORECASE)
+                        if not match:
+                            # Pattern 2: "385 with reviews" (from "1,891 global ratings, 385 with reviews")
+                            match = re.search(r'([\d,]+)\s*with\s*reviews?', count_text, re.IGNORECASE)
+                        if not match:
+                            # Pattern 3: Just "385 reviews"
+                            match = re.search(r'([\d,]+)\s*reviews?', count_text, re.IGNORECASE)
                         if match:
                             count_of_reviews = match.group(1)
                             print(f"  [OK] Extracted count_of_reviews from review page: {count_of_reviews}")

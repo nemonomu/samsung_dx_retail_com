@@ -950,10 +950,10 @@ class AmazonDetailCrawler:
 
             # If more than 10 reviews exist, go to next page for more
             if count_int > 10 and len(all_reviews) > 0:
-                # Find next page link
+                # Find next page link - use contains() for class matching
                 next_button_xpaths = [
-                    '//*[@id="cm_cr-pagination_bar"]/ul/li[@class="a-last"]/a/@href',
-                    '//li[@class="a-last"]/a[contains(text(), "Next page")]/@href',
+                    '//li[contains(@class, "a-last")]/a/@href',
+                    '//*[@id="cm_cr-pagination_bar"]//li[contains(@class, "a-last")]/a/@href',
                     '//a[contains(text(), "Next page")]/@href'
                 ]
 
@@ -962,31 +962,43 @@ class AmazonDetailCrawler:
                     result = tree.xpath(xpath)
                     if result:
                         next_link = result[0]
+                        print(f"  [DEBUG] Found next page link: {next_link[:80]}...")
                         break
 
                 if next_link:
-                    if next_link.startswith('http'):
-                        next_url = next_link
+                    # Verify the link contains pageNumber=2
+                    if 'pageNumber=' not in next_link:
+                        print(f"  [WARNING] Next link doesn't contain pageNumber, skipping")
                     else:
-                        next_url = "https://www.amazon.com" + next_link
+                        if next_link.startswith('http'):
+                            next_url = next_link
+                        else:
+                            next_url = "https://www.amazon.com" + next_link
 
-                    print(f"  [INFO] Navigating to review page 2: {next_url[:80]}...")
-                    self.driver.get(next_url)
-                    time.sleep(random.uniform(2, 3))
+                        print(f"  [INFO] Navigating to review page 2: {next_url[:100]}...")
+                        self.driver.get(next_url)
+                        time.sleep(random.uniform(2, 3))
 
-                    # Extract reviews from second page
-                    tree = html.fromstring(self.driver.page_source)
-                    review_elements = tree.xpath(review_xpath)
+                        # Extract reviews from second page
+                        tree = html.fromstring(self.driver.page_source)
+                        review_elements = tree.xpath(review_xpath)
 
-                    if review_elements:
-                        for elem in review_elements[:10]:  # Max 10 from second page
-                            if len(all_reviews) >= 20:
-                                break
-                            review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
-                            if review_text and len(review_text) > 10:
-                                all_reviews.append(review_text)
+                        # Collect reviews but check for duplicates
+                        first_page_reviews = set(all_reviews)  # Store first page reviews for duplicate check
 
-                    print(f"  [INFO] Review page 2: collected {len(all_reviews)} reviews total")
+                        if review_elements:
+                            for elem in review_elements[:10]:  # Max 10 from second page
+                                if len(all_reviews) >= 20:
+                                    break
+                                review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
+                                if review_text and len(review_text) > 10:
+                                    # Skip if duplicate from first page
+                                    if review_text not in first_page_reviews:
+                                        all_reviews.append(review_text)
+
+                        print(f"  [INFO] Review page 2: collected {len(all_reviews)} reviews total")
+                else:
+                    print(f"  [WARNING] Could not find next page link")
 
             # Navigate back to product page
             print(f"  [INFO] Navigating back to product page...")

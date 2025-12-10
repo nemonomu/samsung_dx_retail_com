@@ -974,11 +974,12 @@ class AmazonDetailCrawler:
                 tree = html.fromstring(self.driver.page_source)
 
                 # Find next page link - multiple approaches
+                # Priority: text-based search is most reliable
                 next_button_xpaths = [
-                    '//*[@id="cm_cr-pagination_bar"]/ul/li[2]/a/@href',  # Exact structure from Amazon
-                    '//a[contains(text(), "Next page")]/@href',  # Text-based search
+                    '//a[contains(text(), "Next page")]/@href',  # Text-based search - most reliable
+                    '//*[@id="cm_cr-pagination_bar"]//a[contains(text(), "Next")]/@href',  # Pagination bar with text
                     '//li[contains(@class, "a-last")]/a/@href',
-                    '//*[@id="cm_cr-pagination_bar"]//li[contains(@class, "a-last")]/a/@href',
+                    '//*[@id="cm_cr-pagination_bar"]/ul/li[2]/a/@href',  # Fallback: position-based
                     '//ul[@class="a-pagination"]//li[@class="a-last"]/a/@href'
                 ]
 

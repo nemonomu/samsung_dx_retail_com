@@ -965,20 +965,24 @@ class AmazonDetailCrawler:
 
             # If more than 10 reviews exist, go to next page for more
             if count_int > 10 and len(all_reviews) > 0:
-                # Find next page link - use contains() for class matching
+                # Find next page link - multiple approaches
                 next_button_xpaths = [
+                    '//*[@id="cm_cr-pagination_bar"]/ul/li[2]/a/@href',  # Exact structure from Amazon
+                    '//a[contains(text(), "Next page")]/@href',  # Text-based search
                     '//li[contains(@class, "a-last")]/a/@href',
                     '//*[@id="cm_cr-pagination_bar"]//li[contains(@class, "a-last")]/a/@href',
-                    '//a[contains(text(), "Next page")]/@href'
+                    '//ul[@class="a-pagination"]//li[@class="a-last"]/a/@href'
                 ]
 
                 next_link = None
-                for xpath in next_button_xpaths:
+                for idx, xpath in enumerate(next_button_xpaths, 1):
                     result = tree.xpath(xpath)
                     if result:
                         next_link = result[0]
-                        print(f"  [DEBUG] Found next page link: {next_link[:80]}...")
+                        print(f"  [DEBUG] Found next page link with XPath #{idx}: {next_link[:80]}...")
                         break
+                    else:
+                        print(f"  [DEBUG] Next page XPath #{idx} not found")
 
                 if next_link:
                     # Verify the link contains pageNumber=2

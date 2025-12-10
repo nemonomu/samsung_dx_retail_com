@@ -904,6 +904,13 @@ class AmazonDetailCrawler:
             else:
                 review_url = "https://www.amazon.com" + review_link
 
+            # Add sortBy=helpful to ensure consistent sorting across pages
+            if 'sortBy=' not in review_url:
+                if '?' in review_url:
+                    review_url += '&sortBy=helpful'
+                else:
+                    review_url += '?sortBy=helpful'
+
             print(f"  [INFO] Navigating to review page: {review_url[:80]}...")
             self.driver.get(review_url)
             time.sleep(random.uniform(3, 4))

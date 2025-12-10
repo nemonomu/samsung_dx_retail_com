@@ -996,7 +996,14 @@ class AmazonDetailCrawler:
 
                         print(f"  [INFO] Navigating to review page 2: {next_url[:100]}...")
                         self.driver.get(next_url)
-                        time.sleep(random.uniform(2, 3))
+                        time.sleep(random.uniform(3, 5))  # Increased wait time for page load
+
+                        # Verify we're on page 2
+                        current_url = self.driver.current_url
+                        if 'pageNumber=2' not in current_url:
+                            print(f"  [WARNING] Page 2 not loaded properly, current URL: {current_url[:80]}...")
+                        else:
+                            print(f"  [DEBUG] Confirmed on page 2: {current_url[:80]}...")
 
                         # Extract reviews from second page
                         tree = html.fromstring(self.driver.page_source)
@@ -1004,17 +1011,27 @@ class AmazonDetailCrawler:
 
                         print(f"  [DEBUG] Review page 2: found {len(review_elements)} review elements")
 
-                        # Collect reviews from second page (no duplicate check - pages are different)
+                        # Store first page reviews for duplicate check
+                        first_page_reviews = set(all_reviews)
+
+                        # Collect reviews from second page with duplicate check
                         page2_count = 0
+                        duplicates = 0
                         if review_elements:
                             for elem in review_elements[:10]:  # Max 10 from second page
                                 if len(all_reviews) >= 20:
                                     break
                                 review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
                                 if review_text and len(review_text) > 10:
+                                    # Skip if duplicate from first page
+                                    if review_text in first_page_reviews:
+                                        duplicates += 1
+                                        continue
                                     all_reviews.append(review_text)
                                     page2_count += 1
 
+                        if duplicates > 0:
+                            print(f"  [WARNING] Found {duplicates} duplicate reviews on page 2")
                         print(f"  [INFO] Review page 2: added {page2_count} reviews, total {len(all_reviews)} reviews")
                 else:
                     print(f"  [WARNING] Could not find next page link")

@@ -941,6 +941,11 @@ class AmazonDetailCrawler:
 
             # Collect reviews from first page (max 10 reviews per page)
             all_reviews = []
+
+            # Debug: Print current URL to verify we're on review page
+            current_url = self.driver.current_url
+            print(f"  [DEBUG] Current URL before extracting reviews: {current_url[:100]}...")
+
             tree = html.fromstring(self.driver.page_source)
 
             # Extract reviews from first page
@@ -965,6 +970,9 @@ class AmazonDetailCrawler:
 
             # If more than 10 reviews exist, go to next page for more
             if count_int > 10 and len(all_reviews) > 0:
+                # Re-parse page to get fresh HTML for Next button search
+                tree = html.fromstring(self.driver.page_source)
+
                 # Find next page link - multiple approaches
                 next_button_xpaths = [
                     '//*[@id="cm_cr-pagination_bar"]/ul/li[2]/a/@href',  # Exact structure from Amazon

@@ -948,8 +948,8 @@ class AmazonDetailCrawler:
                 except:
                     count_int = 0
 
-            # If more than 10 reviews exist and we collected 10, go to next page
-            if count_int > 10 and len(all_reviews) >= 10:
+            # If more than 10 reviews exist, go to next page for more
+            if count_int > 10 and len(all_reviews) > 0:
                 # Find next page link
                 next_button_xpaths = [
                     '//*[@id="cm_cr-pagination_bar"]/ul/li[@class="a-last"]/a/@href',

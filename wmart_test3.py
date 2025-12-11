@@ -108,48 +108,61 @@ class WalmartStarRatingsTest:
             return None
 
     def extract_count_of_star_ratings(self, tree):
-        """Extract total star rating count from ratings link
-        New method: Extract from "2,204 ratings" text in review section link
-        Returns: integer (e.g., 2204) or None
+        """Extract total star rating count from star rating span
+        New method: Extract from "4.4 stars out of 50630 reviews" text
+        Returns: integer (e.g., 50630) or None
         """
         try:
-            # ===== NEW METHOD: Direct extraction from reviewsLink =====
-            # <a data-testid="item-review-section-link" itemprop="ratingCount">2,204 ratings</a>
+            # ===== NEW METHOD: Extract from w_iUH7 span =====
+            # <span class="w_iUH7">4.4 stars out of 50630 reviews</span>
 
-            # Method 1: data-testid attribute
-            new_xpath_1 = "//a[@data-testid='item-review-section-link']"
+            # Method 1: class attribute
+            new_xpath_1 = "//span[@class='w_iUH7']"
             elements = tree.xpath(new_xpath_1)
             if elements:
                 text = elements[0].text_content().strip()
-                print(f"  [DEBUG] NEW Method 1 (data-testid): '{text}'")
-                match = re.search(r'([\d,]+)\s*ratings?', text)
+                print(f"  [DEBUG] NEW Method 1 (w_iUH7): '{text}'")
+                # Extract number before "reviews" - "4.4 stars out of 50630 reviews"
+                match = re.search(r'out of\s*([\d,]+)\s*reviews?', text)
                 if match:
                     count = int(match.group(1).replace(',', ''))
                     print(f"  [DEBUG] NEW Method 1 extracted: {count}")
                     return count
 
-            # Method 2: itemprop attribute
-            new_xpath_2 = "//a[@itemprop='ratingCount']"
+            # Method 2: contains class (for partial match)
+            new_xpath_2 = "//span[contains(@class, 'w_iUH7')]"
             elements = tree.xpath(new_xpath_2)
             if elements:
                 text = elements[0].text_content().strip()
-                print(f"  [DEBUG] NEW Method 2 (itemprop): '{text}'")
-                match = re.search(r'([\d,]+)\s*ratings?', text)
+                print(f"  [DEBUG] NEW Method 2 (contains w_iUH7): '{text}'")
+                match = re.search(r'out of\s*([\d,]+)\s*reviews?', text)
                 if match:
                     count = int(match.group(1).replace(',', ''))
                     print(f"  [DEBUG] NEW Method 2 extracted: {count}")
                     return count
 
-            # Method 3: link-identifier attribute
-            new_xpath_3 = "//a[@link-identifier='reviewsLink']"
+            # Method 3: text pattern search
+            new_xpath_3 = "//span[contains(text(), 'stars out of')]"
             elements = tree.xpath(new_xpath_3)
             if elements:
                 text = elements[0].text_content().strip()
-                print(f"  [DEBUG] NEW Method 3 (link-identifier): '{text}'")
-                match = re.search(r'([\d,]+)\s*ratings?', text)
+                print(f"  [DEBUG] NEW Method 3 (text pattern): '{text}'")
+                match = re.search(r'out of\s*([\d,]+)\s*reviews?', text)
                 if match:
                     count = int(match.group(1).replace(',', ''))
                     print(f"  [DEBUG] NEW Method 3 extracted: {count}")
+                    return count
+
+            # Method 4: absolute xpath from user
+            new_xpath_4 = "//*[@id='maincontent']/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[2]/div/div/span"
+            elements = tree.xpath(new_xpath_4)
+            if elements:
+                text = elements[0].text_content().strip()
+                print(f"  [DEBUG] NEW Method 4 (absolute xpath): '{text}'")
+                match = re.search(r'out of\s*([\d,]+)\s*reviews?', text)
+                if match:
+                    count = int(match.group(1).replace(',', ''))
+                    print(f"  [DEBUG] NEW Method 4 extracted: {count}")
                     return count
 
             # ===== FALLBACK: Old method using star button breakdown =====

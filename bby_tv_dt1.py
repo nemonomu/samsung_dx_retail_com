@@ -1552,8 +1552,8 @@ class BestBuyDetailCrawler:
             count_of_reviews = self.extract_count_of_reviews_from_detail(tree)
             print(f"  [✓] Count_of_Reviews: {count_of_reviews}")
 
-            # 3. Compare similar products extraction
-            mst_products = self.extract_compare_similar_products(product_url)
+            # 3. Compare similar products extraction (사용 안함 - 주석처리)
+            # mst_products = self.extract_compare_similar_products(product_url)
 
             # 4. Item extraction from URL (simplified - no dialog needed)
             item = self.extract_item_from_url(product_url)

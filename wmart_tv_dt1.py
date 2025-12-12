@@ -1557,7 +1557,7 @@ class WalmartDetailCrawler:
 
             print(f"  [INFO] Loading page...")
             self.driver.get(url)
-            time.sleep(random.uniform(4, 6))
+            time.sleep(random.uniform(6, 10))
 
             print(f"  [INFO] Page loaded, extracting data...")
 
@@ -1628,10 +1628,16 @@ class WalmartDetailCrawler:
                 pass
 
             # Extract count of star ratings (from review section)
+            # Note: count_of_star_ratings extracts from "X stars out of Y reviews" - Y is the review count
             count_of_star_ratings = self.extract_count_of_star_ratings(tree)
 
-            # Extract count of reviews (from review section)
-            count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source)
+            # count_of_reviews = count_of_star_ratings (same source: "X stars out of Y reviews")
+            # If count_of_star_ratings is available, use it directly
+            # Otherwise fall back to extract_count_of_reviews
+            if count_of_star_ratings is not None:
+                count_of_reviews = count_of_star_ratings
+            else:
+                count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source)
 
             # Click Specifications and get Model (after static content extraction)
             sku_model = self.click_specifications_and_get_model()
@@ -1768,7 +1774,7 @@ class WalmartDetailCrawler:
             # Also insert into unified tv_retail_com table
             # Ensure count_of_reviews is integer
             count_of_reviews_int = None
-            if data['count_of_reviews']:
+            if data['count_of_reviews'] is not None:
                 try:
                     count_of_reviews_int = int(data['count_of_reviews']) if isinstance(data['count_of_reviews'], int) else int(str(data['count_of_reviews']).replace(',', ''))
                 except:

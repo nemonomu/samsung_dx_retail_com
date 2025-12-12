@@ -3,6 +3,7 @@ Walmart Star Ratings Count Test Script
 - Extract count_of_star_ratings only from test URLs
 - No DB save, just log output
 - XPaths loaded from database
+- Bot detection bypass logic from wmart_tv_main1.py
 """
 import time
 import random
@@ -10,6 +11,7 @@ import psycopg2
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from lxml import html
 import re
 
@@ -96,12 +98,14 @@ class WalmartStarRatingsTest:
             return False
 
     def setup_driver(self):
-        """Setup Chrome WebDriver with undetected-chromedriver"""
+        """Setup Chrome WebDriver with undetected-chromedriver (bot detection bypass)"""
         options = uc.ChromeOptions()
-        options.page_load_strategy = 'none'
+        options.add_argument('--disable-blink-features=AutomationControlled')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--no-sandbox')
-        options.add_argument('--disable-gpu')
+        options.add_argument('--disable-setuid-sandbox')
+        options.add_argument('--start-maximized')
+        options.add_argument('--disable-infobars')
         options.add_argument('--window-size=1920,1080')
         options.add_argument('--lang=en-US,en;q=0.9')
 
@@ -112,10 +116,106 @@ class WalmartStarRatingsTest:
         }
         options.add_experimental_option("prefs", prefs)
 
-        self.driver = uc.Chrome(options=options)
+        self.driver = uc.Chrome(options=options, use_subprocess=True)
         self.driver.set_page_load_timeout(120)
         self.wait = WebDriverWait(self.driver, 20)
-        print("[OK] WebDriver setup complete")
+        print("[OK] WebDriver setup complete (bot detection bypass enabled)")
+
+    def check_robot_page(self, page_source):
+        """Check if page is showing 'Robot or human?' challenge"""
+        if "Robot or human?" in page_source or "Enter the characters you see below" in page_source:
+            return True
+        return False
+
+    def handle_captcha(self):
+        """Handle 'PRESS & HOLD' CAPTCHA if present"""
+        try:
+            print("[INFO] Checking for CAPTCHA...")
+
+            page_content = self.driver.page_source.lower()
+            if any(keyword in page_content for keyword in ['press & hold', 'press and hold', 'captcha', 'human verification']):
+                print("[WARNING] CAPTCHA keywords found in page")
+                print("[INFO] CAPTCHA detection - waiting 60 seconds for manual intervention...")
+                print("[INFO] Please solve CAPTCHA manually if present")
+
+                try:
+                    self.driver.save_screenshot(f"captcha_screen_{int(time.time())}.png")
+                    print("[INFO] Screenshot saved for debugging")
+                except:
+                    pass
+
+                time.sleep(60)
+                print("[INFO] Continuing after wait...")
+                return True
+            else:
+                print("[INFO] No CAPTCHA detected")
+                return True
+
+        except Exception as e:
+            print(f"[WARNING] CAPTCHA check failed: {e}")
+            return True
+
+    def initialize_session(self):
+        """Initialize session with natural browsing pattern to avoid bot detection"""
+        try:
+            print("[INFO] Initializing session - navigating to Walmart homepage...")
+
+            self.driver.get("https://www.walmart.com")
+            time.sleep(random.uniform(8, 12))
+
+            # Check for robot detection
+            if self.check_robot_page(self.driver.page_source):
+                print("[WARNING] Robot detection on homepage. Handling CAPTCHA...")
+                self.handle_captcha()
+                time.sleep(random.uniform(3, 5))
+
+                if self.check_robot_page(self.driver.page_source):
+                    print("[WARNING] Still showing robot detection, trying recovery...")
+
+                    # Slow scroll down
+                    print("[INFO] Scrolling slowly...")
+                    for i in range(5):
+                        scroll_amount = random.randint(150, 300)
+                        self.driver.execute_script(f"window.scrollBy(0, {scroll_amount})")
+                        time.sleep(random.uniform(1.5, 2.5))
+
+                    self.driver.execute_script("window.scrollBy(0, -200)")
+                    time.sleep(random.uniform(1, 2))
+
+                print("[INFO] Waiting 30 seconds...")
+                time.sleep(30)
+
+                print("[INFO] Reloading page...")
+                self.driver.refresh()
+                time.sleep(random.uniform(10, 15))
+
+                if self.check_robot_page(self.driver.page_source):
+                    print("[ERROR] Still getting robot detection after recovery")
+                    print("[INFO] Attempting to continue anyway...")
+
+            # Simple homepage exploration
+            print("[INFO] Exploring homepage...")
+            time.sleep(random.uniform(2, 4))
+
+            # Random scrolling
+            for _ in range(random.randint(2, 4)):
+                scroll_amount = random.randint(200, 500)
+                self.driver.execute_script(f"window.scrollBy(0, {scroll_amount})")
+                time.sleep(random.uniform(1, 2))
+
+            # Scroll back to top
+            print("[INFO] Scrolling back to top...")
+            self.driver.execute_script("window.scrollTo(0, 0)")
+            time.sleep(random.uniform(2, 3))
+
+            print("[OK] Session initialized")
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Failed to initialize session: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def extract_text_safe(self, tree, xpath):
         """Safely extract text from XPath"""
@@ -268,8 +368,10 @@ class WalmartStarRatingsTest:
             print(f"  [WARNING] Failed to extract star rating counts: {e}")
             return None
 
-    def scrape_url(self, url):
+    def scrape_url(self, url, retry_count=0):
         """Scrape single URL and extract count_of_star_ratings"""
+        max_retries = 2
+
         try:
             print(f"\n{'='*80}")
             print(f"[INFO] Accessing: {url[:80]}...")
@@ -284,11 +386,44 @@ class WalmartStarRatingsTest:
                 except Exception:
                     pass
                 self.setup_driver()
+                self.initialize_session()
                 print(f"  [OK] Driver restarted successfully")
 
             print(f"  [INFO] Loading page...")
             self.driver.get(url)
-            time.sleep(random.uniform(4, 6))
+            time.sleep(random.uniform(6, 10))
+
+            # Check for robot detection
+            page_source = self.driver.page_source
+            if self.check_robot_page(page_source):
+                print(f"  [WARNING] Robot detection page detected.")
+
+                if self.handle_captcha():
+                    print("  [OK] CAPTCHA handled, checking page again...")
+                    time.sleep(random.uniform(3, 5))
+                    page_source = self.driver.page_source
+
+                    if not self.check_robot_page(page_source):
+                        print("  [OK] Robot detection bypassed after CAPTCHA")
+                    else:
+                        print("  [WARNING] Robot detection still present after CAPTCHA")
+
+                # If still robot detected, retry
+                if self.check_robot_page(self.driver.page_source):
+                    if retry_count < max_retries:
+                        print(f"  [WARNING] Retrying... {retry_count + 1}/{max_retries}")
+                        wait_time = 30 + retry_count * 15
+                        print(f"  [INFO] Waiting {wait_time} seconds before retry...")
+                        time.sleep(wait_time)
+
+                        print("  [INFO] Refreshing page...")
+                        self.driver.refresh()
+                        time.sleep(random.uniform(10, 15))
+
+                        return self.scrape_url(url, retry_count + 1)
+                    else:
+                        print(f"  [ERROR] Failed to bypass robot detection after {max_retries} retries")
+                        return None
 
             print(f"  [INFO] Page loaded, extracting data...")
 
@@ -321,7 +456,7 @@ class WalmartStarRatingsTest:
         """Main execution"""
         try:
             print("=" * 80)
-            print("Walmart Star Ratings Count Test - Starting")
+            print("Walmart Star Ratings Count Test - Starting (Bot Detection Bypass)")
             print("=" * 80)
 
             # Connect to database and load xpaths
@@ -335,6 +470,10 @@ class WalmartStarRatingsTest:
 
             # Setup WebDriver
             self.setup_driver()
+
+            # Initialize session (visit Walmart homepage first to avoid bot detection)
+            if not self.initialize_session():
+                print("[WARNING] Session initialization had issues, continuing anyway...")
 
             results = []
 

@@ -45,6 +45,8 @@ def analyze_crawl_results(retailer_code, target_count, results_df):
         'is_critical': False,
         'has_countofreviews_error': False,  # count_of_star_ratings >= 100 but count_of_reviews is null
         'countofreviews_error_urls': [],  # URLs with this issue
+        'has_price_error': False,  # final_sku_price is null
+        'price_error_urls': [],  # URLs with price error
         'field_stats': {}
     }
 
@@ -123,9 +125,20 @@ def analyze_crawl_results(retailer_code, target_count, results_df):
 
                 if star_ratings_valid and reviews_is_null:
                     analysis['has_countofreviews_error'] = True
-                    # Get product URL
                     url = row.get('product_url', 'N/A')
                     analysis['countofreviews_error_urls'].append(url)
+
+    # Check for final_sku_price is null (price error)
+    if results_df is not None and len(results_df) > 0:
+        if 'final_sku_price' in results_df.columns:
+            for idx, row in results_df.iterrows():
+                price = row.get('final_sku_price')
+                price_is_null = price is None or pd.isna(price) or (isinstance(price, str) and price.strip() == '')
+
+                if price_is_null:
+                    analysis['has_price_error'] = True
+                    url = row.get('product_url', 'N/A')
+                    analysis['price_error_urls'].append(url)
 
     return analysis
 
@@ -148,15 +161,20 @@ def send_alert_email(analysis, error_message=None):
         # Generate email subject
         retailer_name = analysis['retailer_name']
 
-        # countofreviews error prefix
-        countofreviews_prefix = "countofreviews error " if analysis.get('has_countofreviews_error', False) else ""
+        # Error prefixes
+        error_prefixes = []
+        if analysis.get('has_price_error', False):
+            error_prefixes.append("price")
+        if analysis.get('has_countofreviews_error', False):
+            error_prefixes.append("countofreviews error")
+        prefix = " ".join(error_prefixes) + " " if error_prefixes else ""
 
         if analysis['is_critical'] or error_message:
-            subject = f"{countofreviews_prefix}[CRITICAL] {retailer_name} TV Crawling Alert - {now.strftime('%Y-%m-%d %H:%M')}"
+            subject = f"{prefix}[CRITICAL] {retailer_name} TV Crawling Alert - {now.strftime('%Y-%m-%d %H:%M')}"
         elif analysis['alerts']:
-            subject = f"{countofreviews_prefix}[WARNING] {retailer_name} TV Crawling Alert - {now.strftime('%Y-%m-%d %H:%M')}"
+            subject = f"{prefix}[WARNING] {retailer_name} TV Crawling Alert - {now.strftime('%Y-%m-%d %H:%M')}"
         else:
-            subject = f"{countofreviews_prefix}[OK] {retailer_name} TV Crawling Report - {now.strftime('%Y-%m-%d %H:%M')}"
+            subject = f"{prefix}[OK] {retailer_name} TV Crawling Report - {now.strftime('%Y-%m-%d %H:%M')}"
 
         # Generate email body (HTML)
         html_content = f"""
@@ -253,6 +271,21 @@ def send_alert_email(analysis, error_message=None):
 
             html_content += """
                 </table>
+            </div>
+            """
+
+        # price error section (final_sku_price is null)
+        if analysis.get('has_price_error', False) and analysis.get('price_error_urls'):
+            html_content += """
+            <div class="section">
+                <h3 style="color: #dc3545;">Price Error</h3>
+                <p>The following products have final_sku_price as NULL:</p>
+                <ul>
+            """
+            for url in analysis['price_error_urls']:
+                html_content += f'<li><a href="{url}">{url}</a></li>'
+            html_content += """
+                </ul>
             </div>
             """
 

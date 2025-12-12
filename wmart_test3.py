@@ -368,6 +368,89 @@ class WalmartStarRatingsTest:
             print(f"  [WARNING] Failed to extract star rating counts: {e}")
             return None
 
+    def extract_count_of_reviews(self, tree, page_source=None):
+        """Extract total number of reviews from main page
+        Example: '248 reviews' -> 248, '43 ratings' -> 43, 'No ratings yet' -> 0
+        """
+        try:
+            # Check for "No ratings yet" in page source
+            if page_source and "No ratings yet" in page_source:
+                no_ratings_xpaths = [
+                    "//span[contains(text(), 'No ratings yet')]",
+                    "//*[@id='item-review-section']//span[contains(text(), 'No ratings yet')]"
+                ]
+                for xpath in no_ratings_xpaths:
+                    result = tree.xpath(xpath)
+                    if result:
+                        print(f"  [DEBUG] Found 'No ratings yet' on page, setting count_of_reviews to 0")
+                        return 0
+
+            # Priority 1: Extract from "Showing 1-3 of 4,686 reviews" pattern
+            showing_xpaths = [
+                '//*[@id="item-review-section"]/div[7]/div[1]',
+                '//*[@id="item-review-section"]//div[@role="heading" and contains(text(), "Showing")]',
+                '//div[@role="heading" and contains(text(), "Showing") and contains(text(), "reviews")]'
+            ]
+            for xpath in showing_xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+                    match = re.search(r'of\s+([\d,]+)\s+reviews?', text, re.IGNORECASE)
+                    if match:
+                        count_str = match.group(1).replace(',', '')
+                        count = int(count_str)
+                        print(f"  [DEBUG] Extracted count from 'Showing X of Y reviews': {count}")
+                        return count
+
+            # Priority 2: Extract from "View all reviews (4,686)" button
+            view_all_xpaths = [
+                '//*[@id="item-review-section"]/div[8]/button',
+                '//button[contains(text(), "View all reviews")]',
+                '//*[@id="item-review-section"]//button[contains(text(), "View all reviews")]'
+            ]
+            for xpath in view_all_xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+                    match = re.search(r'\(([\d,]+)\)', text)
+                    if match:
+                        count_str = match.group(1).replace(',', '')
+                        count = int(count_str)
+                        print(f"  [DEBUG] Extracted count from 'View all reviews' button: {count}")
+                        return count
+
+            # Priority 3: Extract from "4,686 reviews" link
+            reviews_link_xpaths = [
+                "//*[@id='item-review-section']/div[2]/div[1]/div[1]/div/a",
+                "//a[@link-identifier='seeAllReviewsStarRating']"
+            ]
+            for xpath in reviews_link_xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+                    match = re.search(r'([\d,]+)\s+reviews?', text, re.IGNORECASE)
+                    if match:
+                        count_str = match.group(1).replace(',', '')
+                        count = int(count_str)
+                        print(f"  [DEBUG] Extracted count from reviews link: {count}")
+                        return count
+
+            # Fallback: Check for "No ratings yet" -> return 0
+            no_ratings_xpaths = [
+                "//span[contains(text(), 'No ratings yet')]",
+                "//*[@id='item-review-section']//span[contains(text(), 'No ratings yet')]"
+            ]
+            for xpath in no_ratings_xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    return 0
+
+            return None
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract count of reviews: {e}")
+            return None
+
     def scrape_url(self, url, retry_count=0):
         """Scrape single URL and extract count_of_star_ratings"""
         max_retries = 2
@@ -442,9 +525,16 @@ class WalmartStarRatingsTest:
             # Extract count of star ratings
             count_of_star_ratings = self.extract_count_of_star_ratings(tree)
 
-            print(f"  [RESULT] count_of_star_ratings = {count_of_star_ratings}")
+            # Extract count of reviews
+            count_of_reviews = self.extract_count_of_reviews(tree, page_source)
 
-            return count_of_star_ratings
+            print(f"  [RESULT] count_of_reviews = {count_of_reviews}, product_url = {url}")
+
+            return {
+                'count_of_star_ratings': count_of_star_ratings,
+                'count_of_reviews': count_of_reviews,
+                'product_url': url
+            }
 
         except Exception as e:
             print(f"  [ERROR] Failed to scrape: {e}")
@@ -482,11 +572,8 @@ class WalmartStarRatingsTest:
                 print(f"\n{'='*80}")
                 print(f"Processing {idx}/{len(TEST_URLS)}")
 
-                count = self.scrape_url(url)
-                results.append({
-                    'url': url,
-                    'count_of_star_ratings': count
-                })
+                result = self.scrape_url(url)
+                results.append(result)
 
                 # Random delay between requests
                 if idx < len(TEST_URLS):
@@ -494,27 +581,24 @@ class WalmartStarRatingsTest:
 
             # Print summary
             print("\n" + "=" * 80)
-            print("SUMMARY")
+            print("SUMMARY (count_of_reviews, product_url)")
             print("=" * 80)
 
-            total_star_ratings = 0
             success_count = 0
 
             for idx, result in enumerate(results, 1):
-                url_short = result['url'].split('/')[-1][:30]
-                count = result['count_of_star_ratings']
-
-                if count is not None:
-                    print(f"  [{idx}] {url_short}... -> {count}")
-                    total_star_ratings += count
+                if result is not None:
+                    count_of_reviews = result.get('count_of_reviews')
+                    product_url = result.get('product_url', '')
+                    url_short = product_url.split('/')[-1][:40] if product_url else 'N/A'
+                    print(f"  [{idx}] count_of_reviews = {count_of_reviews}, url = {url_short}")
                     success_count += 1
                 else:
-                    print(f"  [{idx}] {url_short}... -> None (failed)")
+                    print(f"  [{idx}] None (failed)")
 
             print(f"\n  Total URLs: {len(TEST_URLS)}")
             print(f"  Success: {success_count}")
             print(f"  Failed: {len(TEST_URLS) - success_count}")
-            print(f"  Total Star Ratings Sum: {total_star_ratings}")
             print("=" * 80)
 
         except Exception as e:

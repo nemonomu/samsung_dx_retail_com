@@ -47,6 +47,8 @@ def analyze_crawl_results(retailer_code, target_count, results_df):
         'countofreviews_error_urls': [],  # URLs with this issue
         'has_price_error': False,  # final_sku_price is null
         'price_error_urls': [],  # URLs with price error
+        'has_countofstarratings_error': False,  # star_rating exists but count_of_star_ratings is null
+        'countofstarratings_error_urls': [],  # URLs with this issue
         'field_stats': {}
     }
 
@@ -140,6 +142,29 @@ def analyze_crawl_results(retailer_code, target_count, results_df):
                     url = row.get('product_url', 'N/A')
                     analysis['price_error_urls'].append(url)
 
+    # Check for star_rating exists but count_of_star_ratings is null
+    if results_df is not None and len(results_df) > 0:
+        if 'star_rating' in results_df.columns and 'count_of_star_ratings' in results_df.columns:
+            for idx, row in results_df.iterrows():
+                star_rating = row.get('star_rating')
+                count_of_star_ratings = row.get('count_of_star_ratings')
+
+                # Check if star_rating exists and is not "No ratings yet"
+                star_rating_exists = (
+                    star_rating is not None and
+                    not pd.isna(star_rating) and
+                    str(star_rating).strip() != '' and
+                    str(star_rating).strip().lower() != 'no ratings yet'
+                )
+
+                # Check if count_of_star_ratings is null
+                count_is_null = count_of_star_ratings is None or pd.isna(count_of_star_ratings)
+
+                if star_rating_exists and count_is_null:
+                    analysis['has_countofstarratings_error'] = True
+                    url = row.get('product_url', 'N/A')
+                    analysis['countofstarratings_error_urls'].append(url)
+
     return analysis
 
 
@@ -167,6 +192,8 @@ def send_alert_email(analysis, error_message=None):
             error_prefixes.append("price")
         if analysis.get('has_countofreviews_error', False):
             error_prefixes.append("countofreviews error")
+        if analysis.get('has_countofstarratings_error', False):
+            error_prefixes.append("countofstarratings error")
         prefix = " ".join(error_prefixes) + " " if error_prefixes else ""
 
         if analysis['is_critical'] or error_message:
@@ -298,6 +325,21 @@ def send_alert_email(analysis, error_message=None):
                 <ul>
             """
             for url in analysis['countofreviews_error_urls']:
+                html_content += f'<li><a href="{url}">{url}</a></li>'
+            html_content += """
+                </ul>
+            </div>
+            """
+
+        # countofstarratings error section (star_rating exists but count_of_star_ratings is null)
+        if analysis.get('has_countofstarratings_error', False) and analysis.get('countofstarratings_error_urls'):
+            html_content += """
+            <div class="section">
+                <h3 style="color: #dc3545;">Count of Star Ratings Error</h3>
+                <p>The following products have star_rating but count_of_star_ratings is NULL:</p>
+                <ul>
+            """
+            for url in analysis['countofstarratings_error_urls']:
                 html_content += f'<li><a href="{url}">{url}</a></li>'
             html_content += """
                 </ul>

@@ -20,41 +20,25 @@ from config import DB_CONFIG
 
 # Test URLs
 TEST_URLS = [
-    "https://www.walmart.com/ip/Philips-75-Class-4K-Ultra-HD-2160p-Google-Smart-LED-TV-75PUL7552-F7-New/873651804",
+    "https://www.walmart.com/ip/Samsung-65-Class-Crystal-UHD-U7900F-4K-Smart-TV-2025-UN65U7900FFXZA/16815105564",
+    "https://www.walmart.com/ip/Philips-55-Class-4K-UHD-2160p-Google-Gaming-TV/17233061084",
     "https://www.walmart.com/ip/onn-32-Class-HD-720P-LED-Roku-Smart-Television-100012589/314022535",
+    "https://www.walmart.com/ip/onn-50-Class-4K-UHD-2160P-LED-Roku-Smart-Television-HDR-100012585/300694285",
+    "https://www.walmart.com/ip/Samsung-75-Class-Crystal-UHD-U7900F-4K-Smart-TV-2025-UN75U7900FFXZA/16785918403",
+    "https://www.walmart.com/ip/Philips-50-Class-4K-UHD-2160p-Google-Gaming-TV/17216450897",
+    "https://www.walmart.com/ip/Philips-55-Class-4K-Ultra-HD-2160p-Google-Smart-LED-TV-55PUL7552-F7-New/811665748",
+    "https://www.walmart.com/ip/Hisense-40-Class-FHD-1080P-Roku-Smart-LED-TV-40H4030F1/470905078",
+    "https://www.walmart.com/ip/GPX-40-DLED-TV-TE4019BP/688968343",
+    "https://www.walmart.com/ip/86UA7500ZUA-AUSQ/14363012836",
+    "https://www.walmart.com/ip/Philips-50-Class-4K-Ultra-HD-2160p-Google-Smart-LED-TV-50PUL7552-F7-New/225555636",
+    "https://www.walmart.com/ip/onn-65-Class-4K-UHD-2160P-LED-Roku-Smart-Television-HDR-100012587/476550098",
     "https://www.walmart.com/ip/Hisense-43-inch-Full-HD-LED-TV/17310022307",
-    "https://www.walmart.com/ip/Samsung-QN75Q7FBAFXZA/14331173819",
-    "https://www.walmart.com/ip/VIZIO-75-Class-Quantum-4K-QLED-HDR-Smart-TV-NEW-VQD75M-0804/7772412357",
-    "https://www.walmart.com/ip/Philips-32-Class-HD-720p-LED-TV-32PFL3453-F7-New/2587374896",
-    "https://www.walmart.com/ip/75UA7500ZUA-AUSQ/14354358485",
-    "https://www.walmart.com/ip/TCL-Google-TV-43Q51K/14574454877",
-    "https://www.walmart.com/ip/Samsung-QN55Q7FBAFXZA/14356852276",
-    "https://www.walmart.com/ip/Philips-70-Class-4K-Ultra-HD-2160p-Google-Smart-LED-Television-70PUL7553-F7/5200041769",
-    "https://www.walmart.com/ip/VIZIO-65-Class-Quantum-Pro-4K-QLED-HDR-120Hz-Smart-TV-NEW-VQP65C-84/1110721814",
-    "https://www.walmart.com/ip/LG-48-Class-4K-UHD-OLED-Web-OS-Smart-TV-with-Dolby-Vision-C4-Series-OLED48C4PUA/5446374202",
-    "https://www.walmart.com/ip/Samsung-32-inch-Class-HD-H5000F-4K-Smart-TV-2025/15974661488",
-    "https://www.walmart.com/ip/Philips-85-4K-UHD-2160p-Google-Smart-TV/17255214013",
-    "https://www.walmart.com/ip/LG-77-Class-4K-UHD-OLED-C4-Series-120-Hz-Web-OS-24-Smart-TV-with-Dolby-Vision-OLED77C4PUA/5332753048",
-    "https://www.walmart.com/ip/TCL-85-Q-Series-4K-UHD-HDR-QD-Mini-LED-Smart-TV-with-Google-TV-85QM7K/15118916244",
-    "https://www.walmart.com/ip/SAMSUNG-50-Class-LS03B-The-Frame-QLED-4K-Smart-TV-QN50LS03BAFXZA/821644919",
-    "https://www.walmart.com/ip/Samsung-QN65Q8FAAF-65-Smart-LED-LCD-TV-4K-UHDTV-High-Dynamic-Range-HDR-qn65q8faafxza/16272668792",
-    "https://www.walmart.com/ip/Onn-65-Class-4K-2160p-Smart-LED-TV-100012587/18378210936",
-    "https://www.walmart.com/ip/ONN-55-Class-4K-2160P-Roku-Smart-LED-TV-100012586/18402308641",
-    "https://www.walmart.com/ip/onn-32-Class-HD-720P-Smart-LED-TV-100012589/18375223072",
-    "https://www.walmart.com/ip/TCL-32Q2K-32-inch-Class-Q2K-Series-1080P-FHD-QLED-Smart-TV/17115511113",
-    "https://www.walmart.com/ip/SAMSUNG-50-Class-DU8000B-Crystal-UHD-4K-Smart-TV-UN50DU8000BXZA-2024/5150283705",
-    "https://www.walmart.com/ip/Supersonic-19-Class-LED-HDTV-with-USB-and-HDMI-Inputs/23142954",
-    "https://www.walmart.com/ip/Samsung-QN85QN80F-85-inch-Class-Neo-QN80F-Series-QLED-4K-Smart-TV/15943420383",
-    "https://www.walmart.com/ip/LG-55QNED70A-55-inch-Class-QNED70A-Series-4K-QNED-Smart-TV/17760415929",
-    "https://www.walmart.com/ip/GPX-TE1982B-19-720p-60Hz-LED-HDTV/37451841",
-    "https://www.walmart.com/ip/Emerson-24-720p-LED-TV-with-DVD-Player-ETD-2450/1905212031",
-    "https://www.walmart.com/ip/55-Roku-Plus-Series/15942718986",
-    "https://www.walmart.com/ip/Sony-BRAVIA-5-65-inch-Class-Mini-LED-4K-HDR-Google-TV-2025/16347258322",
-    "https://www.walmart.com/ip/SYLVOX-Smart-Kitchen-TV-15-6-Android-Small-TV-1080P-FHD-Support-Rotated-Foldable-WiFi-Bluetooth-Cabinet-TV-Kitchen-Bedroom-RV-Camper-White/12403568804",
-    "https://www.walmart.com/ip/Hisense-75-Class-U8-Series-Mini-LED-ULED-4K-UHD-Google-Smart-TV-75U8QG-2025-Model-QLED-Native-165Hz-5000-Nit-Dolby-Vision-IQ-Full-Array-Local-Dimming/16115514527",
-    "https://www.walmart.com/ip/Onn-50-Class-4K-2160P-Roku-Smart-LED-TV-100012585/18299759637",
-    "https://www.walmart.com/ip/JVC-LT-32MAR205-32-inch-Class-Roku-LED-Smart-TV/290868918",
-    "https://www.walmart.com/ip/Element-55-4K-UHD-HDR-Google-TV-Frameless-E450AD55G/17434323142",
+    "https://www.walmart.com/ip/TCL-55-Class-S4-55S451-4K-UHD-HDR-Smart-TV-with-Roku-TV/533225197",
+    "https://www.walmart.com/ip/Westinghouse-43-EX-Series-720p-LED-Roku-TV-WR43EX2300/5387380257",
+    "https://www.walmart.com/ip/VIZIO-43-Class-Full-HD-1080p-LED-Smart-TV-New-VFD43M-0804/5197667451",
+    "https://www.walmart.com/ip/onn-24-Class-HD-720P-LED-Roku-Smart-Television-100012590/959853005",
+    "https://www.walmart.com/ip/Philips-43-Class-4K-Ultra-HD-2160p-Google-Smart-LED-TV-43PUL7652-F7-New/666303210",
+    "https://www.walmart.com/ip/LG-55-4K-UHD-UA70-AI-Smart-TV-55UA7000/16682874682",
 ]
 
 
@@ -525,14 +509,10 @@ class WalmartStarRatingsTest:
             # Extract count of star ratings
             count_of_star_ratings = self.extract_count_of_star_ratings(tree)
 
-            # Extract count of reviews
-            count_of_reviews = self.extract_count_of_reviews(tree, page_source)
-
-            print(f"  [RESULT] count_of_reviews = {count_of_reviews}, product_url = {url}")
+            print(f"  [RESULT] count_of_star_ratings = {count_of_star_ratings}, product_url = {url}")
 
             return {
                 'count_of_star_ratings': count_of_star_ratings,
-                'count_of_reviews': count_of_reviews,
                 'product_url': url
             }
 
@@ -581,17 +561,17 @@ class WalmartStarRatingsTest:
 
             # Print summary
             print("\n" + "=" * 80)
-            print("SUMMARY (count_of_reviews, product_url)")
+            print("SUMMARY (count_of_star_ratings, product_url)")
             print("=" * 80)
 
             success_count = 0
 
             for idx, result in enumerate(results, 1):
                 if result is not None:
-                    count_of_reviews = result.get('count_of_reviews')
+                    count_of_star_ratings = result.get('count_of_star_ratings')
                     product_url = result.get('product_url', '')
                     url_short = product_url.split('/')[-1][:40] if product_url else 'N/A'
-                    print(f"  [{idx}] count_of_reviews = {count_of_reviews}, url = {url_short}")
+                    print(f"  [{idx}] count_of_star_ratings = {count_of_star_ratings}, url = {url_short}")
                     success_count += 1
                 else:
                     print(f"  [{idx}] None (failed)")

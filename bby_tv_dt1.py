@@ -1521,6 +1521,19 @@ class BestBuyDetailCrawler:
             print(f"  [✓] Model Year: {model_year}")
 
             # 2-1. Price 정보 extraction (메인 page에서 직접 collected)
+            # 가격 컨테이너 로딩 대기 (최대 10초)
+            try:
+                price_wait = WebDriverWait(self.driver, 10)
+                price_wait.until(EC.presence_of_element_located(
+                    (By.XPATH, '//div[contains(@class, "order-2")]//div[@data-testid="price-block-customer-price"] | //div[contains(@class, "order-2")]//span[contains(text(), "See price in cart")] | //div[contains(text(), "no longer available in new condition")]')
+                ))
+                print(f"  [OK] price container load complete")
+                # 가격 컨테이너 로딩 후 tree 다시 가져오기
+                page_source = self.driver.page_source
+                tree = html.fromstring(page_source)
+            except TimeoutException:
+                print(f"  [WARNING] price container loading timeout - attempting extraction anyway")
+
             final_sku_price = self.extract_final_sku_price(tree)
             print(f"  [✓] Final_SKU_Price: {final_sku_price}")
 

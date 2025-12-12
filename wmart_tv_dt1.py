@@ -1619,7 +1619,7 @@ class WalmartDetailCrawler:
 
             # Scroll to review section for lazy loading content
             try:
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight * 0.7);")
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight * 0.5);")
                 time.sleep(2)
                 # Update page_source and tree after scroll
                 page_source = self.driver.page_source
@@ -1628,16 +1628,12 @@ class WalmartDetailCrawler:
                 pass
 
             # Extract count of star ratings (from review section)
-            # Note: count_of_star_ratings extracts from "X stars out of Y reviews" - Y is the review count
             count_of_star_ratings = self.extract_count_of_star_ratings(tree)
 
-            # count_of_reviews = count_of_star_ratings (same source: "X stars out of Y reviews")
-            # If count_of_star_ratings is available, use it directly
-            # Otherwise fall back to extract_count_of_reviews
-            if count_of_star_ratings is not None:
-                count_of_reviews = count_of_star_ratings
-            else:
-                count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source)
+            # Extract count of reviews (different from count_of_star_ratings)
+            # count_of_star_ratings: "4.4 stars out of 50630 reviews" -> 50630 (ratings count)
+            # count_of_reviews: "986 reviews" link -> 986 (actual written reviews count)
+            count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source)
 
             # Click Specifications and get Model (after static content extraction)
             sku_model = self.click_specifications_and_get_model()

@@ -10,6 +10,7 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 import pytz
 import logging
+import pandas as pd
 
 from config import EMAIL_CONFIG
 
@@ -42,6 +43,8 @@ def analyze_crawl_results(retailer_code, target_count, results_df):
         'crawled_count': len(results_df) if results_df is not None else 0,
         'alerts': [],
         'is_critical': False,
+        'has_countofreviews_error': False,  # count_of_star_ratings >= 100 but count_of_reviews is null
+        'countofreviews_error_urls': [],  # URLs with this issue
         'field_stats': {}
     }
 
@@ -103,6 +106,27 @@ def analyze_crawl_results(retailer_code, target_count, results_df):
                     'message': f'{field_names.get(field, field)} empty {empty_rate:.1f}% ({empty_count}/{crawled_count})'
                 })
 
+    # Check for count_of_star_ratings >= 100 but count_of_reviews is null
+    if results_df is not None and len(results_df) > 0:
+        if 'count_of_star_ratings' in results_df.columns and 'count_of_reviews' in results_df.columns:
+            for idx, row in results_df.iterrows():
+                star_ratings = row.get('count_of_star_ratings')
+                reviews = row.get('count_of_reviews')
+
+                # Check if count_of_star_ratings >= 100 and count_of_reviews is null/NaN
+                try:
+                    star_ratings_valid = star_ratings is not None and not pd.isna(star_ratings) and int(float(star_ratings)) >= 100
+                except (ValueError, TypeError):
+                    star_ratings_valid = False
+
+                reviews_is_null = reviews is None or pd.isna(reviews)
+
+                if star_ratings_valid and reviews_is_null:
+                    analysis['has_countofreviews_error'] = True
+                    # Get product URL
+                    url = row.get('product_url', 'N/A')
+                    analysis['countofreviews_error_urls'].append(url)
+
     return analysis
 
 
@@ -123,12 +147,16 @@ def send_alert_email(analysis, error_message=None):
 
         # Generate email subject
         retailer_name = analysis['retailer_name']
+
+        # countofreviews error prefix
+        countofreviews_prefix = "countofreviews error " if analysis.get('has_countofreviews_error', False) else ""
+
         if analysis['is_critical'] or error_message:
-            subject = f"[CRITICAL] {retailer_name} TV Crawling Alert - {now.strftime('%Y-%m-%d %H:%M')}"
+            subject = f"{countofreviews_prefix}[CRITICAL] {retailer_name} TV Crawling Alert - {now.strftime('%Y-%m-%d %H:%M')}"
         elif analysis['alerts']:
-            subject = f"[WARNING] {retailer_name} TV Crawling Alert - {now.strftime('%Y-%m-%d %H:%M')}"
+            subject = f"{countofreviews_prefix}[WARNING] {retailer_name} TV Crawling Alert - {now.strftime('%Y-%m-%d %H:%M')}"
         else:
-            subject = f"[OK] {retailer_name} TV Crawling Report - {now.strftime('%Y-%m-%d %H:%M')}"
+            subject = f"{countofreviews_prefix}[OK] {retailer_name} TV Crawling Report - {now.strftime('%Y-%m-%d %H:%M')}"
 
         # Generate email body (HTML)
         html_content = f"""
@@ -225,6 +253,21 @@ def send_alert_email(analysis, error_message=None):
 
             html_content += """
                 </table>
+            </div>
+            """
+
+        # countofreviews error section (count_of_star_ratings >= 100 but count_of_reviews is null)
+        if analysis.get('has_countofreviews_error', False) and analysis.get('countofreviews_error_urls'):
+            html_content += """
+            <div class="section">
+                <h3 style="color: #dc3545;">Count of Reviews Error</h3>
+                <p>The following products have count_of_star_ratings >= 100 but count_of_reviews is NULL:</p>
+                <ul>
+            """
+            for url in analysis['countofreviews_error_urls']:
+                html_content += f'<li><a href="{url}">{url}</a></li>'
+            html_content += """
+                </ul>
             </div>
             """
 

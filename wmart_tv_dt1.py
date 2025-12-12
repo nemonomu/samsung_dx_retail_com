@@ -287,15 +287,19 @@ class WalmartDetailCrawler:
             return []
 
     def setup_driver(self):
-        """Setup Chrome WebDriver with undetected-chromedriver"""
+        """Setup Chrome WebDriver with undetected-chromedriver (bot detection bypass)"""
         options = uc.ChromeOptions()
 
         # Set page load strategy to 'none' - don't wait for full page load
         options.page_load_strategy = 'none'
 
-        # Basic options
+        # Bot detection bypass options
+        options.add_argument('--disable-blink-features=AutomationControlled')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--no-sandbox')
+        options.add_argument('--disable-setuid-sandbox')
+        options.add_argument('--start-maximized')
+        options.add_argument('--disable-infobars')
         options.add_argument('--disable-gpu')
         options.add_argument('--window-size=1920,1080')
         options.add_argument('--lang=en-US,en;q=0.9')
@@ -308,12 +312,93 @@ class WalmartDetailCrawler:
         }
         options.add_experimental_option("prefs", prefs)
 
-        # Use undetected_chromedriver
-        self.driver = uc.Chrome(options=options)
+        # Use undetected_chromedriver with subprocess for better bot detection bypass
+        self.driver = uc.Chrome(options=options, use_subprocess=True)
         self.driver.set_page_load_timeout(120)  # Increased to 120 seconds as backup
         self.wait = WebDriverWait(self.driver, 20)
 
-        print("[OK] WebDriver setup complete")
+        print("[OK] WebDriver setup complete (bot detection bypass enabled)")
+
+    def check_robot_page(self, page_source):
+        """Check if page is showing 'Robot or human?' challenge"""
+        if "Robot or human?" in page_source or "Enter the characters you see below" in page_source:
+            return True
+        return False
+
+    def handle_captcha(self):
+        """Handle 'PRESS & HOLD' CAPTCHA if present"""
+        try:
+            print("[INFO] Checking for CAPTCHA...")
+            page_content = self.driver.page_source.lower()
+            if any(keyword in page_content for keyword in ['press & hold', 'press and hold', 'captcha', 'human verification']):
+                print("[WARNING] CAPTCHA keywords found in page")
+                print("[INFO] CAPTCHA detection - waiting 60 seconds for manual intervention...")
+                time.sleep(60)
+                print("[INFO] Continuing after wait...")
+                return True
+            else:
+                print("[INFO] No CAPTCHA detected")
+                return True
+        except Exception as e:
+            print(f"[WARNING] CAPTCHA check failed: {e}")
+            return True
+
+    def initialize_session(self):
+        """Initialize session with natural browsing pattern to avoid bot detection"""
+        try:
+            print("[INFO] Initializing session - navigating to Walmart homepage...")
+            self.driver.get("https://www.walmart.com")
+            time.sleep(random.uniform(8, 12))
+
+            # Check for robot detection
+            if self.check_robot_page(self.driver.page_source):
+                print("[WARNING] Robot detection on homepage. Handling CAPTCHA...")
+                self.handle_captcha()
+                time.sleep(random.uniform(3, 5))
+
+                if self.check_robot_page(self.driver.page_source):
+                    print("[WARNING] Still showing robot detection, trying recovery...")
+                    # Slow scroll down
+                    for i in range(5):
+                        scroll_amount = random.randint(150, 300)
+                        self.driver.execute_script(f"window.scrollBy(0, {scroll_amount})")
+                        time.sleep(random.uniform(1.5, 2.5))
+                    self.driver.execute_script("window.scrollBy(0, -200)")
+                    time.sleep(random.uniform(1, 2))
+
+                print("[INFO] Waiting 30 seconds...")
+                time.sleep(30)
+
+                print("[INFO] Reloading page...")
+                self.driver.refresh()
+                time.sleep(random.uniform(10, 15))
+
+                if self.check_robot_page(self.driver.page_source):
+                    print("[ERROR] Still getting robot detection after recovery")
+                    print("[INFO] Attempting to continue anyway...")
+
+            # Simple homepage exploration
+            print("[INFO] Exploring homepage...")
+            time.sleep(random.uniform(2, 4))
+
+            # Random scrolling
+            for _ in range(random.randint(2, 4)):
+                scroll_amount = random.randint(200, 500)
+                self.driver.execute_script(f"window.scrollBy(0, {scroll_amount})")
+                time.sleep(random.uniform(1, 2))
+
+            # Scroll back to top
+            self.driver.execute_script("window.scrollTo(0, 0)")
+            time.sleep(random.uniform(2, 3))
+
+            print("[OK] Session initialized")
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Failed to initialize session: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def extract_text_safe(self, tree, xpath):
         """Safely extract text from XPath"""
@@ -1916,6 +2001,10 @@ class WalmartDetailCrawler:
 
             # Setup WebDriver
             self.setup_driver()
+
+            # Initialize session (visit Walmart homepage first to avoid bot detection)
+            if not self.initialize_session():
+                print("[WARNING] Session initialization had issues, continuing anyway...")
 
             # Scrape each detail page
             for idx, url_data in enumerate(product_urls, 1):

@@ -1677,7 +1677,7 @@ class WalmartDetailCrawler:
                 self.total_collected += 1
                 print(f"  [OK] Collected: {retailer_sku_name[:50] if retailer_sku_name else '[NO NAME]'}...")
                 print(f"       Model: {sku_model or 'N/A'} | Screen: {screen_size or 'N/A'} | Star: {star_rating or 'N/A'}")
-                print(f"       Total Reviews: {count_of_reviews or 'N/A'} | Purchased Yesterday: {purchased_yesterday or 'N/A'} | Added to Carts: {added_to_carts or 'N/A'}")
+                print(f"       Ratings: {count_of_star_ratings or 'N/A'} | Reviews: {count_of_reviews or 'N/A'} | Purchased Yesterday: {purchased_yesterday or 'N/A'} | Added to Carts: {added_to_carts or 'N/A'}")
                 print(f"       Savings: {savings or 'N/A'} | Discount: {discount_type or 'N/A'}")
                 print(f"       Popularity: {sku_popularity or 'N/A'}")
 

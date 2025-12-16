@@ -1161,15 +1161,21 @@ class AmazonDetailCrawler:
             except Exception as e:
                 print(f"  [WARNING] Summarized review not found (may not exist for this product): {str(e)[:100]}")
 
-            # Extract detailed review content and count_of_reviews from review page (up to 20 reviews)
-            detailed_review_content, count_of_reviews = self.extract_detailed_reviews_from_review_page(url)
+            # Extract detailed review content from product detail page (not review page)
+            detailed_review_content = self.extract_detailed_reviews(url)
 
-            # Re-parse page source after returning from review page
-            tree = html.fromstring(self.driver.page_source)
+            # count_of_reviews = count_of_star_ratings (same value)
+            count_of_reviews = count_of_star_ratings
 
-            # Fallback: If count_of_reviews not found from review page, try detail page
-            if not count_of_reviews:
-                count_of_reviews = self.extract_count_of_reviews(tree)
+            # [COMMENTED OUT] Extract detailed review content and count_of_reviews from review page (up to 20 reviews)
+            # detailed_review_content, count_of_reviews = self.extract_detailed_reviews_from_review_page(url)
+
+            # [COMMENTED OUT] Re-parse page source after returning from review page
+            # tree = html.fromstring(self.driver.page_source)
+
+            # [COMMENTED OUT] Fallback: If count_of_reviews not found from review page, try detail page
+            # if not count_of_reviews:
+            #     count_of_reviews = self.extract_count_of_reviews(tree)
 
             # Extract prices from detail page
             final_sku_price = self.extract_final_sku_price(tree)

@@ -988,6 +988,19 @@ class WalmartDetailCrawler:
             print(f"  [WARNING] Failed to extract screen size: {e}")
             return None
 
+    def extract_offer(self, tree):
+        """Extract offer info (e.g., '5 free offers, including Apple TV up to 3 months free')"""
+        try:
+            xpath = '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/section[1]/div/div'
+            text = self.extract_text_safe(tree, xpath)
+            if text:
+                return text.strip()
+            return None
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract offer: {e}")
+            return None
+
     def extract_count_of_reviews(self, tree, star_rating=None, page_source=None):
         """Extract total number of reviews from main page
         Example: '248 reviews' -> 248, '43 ratings' -> 43, 'No ratings yet' -> 0
@@ -1696,6 +1709,9 @@ class WalmartDetailCrawler:
             # Extract shipping info (combine 2 parts)
             shipping_info = self.extract_shipping_info(tree)
 
+            # Extract offer info
+            offer = self.extract_offer(tree)
+
             # Extract similar products
             similar_products = self.extract_similar_products(tree)
 
@@ -1738,6 +1754,7 @@ class WalmartDetailCrawler:
                 'Savings': savings,
                 'Discount_Type': final_discount_type,  # Changed to use final_discount_type
                 'Shipping_Info': shipping_info,
+                'offer': offer,
                 'Count_of_Star_Ratings': count_of_star_ratings,
                 'Retailer_SKU_Name_similar': similar_products,
                 'Detailed_Review_Content': detailed_review_content,
@@ -1889,7 +1906,7 @@ class WalmartDetailCrawler:
                 data['original_sku_price'],
                 data['Savings'],
                 data['Discount_Type'],
-                None,  # offer (Walmart doesn't have this)
+                data.get('offer'),  # offer
                 data['pick_up_availability'],
                 data['shipping_availability'],
                 data['delivery_availability'],

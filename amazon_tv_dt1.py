@@ -1052,6 +1052,24 @@ class AmazonDetailCrawler:
             print(f"  [WARNING] Failed to extract detailed reviews from review page: {e}")
             return self.extract_detailed_reviews(product_url), None
 
+    def clean_shipping_text(self, text):
+        """Clean shipping text by removing JavaScript and stopping at 'Join Prime'"""
+        if not text:
+            return None
+
+        # Stop at "Join Prime" (and remove it)
+        if "Join Prime" in text:
+            text = text.split("Join Prime")[0].strip()
+
+        # Remove JavaScript patterns (function(...) or any text containing curly braces with code)
+        text = re.sub(r'\(function\(.*', '', text)
+        text = re.sub(r'\{[^}]*\}', '', text)
+
+        # Clean up extra whitespace
+        text = ' '.join(text.split())
+
+        return text.strip() if text.strip() else None
+
     def extract_shipping_info(self, tree):
         """Extract shipping info from up to 3 locations, concatenated with comma"""
         try:
@@ -1060,20 +1078,23 @@ class AmazonDetailCrawler:
             # Location 1: Primary delivery message
             xpath1 = '//*[@id="mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE"]/span'
             text1 = self.extract_text_safe(tree, xpath1)
+            text1 = self.clean_shipping_text(text1)
             if text1:
-                shipping_parts.append(text1.strip())
+                shipping_parts.append(text1)
 
             # Location 2: Secondary delivery message
             xpath2 = '//*[@id="mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE"]/span'
             text2 = self.extract_text_safe(tree, xpath2)
+            text2 = self.clean_shipping_text(text2)
             if text2:
-                shipping_parts.append(text2.strip())
+                shipping_parts.append(text2)
 
             # Location 3: Holiday delivery message
             xpath3 = '//*[@id="mir-layout-DELIVERY_BLOCK-slot-HOLIDAY_DELIVERY_MESSAGE"]/b/font'
             text3 = self.extract_text_safe(tree, xpath3)
+            text3 = self.clean_shipping_text(text3)
             if text3:
-                shipping_parts.append(text3.strip())
+                shipping_parts.append(text3)
 
             if shipping_parts:
                 return ', '.join(shipping_parts)

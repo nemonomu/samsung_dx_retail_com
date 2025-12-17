@@ -1052,6 +1052,66 @@ class AmazonDetailCrawler:
             print(f"  [WARNING] Failed to extract detailed reviews from review page: {e}")
             return self.extract_detailed_reviews(product_url), None
 
+    def extract_shipping_info(self, tree):
+        """Extract shipping info from up to 3 locations, concatenated with comma"""
+        try:
+            shipping_parts = []
+
+            # Location 1: Primary delivery message
+            xpath1 = '//*[@id="mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE"]/span'
+            text1 = self.extract_text_safe(tree, xpath1)
+            if text1:
+                shipping_parts.append(text1.strip())
+
+            # Location 2: Secondary delivery message
+            xpath2 = '//*[@id="mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE"]/span'
+            text2 = self.extract_text_safe(tree, xpath2)
+            if text2:
+                shipping_parts.append(text2.strip())
+
+            # Location 3: Holiday delivery message
+            xpath3 = '//*[@id="mir-layout-DELIVERY_BLOCK-slot-HOLIDAY_DELIVERY_MESSAGE"]/b/font'
+            text3 = self.extract_text_safe(tree, xpath3)
+            if text3:
+                shipping_parts.append(text3.strip())
+
+            if shipping_parts:
+                return ', '.join(shipping_parts)
+            return None
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract shipping info: {e}")
+            return None
+
+    def extract_available_quantity_for_purchase(self, tree):
+        """Extract quantity purchased (e.g., '10K' from '10K+ bought')"""
+        try:
+            xpath = '//*[@id="social-proofing-faceout-title-tk_bought"]/span[1]'
+            text = self.extract_text_safe(tree, xpath)
+            if text:
+                # Extract only the number part (e.g., "10K" from "10K+ bought")
+                match = re.search(r'([\d,.]+[KkMm]?)', text)
+                if match:
+                    return match.group(1)
+            return None
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract available quantity: {e}")
+            return None
+
+    def extract_discount_type(self, tree):
+        """Extract discount type (e.g., 'Limited time deal')"""
+        try:
+            xpath = '//*[@id="dealBadgeSupportingText"]'
+            text = self.extract_text_safe(tree, xpath)
+            if text:
+                return text.strip()
+            return None
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract discount type: {e}")
+            return None
+
     def scrape_detail_page(self, url_data):
         """Scrape detail page and extract information"""
         try:
@@ -1193,6 +1253,11 @@ class AmazonDetailCrawler:
                 original_sku_price = self.extract_original_sku_price(tree)
             savings = self.calculate_savings(final_sku_price, original_sku_price)
 
+            # Extract shipping info, available quantity, and discount type
+            shipping_info = self.extract_shipping_info(tree)
+            available_quantity = self.extract_available_quantity_for_purchase(tree)
+            discount_type = self.extract_discount_type(tree)
+
             data = {
                 'page_type': page_type,
                 'product_url': final_url,
@@ -1215,7 +1280,10 @@ class AmazonDetailCrawler:
                 'number_of_units_purchased_past_month': url_data.get('number_of_units_purchased_past_month'),  # From main_crawled
                 'final_sku_price': final_sku_price,  # Extracted from detail page
                 'original_sku_price': original_sku_price,  # Extracted from detail page
-                'savings': savings  # Calculated from prices
+                'savings': savings,  # Calculated from prices
+                'shipping_info': shipping_info,
+                'available_quantity_for_purchase': available_quantity,
+                'discount_type': discount_type
             }
 
             # Save to database
@@ -1344,13 +1412,13 @@ class AmazonDetailCrawler:
                 data['final_sku_price'],  # Extracted from detail page
                 data['original_sku_price'],  # Extracted from detail page
                 data['savings'],  # Calculated from prices
-                None,  # discount_type (Amazon doesn't have this in detail)
+                data.get('discount_type'),  # discount_type
                 None,  # offer (Amazon doesn't have this)
                 None,  # pick_up_availability (Amazon doesn't have this)
                 None,  # shipping_availability (Amazon doesn't have this)
                 None,  # delivery_availability (Amazon doesn't have this)
-                None,  # shipping_info (Amazon doesn't have this in detail)
-                None,  # available_quantity_for_purchase (Amazon doesn't have this in detail)
+                data.get('shipping_info'),  # shipping_info
+                data.get('available_quantity_for_purchase'),  # available_quantity_for_purchase
                 None,  # inventory_status (Amazon doesn't have this)
                 None,  # sku_status (Amazon doesn't have this)
                 data['Retailer_Membership_Discounts'],

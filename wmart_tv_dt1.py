@@ -995,11 +995,12 @@ class WalmartDetailCrawler:
         try:
             xpath = '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/section[1]/div/div'
             text = self.extract_text_safe(tree, xpath)
+            print(f"  [DEBUG] extract_offer - raw text: {repr(text)}")
             if text:
-                text = text.strip()
-                # Only return if 'free offer' is found
-                if 'free offer' in text.lower():
-                    return text
+                has_free_offer = 'free offer' in text.lower()
+                print(f"  [DEBUG] extract_offer - has 'free offer': {has_free_offer}")
+                if has_free_offer:
+                    return text.strip()
             return None
 
         except Exception as e:

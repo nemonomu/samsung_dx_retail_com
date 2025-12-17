@@ -1105,15 +1105,24 @@ class AmazonDetailCrawler:
             return None
 
     def extract_available_quantity_for_purchase(self, tree):
-        """Extract quantity purchased (e.g., '10K' from '10K+ bought')"""
+        """Extract available quantity (e.g., '6' from 'Only 6 left in stock')
+        - If starts with 'Only': extract the number
+        - If 'In Stock': return 'In Stock'
+        - Otherwise: return None
+        """
         try:
-            xpath = '//*[@id="social-proofing-faceout-title-tk_bought"]/span[1]'
+            xpath = '//*[@id="availability"]/span'
             text = self.extract_text_safe(tree, xpath)
             if text:
-                # Extract only the number part (e.g., "10K" from "10K+ bought")
-                match = re.search(r'([\d,.]+[KkMm]?)', text)
-                if match:
-                    return match.group(1)
+                text = text.strip()
+                # Extract number if starts with "Only"
+                if text.startswith("Only"):
+                    match = re.search(r'Only\s+(\d+)', text)
+                    if match:
+                        return match.group(1)
+                # Return "In Stock" if text is "In Stock"
+                elif text.lower() == "in stock":
+                    return "In Stock"
             return None
 
         except Exception as e:

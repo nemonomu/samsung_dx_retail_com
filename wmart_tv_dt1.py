@@ -989,18 +989,19 @@ class WalmartDetailCrawler:
             return None
 
     def extract_offer(self, tree):
-        """Extract offer info (e.g., '5 free offers, including Apple TV up to 3 months free')
-        Only extracts if 'free offer' text is found, otherwise returns None
+        """Extract offer count (e.g., '4' from '4 free offers, including Apple TV up to 3 months free')
+        Only extracts if 'free offer' text is found, returns the number only
         """
         try:
             xpath = '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/section[1]/div/div'
             text = self.extract_text_safe(tree, xpath)
             print(f"  [DEBUG] extract_offer - raw text: {repr(text)}")
-            if text:
-                has_free_offer = 'free offer' in text.lower()
-                print(f"  [DEBUG] extract_offer - has 'free offer': {has_free_offer}")
-                if has_free_offer:
-                    return text.strip()
+            if text and 'free offer' in text.lower():
+                # Extract the number at the beginning (e.g., "4" from "4 free offers...")
+                match = re.search(r'^(\d+)', text.strip())
+                if match:
+                    print(f"  [DEBUG] extract_offer - extracted number: {match.group(1)}")
+                    return match.group(1)
             return None
 
         except Exception as e:

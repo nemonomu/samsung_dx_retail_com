@@ -989,12 +989,17 @@ class WalmartDetailCrawler:
             return None
 
     def extract_offer(self, tree):
-        """Extract offer info (e.g., '5 free offers, including Apple TV up to 3 months free')"""
+        """Extract offer info (e.g., '5 free offers, including Apple TV up to 3 months free')
+        Only extracts if 'free offer' text is found, otherwise returns None
+        """
         try:
             xpath = '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/section[1]/div/div'
             text = self.extract_text_safe(tree, xpath)
             if text:
-                return text.strip()
+                text = text.strip()
+                # Only return if 'free offer' is found
+                if 'free offer' in text.lower():
+                    return text
             return None
 
         except Exception as e:

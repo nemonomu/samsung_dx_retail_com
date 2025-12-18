@@ -600,7 +600,7 @@ class WalmartDetailCrawler:
             return None
 
     def extract_original_price(self, tree, savings):
-        """Extract original/strike-through price from detail page (container-based)
+        """Extract original/strike-through price from detail page (hardcoded XPath)
         Only extract if savings exists (to avoid picking prices from other sections)
 
         Args:
@@ -614,30 +614,16 @@ class WalmartDetailCrawler:
             if not savings:
                 return None
 
-            # Try to get price container first
-            price_container = self.get_price_container(tree)
-            search_context = price_container if price_container is not None else tree
+            # Hardcoded XPath for original_sku_price (strike-through price)
+            xpath = '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/section[1]/div/div[1]/span[2]'
+            text = self.extract_text_safe(tree, xpath)
 
-            # Try multiple XPath strategies (relative to container if available)
-            xpaths = [
-                './/span[@data-seo-id="strike-through-price"]',
-                './/span[contains(@class, "strike")]',
-                './/span[@aria-hidden="true"][contains(@class, "strike")]',
-                './/del//span[contains(text(), "$")]'
-            ]
-
-            for xpath in xpaths:
-                try:
-                    elements = search_context.xpath(xpath)
-                    if elements:
-                        text = elements[0].text_content().strip()
-                        # Extract price (e.g., "$298.00")
-                        price_match = re.search(r'\$[\d,]+\.?\d*', text)
-                        if price_match:
-                            print(f"       Original Price: {price_match.group(0)} (with savings: {savings})")
-                            return price_match.group(0)
-                except:
-                    continue
+            if text:
+                # Extract price (e.g., "$4,999.99")
+                price_match = re.search(r'\$[\d,]+\.?\d*', text)
+                if price_match:
+                    print(f"       Original Price: {price_match.group(0)} (with savings: {savings})")
+                    return price_match.group(0)
 
             # If savings exists but no strike-through price found, log it
             print(f"       Original Price: Not found (but savings exists: {savings})")
@@ -791,10 +777,14 @@ class WalmartDetailCrawler:
             return None
 
     def extract_shipping_info(self, tree):
-        """Combine two shipping info parts"""
+        """Combine two shipping info parts (hardcoded XPaths)"""
         try:
-            part1 = self.extract_text_safe(tree, self.xpaths.get('shipping_info_1'))
-            part2 = self.extract_text_safe(tree, self.xpaths.get('shipping_info_2'))
+            # Hardcoded XPaths for shipping info
+            xpath_part1 = '//*[@id="fulfillment-Shipping-content"]/div[3]'  # e.g., "Arrives Dec 23"
+            xpath_part2 = '//*[@id="fulfillment-Shipping-content"]/div[4]/div'  # e.g., "Free"
+
+            part1 = self.extract_text_safe(tree, xpath_part1)
+            part2 = self.extract_text_safe(tree, xpath_part2)
 
             parts = []
             if part1:
@@ -989,15 +979,16 @@ class WalmartDetailCrawler:
             return None
 
     def extract_offer(self, tree):
-        """Extract offer count (e.g., '4' from '4 free offers, including Apple TV up to 3 months free')
+        """Extract offer count (e.g., '5' from '5 free offers, including Apple TV up to 3 months free')
         Only extracts if 'free offer' text is found, returns the number only
         """
         try:
-            xpath = '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/section[1]/div/div'
+            # Hardcoded XPath for offer (section[2], not section[1])
+            xpath = '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/section[2]/div/div'
             text = self.extract_text_safe(tree, xpath)
             print(f"  [DEBUG] extract_offer - raw text: {repr(text)}")
             if text and 'free offer' in text.lower():
-                # Extract the number at the beginning (e.g., "4" from "4 free offers...")
+                # Extract the number at the beginning (e.g., "5" from "5 free offers...")
                 match = re.search(r'^(\d+)', text.strip())
                 if match:
                     print(f"  [DEBUG] extract_offer - extracted number: {match.group(1)}")
@@ -1672,8 +1663,13 @@ class WalmartDetailCrawler:
             # Extract basic data using XPaths (from initial page load)
             retailer_sku_name = self.extract_text_safe(tree, self.xpaths.get('product_name'))
             star_rating = self.extract_star_rating(tree, page_source)
-            discount_type = self.extract_text_safe(tree, self.xpaths.get('discount_type'))
-            savings = self.extract_text_safe(tree, self.xpaths.get('savings'))
+
+            # Hardcoded XPaths for discount_type and savings
+            discount_type_xpath = '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/div[1]/span[1]'
+            savings_xpath = '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/section[1]/div/div[2]/span[2]'
+
+            discount_type = self.extract_text_safe(tree, discount_type_xpath)
+            savings = self.extract_text_safe(tree, savings_xpath)
 
             # Extract prices from detail page (original_price only if savings exists)
             final_sku_price = self.extract_final_price(tree)

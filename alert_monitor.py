@@ -72,15 +72,56 @@ def analyze_crawl_results(retailer_code, target_count, results_df):
         })
         analysis['is_critical'] = True
 
-    # Analyze empty value ratio for each field
-    fields_to_check = ['final_sku_price', 'count_of_reviews', 'count_of_star_ratings', 'star_rating', 'retailer_sku_name', 'screen_size']
+    # Analyze empty value ratio for each field (all tv_retail_com columns)
+    fields_to_check = [
+        'retailer_sku_name', 'star_rating', 'count_of_star_ratings', 'count_of_reviews',
+        'screen_size', 'sku_popularity', 'final_sku_price', 'original_sku_price',
+        'savings', 'discount_type', 'offer', 'pick_up_availability',
+        'shipping_availability', 'delivery_availability', 'shipping_info',
+        'available_quantity_for_purchase', 'inventory_status', 'sku_status',
+        'retailer_membership_discounts', 'detailed_review_content', 'summarized_review_content',
+        'top_mentions', 'recommendation_intent', 'main_rank', 'bsr_rank', 'trend_rank',
+        'rank_1', 'rank_2', 'promotion_position', 'number_of_ppl_purchased_yesterday',
+        'number_of_ppl_added_to_carts', 'number_of_units_purchased_past_month',
+        'retailer_sku_name_similar', 'estimated_annual_electricity_use', 'promotion_type', 'model_year'
+    ]
     field_names = {
-        'final_sku_price': 'Final SKU Price',
-        'count_of_reviews': 'Count of Reviews',
-        'count_of_star_ratings': 'Count of Star Ratings',
-        'star_rating': 'Star Rating',
         'retailer_sku_name': 'Retailer SKU Name',
-        'screen_size': 'Screen Size'
+        'star_rating': 'Star Rating',
+        'count_of_star_ratings': 'Count of Star Ratings',
+        'count_of_reviews': 'Count of Reviews',
+        'screen_size': 'Screen Size',
+        'sku_popularity': 'SKU Popularity',
+        'final_sku_price': 'Final SKU Price',
+        'original_sku_price': 'Original SKU Price',
+        'savings': 'Savings',
+        'discount_type': 'Discount Type',
+        'offer': 'Offer',
+        'pick_up_availability': 'Pick Up Availability',
+        'shipping_availability': 'Shipping Availability',
+        'delivery_availability': 'Delivery Availability',
+        'shipping_info': 'Shipping Info',
+        'available_quantity_for_purchase': 'Available Quantity',
+        'inventory_status': 'Inventory Status',
+        'sku_status': 'SKU Status',
+        'retailer_membership_discounts': 'Membership Discounts',
+        'detailed_review_content': 'Detailed Review',
+        'summarized_review_content': 'Summarized Review',
+        'top_mentions': 'Top Mentions',
+        'recommendation_intent': 'Recommendation Intent',
+        'main_rank': 'Main Rank',
+        'bsr_rank': 'BSR Rank',
+        'trend_rank': 'Trend Rank',
+        'rank_1': 'Rank 1',
+        'rank_2': 'Rank 2',
+        'promotion_position': 'Promotion Position',
+        'number_of_ppl_purchased_yesterday': 'Purchased Yesterday',
+        'number_of_ppl_added_to_carts': 'Added to Carts',
+        'number_of_units_purchased_past_month': 'Units Purchased (Month)',
+        'retailer_sku_name_similar': 'Similar SKU Name',
+        'estimated_annual_electricity_use': 'Annual Electricity Use',
+        'promotion_type': 'Promotion Type',
+        'model_year': 'Model Year'
     }
 
     for field in fields_to_check:

@@ -1590,15 +1590,33 @@ class AmazonDetailCrawler:
             try:
                 cursor = self.db_conn.cursor()
                 cursor.execute("""
-                    SELECT final_sku_price, count_of_reviews, count_of_star_ratings,
-                           star_rating, retailer_sku_name, screen_size
+                    SELECT retailer_sku_name, star_rating, count_of_star_ratings, count_of_reviews,
+                           screen_size, sku_popularity, final_sku_price, original_sku_price,
+                           savings, discount_type, offer, pick_up_availability,
+                           shipping_availability, delivery_availability, shipping_info,
+                           available_quantity_for_purchase, inventory_status, sku_status,
+                           retailer_membership_discounts, detailed_review_content, summarized_review_content,
+                           top_mentions, recommendation_intent, main_rank, bsr_rank, trend_rank,
+                           rank_1, rank_2, promotion_position, number_of_ppl_purchased_yesterday,
+                           number_of_ppl_added_to_carts, number_of_units_purchased_past_month,
+                           retailer_sku_name_similar, estimated_annual_electricity_use, promotion_type, model_year
                     FROM tv_retail_com
                     WHERE account_name = 'Amazon'
-                    AND crawl_datetime >= NOW() - INTERVAL '1 day'
+                    AND crawl_datetime::timestamp >= NOW() - INTERVAL '4 hours'
                 """)
                 rows = cursor.fetchall()
-                columns = ['final_sku_price', 'count_of_reviews', 'count_of_star_ratings',
-                          'star_rating', 'retailer_sku_name', 'screen_size']
+                columns = [
+                    'retailer_sku_name', 'star_rating', 'count_of_star_ratings', 'count_of_reviews',
+                    'screen_size', 'sku_popularity', 'final_sku_price', 'original_sku_price',
+                    'savings', 'discount_type', 'offer', 'pick_up_availability',
+                    'shipping_availability', 'delivery_availability', 'shipping_info',
+                    'available_quantity_for_purchase', 'inventory_status', 'sku_status',
+                    'retailer_membership_discounts', 'detailed_review_content', 'summarized_review_content',
+                    'top_mentions', 'recommendation_intent', 'main_rank', 'bsr_rank', 'trend_rank',
+                    'rank_1', 'rank_2', 'promotion_position', 'number_of_ppl_purchased_yesterday',
+                    'number_of_ppl_added_to_carts', 'number_of_units_purchased_past_month',
+                    'retailer_sku_name_similar', 'estimated_annual_electricity_use', 'promotion_type', 'model_year'
+                ]
                 results_df = pd.DataFrame(rows, columns=columns)
                 cursor.close()
 

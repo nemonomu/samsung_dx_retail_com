@@ -24,8 +24,10 @@ if sys.stdout.encoding != 'utf-8':
 # Import database and account configuration
 from config import DB_CONFIG, AMAZON_ACCOUNTS
 
-# Cookie file path (uses unsandev0004 for amazon_tv_crawl.py)
-COOKIE_FILE = AMAZON_ACCOUNTS['unsandev0004']['cookie_file']
+# Cookie files for account switching (crawl1 uses unsandev0002 -> unsandev0003)
+COOKIE_FILE_1 = AMAZON_ACCOUNTS['unsandev0002']['cookie_file']  # First 100 products
+COOKIE_FILE_2 = AMAZON_ACCOUNTS['unsandev0003']['cookie_file']  # Remaining products
+ACCOUNT_SWITCH_AT = 100  # Switch account after this many products
 import pandas as pd
 from alert_monitor import monitor_and_alert
 
@@ -36,6 +38,8 @@ class AmazonDetailCrawler:
         self.xpaths = {}
         self.total_collected = 0
         self.max_skus = 300  # Maximum SKUs to collect (final limit)
+        self.current_cookie_file = COOKIE_FILE_1  # Start with first account
+        self.account_switched = False  # Track if account has been switched
         # Generate batch_id using Korea timezone
         korea_tz = pytz.timezone('Asia/Seoul')
         self.batch_id = datetime.now(korea_tz).strftime('%Y%m%d_%H%M%S')
@@ -350,14 +354,17 @@ class AmazonDetailCrawler:
             traceback.print_exc()
             raise
 
-    def load_cookies(self):
+    def load_cookies(self, cookie_file=None):
         """Load cookies from file for authenticated access"""
-        print(f"[INFO] Loading cookies from {COOKIE_FILE}...")
+        if cookie_file is None:
+            cookie_file = self.current_cookie_file
 
-        if not os.path.exists(COOKIE_FILE):
-            print(f"[WARNING] Cookie file not found: {COOKIE_FILE}")
+        print(f"[INFO] Loading cookies from {cookie_file}...")
+
+        if not os.path.exists(cookie_file):
+            print(f"[WARNING] Cookie file not found: {cookie_file}")
             print("[WARNING] Review collection may fail without login.")
-            print("[INFO] To create cookie file, run amazon_login.py first")
+            print("[INFO] To create cookie file, run: python amazon_login.py <account_name>")
             return False
 
         try:
@@ -365,7 +372,7 @@ class AmazonDetailCrawler:
             self.driver.get("https://www.amazon.com")
             time.sleep(2)
 
-            with open(COOKIE_FILE, 'rb') as f:
+            with open(cookie_file, 'rb') as f:
                 cookies = pickle.load(f)
                 print(f"[DEBUG] Found {len(cookies)} cookies in file")
                 for cookie in cookies:
@@ -377,11 +384,42 @@ class AmazonDetailCrawler:
             print("[INFO] Refreshing page with cookies...")
             self.driver.refresh()
             time.sleep(2)
-            print(f"[OK] Cookies loaded successfully")
+            print(f"[OK] Cookies loaded successfully from {cookie_file}")
             return True
 
         except Exception as e:
             print(f"[WARNING] Failed to load cookies: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def switch_account(self):
+        """Switch to second account by loading new cookies"""
+        print("\n" + "=" * 80)
+        print(f"[INFO] Switching account after {self.total_collected} products...")
+        print(f"[INFO] Current cookie: {self.current_cookie_file}")
+        print(f"[INFO] Switching to: {COOKIE_FILE_2}")
+        print("=" * 80)
+
+        try:
+            # Clear existing cookies
+            self.driver.delete_all_cookies()
+            print("[INFO] Cleared existing cookies")
+
+            # Update current cookie file
+            self.current_cookie_file = COOKIE_FILE_2
+
+            # Load new cookies
+            if self.load_cookies(COOKIE_FILE_2):
+                self.account_switched = True
+                print("[OK] Account switched successfully!")
+                return True
+            else:
+                print("[ERROR] Failed to load new account cookies")
+                return False
+
+        except Exception as e:
+            print(f"[ERROR] Failed to switch account: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -1569,8 +1607,13 @@ class AmazonDetailCrawler:
                     print(f"[INFO] Stopping collection. Total collected: {self.total_collected}")
                     break
 
+                # Check if we need to switch account (after ACCOUNT_SWITCH_AT products)
+                if self.total_collected >= ACCOUNT_SWITCH_AT and not self.account_switched:
+                    if not self.switch_account():
+                        print("[WARNING] Account switch failed, continuing with current account...")
+
                 print(f"\n{'='*80}")
-                print(f"Processing {idx}/{len(product_urls)}")
+                print(f"Processing {idx}/{len(product_urls)} (Total collected: {self.total_collected})")
 
                 self.scrape_detail_page(url_data)
 

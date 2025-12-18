@@ -1,6 +1,7 @@
 import time
 import pickle
 import os
+import sys
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -9,10 +10,12 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
-# Cookie file path
+from config import AMAZON_ACCOUNTS
+
+# Default cookie file path (for backward compatibility)
 COOKIE_FILE = 'amazon_cookies.pkl'
 
-# Amazon credentials (CHANGE THESE!)
+# Amazon credentials (will be overridden by account selection)
 AMAZON_EMAIL = 'your-email@example.com'
 AMAZON_PASSWORD = 'your-password'
 
@@ -367,16 +370,110 @@ def test_login_with_cookies():
         traceback.print_exc()
         return None
 
+def login_with_account(account_name):
+    """Login with specific account from config"""
+    if account_name not in AMAZON_ACCOUNTS:
+        print(f"\n[ERROR] Account '{account_name}' not found in config.py")
+        print(f"Available accounts: {', '.join(AMAZON_ACCOUNTS.keys())}")
+        return None
+
+    account = AMAZON_ACCOUNTS[account_name]
+    email = account['email']
+    password = account['password']
+    cookie_file = account['cookie_file']
+
+    print(f"\n{'='*80}")
+    print(f"Amazon Login - Account: {account_name}")
+    print(f"Email: {email}")
+    print(f"Cookie file: {cookie_file}")
+    print(f"{'='*80}")
+
+    driver = setup_driver()
+
+    try:
+        # Try to load existing cookies first
+        if os.path.exists(cookie_file):
+            print(f"\n[INFO] Found existing cookies: {cookie_file}")
+            print("[INFO] Trying to login with saved cookies...")
+
+            driver.get("https://www.amazon.com")
+            time.sleep(2)
+
+            load_cookies(driver, cookie_file)
+            driver.refresh()
+            time.sleep(3)
+
+            # Check if logged in
+            try:
+                account_element = driver.find_element(By.ID, "nav-link-accountList")
+                account_text = account_element.text.lower()
+
+                if "hello" in account_text and "sign in" not in account_text:
+                    print("\n✓ Successfully logged in using saved cookies!")
+                    return driver
+                else:
+                    print("\n✗ Saved cookies expired, need fresh login")
+            except:
+                print("\n✗ Could not verify cookie login, need fresh login")
+
+        # Fresh login
+        print("\n[INFO] Starting fresh login...")
+
+        if login_to_amazon(driver, email, password):
+            save_cookies(driver, cookie_file)
+            print(f"\n[OK] Cookies saved to {cookie_file}")
+            return driver
+        else:
+            print("\n[ERROR] Login failed!")
+            return None
+
+    except Exception as e:
+        print(f"\n[ERROR] Login failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
 if __name__ == "__main__":
-    driver = test_login_with_cookies()
+    # Check command line arguments
+    if len(sys.argv) > 1:
+        account_name = sys.argv[1]
+        driver = login_with_account(account_name)
+    else:
+        # Show available accounts and prompt for selection
+        print("\n" + "=" * 80)
+        print("Amazon Login - Account Selection")
+        print("=" * 80)
+        print("\nAvailable accounts:")
+        for idx, (name, info) in enumerate(AMAZON_ACCOUNTS.items(), 1):
+            print(f"  {idx}. {name} ({info['email']})")
+        print(f"  0. Use default (legacy mode)")
+
+        print("\nUsage: python amazon_login.py <account_name>")
+        print("Example: python amazon_login.py unsandev0002")
+        print("\nOr select account number:")
+
+        try:
+            choice = input("Enter choice (0-3): ").strip()
+            if choice == '0':
+                driver = test_login_with_cookies()
+            elif choice.isdigit() and 1 <= int(choice) <= len(AMAZON_ACCOUNTS):
+                account_name = list(AMAZON_ACCOUNTS.keys())[int(choice) - 1]
+                driver = login_with_account(account_name)
+            else:
+                print("[ERROR] Invalid choice")
+                driver = None
+        except KeyboardInterrupt:
+            print("\n[INFO] Cancelled by user")
+            driver = None
 
     if driver:
         print("\n" + "=" * 80)
-        print("Login test completed successfully!")
+        print("Login completed successfully!")
         print("You can now use the saved cookies for crawling")
         print("=" * 80)
 
         input("\nPress Enter to close browser...")
         driver.quit()
     else:
-        print("\n[FAILED] Login test failed")
+        print("\n[FAILED] Login failed")

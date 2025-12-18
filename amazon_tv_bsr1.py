@@ -255,7 +255,7 @@ class AmazonBSRCrawler:
 
         return True
 
-    def check_and_handle_sorry_page(self, max_retries=3):
+    def check_and_handle_sorry_page(self, max_retries=20):
         """Check for sorry/robot check page and refresh if needed
 
         Returns:
@@ -303,7 +303,7 @@ class AmazonBSRCrawler:
             time.sleep(random.uniform(8, 12))
 
             # Check and handle sorry page with refresh retries
-            if not self.check_and_handle_sorry_page(max_retries=3):
+            if not self.check_and_handle_sorry_page(max_retries=20):
                 print(f"[SKIP] Skipping page {page_number} due to persistent sorry/robot check page")
                 return False
 

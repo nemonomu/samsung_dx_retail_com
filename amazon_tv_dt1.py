@@ -978,9 +978,14 @@ class AmazonDetailCrawler:
                 except:
                     count_int = 0
 
-            # If more than 10 reviews exist, go to next page for more
-            if count_int > 10 and len(all_reviews) > 0:
-                # Click "Next page" button (Amazon requires actual click for pagination to work)
+            # Store collected reviews for duplicate check
+            collected_reviews = set(all_reviews)
+
+            # If 20+ reviews exist and we have less than 20, go to next pages (up to 3 pages)
+            current_page = 1
+            max_pages = 3
+
+            while len(all_reviews) < 20 and current_page < max_pages and count_int >= 20:
                 try:
                     # Scroll to bottom of page to ensure Next button is visible
                     self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
@@ -988,48 +993,54 @@ class AmazonDetailCrawler:
 
                     # Find and click Next page button
                     next_button = self.driver.find_element(By.XPATH, '//li[@class="a-last"]/a')
-                    print(f"  [INFO] Clicking Next page button...")
+                    print(f"  [INFO] Clicking Next page button (page {current_page} -> {current_page + 1})...")
                     self.driver.execute_script("arguments[0].click();", next_button)
                     time.sleep(random.uniform(3, 5))
 
-                    # Verify we're on page 2
-                    current_url = self.driver.current_url
-                    if 'pageNumber=2' not in current_url:
-                        print(f"  [WARNING] Page 2 not loaded properly, current URL: {current_url[:80]}...")
-                    else:
-                        print(f"  [DEBUG] Confirmed on page 2: {current_url[:80]}...")
+                    current_page += 1
 
-                    # Extract reviews from second page
+                    # Verify we're on expected page
+                    current_url = self.driver.current_url
+                    if f'pageNumber={current_page}' not in current_url:
+                        print(f"  [WARNING] Page {current_page} not loaded properly, current URL: {current_url[:80]}...")
+                    else:
+                        print(f"  [DEBUG] Confirmed on page {current_page}: {current_url[:80]}...")
+
+                    # Extract reviews from current page
                     tree = html.fromstring(self.driver.page_source)
                     review_elements = tree.xpath(review_xpath)
 
-                    print(f"  [DEBUG] Review page 2: found {len(review_elements)} review elements")
+                    print(f"  [DEBUG] Review page {current_page}: found {len(review_elements)} review elements")
 
-                    # Store first page reviews for duplicate check
-                    first_page_reviews = set(all_reviews)
-
-                    # Collect reviews from second page with duplicate check
-                    page2_count = 0
+                    # Collect reviews with duplicate check
+                    page_count = 0
                     duplicates = 0
                     if review_elements:
-                        for elem in review_elements[:10]:  # Max 10 from second page
+                        for elem in review_elements[:10]:  # Max 10 per page
                             if len(all_reviews) >= 20:
                                 break
                             review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
                             if review_text and len(review_text) > 10:
-                                # Skip if duplicate from first page
-                                if review_text in first_page_reviews:
+                                # Skip if duplicate
+                                if review_text in collected_reviews:
                                     duplicates += 1
                                     continue
                                 all_reviews.append(review_text)
-                                page2_count += 1
+                                collected_reviews.add(review_text)
+                                page_count += 1
 
                     if duplicates > 0:
-                        print(f"  [WARNING] Found {duplicates} duplicate reviews on page 2")
-                    print(f"  [INFO] Review page 2: added {page2_count} reviews, total {len(all_reviews)} reviews")
+                        print(f"  [WARNING] Found {duplicates} duplicate reviews on page {current_page}")
+                    print(f"  [INFO] Review page {current_page}: added {page_count} reviews, total {len(all_reviews)} reviews")
+
+                    # If no new reviews found, stop pagination
+                    if page_count == 0:
+                        print(f"  [INFO] No new reviews on page {current_page}, stopping pagination")
+                        break
 
                 except Exception as e:
-                    print(f"  [WARNING] Could not navigate to page 2: {e}")
+                    print(f"  [WARNING] Could not navigate to page {current_page + 1}: {e}")
+                    break
 
             # Navigate back to product page
             print(f"  [INFO] Navigating back to product page...")

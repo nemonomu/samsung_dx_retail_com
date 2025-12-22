@@ -1,12 +1,13 @@
 """
 Amazon TV Test Script - Extract specific fields only
 Fields: final_sku_price, count_of_reviews, count_of_star_ratings, star_ratings
-No DB save - just extraction and logging
+Based on amazon_tv_dt1.py - No DB save, just extraction and logging
 """
 
 import time
 import random
 import sys
+import psycopg2
 import pickle
 import os
 from datetime import datetime
@@ -25,18 +26,79 @@ import re
 if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-# Import account configuration
-from config import AMAZON_ACCOUNTS
+# Import database and account configuration
+from config import DB_CONFIG, AMAZON_ACCOUNTS
 
-# Cookie file path
+# Cookie file path (uses unsandev0004 for amazon_tv_crawl.py)
 COOKIE_FILE = AMAZON_ACCOUNTS['unsandev0004']['cookie_file']
 
 
 class AmazonTVTestCrawler:
     def __init__(self):
         self.driver = None
+        self.db_conn = None
+        self.xpaths = {}
+        # Generate batch_id using Korea timezone
         korea_tz = pytz.timezone('Asia/Seoul')
         self.batch_id = datetime.now(korea_tz).strftime('%Y%m%d_%H%M%S')
+
+    def connect_db(self):
+        """Connect to PostgreSQL database"""
+        try:
+            self.db_conn = psycopg2.connect(**DB_CONFIG)
+            self.db_conn.autocommit = True
+            print("[OK] Database connected (autocommit enabled)")
+            return True
+        except Exception as e:
+            print(f"[ERROR] Database connection failed: {e}")
+            return False
+
+    def load_xpaths(self):
+        """Load XPath selectors from database"""
+        try:
+            print("[INFO] Loading XPath selectors from database...")
+            cursor = self.db_conn.cursor()
+
+            # Check if table exists
+            cursor.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'xpath_selectors'
+                )
+            """)
+            table_exists = cursor.fetchone()[0]
+
+            if not table_exists:
+                print("[ERROR] Table 'xpath_selectors' does not exist")
+                cursor.close()
+                return False
+
+            cursor.execute("""
+                SELECT data_field, xpath
+                FROM xpath_selectors
+                WHERE mall_name = 'Amazon' AND page_type = 'detail_page' AND is_active = TRUE
+            """)
+
+            rows = cursor.fetchall()
+            for row in rows:
+                self.xpaths[row[0]] = row[1]
+                print(f"  [DEBUG] Loaded XPath: {row[0]} = {row[1][:50]}...")
+
+            cursor.close()
+
+            if len(self.xpaths) == 0:
+                print("[WARNING] No XPath selectors found for Amazon detail_page")
+                print("[INFO] You may need to populate xpath_selectors table first")
+            else:
+                print(f"[OK] Loaded {len(self.xpaths)} XPath selectors")
+
+            return True
+
+        except Exception as e:
+            print(f"[ERROR] Failed to load XPaths: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def setup_driver(self):
         """Setup Chrome WebDriver"""
@@ -82,6 +144,8 @@ class AmazonTVTestCrawler:
 
         if not os.path.exists(COOKIE_FILE):
             print(f"[WARNING] Cookie file not found: {COOKIE_FILE}")
+            print("[WARNING] Review collection may fail without login.")
+            print("[INFO] To create cookie file, run amazon_login.py first")
             return False
 
         try:
@@ -106,6 +170,8 @@ class AmazonTVTestCrawler:
 
         except Exception as e:
             print(f"[WARNING] Failed to load cookies: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def extract_text_safe(self, tree, xpath):
@@ -124,29 +190,19 @@ class AmazonTVTestCrawler:
             return None
 
     def extract_star_rating(self, tree):
-        """Extract star rating (format: '4.5 out of 5 stars' or 'No customer reviews')
-        Returns the full rating text as displayed on Amazon
-        """
+        """Extract star rating (format: '4.5' or 'No customer reviews')"""
         try:
-            # Primary XPath for star rating - matches original amazon_tv_dt1.py
-            star_rating_xpaths = [
-                '//*[@id="acrPopover"]/@title',  # "4.5 out of 5 stars"
-                '//*[@id="acrPopover"]/span[1]/a/span',
-                '//span[@data-hook="rating-out-of-text"]',
-                '//i[contains(@class, "a-icon-star")]//span[@class="a-icon-alt"]'
-            ]
+            # Try to get star rating from database XPath
+            star_rating_text = self.extract_text_safe(tree, self.xpaths.get('star_rating'))
 
-            for xpath in star_rating_xpaths:
-                star_rating_text = self.extract_text_safe(tree, xpath)
-                if star_rating_text:
-                    # Check for "No customer reviews" first
-                    if "No customer reviews" in star_rating_text:
-                        return "No customer reviews"
+            if star_rating_text:
+                # Check for "No customer reviews" first
+                if "No customer reviews" in star_rating_text:
+                    return "No customer reviews"
 
-                    # Return the star rating as-is if it contains a number
-                    # (matches original logic from amazon_tv_dt1.py)
-                    if re.search(r'\d', star_rating_text):
-                        return star_rating_text
+                # Return the star rating as-is if it contains a number
+                if re.search(r'\d', star_rating_text):
+                    return star_rating_text
 
             # Fallback: Check for "No customer reviews" at specific location
             no_reviews_xpaths = [
@@ -168,8 +224,11 @@ class AmazonTVTestCrawler:
             return None
 
     def extract_count_of_reviews(self, tree):
-        """Extract count of reviews (format: '1,484' or '0' for no reviews)"""
+        """Extract count of reviews from detail page (fallback)
+        Format: '1,484' or '0' for no reviews
+        """
         try:
+            # XPath: //*[@id="acrCustomerReviewText"]
             xpaths = [
                 '//*[@id="acrCustomerReviewText"]',
                 '//span[@id="acrCustomerReviewText"]',
@@ -184,13 +243,16 @@ class AmazonTVTestCrawler:
                         return "0"
 
                     # "1,484 ratings" -> "1,484"
+                    # Extract only numbers and comma
                     match = re.search(r'([\d,]+)', reviews_text)
                     if match:
                         return match.group(1)
 
-            # Fallback: Check for "No customer reviews"
+            # Fallback: Check for "No customer reviews" at specific location -> return 0
             no_reviews_xpaths = [
                 '//*[@id="cm-cr-dp-review-header"]/h3/span',
+                '//span[@data-hook="top-customer-reviews-title"]',
+                '//div[@id="cm-cr-dp-review-header"]//span[contains(text(), "No customer reviews")]',
                 '//span[contains(text(), "No customer reviews")]'
             ]
 
@@ -203,6 +265,110 @@ class AmazonTVTestCrawler:
 
         except Exception as e:
             print(f"  [WARNING] Failed to extract count of reviews: {e}")
+            return None
+
+    def extract_count_of_reviews_from_review_page(self, product_url):
+        """Extract count_of_reviews from review page (same logic as dt1.py)
+
+        Returns:
+            str: count_of_reviews (e.g., '385') or None
+        """
+        try:
+            # Get current page HTML
+            tree = html.fromstring(self.driver.page_source)
+
+            # Extract "See more reviews" link
+            # Priority: data-hook attribute is most reliable
+            review_link_xpaths = [
+                '//a[@data-hook="see-all-reviews-link-foot"]/@href',  # Most reliable - data-hook attribute
+                '//*[@id="reviews-medley-footer"]//a[contains(@href, "product-reviews")]/@href',  # Footer container
+                '//*[@id="reviews-medley-footer"]/div[2]/a/@href',  # Legacy structure
+                '//a[contains(text(), "See more reviews")]/@href',
+                '//a[contains(text(), "See all reviews")]/@href',
+                '//a[contains(@href, "product-reviews")]/@href'
+            ]
+
+            review_link = None
+            for idx, xpath in enumerate(review_link_xpaths, 1):
+                result = tree.xpath(xpath)
+                if result:
+                    review_link = result[0]
+                    print(f"  [DEBUG] Found review link with XPath #{idx}: {review_link[:80]}...")
+                    break
+                else:
+                    print(f"  [DEBUG] XPath #{idx} not found")
+
+            if not review_link:
+                print("  [WARNING] Could not find review page link, falling back to detail page")
+                return None
+
+            # Extract ASIN from review link
+            asin_match = re.search(r'/product-reviews/([A-Z0-9]{10})', review_link)
+            if asin_match:
+                asin = asin_match.group(1)
+                print(f"  [DEBUG] Extracted ASIN from review link: {asin}")
+            else:
+                print(f"  [WARNING] Could not extract ASIN from review link")
+
+            # Use original review link (Amazon requires specific ref parameter for pagination)
+            if review_link.startswith('http'):
+                review_url = review_link
+            else:
+                review_url = "https://www.amazon.com" + review_link
+
+            print(f"  [INFO] Navigating to review page: {review_url[:80]}...")
+            self.driver.get(review_url)
+            time.sleep(random.uniform(3, 4))
+            print(f"  [DEBUG] Actual URL after navigation: {self.driver.current_url[:80]}...")
+
+            # Extract count_of_reviews from review page
+            # XPath: //*[@id="filter-info-section"]/div or div[@data-hook="cr-filter-info-review-rating-count"]
+            count_of_reviews = None
+            tree = html.fromstring(self.driver.page_source)
+
+            count_xpaths = [
+                '//*[@id="filter-info-section"]/div',
+                '//div[@data-hook="cr-filter-info-review-rating-count"]',
+                '//div[contains(@data-hook, "review-rating-count")]'
+            ]
+
+            for xpath in count_xpaths:
+                count_elements = tree.xpath(xpath)
+                if count_elements:
+                    count_text = count_elements[0].text_content().strip() if hasattr(count_elements[0], 'text_content') else str(count_elements[0]).strip()
+                    if count_text:
+                        print(f"  [DEBUG] count_text found: {count_text[:100]}...")
+                        # Try multiple patterns
+                        # Pattern 1: "385 customer reviews" or "1,234 customer reviews"
+                        match = re.search(r'([\d,]+)\s*customer\s*reviews?', count_text, re.IGNORECASE)
+                        if not match:
+                            # Pattern 2: "385 with reviews" (from "1,891 global ratings, 385 with reviews")
+                            match = re.search(r'([\d,]+)\s*with\s*reviews?', count_text, re.IGNORECASE)
+                        if not match:
+                            # Pattern 3: Just "385 reviews"
+                            match = re.search(r'([\d,]+)\s*reviews?', count_text, re.IGNORECASE)
+                        if match:
+                            count_of_reviews = match.group(1)
+                            print(f"  [OK] Extracted count_of_reviews from review page: {count_of_reviews}")
+                            break
+
+            # Navigate back to product page
+            print(f"  [INFO] Navigating back to product page...")
+            self.driver.get(product_url)
+            time.sleep(random.uniform(2, 3))
+
+            return count_of_reviews
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract count_of_reviews from review page: {e}")
+            import traceback
+            traceback.print_exc()
+            # Try to navigate back to product page
+            try:
+                self.driver.get(product_url)
+                time.sleep(2)
+            except:
+                pass
             return None
 
     def extract_count_of_star_ratings(self, tree):
@@ -228,13 +394,18 @@ class AmazonTVTestCrawler:
             return None
 
     def extract_final_sku_price(self, tree):
-        """Extract final SKU price from detail page"""
+        """Extract final SKU price from detail page
+        Priority order: Special cases first, then normal price extraction
+        """
         try:
+            import re
+
             # PRIORITY 1: Check for "Currently unavailable."
             currently_unavailable_xpaths = [
                 '//*[@id="outOfStock"]/div/div[1]/span[1]',
                 '//*[@id="availability"]/span[2]/span',
-                '//span[@class="a-color-price a-text-bold"]'
+                '//span[@class="a-color-price a-text-bold"]',
+                '//span[@class="a-size-medium a-color-success"]'
             ]
 
             for xpath in currently_unavailable_xpaths:
@@ -243,8 +414,10 @@ class AmazonTVTestCrawler:
                     return "Currently unavailable."
 
             # PRIORITY 2: Check for "Price higher than typical"
+            # NOTE: Checked before "No featured offers" because they use same XPath location
             price_higher_xpaths = [
                 '//*[@id="fod-cx-message-with-learn-more"]/span[1]',
+                '//span[@id="fod-cx-message-with-learn-more"]/span[1]',
                 '//span[contains(text(), "Price higher than typical")]'
             ]
 
@@ -256,6 +429,7 @@ class AmazonTVTestCrawler:
             # PRIORITY 3: Check for "No featured offers available"
             no_offers_xpaths = [
                 '//*[@id="fod-cx-message-with-learn-more"]/span[1]',
+                '//span[@id="fod-cx-message-with-learn-more"]/span[1]',
                 '//span[contains(text(), "No featured offers available")]'
             ]
 
@@ -267,7 +441,8 @@ class AmazonTVTestCrawler:
             # PRIORITY 4: Check for "See price in cart"
             see_price_xpaths = [
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/table/tbody/tr/td[2]/span/a',
-                '//a[contains(text(), "See price in cart")]'
+                '//a[contains(text(), "See price in cart")]',
+                '//span[@class="a-declarative"]//a[contains(text(), "See price in cart")]'
             ]
 
             for xpath in see_price_xpaths:
@@ -278,6 +453,7 @@ class AmazonTVTestCrawler:
             # PRIORITY 5: Check for "To see our price, add this item to your cart."
             add_to_cart_xpaths = [
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/table/tbody/tr/td[2]',
+                '//table[@class="a-lineitem"]//td[contains(text(), "To see our price")]',
                 '//td[contains(text(), "To see our price, add this item to your cart")]'
             ]
 
@@ -288,21 +464,23 @@ class AmazonTVTestCrawler:
 
             # NORMAL EXTRACTION: Try to extract regular price
             xpaths = [
-                '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[1]',
-                '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[3]/span[2]',
-                '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[3]/span[2]/span[1]',
-                '//span[@class="a-price aok-align-center reinventPricePriceToPayMargin priceToPay"]//span[@class="a-offscreen"]',
-                '//*[@id="corePrice_feature_div"]/div/div/span[1]/span[1]',
-                '//*[@id="corePrice_feature_div"]//span[@class="a-offscreen"]'
+                '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[1]',  # New primary xpath
+                '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[3]/span[2]',  # Main container
+                '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[3]/span[2]/span[1]',  # Main with span[1]
+                '//span[@class="a-price aok-align-center reinventPricePriceToPayMargin priceToPay"]//span[@class="a-offscreen"]',  # Generic offscreen
+                '//*[@id="corePrice_feature_div"]/div/div/span[1]/span[1]',  # Side container
+                '//*[@id="corePrice_feature_div"]//span[@class="a-offscreen"]'  # Side generic
             ]
 
             for xpath in xpaths:
                 price_text = self.extract_text_safe(tree, xpath)
                 if price_text:
                     # Extract only "$XXX.XX" or "$X,XXX.XX" format
+                    # Remove "with X percent savings" and other extra text
                     match = re.search(r'\$[\d,]+\.?\d*', price_text)
                     if match:
                         return match.group()
+                    # Fallback: return original if no price pattern found
                     return price_text.strip()
 
             return None
@@ -315,7 +493,7 @@ class AmazonTVTestCrawler:
         """Scrape a single URL and extract fields"""
         try:
             print(f"\n{'='*80}")
-            print(f"[INFO] Accessing: {url}")
+            print(f"[INFO] Accessing: {url[:80]}...")
 
             self.driver.get(url)
             time.sleep(random.uniform(3, 5))
@@ -325,10 +503,21 @@ class AmazonTVTestCrawler:
             page_source = self.driver.page_source
             tree = html.fromstring(page_source)
 
-            # Extract the 4 fields
-            final_sku_price = self.extract_final_sku_price(tree)
-            count_of_reviews = self.extract_count_of_reviews(tree)
+            # Extract count_of_star_ratings first (from detail page)
             count_of_star_ratings = self.extract_count_of_star_ratings(tree)
+
+            # Extract count_of_reviews from review page (same as dt1.py)
+            count_of_reviews = self.extract_count_of_reviews_from_review_page(url)
+
+            # Re-parse page source after returning from review page
+            tree = html.fromstring(self.driver.page_source)
+
+            # Fallback: If count_of_reviews not found from review page, try detail page
+            if not count_of_reviews:
+                count_of_reviews = self.extract_count_of_reviews(tree)
+
+            # Extract other fields from detail page
+            final_sku_price = self.extract_final_sku_price(tree)
             star_ratings = self.extract_star_rating(tree)
 
             # Log results
@@ -366,17 +555,28 @@ class AmazonTVTestCrawler:
             # Default test URLs if none provided
             if not test_urls:
                 test_urls = [
-                    'https://www.amazon.com/dp/B0D1XL87F4',  # Samsung TV
-                    'https://www.amazon.com/dp/B0DK7MQFXC',  # Another TV
+                    'https://www.amazon.com/dp/B0D1XL87F4',
                 ]
 
-            # Setup WebDriver
-            print("\n[STEP 1] Setting up WebDriver...")
+            # Step 1: Connect to database
+            print("\n[STEP 1/3] Connecting to database...")
+            if not self.connect_db():
+                print("[ERROR] Failed to connect to database. Stopping.")
+                return
+
+            # Step 2: Load XPaths
+            print("\n[STEP 2/3] Loading XPath selectors...")
+            if not self.load_xpaths():
+                print("[ERROR] Failed to load XPath selectors. Stopping.")
+                return
+
+            # Step 3: Setup WebDriver
+            print("\n[STEP 3/3] Setting up WebDriver...")
             self.setup_driver()
             print("[OK] WebDriver ready")
 
             # Scrape each URL
-            print(f"\n[STEP 2] Scraping {len(test_urls)} URLs...")
+            print(f"\n[INFO] Scraping {len(test_urls)} URLs...")
 
             results = []
             for idx, url in enumerate(test_urls, 1):
@@ -414,6 +614,12 @@ class AmazonTVTestCrawler:
                 try:
                     self.driver.quit()
                     print("[OK] WebDriver closed")
+                except:
+                    pass
+            if self.db_conn:
+                try:
+                    self.db_conn.close()
+                    print("[OK] Database connection closed")
                 except:
                     pass
 

@@ -403,15 +403,6 @@ class AmazonDetailCrawler:
             bool: True if page is ready, False if bot detection or load failure
         """
         try:
-            page_source = self.driver.page_source.lower()
-
-            # Check for bot detection / captcha
-            bot_indicators = ['robot', 'captcha', 'automated access', 'unusual traffic']
-            for indicator in bot_indicators:
-                if indicator in page_source:
-                    print(f"  [ERROR] Bot detection triggered - '{indicator}' found in page")
-                    return False
-
             # Wait for product title element (required)
             try:
                 WebDriverWait(self.driver, 10).until(

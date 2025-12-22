@@ -1734,10 +1734,21 @@ class WalmartDetailCrawler:
             # Extract count of star ratings (from review section)
             count_of_star_ratings = self.extract_count_of_star_ratings(tree)
 
-            # Extract count of reviews (different from count_of_star_ratings)
+            # Wait for count_of_reviews element to load, then extract
             # count_of_star_ratings: "4.4 stars out of 50630 reviews" -> 50630 (ratings count)
             # count_of_reviews: "986 reviews" link -> 986 (actual written reviews count)
-            count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source)
+            count_of_reviews = None
+            try:
+                WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, "//*[@id='item-review-section']//a[@link-identifier='seeAllReviewsStarRating'] | //*[@id='item-review-section']/div[7]/div[1] | //span[contains(text(), 'No ratings yet')]"))
+                )
+                # Element loaded - re-parse and extract
+                page_source = self.driver.page_source
+                tree = html.fromstring(page_source)
+                count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source)
+            except:
+                print("  [WARNING] count_of_reviews element not loaded - trying extraction anyway")
+                count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source)
 
             # Click Specifications and get Model (after static content extraction)
             sku_model = self.click_specifications_and_get_model()

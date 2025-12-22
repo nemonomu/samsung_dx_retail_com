@@ -386,6 +386,57 @@ class AmazonDetailCrawler:
             traceback.print_exc()
             return False
 
+    def verify_page_loaded(self, wait_for_price=True):
+        """
+        Verify page is properly loaded before extraction.
+        - Check for bot detection (captcha/robot page)
+        - Wait for key elements to load
+
+        Returns:
+            bool: True if page is ready, False if bot detection or load failure
+        """
+        try:
+            page_source = self.driver.page_source.lower()
+
+            # Check for bot detection / captcha
+            bot_indicators = ['robot', 'captcha', 'automated access', 'unusual traffic']
+            for indicator in bot_indicators:
+                if indicator in page_source:
+                    print(f"  [ERROR] Bot detection triggered - '{indicator}' found in page")
+                    return False
+
+            # Wait for product title element (required)
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.ID, 'productTitle'))
+                )
+            except:
+                print("  [WARNING] Product title element not found within timeout")
+                return False
+
+            # Wait for price element (optional but important)
+            if wait_for_price:
+                try:
+                    WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.XPATH, '//*[@id="corePriceDisplay_desktop_feature_div"] | //*[@id="corePrice_feature_div"] | //*[@id="outOfStock"]'))
+                    )
+                except:
+                    print("  [WARNING] Price element not found within timeout - may be unavailable product")
+
+            # Wait for star rating element (optional)
+            try:
+                WebDriverWait(self.driver, 3).until(
+                    EC.presence_of_element_located((By.XPATH, '//*[@id="acrPopover"] | //*[@id="averageCustomerReviews"] | //span[contains(text(), "No customer reviews")]'))
+                )
+            except:
+                print("  [WARNING] Star rating element not found within timeout")
+
+            return True
+
+        except Exception as e:
+            print(f"  [ERROR] Page verification failed: {e}")
+            return False
+
     def extract_text_safe(self, tree, xpath):
         """Safely extract text from XPath"""
         if not xpath:
@@ -918,36 +969,36 @@ class AmazonDetailCrawler:
             time.sleep(random.uniform(3, 4))
             print(f"  [DEBUG] Actual URL after navigation: {self.driver.current_url}")
 
-            # Extract count_of_reviews from review page
-            # XPath: //*[@id="filter-info-section"]/div or div[@data-hook="cr-filter-info-review-rating-count"]
+            # Wait for count_of_reviews element to load, then extract
             count_of_reviews = None
-            tree = html.fromstring(self.driver.page_source)
-
-            count_xpaths = [
-                '//*[@id="filter-info-section"]/div',
-                '//div[@data-hook="cr-filter-info-review-rating-count"]',
-                '//div[contains(@data-hook, "review-rating-count")]'
-            ]
-
-            for xpath in count_xpaths:
-                count_elements = tree.xpath(xpath)
-                if count_elements:
-                    count_text = count_elements[0].text_content().strip() if hasattr(count_elements[0], 'text_content') else str(count_elements[0]).strip()
-                    if count_text:
-                        print(f"  [DEBUG] count_text found: {count_text[:100]}...")
-                        # Try multiple patterns
-                        # Pattern 1: "385 customer reviews" or "1,234 customer reviews"
-                        match = re.search(r'([\d,]+)\s*customer\s*reviews?', count_text, re.IGNORECASE)
-                        if not match:
-                            # Pattern 2: "385 with reviews" (from "1,891 global ratings, 385 with reviews")
-                            match = re.search(r'([\d,]+)\s*with\s*reviews?', count_text, re.IGNORECASE)
-                        if not match:
-                            # Pattern 3: Just "385 reviews"
-                            match = re.search(r'([\d,]+)\s*reviews?', count_text, re.IGNORECASE)
-                        if match:
-                            count_of_reviews = match.group(1)
-                            print(f"  [OK] Extracted count_of_reviews from review page: {count_of_reviews}")
-                            break
+            try:
+                WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, '//*[@id="filter-info-section"] | //div[@data-hook="cr-filter-info-review-rating-count"]'))
+                )
+                # Element loaded - extract count_of_reviews
+                tree = html.fromstring(self.driver.page_source)
+                count_xpaths = [
+                    '//*[@id="filter-info-section"]/div',
+                    '//div[@data-hook="cr-filter-info-review-rating-count"]',
+                    '//div[contains(@data-hook, "review-rating-count")]'
+                ]
+                for xpath in count_xpaths:
+                    count_elements = tree.xpath(xpath)
+                    if count_elements:
+                        count_text = count_elements[0].text_content().strip() if hasattr(count_elements[0], 'text_content') else str(count_elements[0]).strip()
+                        if count_text:
+                            print(f"  [DEBUG] count_text found: {count_text[:100]}...")
+                            match = re.search(r'([\d,]+)\s*customer\s*reviews?', count_text, re.IGNORECASE)
+                            if not match:
+                                match = re.search(r'([\d,]+)\s*with\s*reviews?', count_text, re.IGNORECASE)
+                            if not match:
+                                match = re.search(r'([\d,]+)\s*reviews?', count_text, re.IGNORECASE)
+                            if match:
+                                count_of_reviews = match.group(1)
+                                print(f"  [OK] Extracted count_of_reviews from review page: {count_of_reviews}")
+                                break
+            except:
+                print("  [WARNING] count_of_reviews element not loaded - skipping extraction")
 
             # Collect reviews from first page (max 10 reviews per page)
             all_reviews = []
@@ -1166,7 +1217,12 @@ class AmazonDetailCrawler:
             self.driver.get(url)
             time.sleep(random.uniform(3, 5))
 
-            print(f"  [INFO] Page loaded, extracting data...")
+            # Verify page is properly loaded before extraction
+            if not self.verify_page_loaded(wait_for_price=True):
+                print(f"  [ERROR] Page verification failed - skipping this product")
+                return False
+
+            print(f"  [INFO] Page loaded and verified, extracting data...")
 
             # Click "Item details" section to expand it (needed for item, rank_1, rank_2)
             try:
@@ -1269,6 +1325,10 @@ class AmazonDetailCrawler:
 
             # Extract detailed review content and count_of_reviews from review page (up to 20 reviews)
             detailed_review_content, count_of_reviews = self.extract_detailed_reviews_from_review_page(url)
+
+            # Verify page is properly loaded after returning from review page
+            if not self.verify_page_loaded(wait_for_price=True):
+                print(f"  [WARNING] Page verification failed after review page return - continuing with available data")
 
             # Re-parse page source after returning from review page
             tree = html.fromstring(self.driver.page_source)

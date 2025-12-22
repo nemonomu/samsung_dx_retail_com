@@ -1377,6 +1377,86 @@ class AmazonDetailCrawler:
                 'discount_type': discount_type
             }
 
+            # Check if all 5 key fields are null - retry with 3x wait time
+            key_fields_null = (
+                not retailer_sku_name and
+                not star_rating and
+                not count_of_star_ratings and
+                not count_of_reviews and
+                not final_sku_price
+            )
+
+            if key_fields_null:
+                print(f"  [WARNING] All 5 key fields are null - retrying with extended wait for all elements...")
+
+                # Re-access the URL
+                self.driver.get(url)
+
+                # Wait for all key elements to load with extended timeout
+                print(f"  [INFO] Waiting for product title element...")
+                try:
+                    WebDriverWait(self.driver, 30).until(
+                        EC.presence_of_element_located((By.ID, 'productTitle'))
+                    )
+                    print(f"  [OK] Product title element loaded")
+                except:
+                    print(f"  [WARNING] Product title element not loaded within 30s")
+
+                print(f"  [INFO] Waiting for star rating element...")
+                try:
+                    WebDriverWait(self.driver, 30).until(
+                        EC.presence_of_element_located((By.XPATH, '//*[@id="acrPopover"] | //*[@id="averageCustomerReviews"]'))
+                    )
+                    print(f"  [OK] Star rating element loaded")
+                except:
+                    print(f"  [WARNING] Star rating element not loaded within 30s")
+
+                print(f"  [INFO] Waiting for count of star ratings element...")
+                try:
+                    WebDriverWait(self.driver, 30).until(
+                        EC.presence_of_element_located((By.ID, 'acrCustomerReviewText'))
+                    )
+                    print(f"  [OK] Count of star ratings element loaded")
+                except:
+                    print(f"  [WARNING] Count of star ratings element not loaded within 30s")
+
+                print(f"  [INFO] Waiting for price element...")
+                try:
+                    WebDriverWait(self.driver, 30).until(
+                        EC.presence_of_element_located((By.XPATH, '//*[@id="corePriceDisplay_desktop_feature_div"] | //*[@id="corePrice_feature_div"]'))
+                    )
+                    print(f"  [OK] Price element loaded")
+                except:
+                    print(f"  [WARNING] Price element not loaded within 30s")
+
+                print(f"  [INFO] All element waits complete, re-extracting data...")
+
+                # Re-parse page
+                page_source = self.driver.page_source
+                tree = html.fromstring(page_source)
+
+                # Re-extract key fields
+                retailer_sku_name = self.extract_text_safe(tree, self.xpaths.get('product_name'))
+                star_rating = self.extract_star_rating(tree)
+                count_of_star_ratings = self.extract_count_of_star_ratings(tree)
+                final_sku_price = self.extract_final_sku_price(tree)
+
+                # Re-extract count_of_reviews from review page
+                detailed_review_content, count_of_reviews = self.extract_detailed_reviews_from_review_page(url)
+                if not count_of_reviews:
+                    tree = html.fromstring(self.driver.page_source)
+                    count_of_reviews = self.extract_count_of_reviews(tree)
+
+                # Update data dict
+                data['Retailer_SKU_Name'] = retailer_sku_name
+                data['Star_Rating'] = star_rating
+                data['Count_of_Star_Ratings'] = count_of_star_ratings
+                data['count_of_reviews'] = count_of_reviews
+                data['final_sku_price'] = final_sku_price
+                data['Detailed_Review_Content'] = detailed_review_content
+
+                print(f"  [INFO] Retry complete - Name: {'OK' if retailer_sku_name else 'NULL'}, Star: {'OK' if star_rating else 'NULL'}, Price: {'OK' if final_sku_price else 'NULL'}")
+
             # Save to database
             if self.save_to_db(data):
                 self.total_collected += 1

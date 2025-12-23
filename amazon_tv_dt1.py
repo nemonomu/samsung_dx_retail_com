@@ -386,6 +386,22 @@ class AmazonDetailCrawler:
             traceback.print_exc()
             return False
 
+    def log_failed_url(self, url, reason="no_sku_name"):
+        """Save failed URL to file for later investigation"""
+        try:
+            failed_dir = r"C:\samsung_dx_retail_com\failed_amazon"
+            os.makedirs(failed_dir, exist_ok=True)
+
+            filename = datetime.now().strftime('%Y%m%d') + f"_{reason}.txt"
+            filepath = os.path.join(failed_dir, filename)
+
+            with open(filepath, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | {url}\n")
+
+            print(f"  [LOG] Failed URL saved to {filepath}")
+        except Exception as e:
+            print(f"  [WARNING] Failed to log URL: {e}")
+
     def verify_page_loaded(self, wait_for_price=True):
         """
         Verify page is properly loaded before extraction.
@@ -1208,10 +1224,31 @@ class AmazonDetailCrawler:
             self.driver.get(url)
             time.sleep(random.uniform(3, 5))
 
-            # Verify page is properly loaded before extraction
-            if not self.verify_page_loaded(wait_for_price=True):
-                print(f"  [ERROR] Page verification failed - skipping this product")
-                return False
+            # Verify page is properly loaded before extraction (with retry logic)
+            page_loaded = self.verify_page_loaded(wait_for_price=True)
+            skip_sku_name = False  # Flag to skip retailer_sku_name extraction
+
+            if not page_loaded:
+                # 1차 재시도: URL 재접속
+                print(f"  [RETRY 1/2] Page verification failed - retrying with URL re-access...")
+                time.sleep(3)
+                self.driver.get(url)
+                time.sleep(random.uniform(3, 5))
+                page_loaded = self.verify_page_loaded(wait_for_price=True)
+
+                if not page_loaded:
+                    # 2차 재시도: 쿠키 재로드 후 URL 재접속
+                    print(f"  [RETRY 2/2] Still failed - reloading cookies and retrying...")
+                    self.load_cookies()
+                    self.driver.get(url)
+                    time.sleep(random.uniform(3, 5))
+                    page_loaded = self.verify_page_loaded(wait_for_price=True)
+
+                    if not page_loaded:
+                        # 3차 실패: 제품명 제외하고 나머지 수집 시도
+                        print(f"  [WARNING] Page verification failed after retries - continuing without sku_name")
+                        self.log_failed_url(url, "no_sku_name")
+                        skip_sku_name = True
 
             print(f"  [INFO] Page loaded and verified, extracting data...")
 
@@ -1235,7 +1272,11 @@ class AmazonDetailCrawler:
             tree = html.fromstring(page_source)
 
             # Extract data
-            retailer_sku_name = self.extract_text_safe(tree, self.xpaths.get('product_name'))
+            if skip_sku_name:
+                retailer_sku_name = None  # Skip extraction due to page load failure
+                print(f"  [INFO] Skipping retailer_sku_name extraction (page load failed)")
+            else:
+                retailer_sku_name = self.extract_text_safe(tree, self.xpaths.get('product_name'))
             star_rating = self.extract_star_rating(tree)
 
             # SKU_Popularity - only collect if "Amazon's Choice"

@@ -1,7 +1,7 @@
 """
 Amazon TV Test Script - Extract specific fields only
-Fields: final_sku_price, count_of_star_ratings, star_rating, count_of_reviews
-Based on amazon_tv_dt1.py - No DB save, just extraction and logging with timing
+Fields: retailer_sku_name, final_sku_price, count_of_star_ratings, star_rating, count_of_reviews
+Based on amazon_tv_dt2.py - No DB save, just extraction and logging with timing
 
 DEBUG MODE: Includes timing measurements to diagnose page load issues
 """
@@ -572,6 +572,7 @@ class AmazonTVTestCrawler:
                 count_of_reviews = self.extract_count_of_reviews(tree)
 
             # Extract other fields from detail page
+            retailer_sku_name = self.extract_text_safe(tree, self.xpaths.get('product_name'))
             final_sku_price = self.extract_final_sku_price(tree)
             star_rating = self.extract_star_rating(tree)
 
@@ -579,6 +580,7 @@ class AmazonTVTestCrawler:
             print(f"\n  {'='*60}")
             print(f"  [RESULT] Extraction Results:")
             print(f"  {'='*60}")
+            print(f"  retailer_sku_name     : {retailer_sku_name[:60] + '...' if retailer_sku_name and len(retailer_sku_name) > 60 else retailer_sku_name}")
             print(f"  final_sku_price       : {final_sku_price}")
             print(f"  count_of_star_ratings : {count_of_star_ratings}")
             print(f"  star_rating           : {star_rating}")
@@ -587,6 +589,8 @@ class AmazonTVTestCrawler:
 
             # Check for empty values and warn
             empty_fields = []
+            if not retailer_sku_name:
+                empty_fields.append("retailer_sku_name")
             if not final_sku_price:
                 empty_fields.append("final_sku_price")
             if not count_of_star_ratings:
@@ -605,6 +609,7 @@ class AmazonTVTestCrawler:
 
             return {
                 'url': url,
+                'retailer_sku_name': retailer_sku_name,
                 'final_sku_price': final_sku_price,
                 'count_of_star_ratings': count_of_star_ratings,
                 'star_rating': star_rating,
@@ -624,7 +629,7 @@ class AmazonTVTestCrawler:
         try:
             print("="*80)
             print(f"Amazon TV Test Crawler - Starting (Batch ID: {self.batch_id})")
-            print("Fields: final_sku_price, count_of_star_ratings, star_rating, count_of_reviews")
+            print("Fields: retailer_sku_name, final_sku_price, count_of_star_ratings, star_rating, count_of_reviews")
             print("="*80)
 
             # Default test URLs if none provided
@@ -672,6 +677,8 @@ class AmazonTVTestCrawler:
             print("="*80)
             for idx, r in enumerate(results, 1):
                 print(f"\n[{idx}] {r['url'][:60]}...")
+                sku_name = r['retailer_sku_name']
+                print(f"    retailer_sku_name     : {sku_name[:50] + '...' if sku_name and len(sku_name) > 50 else sku_name}")
                 print(f"    final_sku_price       : {r['final_sku_price']}")
                 print(f"    count_of_star_ratings : {r['count_of_star_ratings']}")
                 print(f"    star_rating           : {r['star_rating']}")
@@ -684,6 +691,8 @@ class AmazonTVTestCrawler:
             print("="*80)
             for idx, r in enumerate(results, 1):
                 empty = []
+                if not r['retailer_sku_name']:
+                    empty.append("retailer_sku_name")
                 if not r['final_sku_price']:
                     empty.append("final_sku_price")
                 if not r['count_of_star_ratings']:

@@ -186,9 +186,19 @@ class AmazonReviewTestCrawler:
                 print(f"  [ERROR] REVIEW PAGE BLOCKED - Redirected to sign-in page")
                 return False
 
-            if "robot" in page_source.lower() or "captcha" in page_source.lower():
-                print(f"  [ERROR] REVIEW PAGE BLOCKED - Robot/Captcha detected")
-                return False
+            # Check for actual blocking page (more specific detection)
+            # Amazon's actual robot check page has specific patterns
+            blocking_patterns = [
+                "sorry, we just need to make sure you're not a robot",
+                "enter the characters you see below",
+                "type the characters you see in this image",
+                "to discuss automated access to amazon data"
+            ]
+            page_lower = page_source.lower()
+            for pattern in blocking_patterns:
+                if pattern in page_lower:
+                    print(f"  [ERROR] REVIEW PAGE BLOCKED - Robot/Captcha detected: '{pattern}'")
+                    return False
 
             # Check for review elements
             review_elements = tree.xpath('//span[@data-hook="review-body"]')
@@ -197,7 +207,7 @@ class AmazonReviewTestCrawler:
                 return True
 
             # Check for "no reviews" message
-            if "no customer reviews" in page_source.lower():
+            if "no customer reviews" in page_lower:
                 print(f"  [OK] REVIEW PAGE ACCESSIBLE - No reviews for this product")
                 return True
 

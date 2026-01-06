@@ -126,6 +126,10 @@ class AmazonReviewTestCrawler:
             print("[INFO] Refreshing page with cookies...")
             self.driver.refresh()
             time.sleep(2)
+
+            # Verify login status
+            self.verify_login_status()
+
             print(f"[OK] Cookies loaded successfully")
             return True
 
@@ -134,6 +138,75 @@ class AmazonReviewTestCrawler:
             import traceback
             traceback.print_exc()
             return False
+
+    def verify_login_status(self):
+        """Verify if logged in by checking for account name or sign-in element"""
+        try:
+            tree = html.fromstring(self.driver.page_source)
+
+            # Check for account name (logged in)
+            account_xpaths = [
+                '//*[@id="nav-link-accountList-nav-line-1"]',
+                '//span[@id="nav-link-accountList-nav-line-1"]',
+                '//a[@id="nav-link-accountList"]//span'
+            ]
+
+            for xpath in account_xpaths:
+                account_text = self.extract_text_safe(tree, xpath)
+                if account_text:
+                    if "Sign in" in account_text or "Hello, sign in" in account_text:
+                        print(f"[WARNING] NOT LOGGED IN - Found: '{account_text}'")
+                        return False
+                    else:
+                        print(f"[OK] LOGGED IN - Account: '{account_text}'")
+                        return True
+
+            # Fallback: check page source for login indicators
+            page_source = self.driver.page_source
+            if "Hello, sign in" in page_source:
+                print(f"[WARNING] NOT LOGGED IN - 'Hello, sign in' found in page")
+                return False
+
+            print(f"[WARNING] Could not determine login status")
+            return None
+
+        except Exception as e:
+            print(f"[WARNING] Failed to verify login status: {e}")
+            return None
+
+    def verify_review_page_access(self):
+        """Verify if review page is accessible (not blocked)"""
+        try:
+            tree = html.fromstring(self.driver.page_source)
+
+            # Check for sign-in redirect or blocked page
+            page_source = self.driver.page_source
+
+            if "ap/signin" in self.driver.current_url:
+                print(f"  [ERROR] REVIEW PAGE BLOCKED - Redirected to sign-in page")
+                return False
+
+            if "robot" in page_source.lower() or "captcha" in page_source.lower():
+                print(f"  [ERROR] REVIEW PAGE BLOCKED - Robot/Captcha detected")
+                return False
+
+            # Check for review elements
+            review_elements = tree.xpath('//span[@data-hook="review-body"]')
+            if review_elements:
+                print(f"  [OK] REVIEW PAGE ACCESSIBLE - Found {len(review_elements)} review elements")
+                return True
+
+            # Check for "no reviews" message
+            if "no customer reviews" in page_source.lower():
+                print(f"  [OK] REVIEW PAGE ACCESSIBLE - No reviews for this product")
+                return True
+
+            print(f"  [WARNING] REVIEW PAGE STATUS UNKNOWN - No review elements found")
+            return None
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to verify review page access: {e}")
+            return None
 
     def verify_page_loaded(self):
         """Verify page is properly loaded before extraction"""
@@ -301,6 +374,12 @@ class AmazonReviewTestCrawler:
             self.driver.get(review_url)
             time.sleep(random.uniform(3, 4))
             print(f"  [DEBUG] Actual URL after navigation: {self.driver.current_url[:100]}...")
+
+            # Verify review page access (check login/block status)
+            review_access = self.verify_review_page_access()
+            if review_access is False:
+                print(f"  [ERROR] Review page access failed - cookie may be expired")
+                return self.extract_detailed_reviews(product_url), None, 0
 
             # Wait for count_of_reviews element to load, then extract
             count_of_reviews = None

@@ -49,6 +49,8 @@ def analyze_crawl_results(retailer_code, target_count, results_df):
         'price_error_urls': [],  # URLs with price error
         'has_countofstarratings_error': False,  # star_rating exists but count_of_star_ratings is null
         'countofstarratings_error_urls': [],  # URLs with this issue
+        'has_rv_detail_null_error': False,  # count_of_reviews > 0 but detailed_review_content is null
+        'rv_detail_null_urls': [],  # URLs with this issue
         'field_stats': {}
     }
 
@@ -206,6 +208,27 @@ def analyze_crawl_results(retailer_code, target_count, results_df):
                     url = row.get('product_url', 'N/A')
                     analysis['countofstarratings_error_urls'].append(url)
 
+    # Check for count_of_reviews > 0 but detailed_review_content is null
+    if results_df is not None and len(results_df) > 0:
+        if 'count_of_reviews' in results_df.columns and 'detailed_review_content' in results_df.columns:
+            for idx, row in results_df.iterrows():
+                count_of_reviews = row.get('count_of_reviews')
+                detailed_review_content = row.get('detailed_review_content')
+
+                # Check if count_of_reviews > 0
+                try:
+                    count_valid = count_of_reviews is not None and not pd.isna(count_of_reviews) and int(float(str(count_of_reviews).replace(',', ''))) > 0
+                except (ValueError, TypeError):
+                    count_valid = False
+
+                # Check if detailed_review_content is null/empty
+                review_is_null = detailed_review_content is None or pd.isna(detailed_review_content) or (isinstance(detailed_review_content, str) and detailed_review_content.strip() == '')
+
+                if count_valid and review_is_null:
+                    analysis['has_rv_detail_null_error'] = True
+                    url = row.get('product_url', 'N/A')
+                    analysis['rv_detail_null_urls'].append(url)
+
     return analysis
 
 
@@ -229,6 +252,10 @@ def send_alert_email(analysis, error_message=None):
 
         # Error prefixes
         error_prefixes = []
+        if analysis.get('has_rv_detail_null_error', False):
+            error_prefixes.append("rv_detail_null")
+        if analysis.get('has_reviews_equals_ratings_error', False):
+            error_prefixes.append("reviews_equals_ratings")
         if analysis.get('has_price_error', False):
             error_prefixes.append("price")
         if analysis.get('has_countofreviews_error', False):
@@ -387,6 +414,87 @@ def send_alert_email(analysis, error_message=None):
             </div>
             """
 
+        # rv_detail_null error section (count_of_reviews > 0 but detailed_review_content is null)
+        # Use crawler-provided records if available (includes account info)
+        rv_records = analysis.get('rv_detail_null_records', [])
+        if analysis.get('has_rv_detail_null_error', False) and rv_records:
+            html_content += f"""
+            <div class="section">
+                <h3 style="color: #dc3545;">Review Detail Null Error ({len(rv_records)} products)</h3>
+                <p>The following products have count_of_reviews > 0 but detailed_review_content is NULL:</p>
+                <table>
+                    <tr>
+                        <th>Product URL</th>
+                        <th>Reviews</th>
+                        <th>Ratings</th>
+                        <th>Account</th>
+                    </tr>
+            """
+            for record in rv_records:
+                url = record.get('url', 'N/A')
+                cor = record.get('count_of_reviews', 'N/A')
+                cosr = record.get('count_of_star_ratings', 'N/A')
+                account = record.get('account', 'N/A')
+                html_content += f"""
+                    <tr>
+                        <td><a href="{url}">{url[:80]}...</a></td>
+                        <td>{cor}</td>
+                        <td>{cosr}</td>
+                        <td>{account}</td>
+                    </tr>
+                """
+            html_content += """
+                </table>
+            </div>
+            """
+        # Fallback to old format (without account info)
+        elif analysis.get('has_rv_detail_null_error', False) and analysis.get('rv_detail_null_urls'):
+            html_content += f"""
+            <div class="section">
+                <h3 style="color: #dc3545;">Review Detail Null Error ({len(analysis['rv_detail_null_urls'])} products)</h3>
+                <p>The following products have count_of_reviews > 0 but detailed_review_content is NULL:</p>
+                <ul>
+            """
+            for url in analysis['rv_detail_null_urls']:
+                html_content += f'<li><a href="{url}">{url}</a></li>'
+            html_content += """
+                </ul>
+            </div>
+            """
+
+        # reviews_equals_ratings error section (count_of_reviews == count_of_star_ratings)
+        rer_records = analysis.get('reviews_equals_ratings_records', [])
+        if analysis.get('has_reviews_equals_ratings_error', False) and rer_records:
+            html_content += f"""
+            <div class="section">
+                <h3 style="color: #dc3545;">Reviews Equals Ratings Error ({len(rer_records)} products)</h3>
+                <p>The following products have count_of_reviews == count_of_star_ratings (suspicious):</p>
+                <table>
+                    <tr>
+                        <th>Product URL</th>
+                        <th>Reviews</th>
+                        <th>Ratings</th>
+                        <th>Account</th>
+                    </tr>
+            """
+            for record in rer_records:
+                url = record.get('url', 'N/A')
+                cor = record.get('count_of_reviews', 'N/A')
+                cosr = record.get('count_of_star_ratings', 'N/A')
+                account = record.get('account', 'N/A')
+                html_content += f"""
+                    <tr>
+                        <td><a href="{url}">{url[:80]}...</a></td>
+                        <td>{cor}</td>
+                        <td>{cosr}</td>
+                        <td>{account}</td>
+                    </tr>
+                """
+            html_content += """
+                </table>
+            </div>
+            """
+
         html_content += """
             <div class="section">
                 <p style="color: #666; font-size: 12px;">
@@ -423,7 +531,8 @@ def send_alert_email(analysis, error_message=None):
         return False
 
 
-def monitor_and_alert(retailer_code, target_count, results_df, error_message=None):
+def monitor_and_alert(retailer_code, target_count, results_df, error_message=None,
+                      rv_detail_null_records=None, reviews_equals_ratings_records=None):
     """
     Monitor crawling results and send alerts (main function)
 
@@ -434,6 +543,8 @@ def monitor_and_alert(retailer_code, target_count, results_df, error_message=Non
         target_count: Total tracking list count
         results_df: Crawling results DataFrame (None if failed)
         error_message: Additional error message (optional)
+        rv_detail_null_records: List of dicts with url, count_of_reviews, count_of_star_ratings, account
+        reviews_equals_ratings_records: List of dicts with url, count_of_reviews, count_of_star_ratings, account
 
     Returns:
         bool: Alert send success status
@@ -450,6 +561,15 @@ def monitor_and_alert(retailer_code, target_count, results_df, error_message=Non
     try:
         # Analyze results
         analysis = analyze_crawl_results(retailer_code, target_count, results_df)
+
+        # Override with crawler-provided records (includes account info)
+        if rv_detail_null_records is not None:
+            analysis['rv_detail_null_records'] = rv_detail_null_records
+            analysis['has_rv_detail_null_error'] = len(rv_detail_null_records) > 0
+
+        if reviews_equals_ratings_records is not None:
+            analysis['reviews_equals_ratings_records'] = reviews_equals_ratings_records
+            analysis['has_reviews_equals_ratings_error'] = len(reviews_equals_ratings_records) > 0
 
         # Always send email (daily report)
         return send_alert_email(analysis, error_message)

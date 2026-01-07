@@ -43,6 +43,10 @@ class AmazonDetailCrawler:
         # Generate batch_id using Korea timezone
         korea_tz = pytz.timezone('Asia/Seoul')
         self.batch_id = datetime.now(korea_tz).strftime('%Y%m%d_%H%M%S')
+        # Error tracking lists for alert email
+        self.rv_detail_null_records = []  # count_of_reviews > 0 but detailed_review_content is null
+        self.reviews_equals_ratings_records = []  # count_of_reviews == count_of_star_ratings
+        self.current_account = 'unsandev0002'  # Current Amazon account (starts with first)
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -470,6 +474,7 @@ class AmazonDetailCrawler:
             # Load new cookies
             if self.load_cookies(COOKIE_FILE_2):
                 self.account_switched = True
+                self.current_account = 'unsandev0003'  # Update current account
                 print("[OK] Account switched successfully!")
                 return True
             else:
@@ -712,6 +717,21 @@ class AmazonDetailCrawler:
     def extract_count_of_reviews(self, tree):
         """Extract count of reviews (format: '1,484' or '0' for no reviews)"""
         try:
+            # First check for "0 customer reviews" pattern in reviewsMedley section
+            # e.g., "There are 0 customer reviews and 2 customer ratings."
+            zero_reviews_xpaths = [
+                '//*[@id="reviewsMedley"]//div[@class="a-box-inner"]',
+                '//*[@id="reviewsMedley"]/div/div[2]/div/div[2]/div[3]/div[2]/div/div',
+                '//div[contains(text(), "customer reviews and")]'
+            ]
+            for xpath in zero_reviews_xpaths:
+                text = self.extract_text_safe(tree, xpath)
+                if text:
+                    # Match "0 customer reviews" or "There are 0 customer reviews"
+                    match = re.search(r'(\d+)\s*customer\s*reviews?', text, re.IGNORECASE)
+                    if match and match.group(1) == '0':
+                        return "0"
+
             # XPath: //*[@id="acrCustomerReviewText"]
             xpaths = [
                 '//*[@id="acrCustomerReviewText"]',
@@ -1536,6 +1556,40 @@ class AmazonDetailCrawler:
 
                 print(f"  [INFO] Retry complete - Name: {'OK' if retailer_sku_name else 'NULL'}, Star: {'OK' if star_rating else 'NULL'}, Price: {'OK' if final_sku_price else 'NULL'}")
 
+            # Check for rv_detail_null condition (count_of_reviews > 0 but detailed_review_content is null)
+            # Also check for reviews_equals_ratings condition
+            try:
+                cor = data.get('count_of_reviews')
+                cosr = data.get('count_of_star_ratings')
+                drc = data.get('Detailed_Review_Content')
+                cor_int = int(str(cor).replace(',', '')) if cor else 0
+                cosr_int = int(str(cosr).replace(',', '')) if cosr else 0
+                drc_is_null = drc is None or (isinstance(drc, str) and drc.strip() == '')
+
+                # rv_detail_null: count_of_reviews > 0 but detailed_review_content is null
+                if cor_int > 0 and drc_is_null:
+                    print(f"  [WARNING] rv_detail_null detected: count_of_reviews={cor_int}, detailed_review_content=NULL")
+                    print(f"            URL: {data.get('product_url', 'N/A')}")
+                    self.rv_detail_null_records.append({
+                        'url': data.get('product_url', 'N/A'),
+                        'count_of_reviews': cor_int,
+                        'count_of_star_ratings': cosr_int,
+                        'account': self.current_account
+                    })
+
+                # reviews_equals_ratings: count_of_reviews == count_of_star_ratings (suspicious)
+                if cor_int > 0 and cosr_int > 0 and cor_int == cosr_int:
+                    print(f"  [WARNING] reviews_equals_ratings detected: count_of_reviews={cor_int}, count_of_star_ratings={cosr_int}")
+                    print(f"            URL: {data.get('product_url', 'N/A')}")
+                    self.reviews_equals_ratings_records.append({
+                        'url': data.get('product_url', 'N/A'),
+                        'count_of_reviews': cor_int,
+                        'count_of_star_ratings': cosr_int,
+                        'account': self.current_account
+                    })
+            except Exception as e:
+                pass
+
             # Save to database
             if self.save_to_db(data):
                 self.total_collected += 1
@@ -1845,7 +1899,9 @@ class AmazonDetailCrawler:
                 results_df = pd.DataFrame(rows, columns=columns)
                 cursor.close()
 
-                monitor_and_alert('amazon', len(product_urls), results_df)
+                monitor_and_alert('amazon', len(product_urls), results_df,
+                                 rv_detail_null_records=self.rv_detail_null_records,
+                                 reviews_equals_ratings_records=self.reviews_equals_ratings_records)
             except Exception as e:
                 print(f"[WARNING] Failed to send alert: {e}")
 

@@ -34,24 +34,15 @@ COOKIE_FILE = AMAZON_ACCOUNTS['unsandev0004']['cookie_file']
 
 # Test URLs
 TEST_URLS = [
-    "https://www.amazon.com/Feihe-Television-Kitchen-Bedroom-Entertainment/dp/B0F8C3VTVY/ref=zg_bs_g_172659_d_sccl_29/145-0631719-6469732?psc=1",
-    "https://www.amazon.com/VIZIO-Bluetooth-Compatible-Chromecast-VFD43M-0804/dp/B0D92TBJX2/ref=zg_bs_g_172659_d_sccl_81/145-0631719-6469732?psc=1",
-    "https://www.amazon.com/Westinghouse-Smart-Compatible-Google-Assistant/dp/B0B3JMQG8Q/ref=zg_bs_g_172659_d_sccl_84/145-0631719-6469732?th=1",
-    "https://www.amazon.com/Panasonic-Newest-55-inch-Adaptive-Refresh/dp/B0D97GB5HM/ref=zg_bs_g_172659_d_sccl_85/145-0631719-6469732?th=1",
-    "https://www.amazon.com/TCL-43S450R-Assistant-Compatibility-Television/dp/B0C1J14MZT/ref=zg_bs_g_172659_d_sccl_86/145-0631719-6469732?th=1",
-    "https://www.amazon.com/LG-Upscaling-Filmmaker-Orchestra-86QNED85AUA/dp/B0DYR35J2G/ref=zg_bs_g_172659_d_sccl_87/145-0631719-6469732?th=1",
-    "https://www.amazon.com/VIZIO-720P-Smart-Dual-Band-WiFi/dp/B0D81P3D79/ref=zg_bs_g_172659_d_sccl_90/145-0631719-6469732?psc=1",
-    "https://www.amazon.com/amazon-fire-tv-65-inch-omni-series-4k-smart-tv/dp/B08T6J1HG8/ref=zg_bs_g_172659_d_sccl_91/145-0631719-6469732?th=1",
-    "https://www.amazon.com/Samsung-UN40F6000FFXZA-Essentials-Enhanced-Protection/dp/B0FDS8LJDW/ref=zg_bs_g_172659_d_sccl_92/145-0631719-6469732?th=1",
-    "https://www.amazon.com/SAMSUNG-65-Inch-Tracking-Xcelerator-UN65DU8000/dp/B0CV9G5ST8/ref=zg_bs_g_172659_d_sccl_93/145-0631719-6469732?th=1",
-    "https://www.amazon.com/insignia-fire-tv-43-inch-class-f30-series-4k-smart-tv/dp/B0CMDJ8TK3/ref=zg_bs_g_172659_d_sccl_95/145-0631719-6469732?psc=1",
-    "https://www.amazon.com/toshiba-fire-tv-50-inch-class-c350-series-4k-smart-tv/dp/B0BMK5B4TF/ref=zg_bs_g_172659_d_sccl_96/145-0631719-6469732?psc=1",
-    "https://www.amazon.com/Feihe-Screen-Kitchen-Camper-Bedroom/dp/B0FM8FM7MG/ref=zg_bs_g_172659_d_sccl_97/145-0631719-6469732?psc=1",
-    "https://www.amazon.com/TCL-32S350G-Assistant-Compatible-Television/dp/B0C1HZ9HCM/ref=zg_bs_g_172659_d_sccl_98/145-0631719-6469732?th=1",
-    "https://www.amazon.com/Sony-Exclusive-Features-PlayStation-K-85XR90/dp/B0CVPNFL8Z/ref=zg_bs_g_172659_d_sccl_99/145-0631719-6469732?th=1",
-    "https://www.amazon.com/Sony-Exclusive-Features-PlayStation-K-65XR80/dp/B0CVQ6YLH7/ref=zg_bs_g_172659_d_sccl_100/145-0631719-6469732?th=1",
-    "https://www.amazon.com/INSIGNIA-50-inch-4K-UHD-Fire-TV/dp/B0F19KLHG3/ref=sr_1_1?crid=RY3XOG3VC795&dib=eyJ2IjoiMSJ9.5JPdYN3krY1uOzwl96ODr07meUoShy-5mDAzm--YUJnluT2NrL3xbjVwjV_6NnK5t-H226x5VzJLQtos6gA74-WFGO-NHvxpb8-Peff1Ldz47pPGIzk4vldf0o2n8HXNxASoke8Xvk2LguObRwkWa72ufRIOsoubcrJTcZ8huOJ3LRjv6waAipVHt4_VE5nxlKmPJy3QmXYkBA4F3PexEgAv2BwrS9YISUxVRfeVAcs.mUHmg6gJCyQPy_6HRHgxdh_RCBqTE_cBR3nNL2VEfds&dib_tag=se&keywords=TV&qid=1767398422&sprefix=tv%2Caps%2C287&sr=8-1&th=1",
-    "https://www.amazon.com/SAMSUNG-65-Inch-Processor-Upscaling-Xcelerator/dp/B0DXMJGQWC/ref=sr_1_2?crid=RY3XOG3VC795&dib=eyJ2IjoiMSJ9.5JPdYN3krY1uOzwl96ODr07meUoShy-5mDAzm--YUJnluT2NrL3xbjVwjV_6NnK5t-H226x5VzJLQtos6gA74-WFGO-NHvxpb8-Peff1Ldz47pPGIzk4vldf0o2n8HXNxASoke8Xvk2LguObRwkWa72ufRIOsoubcrJTcZ8huOJ3LRjv6waAipVHt4_VE5nxlKmPJy3QmXYkBA4F3PexEgAv2BwrS9YISUxVRfeVAcs.mUHmg6gJCyQPy_6HRHgxdh_RCBqTE_cBR3nNL2VEfds&dib_tag=se&keywords=TV&qid=1767398422&sprefix=tv%2Caps%2C287&sr=8-2&th=1"
+    "https://www.amazon.com/Introducing-Amazon-Fire-TV-without/dp/B09WGTLG4N/ref=zg_bs_g_172659_d_sccl_1/147-0970105-7430814?psc=1",
+    "https://www.amazon.com/toshiba-fire-tv-50-inch-class-c350-series-4k-smart-tv/dp/B0BMK5B4TF/ref=zg_bs_g_172659_d_sccl_91/147-0970105-7430814?psc=1",
+    "https://www.amazon.com/insignia-fire-tv-50-inch-class-f30-series-4k-smart-tv/dp/B0BTTVRWPR/ref=zg_bs_g_172659_d_sccl_17/147-0970105-7430814?psc=1",
+    "https://www.amazon.com/TCL-55-Inch-NXTVISION-Google-Canvas/dp/B0DB6HGXGF/ref=zg_bs_g_172659_d_sccl_92/147-0970105-7430814?psc=1",
+    "https://www.amazon.com/Samsung-QN98QN90DAFXZA-Upscaling-FIXED-MOUNT-43-90-Compatible/dp/B0DK9Y8545/ref=sr_1_111?crid=RY3XOG3VC795&dib=eyJ2IjoiMSJ9.IiTmsqzMc-5zWi18QsQoM21l1kJPKRFs6SC9jvmDyB7br0QBwMBtgKHoNXMOmhRfjq7dB2yLezj-YwtK-kZeQuSOWkvyNw8Tx7CAc_G9hCsa3GoCAFofie8bzit3vEEUY0lwCTwez7hQhAG8wthPMLUeYPNW5RlIzhW2eMOQ4loTdbXci_dSJsEB0QJ6vSfzd4RePLEj8uQWO2PA6dobYrUSzJMzPU73uqIihmctSJs.ec3KzmTvCMrGxAjJTcf3XnwwJbz4iJlthWbCuMTwtcY&dib_tag=se&keywords=TV&qid=1767700926&sprefix=tv%2Caps%2C287&sr=8-111&xpid=Cg0_BApgal-UM&th=1",
+    "https://www.amazon.com/SAMSUNG-65-Inch-Processor-Xcelerator-Samsung/dp/B0DXMJFJ7W/ref=zg_bs_g_172659_d_sccl_18/147-0970105-7430814?psc=1",
+    "https://www.amazon.com/LG-Upscaling-Filmmaker-Orchestra-OLED55G5WUA/dp/B0DYQGRHX3/ref=zg_bs_g_172659_d_sccl_49/147-0970105-7430814?th=1",
+    "https://www.amazon.com/LG-Upscaling-Filmmaker-Orchestra-65QNED82AUA/dp/B0F1P92X1F/ref=zg_bs_g_172659_d_sccl_50/147-0970105-7430814?th=1",
+    "https://www.amazon.com/Samsung-UN55U7900FFXZA-Soundbar-6-Outlet-Essentials/dp/B0FHBWJMYC/ref=sr_1_259?crid=RY3XOG3VC795&dib=eyJ2IjoiMSJ9.f5XcojZ01N6oylmh4MNMluUH3lNNw2rQ7pEn-bfMKm_e-gIPwGyVtJKGOcgdBD-rnwAEl2RRmvU485iYYped-ESgMgq6_TaTm-ooTos3wNy0pMQa6ZlcSHwh0fMwVqia0aNstz5xuRM32ymlKboIjHKTqLn2ut_J9jY_4wqrtEpQR8r7VapAnj98CT_QB38d1zaY_G8YZX38ig7Xb_cjMbcuHZWG-sNLQe72-UUfURc.IMBmPuIGCvnTC1iIOBajBoetYurYiGBUaNoGHkJ2SKE&dib_tag=se&keywords=TV&qid=1767701126&sprefix=tv%2Caps%2C287&sr=8-259&xpid=Cg0_BApgal-UM&th=1"
 ]
 
 

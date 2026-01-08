@@ -252,6 +252,8 @@ def send_alert_email(analysis, error_message=None):
 
         # Error prefixes
         error_prefixes = []
+        if analysis.get('has_drv_20_error', False):
+            error_prefixes.append("drv 20 error")
         if analysis.get('has_fsp_null_error', False):
             error_prefixes.append("fsp_null")
         if analysis.get('has_cosr_null_error', False):
@@ -556,6 +558,36 @@ def send_alert_email(analysis, error_message=None):
             </div>
             """
 
+        # drv_20_error section (count_of_reviews <= 20 but collected less than expected)
+        drv_20_records = analysis.get('drv_20_error_records', [])
+        if analysis.get('has_drv_20_error', False) and drv_20_records:
+            html_content += f"""
+            <div class="section">
+                <h3 style="color: #dc3545;">Detailed Reviews Under-Collected Error ({len(drv_20_records)} products)</h3>
+                <p>The following products have count_of_reviews <= 20 but collected fewer reviews:</p>
+                <table>
+                    <tr>
+                        <th>Product URL</th>
+                        <th>Expected (count_of_reviews)</th>
+                        <th>Collected</th>
+                    </tr>
+            """
+            for record in drv_20_records:
+                url = record.get('url', 'N/A')
+                expected = record.get('count_of_reviews', 'N/A')
+                collected = record.get('collected_count', 'N/A')
+                html_content += f"""
+                    <tr>
+                        <td><a href="{url}">{url[:80]}...</a></td>
+                        <td>{expected}</td>
+                        <td>{collected}</td>
+                    </tr>
+                """
+            html_content += """
+                </table>
+            </div>
+            """
+
         html_content += """
             <div class="section">
                 <p style="color: #666; font-size: 12px;">
@@ -594,7 +626,7 @@ def send_alert_email(analysis, error_message=None):
 
 def monitor_and_alert(retailer_code, target_count, results_df, error_message=None,
                       rv_detail_null_records=None, reviews_equals_ratings_records=None,
-                      fsp_null_records=None, cosr_null_records=None):
+                      fsp_null_records=None, cosr_null_records=None, drv_20_error_records=None):
     """
     Monitor crawling results and send alerts (main function)
 
@@ -609,6 +641,7 @@ def monitor_and_alert(retailer_code, target_count, results_df, error_message=Non
         reviews_equals_ratings_records: List of dicts with url, count_of_reviews, count_of_star_ratings, account
         fsp_null_records: List of dicts with url, account (final_sku_price is null)
         cosr_null_records: List of dicts with url, star_rating, account (count_of_star_ratings is null)
+        drv_20_error_records: List of dicts with url, count_of_reviews, collected_count (detailed reviews under-collected)
 
     Returns:
         bool: Alert send success status
@@ -642,6 +675,10 @@ def monitor_and_alert(retailer_code, target_count, results_df, error_message=Non
         if cosr_null_records is not None:
             analysis['cosr_null_records'] = cosr_null_records
             analysis['has_cosr_null_error'] = len(cosr_null_records) > 0
+
+        if drv_20_error_records is not None:
+            analysis['drv_20_error_records'] = drv_20_error_records
+            analysis['has_drv_20_error'] = len(drv_20_error_records) > 0
 
         # Always send email (daily report)
         return send_alert_email(analysis, error_message)

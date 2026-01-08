@@ -30,6 +30,8 @@ class WalmartDetailCrawler:
         self.xpaths = {}
         self.total_collected = 0
         self.max_skus = 300  # Maximum SKUs to collect (final limit)
+        # Error tracking for alert email
+        self.drv_20_error_records = []  # count_of_reviews <= 20 but collected fewer reviews
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -1809,6 +1811,25 @@ class WalmartDetailCrawler:
                 'count_of_reviews': count_of_reviews
             }
 
+            # Check for drv_20_error: count_of_reviews <= 20 but collected fewer reviews
+            try:
+                cor_int = int(str(count_of_reviews).replace(',', '')) if count_of_reviews else 0
+                collected_count = 0
+                if detailed_review_content:
+                    collected_count = len([r for r in detailed_review_content.split(', ') if r.startswith('review')])
+
+                # If count_of_reviews <= 20 and we collected fewer than expected
+                if cor_int > 0 and cor_int <= 20 and collected_count < cor_int:
+                    print(f"  [WARNING] drv_20_error detected: expected={cor_int}, collected={collected_count}")
+                    print(f"            URL: {url}")
+                    self.drv_20_error_records.append({
+                        'url': url,
+                        'count_of_reviews': cor_int,
+                        'collected_count': collected_count
+                    })
+            except Exception as e:
+                print(f"  [WARNING] drv_20_error check failed: {str(e)[:100]}")
+
             # Save to database
             if self.save_to_db(data):
                 self.total_collected += 1
@@ -2126,7 +2147,8 @@ class WalmartDetailCrawler:
                 results_df = pd.DataFrame(rows, columns=columns)
                 cursor.close()
 
-                monitor_and_alert('walmart', len(product_urls), results_df)
+                monitor_and_alert('walmart', len(product_urls), results_df,
+                                 drv_20_error_records=self.drv_20_error_records)
             except Exception as e:
                 print(f"[WARNING] Failed to send alert: {e}")
 

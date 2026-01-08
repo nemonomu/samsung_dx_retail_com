@@ -1506,11 +1506,15 @@ class WalmartDetailCrawler:
 
                 # Try multiple XPaths to find the button (there might be 2 on the page)
                 view_all_xpaths = [
-                    # Button with review count in text
+                    # Priority 1: Specific XPath with review count (e.g., "View all reviews (11)")
+                    '//*[@id="item-review-section"]/div[6]/button',
+                    # Priority 2: Specific XPath without review count
+                    '//*[@id="item-review-section"]/div[2]/div[1]/div[3]/button',
+                    # Priority 3: Button with review count in text
                     "//button[contains(text(), 'View all reviews') and @data-dca-intent='select']",
-                    # Any button with "View all reviews" text
+                    # Priority 4: Any button with "View all reviews" text
                     "//button[contains(text(), 'View all reviews')]",
-                    # Database XPath as fallback
+                    # Priority 5: Database XPath as fallback
                     self.xpaths.get('view_all_reviews_button')
                 ]
 

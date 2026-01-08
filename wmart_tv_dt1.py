@@ -1586,8 +1586,25 @@ class WalmartDetailCrawler:
                 # If we need more reviews and haven't reached max pages, click Next Page
                 if len(reviews) < 20 and page_num < max_pages:
                     try:
-                        # Find Next Page button using data-testid
-                        next_page_btn = self.driver.find_element(By.XPATH, "//a[@data-testid='NextPage']")
+                        # Try multiple XPaths to find Next Page button
+                        next_page_xpaths = [
+                            '//*[@id="maincontent"]/main/nav/ul/li[4]/a',  # Specific XPath
+                            "//a[@data-testid='NextPage']",                 # data-testid based
+                            "//a[@aria-label='Next Page']",                 # aria-label based
+                        ]
+
+                        next_page_btn = None
+                        for xpath in next_page_xpaths:
+                            try:
+                                next_page_btn = self.driver.find_element(By.XPATH, xpath)
+                                if next_page_btn:
+                                    break
+                            except:
+                                continue
+
+                        if not next_page_btn:
+                            print(f"  [WARNING] Could not find Next Page button")
+                            break
 
                         # Scroll to button
                         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_page_btn)

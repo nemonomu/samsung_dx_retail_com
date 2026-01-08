@@ -42,6 +42,8 @@ class AmazonDetailCrawler:
         # Error tracking lists for alert email
         self.rv_detail_null_records = []  # count_of_reviews > 0 but detailed_review_content is null
         self.reviews_equals_ratings_records = []  # count_of_reviews == count_of_star_ratings
+        self.fsp_null_records = []  # final_sku_price is null
+        self.cosr_null_records = []  # count_of_star_ratings is null but star_rating exists
         self.current_account = 'unsandev0004'  # Current Amazon account
 
     def connect_db(self):
@@ -1375,7 +1377,14 @@ class AmazonDetailCrawler:
             # count_of_reviews = count_of_star_ratings
 
             # Extract detailed review content and count_of_reviews from review page (up to 20 reviews)
-            detailed_review_content, count_of_reviews = self.extract_detailed_reviews_from_review_page(url)
+            # Skip review page navigation if star_rating == "No customer reviews"
+            # This avoids collecting wrong reviews from bundle products (e.g., Asurion warranty reviews)
+            if star_rating == "No customer reviews":
+                print(f"  [INFO] Skipping review page - No customer reviews")
+                detailed_review_content = None
+                count_of_reviews = "0"
+            else:
+                detailed_review_content, count_of_reviews = self.extract_detailed_reviews_from_review_page(url)
 
             # Verify page is properly loaded after returning from review page
             if not self.verify_page_loaded(wait_for_price=True):
@@ -1384,9 +1393,8 @@ class AmazonDetailCrawler:
             # Re-parse page source after returning from review page
             tree = html.fromstring(self.driver.page_source)
 
-            # Fallback: If count_of_reviews not found from review page, try detail page
-            if not count_of_reviews:
-                count_of_reviews = self.extract_count_of_reviews(tree)
+            # Note: count_of_reviews is ONLY extracted from review page (no fallback to detail page)
+            # Detail page shows "ratings" count, not actual "reviews" count
 
             # Extract prices from detail page
             final_sku_price = self.extract_final_sku_price(tree)
@@ -1501,11 +1509,12 @@ class AmazonDetailCrawler:
                 count_of_star_ratings = self.extract_count_of_star_ratings(tree)
                 final_sku_price = self.extract_final_sku_price(tree)
 
-                # Re-extract count_of_reviews from review page
-                detailed_review_content, count_of_reviews = self.extract_detailed_reviews_from_review_page(url)
-                if not count_of_reviews:
-                    tree = html.fromstring(self.driver.page_source)
-                    count_of_reviews = self.extract_count_of_reviews(tree)
+                # Re-extract count_of_reviews from review page (only if has reviews)
+                if star_rating == "No customer reviews":
+                    detailed_review_content = None
+                    count_of_reviews = "0"
+                else:
+                    detailed_review_content, count_of_reviews = self.extract_detailed_reviews_from_review_page(url)
 
                 # Update data dict
                 data['Retailer_SKU_Name'] = retailer_sku_name
@@ -1517,19 +1526,76 @@ class AmazonDetailCrawler:
 
                 print(f"  [INFO] Retry complete - Name: {'OK' if retailer_sku_name else 'NULL'}, Star: {'OK' if star_rating else 'NULL'}, Price: {'OK' if final_sku_price else 'NULL'}")
 
-            # Check for rv_detail_null condition (count_of_reviews > 0 but detailed_review_content is null)
-            # Also check for reviews_equals_ratings condition
+            # Check for error conditions and retry once if detected
             try:
+                # Initial error detection
                 cor = data.get('count_of_reviews')
-                cosr = data.get('count_of_star_ratings')
+                cosr = data.get('Count_of_Star_Ratings')
                 drc = data.get('Detailed_Review_Content')
+                fsp = data.get('final_sku_price')
+                sr = data.get('Star_Rating')
+
                 cor_int = int(str(cor).replace(',', '')) if cor else 0
                 cosr_int = int(str(cosr).replace(',', '')) if cosr else 0
                 drc_is_null = drc is None or (isinstance(drc, str) and drc.strip() == '')
+                fsp_is_null = fsp is None or (isinstance(fsp, str) and fsp.strip() == '')
+                sr_exists = sr is not None and str(sr).strip() != '' and str(sr).strip().lower() != 'no customer reviews'
+                cosr_is_null = cosr is None
 
-                # rv_detail_null: count_of_reviews > 0 but detailed_review_content is null
-                if cor_int > 0 and drc_is_null:
-                    print(f"  [WARNING] rv_detail_null detected: count_of_reviews={cor_int}, detailed_review_content=NULL")
+                # Check for retryable errors
+                has_fsp_null = fsp_is_null
+                has_cosr_null = sr_exists and cosr_is_null
+                has_rv_detail_null = cor_int > 0 and drc_is_null
+
+                # Retry once if any retryable error detected
+                if has_fsp_null or has_cosr_null or has_rv_detail_null:
+                    print(f"  [INFO] Error detected (fsp_null={has_fsp_null}, cosr_null={has_cosr_null}, rv_detail_null={has_rv_detail_null}), retrying...")
+
+                    # Refresh page and re-extract
+                    self.driver.refresh()
+                    time.sleep(2)
+                    tree = html.fromstring(self.driver.page_source)
+
+                    # Re-extract fields based on error type
+                    if has_fsp_null:
+                        fsp = self.extract_final_sku_price(tree)
+                        data['final_sku_price'] = fsp
+                        print(f"  [INFO] Retry fsp: {fsp}")
+
+                    if has_cosr_null:
+                        cosr = self.extract_count_of_star_ratings(tree)
+                        data['Count_of_Star_Ratings'] = cosr
+                        print(f"  [INFO] Retry cosr: {cosr}")
+
+                    if has_rv_detail_null:
+                        # Re-navigate to review page (only if star_rating is not "No customer reviews")
+                        if sr != "No customer reviews":
+                            drc, cor = self.extract_detailed_reviews_from_review_page(url)
+                            data['Detailed_Review_Content'] = drc
+                            data['count_of_reviews'] = cor
+                            print(f"  [INFO] Retry rv: reviews={cor}, content={'OK' if drc else 'NULL'}")
+
+                    # Re-check error conditions after retry
+                    cor = data.get('count_of_reviews')
+                    cosr = data.get('Count_of_Star_Ratings')
+                    drc = data.get('Detailed_Review_Content')
+                    fsp = data.get('final_sku_price')
+
+                    cor_int = int(str(cor).replace(',', '')) if cor else 0
+                    cosr_int = int(str(cosr).replace(',', '')) if cosr else 0
+                    drc_is_null = drc is None or (isinstance(drc, str) and drc.strip() == '')
+                    fsp_is_null = fsp is None or (isinstance(fsp, str) and fsp.strip() == '')
+                    cosr_is_null = cosr is None
+
+                    has_fsp_null = fsp_is_null
+                    has_cosr_null = sr_exists and cosr_is_null
+                    has_rv_detail_null = cor_int > 0 and drc_is_null
+
+                    print(f"  [INFO] After retry - fsp_null={has_fsp_null}, cosr_null={has_cosr_null}, rv_detail_null={has_rv_detail_null}")
+
+                # Add to error records only if error persists after retry
+                if has_rv_detail_null:
+                    print(f"  [WARNING] rv_detail_null persists: count_of_reviews={cor_int}, detailed_review_content=NULL")
                     print(f"            URL: {data.get('product_url', 'N/A')}")
                     self.rv_detail_null_records.append({
                         'url': data.get('product_url', 'N/A'),
@@ -1538,7 +1604,24 @@ class AmazonDetailCrawler:
                         'account': self.current_account
                     })
 
-                # reviews_equals_ratings: count_of_reviews == count_of_star_ratings (suspicious)
+                if has_fsp_null:
+                    print(f"  [WARNING] fsp_null persists: final_sku_price=NULL")
+                    print(f"            URL: {data.get('product_url', 'N/A')}")
+                    self.fsp_null_records.append({
+                        'url': data.get('product_url', 'N/A'),
+                        'account': self.current_account
+                    })
+
+                if has_cosr_null:
+                    print(f"  [WARNING] cosr_null persists: star_rating={sr}, count_of_star_ratings=NULL")
+                    print(f"            URL: {data.get('product_url', 'N/A')}")
+                    self.cosr_null_records.append({
+                        'url': data.get('product_url', 'N/A'),
+                        'star_rating': sr,
+                        'account': self.current_account
+                    })
+
+                # reviews_equals_ratings: not retryable (data pattern issue, not fetch error)
                 if cor_int > 0 and cosr_int > 0 and cor_int == cosr_int:
                     print(f"  [WARNING] reviews_equals_ratings detected: count_of_reviews={cor_int}, count_of_star_ratings={cosr_int}")
                     print(f"            URL: {data.get('product_url', 'N/A')}")
@@ -1549,7 +1632,7 @@ class AmazonDetailCrawler:
                         'account': self.current_account
                     })
             except Exception as e:
-                pass
+                print(f"  [WARNING] Error check failed: {str(e)[:100]}")
 
             # Save to database
             if self.save_to_db(data):
@@ -1857,7 +1940,9 @@ class AmazonDetailCrawler:
 
                 monitor_and_alert('amazon', len(product_urls), results_df,
                                  rv_detail_null_records=self.rv_detail_null_records,
-                                 reviews_equals_ratings_records=self.reviews_equals_ratings_records)
+                                 reviews_equals_ratings_records=self.reviews_equals_ratings_records,
+                                 fsp_null_records=self.fsp_null_records,
+                                 cosr_null_records=self.cosr_null_records)
             except Exception as e:
                 print(f"[WARNING] Failed to send alert: {e}")
 

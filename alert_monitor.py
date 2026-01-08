@@ -252,6 +252,10 @@ def send_alert_email(analysis, error_message=None):
 
         # Error prefixes
         error_prefixes = []
+        if analysis.get('has_fsp_null_error', False):
+            error_prefixes.append("fsp_null")
+        if analysis.get('has_cosr_null_error', False):
+            error_prefixes.append("cosr_null")
         if analysis.get('has_rv_detail_null_error', False):
             error_prefixes.append("rv_detail_null")
         if analysis.get('has_reviews_equals_ratings_error', False):
@@ -495,6 +499,63 @@ def send_alert_email(analysis, error_message=None):
             </div>
             """
 
+        # fsp_null error section (final_sku_price is null)
+        fsp_records = analysis.get('fsp_null_records', [])
+        if analysis.get('has_fsp_null_error', False) and fsp_records:
+            html_content += f"""
+            <div class="section">
+                <h3 style="color: #dc3545;">Final SKU Price Null Error ({len(fsp_records)} products)</h3>
+                <p>The following products have final_sku_price as NULL:</p>
+                <table>
+                    <tr>
+                        <th>Product URL</th>
+                        <th>Account</th>
+                    </tr>
+            """
+            for record in fsp_records:
+                url = record.get('url', 'N/A')
+                account = record.get('account', 'N/A')
+                html_content += f"""
+                    <tr>
+                        <td><a href="{url}">{url[:80]}...</a></td>
+                        <td>{account}</td>
+                    </tr>
+                """
+            html_content += """
+                </table>
+            </div>
+            """
+
+        # cosr_null error section (count_of_star_ratings is null but star_rating exists)
+        cosr_records = analysis.get('cosr_null_records', [])
+        if analysis.get('has_cosr_null_error', False) and cosr_records:
+            html_content += f"""
+            <div class="section">
+                <h3 style="color: #dc3545;">Count of Star Ratings Null Error ({len(cosr_records)} products)</h3>
+                <p>The following products have star_rating but count_of_star_ratings is NULL:</p>
+                <table>
+                    <tr>
+                        <th>Product URL</th>
+                        <th>Star Rating</th>
+                        <th>Account</th>
+                    </tr>
+            """
+            for record in cosr_records:
+                url = record.get('url', 'N/A')
+                star_rating = record.get('star_rating', 'N/A')
+                account = record.get('account', 'N/A')
+                html_content += f"""
+                    <tr>
+                        <td><a href="{url}">{url[:80]}...</a></td>
+                        <td>{star_rating}</td>
+                        <td>{account}</td>
+                    </tr>
+                """
+            html_content += """
+                </table>
+            </div>
+            """
+
         html_content += """
             <div class="section">
                 <p style="color: #666; font-size: 12px;">
@@ -532,7 +593,8 @@ def send_alert_email(analysis, error_message=None):
 
 
 def monitor_and_alert(retailer_code, target_count, results_df, error_message=None,
-                      rv_detail_null_records=None, reviews_equals_ratings_records=None):
+                      rv_detail_null_records=None, reviews_equals_ratings_records=None,
+                      fsp_null_records=None, cosr_null_records=None):
     """
     Monitor crawling results and send alerts (main function)
 
@@ -545,6 +607,8 @@ def monitor_and_alert(retailer_code, target_count, results_df, error_message=Non
         error_message: Additional error message (optional)
         rv_detail_null_records: List of dicts with url, count_of_reviews, count_of_star_ratings, account
         reviews_equals_ratings_records: List of dicts with url, count_of_reviews, count_of_star_ratings, account
+        fsp_null_records: List of dicts with url, account (final_sku_price is null)
+        cosr_null_records: List of dicts with url, star_rating, account (count_of_star_ratings is null)
 
     Returns:
         bool: Alert send success status
@@ -570,6 +634,14 @@ def monitor_and_alert(retailer_code, target_count, results_df, error_message=Non
         if reviews_equals_ratings_records is not None:
             analysis['reviews_equals_ratings_records'] = reviews_equals_ratings_records
             analysis['has_reviews_equals_ratings_error'] = len(reviews_equals_ratings_records) > 0
+
+        if fsp_null_records is not None:
+            analysis['fsp_null_records'] = fsp_null_records
+            analysis['has_fsp_null_error'] = len(fsp_null_records) > 0
+
+        if cosr_null_records is not None:
+            analysis['cosr_null_records'] = cosr_null_records
+            analysis['has_cosr_null_error'] = len(cosr_null_records) > 0
 
         # Always send email (daily report)
         return send_alert_email(analysis, error_message)

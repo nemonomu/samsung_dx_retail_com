@@ -558,27 +558,30 @@ def send_alert_email(analysis, error_message=None):
             </div>
             """
 
-        # drv_20_error section (count_of_reviews <= 20 but collected less than expected)
+        # drv_20_error section (detailed reviews under-collected)
         drv_20_records = analysis.get('drv_20_error_records', [])
         if analysis.get('has_drv_20_error', False) and drv_20_records:
             html_content += f"""
             <div class="section">
                 <h3 style="color: #dc3545;">Detailed Reviews Under-Collected Error ({len(drv_20_records)} products)</h3>
-                <p>The following products have count_of_reviews <= 20 but collected fewer reviews:</p>
+                <p>Reviews under-collected (if total <= 20: collect all, if total > 20: collect at least 20):</p>
                 <table>
                     <tr>
                         <th>Product URL</th>
-                        <th>Expected (count_of_reviews)</th>
+                        <th>Total Reviews</th>
+                        <th>Expected</th>
                         <th>Collected</th>
                     </tr>
             """
             for record in drv_20_records:
                 url = record.get('url', 'N/A')
-                expected = record.get('count_of_reviews', 'N/A')
+                total = record.get('count_of_reviews', 'N/A')
+                expected = record.get('expected_count', record.get('count_of_reviews', 'N/A'))
                 collected = record.get('collected_count', 'N/A')
                 html_content += f"""
                     <tr>
                         <td><a href="{url}">{url[:80]}...</a></td>
+                        <td>{total}</td>
                         <td>{expected}</td>
                         <td>{collected}</td>
                     </tr>

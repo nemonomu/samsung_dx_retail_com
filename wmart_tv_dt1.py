@@ -1811,21 +1811,37 @@ class WalmartDetailCrawler:
                 'count_of_reviews': count_of_reviews
             }
 
-            # Check for drv_20_error: count_of_reviews <= 20 but collected fewer reviews
+            # Check for drv_20_error: detailed reviews under-collected
+            # If count_of_reviews <= 20: should collect all (collected_count == count_of_reviews)
+            # If count_of_reviews > 20: should collect at least 20 (collected_count >= 20)
             try:
                 cor_int = int(str(count_of_reviews).replace(',', '')) if count_of_reviews else 0
                 collected_count = 0
                 if detailed_review_content:
                     collected_count = len([r for r in detailed_review_content.split(', ') if r.startswith('review')])
 
-                # If count_of_reviews <= 20 and we collected fewer than expected
-                if cor_int > 0 and cor_int <= 20 and collected_count < cor_int:
-                    print(f"  [WARNING] drv_20_error detected: expected={cor_int}, collected={collected_count}")
+                has_error = False
+                expected_count = 0
+
+                if cor_int > 0 and cor_int <= 20:
+                    # Should collect all reviews
+                    expected_count = cor_int
+                    if collected_count < cor_int:
+                        has_error = True
+                elif cor_int > 20:
+                    # Should collect at least 20 reviews
+                    expected_count = 20
+                    if collected_count < 20:
+                        has_error = True
+
+                if has_error:
+                    print(f"  [WARNING] drv_20_error detected: expected={expected_count}, collected={collected_count}, total_reviews={cor_int}")
                     print(f"            URL: {url}")
                     self.drv_20_error_records.append({
                         'url': url,
                         'count_of_reviews': cor_int,
-                        'collected_count': collected_count
+                        'collected_count': collected_count,
+                        'expected_count': expected_count
                     })
             except Exception as e:
                 print(f"  [WARNING] drv_20_error check failed: {str(e)[:100]}")

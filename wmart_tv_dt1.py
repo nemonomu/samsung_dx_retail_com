@@ -704,6 +704,38 @@ class WalmartDetailCrawler:
                 if match:
                     return int(match.group(1).replace(',', ''))
 
+            # ===== NEW: Extract from "X ratings" link/span =====
+            # Method 5: reviewsLink with itemprop="ratingCount" - "9,085 ratings"
+            ratings_link_xpaths = [
+                "//*[@id='maincontent']/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[2]/div/div/a",
+                "//a[@link-identifier='reviewsLink' and @itemprop='ratingCount']",
+                "//a[@data-testid='item-review-section-link']"
+            ]
+            for xpath in ratings_link_xpaths:
+                elements = tree.xpath(xpath)
+                if elements:
+                    text = elements[0].text_content().strip()
+                    match = re.search(r'([\d,]+)\s*ratings?', text, re.IGNORECASE)
+                    if match:
+                        count = int(match.group(1).replace(',', ''))
+                        print(f"  [INFO] Extracted count_of_star_ratings from ratings link: {count}")
+                        return count
+
+            # Method 6: span with "X ratings" in item-review-section
+            ratings_span_xpaths = [
+                "//*[@id='item-review-section']/div[2]/div[1]/div[1]/div/span[2]",
+                "//span[contains(@class, 'ml2') and contains(text(), 'ratings')]"
+            ]
+            for xpath in ratings_span_xpaths:
+                elements = tree.xpath(xpath)
+                if elements:
+                    text = elements[0].text_content().strip()
+                    match = re.search(r'([\d,]+)\s*ratings?', text, re.IGNORECASE)
+                    if match:
+                        count = int(match.group(1).replace(',', ''))
+                        print(f"  [INFO] Extracted count_of_star_ratings from ratings span: {count}")
+                        return count
+
             # ===== FALLBACK: Old method using star button breakdown =====
             # Get total ratings count for fallback calculation
             total_text = self.extract_text_safe(tree, self.xpaths.get('total_ratings'))
@@ -1001,21 +1033,32 @@ class WalmartDetailCrawler:
             print(f"  [WARNING] Failed to extract offer: {e}")
             return None
 
-    def extract_count_of_reviews(self, tree, star_rating=None, page_source=None):
+    def extract_count_of_reviews(self, tree, star_rating=None, page_source=None, count_of_star_ratings=None):
         """Extract total number of reviews from main page
         Example: '248 reviews' -> 248, '43 ratings' -> 43, 'No ratings yet' -> 0
 
         Priority:
         1. Check "No ratings yet" first -> return 0
-        2. "Showing 1-3 of 4,686 reviews" pattern (div[7]/div[1])
-        3. "View all reviews (4,686)" button (div[8]/button)
-        4. "4,686 reviews" link (seeAllReviewsStarRating)
+        2. "View all reviews (4,686)" button - user-provided XPath (most reliable)
+        3. "Showing 1-3 of 4,686 reviews" pattern
+        4. JSON extraction (numberOfReviews, totalReviewCount)
 
         Args:
             tree: HTML tree
             star_rating: Star rating value (if "No ratings yet", return 0)
             page_source: Raw HTML page source for JSON extraction
+            count_of_star_ratings: Star ratings count for validation (skip if extracted value equals this and >= 10)
         """
+        def is_likely_ratings_count(value):
+            """Check if extracted value is likely the ratings count (not actual reviews)"""
+            if count_of_star_ratings is None:
+                return False
+            # If value equals count_of_star_ratings and >= 10, it's likely wrong
+            if value == count_of_star_ratings and count_of_star_ratings >= 10:
+                print(f"  [WARNING] Extracted count_of_reviews ({value}) equals count_of_star_ratings - skipping this source")
+                return True
+            return False
+
         try:
             # Check 1: If star_rating is "No ratings yet", return 0 immediately
             if star_rating and "No ratings yet" in str(star_rating):
@@ -1034,7 +1077,52 @@ class WalmartDetailCrawler:
                         print(f"  [INFO] Found 'No ratings yet' on page, setting count_of_reviews to 0")
                         return 0
 
-            # Priority 1: Extract from "Showing 1-3 of 4,686 reviews" pattern
+            # Priority 1: Extract from "View all reviews (4,686)" button - USER PROVIDED XPATH
+            # This is the most reliable source for actual review count
+            # Note: Button with count has class "tc", button without count has class "tl mr2"
+            view_all_xpaths = [
+                # Buttons with data-dca-intent="select" and class containing "tc" (has count)
+                "//button[contains(text(), 'View all reviews') and @data-dca-intent='select' and contains(@class, 'tc')]",
+                # Specific XPaths (div index varies by page)
+                '//*[@id="item-review-section"]/div[6]/button',
+                '//*[@id="item-review-section"]/div[8]/button',
+                # Generic button with data-dca-intent
+                "//button[contains(text(), 'View all reviews') and @data-dca-intent='select']",
+                '//button[contains(text(), "View all reviews")]'
+            ]
+            for xpath in view_all_xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+                    # Pattern: "View all reviews (4,686)" -> extract 4,686
+                    match = re.search(r'\(([\d,]+)\)', text)
+                    if match:
+                        count_str = match.group(1).replace(',', '')
+                        count = int(count_str)
+                        if not is_likely_ratings_count(count):
+                            print(f"  [INFO] Extracted count from 'View all reviews' button: {count}")
+                            return count
+
+            # Priority 2: Extract from "6,602 reviews" link (seeAllReviewsStarRating)
+            # <a link-identifier="seeAllReviewsStarRating">6,602 reviews</a>
+            reviews_link_xpaths = [
+                '//*[@id="item-review-section"]/div[2]/div[1]/div[1]/div/a',
+                "//a[@link-identifier='seeAllReviewsStarRating']"
+            ]
+            for xpath in reviews_link_xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+                    # Pattern: "6,602 reviews" -> extract 6,602
+                    match = re.search(r'([\d,]+)\s+reviews?', text, re.IGNORECASE)
+                    if match:
+                        count_str = match.group(1).replace(',', '')
+                        count = int(count_str)
+                        if not is_likely_ratings_count(count):
+                            print(f"  [INFO] Extracted count from reviews link: {count}")
+                            return count
+
+            # Priority 3: Extract from "Showing 1-3 of 4,686 reviews" pattern
             # XPath: //*[@id="item-review-section"]/div[7]/div[1]
             showing_xpaths = [
                 '//*[@id="item-review-section"]/div[7]/div[1]',
@@ -1050,44 +1138,26 @@ class WalmartDetailCrawler:
                     if match:
                         count_str = match.group(1).replace(',', '')
                         count = int(count_str)
-                        print(f"  [INFO] Extracted count from 'Showing X of Y reviews': {count}")
+                        if not is_likely_ratings_count(count):
+                            print(f"  [INFO] Extracted count from 'Showing X of Y reviews': {count}")
+                            return count
+
+            # Priority 4: Extract from JSON data
+            if page_source:
+                # Try numberOfReviews first (actual written reviews count)
+                match = re.search(r'"numberOfReviews"\s*:\s*(\d+)', page_source)
+                if match:
+                    count = int(match.group(1))
+                    if not is_likely_ratings_count(count):
+                        print(f"  [INFO] Extracted numberOfReviews from JSON: {count}")
                         return count
 
-            # Priority 2: Extract from "View all reviews (4,686)" button
-            # XPath: //*[@id="item-review-section"]/div[8]/button
-            view_all_xpaths = [
-                '//*[@id="item-review-section"]/div[8]/button',
-                '//button[contains(text(), "View all reviews")]',
-                '//*[@id="item-review-section"]//button[contains(text(), "View all reviews")]'
-            ]
-            for xpath in view_all_xpaths:
-                result = tree.xpath(xpath)
-                if result:
-                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
-                    # Pattern: "View all reviews (4,686)" -> extract 4,686
-                    match = re.search(r'\(([\d,]+)\)', text)
-                    if match:
-                        count_str = match.group(1).replace(',', '')
-                        count = int(count_str)
-                        print(f"  [INFO] Extracted count from 'View all reviews' button: {count}")
-                        return count
-
-            # Priority 3: Extract from "4,686 reviews" link
-            # XPath: //*[@id="item-review-section"]/div[2]/div[1]/div[1]/div/a
-            reviews_link_xpaths = [
-                "//*[@id='item-review-section']/div[2]/div[1]/div[1]/div/a",
-                "//a[@link-identifier='seeAllReviewsStarRating']"
-            ]
-            for xpath in reviews_link_xpaths:
-                result = tree.xpath(xpath)
-                if result:
-                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
-                    # Pattern: "4,686 reviews" -> extract 4,686
-                    match = re.search(r'([\d,]+)\s+reviews?', text, re.IGNORECASE)
-                    if match:
-                        count_str = match.group(1).replace(',', '')
-                        count = int(count_str)
-                        print(f"  [INFO] Extracted count from reviews link: {count}")
+                # Try totalReviewCount as alternative
+                match = re.search(r'"totalReviewCount"\s*:\s*(\d+)', page_source)
+                if match:
+                    count = int(match.group(1))
+                    if not is_likely_ratings_count(count):
+                        print(f"  [INFO] Extracted totalReviewCount from JSON: {count}")
                         return count
 
             # Fallback: Check for "No ratings yet" -> return 0
@@ -1101,23 +1171,6 @@ class WalmartDetailCrawler:
                     return 0
 
             return None
-
-            # === DEPRECATED: JSON extraction methods (commented out) ===
-            # # Method 1: Extract from JSON data (most accurate - gets exact count like 28040)
-            # if page_source:
-            #     # Try totalReviewCount first (exact total review count)
-            #     match = re.search(r'"totalReviewCount":(\d+)', page_source)
-            #     if match:
-            #         count = int(match.group(1))
-            #         print(f"  [INFO] Extracted totalReviewCount from JSON: {count}")
-            #         return count
-            #
-            #     # Try numberOfReviews as alternative
-            #     match = re.search(r'"numberOfReviews":(\d+)', page_source)
-            #     if match:
-            #         count = int(match.group(1))
-            #         print(f"  [INFO] Extracted numberOfReviews from JSON: {count}")
-            #         return count
 
         except Exception as e:
             print(f"  [WARNING] Failed to extract count of reviews: {e}")
@@ -1508,12 +1561,13 @@ class WalmartDetailCrawler:
 
                 # Try multiple XPaths to find the button (there might be 2 on the page)
                 view_all_xpaths = [
-                    # Priority 1: Specific XPath with review count (e.g., "View all reviews (11)")
-                    '//*[@id="item-review-section"]/div[6]/button',
-                    # Priority 2: Specific XPath without review count
-                    '//*[@id="item-review-section"]/div[2]/div[1]/div[3]/button',
-                    # Priority 3: Button with review count in text
+                    # Priority 1: Button with data-dca-intent="select" (most reliable)
                     "//button[contains(text(), 'View all reviews') and @data-dca-intent='select']",
+                    # Priority 2: Specific XPaths (div index varies by page)
+                    '//*[@id="item-review-section"]/div[6]/button',
+                    '//*[@id="item-review-section"]/div[8]/button',
+                    # Priority 3: Specific XPath without review count
+                    '//*[@id="item-review-section"]/div[2]/div[1]/div[3]/button',
                     # Priority 4: Any button with "View all reviews" text
                     "//button[contains(text(), 'View all reviews')]",
                     # Priority 5: Database XPath as fallback
@@ -1546,9 +1600,25 @@ class WalmartDetailCrawler:
                 self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", view_all_btn)
                 time.sleep(1)
 
+                # Log button info before click
+                btn_text = view_all_btn.text if view_all_btn else "N/A"
+                print(f"  [DEBUG] Found View all reviews button: '{btn_text[:50]}...' ")
+
+                # Get URL before click
+                url_before = self.driver.current_url
+
                 # Use JavaScript click to avoid interception
                 self.driver.execute_script("arguments[0].click();", view_all_btn)
                 time.sleep(random.uniform(3, 4))
+
+                # Check if URL changed (page navigated)
+                url_after = self.driver.current_url
+                if url_before == url_after:
+                    print(f"  [WARNING] URL did not change after clicking View all reviews button")
+                    print(f"  [DEBUG] URL: {url_after[:80]}...")
+                else:
+                    print(f"  [DEBUG] Navigated to reviews page: {url_after[:80]}...")
+
             except Exception as e:
                 print(f"  [WARNING] Could not click View all reviews: {e}")
                 return None
@@ -1563,9 +1633,18 @@ class WalmartDetailCrawler:
                 page_source = self.driver.page_source
                 tree = html.fromstring(page_source)
 
-                # Get review containers
+                # Get review containers - try multiple XPaths
                 # Find all review containers using data-testid attribute
                 review_content_divs = tree.xpath('//div[@data-testid="enhanced-review-content"]')
+
+                # If not found, try alternative XPaths
+                if not review_content_divs:
+                    review_content_divs = tree.xpath('//div[contains(@class, "review-content")]')
+                if not review_content_divs:
+                    review_content_divs = tree.xpath('//div[@data-testid="review-card"]')
+                if not review_content_divs:
+                    # Try to find any review-like containers
+                    review_content_divs = tree.xpath('//div[contains(@class, "CustomerReview")]')
 
                 if not review_content_divs:
                     print(f"  [WARNING] No review content divs found on page {page_num}")
@@ -1763,15 +1842,15 @@ class WalmartDetailCrawler:
             count_of_reviews = None
             try:
                 WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.XPATH, "//*[@id='item-review-section']//a[@link-identifier='seeAllReviewsStarRating'] | //*[@id='item-review-section']/div[7]/div[1] | //span[contains(text(), 'No ratings yet')]"))
+                    EC.presence_of_element_located((By.XPATH, "//*[@id='item-review-section']/div[7]/div[1] | //button[contains(text(), 'View all reviews')] | //span[contains(text(), 'No ratings yet')]"))
                 )
                 # Element loaded - re-parse and extract
                 page_source = self.driver.page_source
                 tree = html.fromstring(page_source)
-                count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source)
+                count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source, count_of_star_ratings)
             except:
                 print("  [WARNING] count_of_reviews element not loaded - trying extraction anyway")
-                count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source)
+                count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source, count_of_star_ratings)
 
             # Click Specifications and get Model (after static content extraction)
             sku_model = self.click_specifications_and_get_model()

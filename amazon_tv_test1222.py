@@ -82,7 +82,6 @@ class AmazonTVTestCrawler:
             rows = cursor.fetchall()
             for row in rows:
                 self.xpaths[row[0]] = row[1]
-                print(f"  [DEBUG] Loaded XPath: {row[0]} = {row[1][:50]}...")
 
             cursor.close()
 

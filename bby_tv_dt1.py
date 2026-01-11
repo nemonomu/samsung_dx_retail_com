@@ -43,11 +43,7 @@ import os
 import psycopg2
 from datetime import datetime, timedelta
 import pytz
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from DrissionPage import ChromiumPage, ChromiumOptions
 from lxml import html
 from data_validator import DataValidator
 
@@ -58,7 +54,7 @@ from alert_monitor import monitor_and_alert
 
 class BestBuyDetailCrawler:
     def __init__(self):
-        self.driver = None
+        self.page = None
         self.db_conn = None
         self.korea_tz = pytz.timezone('Asia/Seoul')
         self.batch_id = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
@@ -81,23 +77,17 @@ class BestBuyDetailCrawler:
             print(f"[ERROR] Database connection failed: {e}")
             return False
 
-    def setup_driver(self):
-        """Chrome driver setup"""
+    def setup_browser(self):
+        """Setup DrissionPage ChromiumPage - 최소 설정"""
         try:
-            print("[INFO] Setting up Chrome driver...")
-
-            # Chrome options with page load strategy
-            options = uc.ChromeOptions()
-            options.page_load_strategy = 'eager'  # Wait for DOM load (CHANGED from 'none')
-
-            self.driver = uc.Chrome(options=options)
-            self.driver.set_page_load_timeout(120)  # Increased to 120 seconds
-            self.driver.maximize_window()
-
-            print("[OK] Driver setup complete (page_load_strategy=eager, timeout=120s)")
+            print("[INFO] Setting up DrissionPage browser...")
+            self.page = ChromiumPage()
+            print("[OK] DrissionPage browser setup complete")
             return True
         except Exception as e:
-            print(f"[ERROR] Driver setup failed: {e}")
+            print(f"[ERROR] Browser setup failed: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def get_recent_urls(self):
@@ -353,11 +343,15 @@ class BestBuyDetailCrawler:
                 print(f"[INFO] Session start time (from main batch): {session_start_str}")
 
                 # Get all distinct processed URLs from current session in bby_tv_crawl
+                # 핵심 필드(retailer_sku_name, final_sku_price, Detailed_Review_Content)가 모두 있는 경우만 완료로 간주
                 cursor.execute("""
                     SELECT DISTINCT product_url
                     FROM bby_tv_crawl
                     WHERE product_url IS NOT NULL
                       AND crawl_datetime >= %s
+                      AND retailer_sku_name IS NOT NULL
+                      AND final_sku_price IS NOT NULL
+                      AND Detailed_Review_Content IS NOT NULL
                 """, (session_start_str,))
 
                 already_processed_urls = {row[0] for row in cursor.fetchall()}
@@ -408,25 +402,26 @@ class BestBuyDetailCrawler:
             return None
 
     def click_specifications(self):
-        """Specification button click"""
+        """Specification button click (DrissionPage)"""
         try:
             print("  [INFO] Specification button click...")
-            # XPath를 사용한 여러 attempt
-            xpaths = [
-                "//button[@class='c-button-unstyled specs-accordion font-weight-medium w-full flex justify-content-between align-items-center CiN3vihE2Ub2POwD']",
-                "//button[.//h3[text()='Specifications']]",
-                "//button[contains(@class, 'specs-accordion')]"
+            # CSS/XPath를 사용한 여러 attempt
+            selectors = [
+                'xpath://button[contains(@class, "specs-accordion")]',
+                'xpath://button[.//h3[text()="Specifications"]]',
+                'css:button.specs-accordion'
             ]
 
-            for xpath in xpaths:
+            for selector in selectors:
                 try:
-                    spec_button = self.driver.find_element(By.XPATH, xpath)
-                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", spec_button)
-                    time.sleep(2)
-                    spec_button.click()
-                    print("  [OK] Specification click successful")
-                    time.sleep(7)  # dialog 로딩 wait 증가
-                    return True
+                    spec_button = self.page.ele(selector, timeout=3)
+                    if spec_button:
+                        spec_button.scroll.to_see()
+                        time.sleep(2)
+                        spec_button.click()
+                        print("  [OK] Specification click successful")
+                        time.sleep(7)  # dialog 로딩 wait 증가
+                        return True
                 except:
                     continue
 
@@ -439,7 +434,7 @@ class BestBuyDetailCrawler:
 
     def click_specifications_with_retry(self):
         """
-        Specifications dialog 열기 (retry 포함)
+        Specifications dialog 열기 (retry 포함) - DrissionPage
 
         Returns:
             (success, error):
@@ -456,14 +451,15 @@ class BestBuyDetailCrawler:
             if self.click_specifications():
                 try:
                     wait_time = base_timeout * (2 ** retry_count)  # 15s -> 30s
-                    wait = WebDriverWait(self.driver, wait_time)
-                    wait.until(EC.presence_of_element_located(
-                        (By.XPATH, '//div[contains(text(), "Model Number")]')
-                    ))
-                    print(f"  [OK] dialog load complete (wait: {wait_time}sec)")
-                    return True, None
+                    # DrissionPage wait for element
+                    model_num_elem = self.page.ele('xpath://div[contains(text(), "Model Number")]', timeout=wait_time)
+                    if model_num_elem:
+                        print(f"  [OK] dialog load complete (wait: {wait_time}sec)")
+                        return True, None
+                    else:
+                        raise Exception("Model Number element not found")
 
-                except TimeoutException:
+                except Exception as e:
                     if retry_count < max_retries:
                         print(f"  [WARNING] dialog timeout, retry {retry_count + 1}/{max_retries}...")
                         retry_count += 1
@@ -472,11 +468,11 @@ class BestBuyDetailCrawler:
                         # Page refresh to recover from stuck state
                         print(f"  [INFO] Refreshing page to recover from timeout...")
                         try:
-                            self.driver.refresh()
+                            self.page.refresh()
                             time.sleep(3)  # Wait for page reload
                             print(f"  [OK] Page refreshed successfully")
-                        except Exception as e:
-                            print(f"  [WARNING] Page refresh failed: {e}")
+                        except Exception as e2:
+                            print(f"  [WARNING] Page refresh failed: {e2}")
 
                         time.sleep(2)
                         continue
@@ -981,22 +977,23 @@ class BestBuyDetailCrawler:
             return None
 
     def close_specifications_dialog(self):
-        """Specification dialog close"""
+        """Specification dialog close (DrissionPage)"""
         try:
             print("  [INFO] Specification dialog close...")
-            xpaths = [
-                '//button[@data-testid="brix-sheet-closeButton"]',
-                '//button[@aria-label="Close Sheet"]',
-                '//div[@class="relative"]//button'
+            selectors = [
+                'xpath://button[@data-testid="brix-sheet-closeButton"]',
+                'xpath://button[@aria-label="Close Sheet"]',
+                'xpath://div[@class="relative"]//button'
             ]
 
-            for xpath in xpaths:
+            for selector in selectors:
                 try:
-                    close_button = self.driver.find_element(By.XPATH, xpath)
-                    close_button.click()
-                    print("  [OK] dialog close successful")
-                    time.sleep(2)
-                    return True
+                    close_button = self.page.ele(selector, timeout=3)
+                    if close_button:
+                        close_button.click()
+                        print("  [OK] dialog close successful")
+                        time.sleep(2)
+                        return True
                 except:
                     continue
 
@@ -1048,7 +1045,7 @@ class BestBuyDetailCrawler:
             return [None]*4, [None]*4, [None]*4
 
     def extract_star_ratings_from_reviews_page(self):
-        """Count_of_Star_Ratings extraction (See All Customer Reviews page에서)
+        """Count_of_Star_Ratings extraction (See All Customer Reviews page에서) - DrissionPage
         Returns: integer (total count) or None
         """
         try:
@@ -1056,20 +1053,21 @@ class BestBuyDetailCrawler:
             total_count = 0
             # XPath 패턴 (5점부터 1점까지)
             xpaths = [
-                '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[1]/div/label/span[5]',  # 5점
-                '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[2]/div/label/span[5]',  # 4점
-                '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[3]/div/label/span[5]',  # 3점
-                '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[4]/div/label/span[5]',  # 2점
-                '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[5]/div/label/span[5]'   # 1점
+                'xpath://*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[1]/div/label/span[5]',  # 5점
+                'xpath://*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[2]/div/label/span[5]',  # 4점
+                'xpath://*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[3]/div/label/span[5]',  # 3점
+                'xpath://*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[4]/div/label/span[5]',  # 2점
+                'xpath://*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[5]/div/label/span[5]'   # 1점
             ]
 
             # 5점부터 1점까지 순서로 extraction
-            for idx, xpath in enumerate(xpaths):
+            for idx, selector in enumerate(xpaths):
                 try:
-                    elem = self.driver.find_element(By.XPATH, xpath)
-                    count_text = elem.text.strip()
-                    count = int(count_text) if count_text.isdigit() else 0
-                    total_count += count
+                    elem = self.page.ele(selector, timeout=2)
+                    if elem:
+                        count_text = elem.text.strip()
+                        count = int(count_text) if count_text.isdigit() else 0
+                        total_count += count
                 except Exception:
                     pass  # 찾지 못하면 0으로 처리 (total_count에 더하지 않음)
 
@@ -1080,26 +1078,27 @@ class BestBuyDetailCrawler:
             return None
 
     def extract_count_of_reviews(self):
-        """Count_of_Reviews extraction (See All Customer Reviews page에서)"""
+        """Count_of_Reviews extraction (See All Customer Reviews page에서) - DrissionPage"""
         try:
-            # XPath 패턴
-            xpaths = [
+            # Selector 패턴
+            selectors = [
                 # 제공된 HTML 패턴
-                '//span[@class="c-reviews order-2"]',
+                'xpath://span[@class="c-reviews order-2"]',
                 # ID 기반 패턴 (동적 ID이므로 contains 사용)
-                '//div[contains(@id, "user-generated-content-ugc-stats")]//span[@class="c-reviews order-2"]',
+                'xpath://div[contains(@id, "user-generated-content-ugc-stats")]//span[@class="c-reviews order-2"]',
                 # 더 범용적인 패턴
-                '//span[contains(@class, "c-reviews")]'
+                'xpath://span[contains(@class, "c-reviews")]'
             ]
 
-            for xpath in xpaths:
+            for selector in selectors:
                 try:
-                    elem = self.driver.find_element(By.XPATH, xpath)
-                    text = elem.text.strip()
-                    # 숫자만 extraction (예: "(84 Reviews)" -> "84")
-                    match = re.search(r'\((\d+)\s*Reviews?\)', text)
-                    if match:
-                        return match.group(1)
+                    elem = self.page.ele(selector, timeout=3)
+                    if elem:
+                        text = elem.text.strip()
+                        # 숫자만 extraction (예: "(84 Reviews)" -> "84")
+                        match = re.search(r'\((\d+)\s*Reviews?\)', text)
+                        if match:
+                            return match.group(1)
                 except Exception:
                     continue
 
@@ -1110,28 +1109,27 @@ class BestBuyDetailCrawler:
             return None
 
     def extract_top_mentions_from_reviews_page(self):
-        """Top_Mentions extraction (See All Customer Reviews page에서)
+        """Top_Mentions extraction (See All Customer Reviews page에서) - DrissionPage
         Returns: 콤마로 구분된 모든 mentions (예: "Picture Quality, Setup, Size")
         """
         try:
-            # XPath 패턴 - 제공된 HTML 구조 기반
-            # /html/body/div[5]/div[8]/div[2]/aside/ul/li/a
-            xpaths = [
+            # Selector 패턴 - 제공된 HTML 구조 기반
+            selectors = [
                 # 제공된 XPath 기반 - ul 내 모든 li의 a 태그
-                '/html/body/div[5]/div[8]/div[2]/aside/ul/li/a',
+                'xpath:/html/body/div[5]/div[8]/div[2]/aside/ul/li/a',
                 # class 기반 패턴 - list-unstyled ul 내 a 태그
-                '//ul[@class="list-unstyled"]/li/a[contains(@class, "v-text-tech-black")]',
+                'xpath://ul[@class="list-unstyled"]/li/a[contains(@class, "v-text-tech-black")]',
                 # 더 넓은 패턴
-                '//ul[@class="list-unstyled"]/li/a',
+                'xpath://ul[@class="list-unstyled"]/li/a',
                 # 기존 패턴 (fallback)
-                '//div[contains(@class, "customer-review-pros-stats")]//span[@class="text-nowrap"]',
-                '//div[contains(., "Highly rated by customers for")]//span[@class="text-nowrap"]'
+                'xpath://div[contains(@class, "customer-review-pros-stats")]//span[@class="text-nowrap"]',
+                'xpath://div[contains(., "Highly rated by customers for")]//span[@class="text-nowrap"]'
             ]
 
             mentions = []
-            for xpath in xpaths:
+            for selector in selectors:
                 try:
-                    elements = self.driver.find_elements(By.XPATH, xpath)
+                    elements = self.page.eles(selector)
                     if elements:
                         for elem in elements:
                             text = elem.text.strip()
@@ -1158,55 +1156,49 @@ class BestBuyDetailCrawler:
             return None
 
     def click_see_all_reviews(self):
-        """See All Customer Reviews button click"""
+        """See All Customer Reviews button click (DrissionPage)"""
         try:
             print("  [INFO] See All Customer Reviews button searching...")
 
             # page를 천천히 스크롤하면서 button이 나타날 때까지 wait
             print("  [INFO] page starting scroll...")
-            scroll_height = self.driver.execute_script("return document.body.scrollHeight")
+            scroll_height = self.page.run_js("return document.body.scrollHeight")
             current_position = 0
             step = 400  # 400px씩 스크롤 (더 천천히)
 
-            xpaths = [
-                '//button[contains(., "See All Customer Reviews")]',
-                '//button[@class="relative border-xs border-solid rounded-lg justify-center items-center self-start flex flex-col cursor-pointer px-300 py-100 border-comp-outline-primary-emphasis bg-comp-surface-primary-emphasis mr-200 Op9coqeII1kYHR9Q"]',
-                '//button[contains(@class, "Op9coqeII1kYHR9Q")]'
+            selectors = [
+                'xpath://button[contains(., "See All Customer Reviews")]',
+                'xpath://button[contains(@class, "Op9coqeII1kYHR9Q")]',
+                'css:button.Op9coqeII1kYHR9Q'
             ]
 
             # 스크롤하면서 button 찾기
             while current_position < scroll_height:
                 # 각 스크롤 위치에서 button 찾기 attempt
-                for xpath in xpaths:
+                for selector in selectors:
                     try:
-                        button = self.driver.find_element(By.XPATH, xpath)
-                        print("  [OK] See All Customer Reviews button found")
-                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", button)
-                        time.sleep(2)
+                        button = self.page.ele(selector, timeout=1)
+                        if button:
+                            print("  [OK] See All Customer Reviews button found")
+                            button.scroll.to_see()
+                            time.sleep(2)
 
-                        # JavaScript로 click attempt
-                        try:
-                            self.driver.execute_script("arguments[0].click();", button)
-                            print("  [OK] See All Customer Reviews click successful")
-                            time.sleep(5)  # review page 로딩 wait
-                            return True
-                        except Exception as click_err:
-                            print(f"  [WARNING] click failed (JS): {click_err}, trying regular click")
-                            # trying regular click
-                            button.click()
-                            print("  [OK] See All Customer Reviews click successful (regular)")
-                            time.sleep(5)
-                            return True
+                            # click attempt
+                            try:
+                                button.click()
+                                print("  [OK] See All Customer Reviews click successful")
+                                time.sleep(5)  # review page 로딩 wait
+                                return True
+                            except Exception as click_err:
+                                print(f"  [WARNING] click failed: {click_err}")
+                                continue
 
                     except Exception as e:
-                        # button을 찾지 못한 경우만 continue
-                        if "no such element" not in str(e).lower():
-                            print(f"  [DEBUG] button processing failed: {e}")
                         continue
 
                 # button을 못 찾으면 계속 스크롤
                 current_position += step
-                self.driver.execute_script(f"window.scrollTo(0, {current_position});")
+                self.page.run_js(f"window.scrollTo(0, {current_position})")
                 time.sleep(1)  # 스크롤 후 wait 시간
 
             print("  [WARNING] See All Customer Reviews button not found.")
@@ -1217,16 +1209,16 @@ class BestBuyDetailCrawler:
             return False
 
     def extract_reviews(self):
-        """review 20items collected (page네이션 포함)"""
+        """review 20items collected (page네이션 포함) - DrissionPage"""
         try:
             time.sleep(3)  # page 로딩 wait
             reviews = []
             collected = 0
-            page = 1
+            page_num = 1
 
             while collected < 20:
                 # page 소스 가져오기
-                page_source = self.driver.page_source
+                page_source = self.page.html
                 tree = html.fromstring(page_source)
 
                 # review extraction
@@ -1247,13 +1239,17 @@ class BestBuyDetailCrawler:
 
                 # next page button 찾기
                 try:
-                    next_button = self.driver.find_element(By.XPATH, '//li[contains(@class, "page next")]//a')
-                    print(f"  [INFO] Navigating to next page... (Page {page + 1})")
-                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
-                    time.sleep(2)
-                    next_button.click()
-                    time.sleep(4)
-                    page += 1
+                    next_button = self.page.ele('xpath://li[contains(@class, "page next")]//a', timeout=3)
+                    if next_button:
+                        print(f"  [INFO] Navigating to next page... (Page {page_num + 1})")
+                        next_button.scroll.to_see()
+                        time.sleep(2)
+                        next_button.click()
+                        time.sleep(4)
+                        page_num += 1
+                    else:
+                        print("  [INFO] next page button not found. collected closed.")
+                        break
                 except:
                     print("  [INFO] next page button not found. collected closed.")
                     break
@@ -1266,23 +1262,24 @@ class BestBuyDetailCrawler:
             return None
 
     def extract_recommendation_intent_from_reviews_page(self):
-        """Recommendation_Intent extraction (See All Customer Reviews page에서)"""
+        """Recommendation_Intent extraction (See All Customer Reviews page에서) - DrissionPage"""
         try:
-            # XPath 패턴
-            xpaths = [
+            # Selector 패턴
+            selectors = [
                 # 제공된 HTML 기준
-                '//div[contains(@class, "recommendation-card-no-donut")]//span[@class="recommendation-percent v-fw-medium"]',
+                'xpath://div[contains(@class, "recommendation-card-no-donut")]//span[@class="recommendation-percent v-fw-medium"]',
                 # 더 넓은 패턴
-                '//span[contains(@class, "recommendation-percent")]'
+                'xpath://span[contains(@class, "recommendation-percent")]'
             ]
 
             percent = None
-            for xpath in xpaths:
+            for selector in selectors:
                 try:
-                    elem = self.driver.find_element(By.XPATH, xpath)
-                    percent = elem.text.strip()
-                    if percent:
-                        break
+                    elem = self.page.ele(selector, timeout=3)
+                    if elem:
+                        percent = elem.text.strip()
+                        if percent:
+                            break
                 except Exception:
                     continue
 
@@ -1297,7 +1294,7 @@ class BestBuyDetailCrawler:
             return None
 
     def extract_compare_similar_products(self, current_url):
-        """Compare similar products section data extraction (first page 로딩 items선)"""
+        """Compare similar products section data extraction (first page 로딩 items선) - DrissionPage"""
         max_retries = 2
 
         for retry in range(max_retries):
@@ -1308,12 +1305,12 @@ class BestBuyDetailCrawler:
                     print("  [INFO] Compare similar products section searching...")
 
                 # page 상단으로 이동 후 30%까지 스크롤
-                self.driver.execute_script("window.scrollTo(0, 0);")
+                self.page.run_js("window.scrollTo(0, 0)")
                 time.sleep(1)
 
-                total_height = self.driver.execute_script("return document.body.scrollHeight")
+                total_height = self.page.run_js("return document.body.scrollHeight")
                 scroll_to = int(total_height * 0.3)
-                self.driver.execute_script(f"window.scrollTo(0, {scroll_to});")
+                self.page.run_js(f"window.scrollTo(0, {scroll_to})")
 
                 # first page 여부 확인
                 is_first_page = (self.order == 1)
@@ -1324,24 +1321,26 @@ class BestBuyDetailCrawler:
                 if is_first_page:
                     print(f"  [INFO] first page detected - applying long wait time (max {timeout}sec)")
 
-                # WebDriverWait로 product-title element가 load될 때까지 명시적 wait
+                # DrissionPage로 product-title element가 load될 때까지 명시적 wait
                 try:
-                    wait = WebDriverWait(self.driver, timeout)
-                    wait.until(EC.presence_of_element_located(
-                        (By.XPATH, '//div[@class="product-title font-weight-normal pb-100 body-copy-lg min-h-600"]')
-                    ))
-                    print(f"  [OK] Compare similar products element load complete")
-
-                    # element가 load된 후 안정화를 위한 추가 wait
-                    additional_wait = 5 if is_first_page else 3
-                    time.sleep(additional_wait)
+                    product_title_elem = self.page.ele(
+                        'xpath://div[@class="product-title font-weight-normal pb-100 body-copy-lg min-h-600"]',
+                        timeout=timeout
+                    )
+                    if product_title_elem:
+                        print(f"  [OK] Compare similar products element load complete")
+                        # element가 load된 후 안정화를 위한 추가 wait
+                        additional_wait = 5 if is_first_page else 3
+                        time.sleep(additional_wait)
+                    else:
+                        raise Exception("product-title element not found")
 
                 except Exception as wait_error:
                     print(f"  [WARNING] element wait time exceeded: {wait_error}")
                     if retry < max_retries - 1:
                         # next retry를 위해 page refresh
                         print("  [INFO] page refresh and retry...")
-                        self.driver.refresh()
+                        self.page.refresh()
                         time.sleep(10)
                         continue
                     else:
@@ -1349,7 +1348,7 @@ class BestBuyDetailCrawler:
                         return None
 
                 # page 소스 가져오기
-                page_source = self.driver.page_source
+                page_source = self.page.html
                 tree = html.fromstring(page_source)
 
                 # 4items 제품 data save
@@ -1464,7 +1463,7 @@ class BestBuyDetailCrawler:
             return None
 
     def scrape_detail_page(self, url_data):
-        """detail page crawling (items선된 로딩 + dialog 처리)"""
+        """detail page crawling (items선된 로딩 + dialog 처리) - DrissionPage"""
         try:
             self.order += 1
             page_type = url_data['page_type']
@@ -1474,19 +1473,20 @@ class BestBuyDetailCrawler:
             print(f"[{self.order}] [{page_type.upper()}] Accessing: {product_url[:80]}...")
             print(f"[INFO] Page type: {page_type} | Main rank: {url_data.get('main_rank', 'N/A')} | BSR rank: {url_data.get('bsr_rank', 'N/A')}")
 
-            # page 접속
+            # page 접속 (DrissionPage)
             print(f"  [INFO] Loading page...")
-            self.driver.get(product_url)
+            self.page.get(product_url)
 
-            # ADDED: 핵심 element load wait (최대 20sec)
+            # 핵심 element load wait (최대 20sec) - DrissionPage
             try:
-                wait = WebDriverWait(self.driver, 20)
-                wait.until(EC.presence_of_element_located(
-                    (By.XPATH, '//h1[contains(@class, "h4") or contains(@class, "heading")]')  # 제품명
-                ))
-                print(f"  [OK] page load complete")
-            except TimeoutException:
-                print(f"  [ERROR] page loading timeout")
+                h1_elem = self.page.ele('xpath://h1[contains(@class, "h4") or contains(@class, "heading")]', timeout=20)
+                if h1_elem:
+                    print(f"  [OK] page load complete")
+                else:
+                    print(f"  [ERROR] page loading timeout - h1 element not found")
+                    return False
+            except Exception as e:
+                print(f"  [ERROR] page loading timeout: {e}")
                 return False
 
             # page 소스 가져오기 (retry logic for failed extraction)
@@ -1495,7 +1495,7 @@ class BestBuyDetailCrawler:
             tree = None
 
             for attempt in range(max_retries + 1):
-                page_source = self.driver.page_source
+                page_source = self.page.html
                 tree = html.fromstring(page_source)
 
                 # 1. Retailer_SKU_Name extraction
@@ -1521,17 +1521,18 @@ class BestBuyDetailCrawler:
             print(f"  [✓] Model Year: {model_year}")
 
             # 2-1. Price 정보 extraction (메인 page에서 직접 collected)
-            # 가격 컨테이너 로딩 대기 (최대 10초)
+            # 가격 컨테이너 로딩 대기 (최대 10초) - DrissionPage
             try:
-                price_wait = WebDriverWait(self.driver, 10)
-                price_wait.until(EC.presence_of_element_located(
-                    (By.XPATH, '//div[contains(@class, "order-2")]//div[@data-testid="price-block-customer-price"] | //div[contains(@class, "order-2")]//span[contains(text(), "See price in cart")] | //div[contains(text(), "no longer available in new condition")]')
-                ))
-                print(f"  [OK] price container load complete")
+                price_elem = self.page.ele(
+                    'xpath://div[contains(@class, "order-2")]//div[@data-testid="price-block-customer-price"] | //div[contains(@class, "order-2")]//span[contains(text(), "See price in cart")] | //div[contains(text(), "no longer available in new condition")]',
+                    timeout=10
+                )
+                if price_elem:
+                    print(f"  [OK] price container load complete")
                 # 가격 컨테이너 로딩 후 tree 다시 가져오기
-                page_source = self.driver.page_source
+                page_source = self.page.html
                 tree = html.fromstring(page_source)
-            except TimeoutException:
+            except Exception:
                 print(f"  [WARNING] price container loading timeout - attempting extraction anyway")
 
             final_sku_price = self.extract_final_sku_price(tree)
@@ -1565,8 +1566,8 @@ class BestBuyDetailCrawler:
 
             if success:
                 time.sleep(3)
-                # dialog 소스 가져오기
-                dialog_source = self.driver.page_source
+                # dialog 소스 가져오기 (DrissionPage)
+                dialog_source = self.page.html
                 dialog_tree = html.fromstring(dialog_source)
 
                 # Extract Estimated_Annual_Electricity_Use (숫자만)
@@ -1833,7 +1834,7 @@ class BestBuyDetailCrawler:
         """메인 execution"""
         try:
             print("="*80)
-            print(f"Best Buy TV Detail Page Crawler (Modified v1) (Batch ID: {self.batch_id})")
+            print(f"Best Buy TV Detail Page Crawler (DrissionPage) (Batch ID: {self.batch_id})")
             print("="*80)
 
             # DB connection
@@ -1846,8 +1847,8 @@ class BestBuyDetailCrawler:
                 print("[ERROR] No URLs found")
                 return
 
-            # 드라이버 설정
-            if not self.setup_driver():
+            # 브라우저 설정 (DrissionPage)
+            if not self.setup_browser():
                 return
 
             # 각 URL crawling
@@ -1929,9 +1930,9 @@ class BestBuyDetailCrawler:
             traceback.print_exc()
 
         finally:
-            if self.driver:
-                self.driver.quit()
-                print("\n[INFO] Driver closed")
+            if self.page:
+                self.page.quit()
+                print("\n[INFO] Browser closed")
             if self.db_conn:
                 self.db_conn.close()
                 print("[INFO] DB connection closed")

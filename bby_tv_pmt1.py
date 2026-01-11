@@ -28,10 +28,7 @@ import os
 import psycopg2
 from datetime import datetime
 import pytz
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from DrissionPage import ChromiumPage, ChromiumOptions
 from lxml import html, etree
 from data_validator import DataValidator
 
@@ -40,7 +37,7 @@ from config import DB_CONFIG
 
 class BestBuyPromotionCrawler:
     def __init__(self):
-        self.driver = None
+        self.page = None
         self.db_conn = None
         self.korea_tz = pytz.timezone('Asia/Seoul')
         self.batch_id = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
@@ -61,32 +58,54 @@ class BestBuyPromotionCrawler:
             print(f"[ERROR] Database connection failed: {e}")
             return False
 
-    def setup_driver(self):
-        """Chrome driver setup"""
+    def setup_browser(self):
+        """Setup DrissionPage ChromiumPage - 최소 설정"""
         try:
-            print("[INFO] Setting up Chrome driver...")
-            self.driver = uc.Chrome()
-            self.driver.maximize_window()
-            print("[OK] Driver setup complete")
+            print("[INFO] Setting up DrissionPage browser...")
+            self.page = ChromiumPage()
+            print("[OK] DrissionPage browser setup complete")
             return True
         except Exception as e:
-            print(f"[ERROR] Driver setup failed: {e}")
+            print(f"[ERROR] Browser setup failed: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def navigate_to_page(self):
-        """Navigate to promotion page"""
+        """Navigate to promotion page with slow scroll for lazy loading"""
         try:
             print(f"[INFO] Accessing Best Buy TV Promotion page...")
-            self.driver.get(self.url)
-            time.sleep(random.uniform(3, 5))
+            self.page.get(self.url)
+            time.sleep(3)
 
-            # Wait for page load
-            wait = WebDriverWait(self.driver, 20)
+            # Slow scroll to trigger lazy loading
+            print("[INFO] Starting slow scroll for lazy loading...")
+            scroll_step = 300
+            current_position = 0
+            last_height = self.page.run_js("return document.body.scrollHeight")
+
+            while True:
+                current_position += scroll_step
+                self.page.run_js(f"window.scrollTo(0, {current_position})")
+                time.sleep(0.8)
+
+                new_height = self.page.run_js("return document.body.scrollHeight")
+                if current_position >= new_height:
+                    break
+                if current_position > 10000:  # Safety limit
+                    break
+
+            # Scroll back to top
+            self.page.run_js("window.scrollTo(0, 0)")
+            time.sleep(2)
+
             print("[OK] Page loaded successfully")
             return True
 
         except Exception as e:
             print(f"[ERROR] Page access failed: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def extract_promotion_type_text(self, element):
@@ -277,8 +296,8 @@ class BestBuyPromotionCrawler:
         try:
             print("\n[INFO] Starting product extraction...")
 
-            # 페이지 소스 가져오기
-            page_source = self.driver.page_source
+            # 페이지 소스 가져오기 (DrissionPage)
+            page_source = self.page.html
             tree = html.fromstring(page_source)
 
             # Find all promotion sections
@@ -473,15 +492,15 @@ class BestBuyPromotionCrawler:
         """메인 실행"""
         try:
             print("="*80)
-            print(f"Best Buy TV Promotion Crawler (Modified) (Batch ID: {self.batch_id})")
+            print(f"Best Buy TV Promotion Crawler (DrissionPage) (Batch ID: {self.batch_id})")
             print("="*80)
 
             # DB 연결
             if not self.connect_db():
                 return
 
-            # 드라이버 설정
-            if not self.setup_driver():
+            # 브라우저 설정 (DrissionPage)
+            if not self.setup_browser():
                 return
 
             # 페이지 접속
@@ -524,9 +543,9 @@ class BestBuyPromotionCrawler:
             traceback.print_exc()
 
         finally:
-            if self.driver:
-                self.driver.quit()
-                print("\n[INFO] Driver closed")
+            if self.page:
+                self.page.quit()
+                print("\n[INFO] Browser closed")
             if self.db_conn:
                 self.db_conn.close()
                 print("[INFO] DB connection closed")

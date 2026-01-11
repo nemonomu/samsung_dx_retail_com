@@ -1489,6 +1489,27 @@ class BestBuyDetailCrawler:
                 print(f"  [ERROR] page loading timeout: {e}")
                 return False
 
+            # Slow scroll for lazy loading
+            print(f"  [INFO] Starting slow scroll for lazy loading...")
+            scroll_step = 300
+            current_position = 0
+
+            while True:
+                current_position += scroll_step
+                self.page.run_js(f"window.scrollTo(0, {current_position})")
+                time.sleep(0.8)
+
+                page_height = self.page.run_js("return document.body.scrollHeight")
+                if current_position >= page_height:
+                    break
+                if current_position > 15000:  # Safety limit for detail page
+                    break
+
+            # Scroll back to top
+            self.page.run_js("window.scrollTo(0, 0)")
+            time.sleep(2)
+            print(f"  [OK] Slow scroll complete")
+
             # page 소스 가져오기 (retry logic for failed extraction)
             max_retries = 2
             retailer_sku_name = None

@@ -832,22 +832,9 @@ class BestBuyDetailCrawler:
             return None
 
     def extract_star_rating(self, tree):
-        """Star Rating extraction (평점 점수) - Not yet reviewed 먼저 확인"""
+        """Star Rating extraction (평점 점수) - 실제 평점 먼저 찾고, 없으면 Not yet reviewed"""
         try:
-            # Priority 1: Check for "Not yet reviewed" first
-            not_reviewed_xpaths = [
-                '//span[contains(text(), "Not yet reviewed")]',
-                '//span[@class="c-reviews order-2"][contains(text(), "Not yet reviewed")]',
-                '//span[contains(@class, "c-reviews")][contains(text(), "Not yet reviewed")]'
-            ]
-            for xpath in not_reviewed_xpaths:
-                elem = tree.xpath(xpath)
-                if elem:
-                    text = elem[0].text_content().strip()
-                    if "Not yet reviewed" in text:
-                        return "Not yet reviewed"
-
-            # Priority 2: visually-hidden p tag
+            # Priority 1: visually-hidden p tag (가장 정확)
             # <p class="visually-hidden">Rating 4.8 out of 5 stars with 286 reviews</p>
             hidden_xpaths = [
                 '//p[@class="visually-hidden"][contains(text(), "Rating")]',
@@ -861,7 +848,7 @@ class BestBuyDetailCrawler:
                     if match:
                         return match.group(1)
 
-            # Priority 3: 컨테이너 기반 extraction (fallback)
+            # Priority 2: 컨테이너 기반 extraction (fallback)
             container_xpaths = [
                 '/html/body/div[5]/div[4]/div[1]',
                 '//div[@class="order-2 t3V0AOwowrTfUzPn "]',

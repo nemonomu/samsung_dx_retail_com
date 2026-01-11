@@ -27,13 +27,10 @@ import os
 import psycopg2
 from datetime import datetime
 import pytz
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
+import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 from lxml import html
 from data_validator import DataValidator
 
@@ -71,49 +68,25 @@ class BestBuyTVCrawler:
             return False
 
     def setup_driver(self):
-        """Setup Chrome WebDriver"""
-        chrome_options = Options()
-        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('--start-maximized')
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        chrome_options.add_experimental_option('useAutomationExtension', False)
-        chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--lang=en-US,en;q=0.9')
+        """Setup Chrome WebDriver with undetected-chromedriver"""
+        try:
+            print("[INFO] Setting up Chrome driver...")
 
-        prefs = {
-            "profile.default_content_setting_values.notifications": 2,
-            "credentials_enable_service": False,
-            "profile.password_manager_enabled": False,
-        }
-        chrome_options.add_experimental_option("prefs", prefs)
+            options = uc.ChromeOptions()
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--window-size=1920,1080')
+            options.add_argument('--lang=en-US,en;q=0.9')
 
-        service = Service(ChromeDriverManager().install())
-        self.driver = webdriver.Chrome(service=service, options=chrome_options)
-        self.driver.set_page_load_timeout(60)
-        self.wait = WebDriverWait(self.driver, 20)
+            self.driver = uc.Chrome(options=options)
+            self.driver.set_page_load_timeout(60)
+            self.driver.maximize_window()
+            self.wait = WebDriverWait(self.driver, 20)
 
-        self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-            'source': '''
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-                Object.defineProperty(navigator, 'plugins', {
-                    get: () => [1, 2, 3, 4, 5]
-                });
-                Object.defineProperty(navigator, 'languages', {
-                    get: () => ['en-US', 'en']
-                });
-                window.chrome = {
-                    runtime: {}
-                };
-            '''
-        })
-
-        print("[OK] WebDriver setup complete")
+            print("[OK] WebDriver setup complete (undetected-chromedriver)")
+        except Exception as e:
+            print(f"[ERROR] Driver setup failed: {e}")
+            raise
 
     def load_page_urls(self):
         """Load page URLs from database"""

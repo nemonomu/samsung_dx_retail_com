@@ -879,6 +879,7 @@ class BestBuyDetailCrawler:
                 return None
 
             rating_xpaths = [
+                './/div/div[4]/a/div/span[1]',
                 './/div/div[3]/a/div/span[1]',
                 './/span[@class="font-weight-medium  font-weight-bold order-1"]',
                 './/span[contains(@class, "font-weight-bold") and contains(@class, "order-1")]',

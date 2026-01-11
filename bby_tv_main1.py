@@ -28,7 +28,7 @@ import psycopg2
 from datetime import datetime
 import pytz
 from playwright.sync_api import sync_playwright
-from playwright_stealth import stealth_sync
+from playwright_stealth import Stealth
 from lxml import html
 from data_validator import DataValidator
 
@@ -86,7 +86,7 @@ class BestBuyTVCrawler:
                 locale='en-US'
             )
             self.page.set_default_timeout(60000)  # 60 seconds
-            stealth_sync(self.page)
+            Stealth().apply_stealth_sync(self.page)
 
             print("[OK] Playwright browser setup complete (with stealth)")
         except Exception as e:

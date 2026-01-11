@@ -1155,16 +1155,122 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Top mentions extraction failed: {e}")
             return None
 
-    def click_see_all_reviews(self):
-        """See All Customer Reviews button click (DrissionPage)"""
+    def extract_bestbuy_sku_number(self):
+        """BestBuy SKU 번호 추출 (예: 6614066)"""
         try:
-            print("  [INFO] See All Customer Reviews button searching...")
+            # 방법 1: SKU div에서 추출
+            sku_selectors = [
+                'xpath://div[contains(text(), "SKU:")]',
+                'xpath://div[@class="pr-150 inline-block"][contains(text(), "SKU")]',
+            ]
 
-            # page를 천천히 스크롤하면서 button이 나타날 때까지 wait
+            for selector in sku_selectors:
+                try:
+                    elem = self.page.ele(selector, timeout=2)
+                    if elem:
+                        text = elem.text.strip()
+                        # "SKU: 6614066" -> "6614066"
+                        match = re.search(r'SKU[:\s]+(\d+)', text)
+                        if match:
+                            return match.group(1)
+                except:
+                    continue
+
+            # 방법 2: data-testid 속성에서 추출
+            try:
+                elem = self.page.ele('xpath://div[contains(@data-testid, "mbo-entrypoint-")]', timeout=2)
+                if elem:
+                    testid = elem.attr('data-testid')
+                    # "mbo-entrypoint-6614066" -> "6614066"
+                    match = re.search(r'mbo-entrypoint-(\d+)', testid)
+                    if match:
+                        return match.group(1)
+            except:
+                pass
+
+            # 방법 3: 페이지 소스에서 직접 추출
+            page_html = self.page.html
+            match = re.search(r'SKU[:\s]+<!--\s*-->(\d+)', page_html)
+            if match:
+                return match.group(1)
+
+            match = re.search(r'mbo-entrypoint-(\d+)', page_html)
+            if match:
+                return match.group(1)
+
+            return None
+
+        except Exception as e:
+            print(f"  [ERROR] BestBuy SKU number extraction failed: {e}")
+            return None
+
+    def extract_product_slug_from_url(self, url):
+        """URL에서 제품 slug 추출
+        예: https://www.bestbuy.com/product/insignia-40-class.../J2FPJKSFFJ
+        -> insignia-40-class-f40-series-led-full-hd-1080p-smart-fire-tv
+        """
+        try:
+            # /product/ 뒤의 slug 추출
+            match = re.search(r'/product/([^/]+)/', url)
+            if match:
+                return match.group(1)
+            return None
+        except:
+            return None
+
+    def navigate_to_reviews_page(self, product_url):
+        """리뷰 페이지로 직접 이동 (버튼 클릭 대신)"""
+        try:
+            print("  [INFO] Navigating to reviews page directly...")
+
+            # SKU 번호 추출
+            sku_number = self.extract_bestbuy_sku_number()
+            if not sku_number:
+                print("  [WARNING] Could not extract BestBuy SKU number")
+                return False
+            print(f"  [OK] BestBuy SKU number: {sku_number}")
+
+            # 제품 slug 추출
+            product_slug = self.extract_product_slug_from_url(product_url)
+            if not product_slug:
+                print("  [WARNING] Could not extract product slug from URL")
+                return False
+            print(f"  [OK] Product slug: {product_slug}")
+
+            # 리뷰 URL 생성
+            reviews_url = f"https://www.bestbuy.com/site/reviews/{product_slug}/{sku_number}"
+            print(f"  [INFO] Reviews URL: {reviews_url}")
+
+            # 리뷰 페이지 접근
+            self.page.get(reviews_url)
+            time.sleep(3)
+
+            # 페이지 로드 확인
+            page_html = self.page.html
+            if "reviews" in page_html.lower() or "rating" in page_html.lower():
+                print("  [OK] Reviews page loaded successfully")
+                return True
+            else:
+                print("  [WARNING] Reviews page may not have loaded correctly")
+                return True  # 일단 진행
+
+        except Exception as e:
+            print(f"  [ERROR] Navigate to reviews page failed: {e}")
+            return False
+
+    def click_see_all_reviews(self, product_url=None):
+        """See All Customer Reviews - 직접 URL 접근 방식 (DrissionPage)"""
+        try:
+            # 먼저 직접 URL 접근 시도
+            if product_url and self.navigate_to_reviews_page(product_url):
+                return True
+
+            # 실패 시 기존 버튼 클릭 방식 시도
+            print("  [INFO] Fallback: See All Customer Reviews button searching...")
             print("  [INFO] page starting scroll...")
             scroll_height = self.page.run_js("return document.body.scrollHeight")
             current_position = 0
-            step = 400  # 400px씩 스크롤 (더 천천히)
+            step = 400
 
             selectors = [
                 'xpath://button[contains(., "See All Customer Reviews")]',
@@ -1172,9 +1278,7 @@ class BestBuyDetailCrawler:
                 'css:button.Op9coqeII1kYHR9Q'
             ]
 
-            # 스크롤하면서 button 찾기
             while current_position < scroll_height:
-                # 각 스크롤 위치에서 button 찾기 attempt
                 for selector in selectors:
                     try:
                         button = self.page.ele(selector, timeout=1)
@@ -1182,24 +1286,20 @@ class BestBuyDetailCrawler:
                             print("  [OK] See All Customer Reviews button found")
                             button.scroll.to_see()
                             time.sleep(2)
-
-                            # click attempt
                             try:
                                 button.click()
                                 print("  [OK] See All Customer Reviews click successful")
-                                time.sleep(5)  # review page 로딩 wait
+                                time.sleep(5)
                                 return True
                             except Exception as click_err:
                                 print(f"  [WARNING] click failed: {click_err}")
                                 continue
-
                     except Exception as e:
                         continue
 
-                # button을 못 찾으면 계속 스크롤
                 current_position += step
                 self.page.run_js(f"window.scrollTo(0, {current_position})")
-                time.sleep(1)  # 스크롤 후 wait 시간
+                time.sleep(1)
 
             print("  [WARNING] See All Customer Reviews button not found.")
             return False
@@ -1609,14 +1709,7 @@ class BestBuyDetailCrawler:
             detailed_reviews = None
             recommendation_intent = None
 
-            # DEBUG: 페이지 소스에 버튼 텍스트 존재 여부 확인
-            page_html = self.page.html
-            if "See All Customer Reviews" in page_html:
-                print("  [DEBUG] 'See All Customer Reviews' text EXISTS in page source")
-            else:
-                print("  [DEBUG] 'See All Customer Reviews' text NOT in page source - possible bot detection")
-
-            if self.click_see_all_reviews():
+            if self.click_see_all_reviews(product_url):
                 # 9-1. Star ratings collected (review page에서 - 별점별 detail items count)
                 star_ratings = self.extract_star_ratings_from_reviews_page()
                 print(f"  [✓] Star_Ratings: {star_ratings}")

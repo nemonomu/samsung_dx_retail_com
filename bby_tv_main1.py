@@ -204,9 +204,9 @@ class BestBuyTVCrawler:
             tree = html.fromstring(page_source)
 
             # Find all product containers
-            # Base container: li with class "product-list-item product-list-item-gridView"
+            # Base container: li with class "product-list-item grid-view"
             # Filter to only include containers with actual product links
-            all_containers = tree.xpath('//li[contains(@class, "product-list-item") and contains(@class, "product-list-item-gridView")]')
+            all_containers = tree.xpath('//li[contains(@class, "product-list-item") and contains(@class, "grid-view")]')
 
             # Filter containers that have product links (more reliable)
             containers = [c for c in all_containers if c.xpath('.//a[@class="product-list-item-link"]')]

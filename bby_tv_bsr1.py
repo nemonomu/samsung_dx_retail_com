@@ -155,7 +155,7 @@ class BestBuyBSRCrawler:
                 while current_position < scroll_height:
                     current_position += screen_height
                     self.page.evaluate(f"window.scrollTo(0, {current_position})")
-                    time.sleep(2)
+                    time.sleep(4)  # 2초 → 4초 증가
 
                     # Check if new content loaded
                     new_scroll_height = self.page.evaluate("document.body.scrollHeight")
@@ -165,7 +165,7 @@ class BestBuyBSRCrawler:
 
                 # Scroll to absolute bottom
                 self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                time.sleep(3)
+                time.sleep(5)  # 3초 → 5초 증가
                 print(f"[DEBUG] Completed scroll round {scroll_round + 1}, final height: {scroll_height}")
 
             # Scroll back to top slowly
@@ -175,7 +175,7 @@ class BestBuyBSRCrawler:
 
             # Wait for all content to settle
             print("[INFO] Waiting for content to fully render...")
-            time.sleep(8)
+            time.sleep(15)  # 8초 → 15초 증가
 
             # Get page source and parse with lxml
             page_source = self.page.content()

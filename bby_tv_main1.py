@@ -146,7 +146,7 @@ class BestBuyTVCrawler:
             while True:
                 current_position += scroll_step
                 self.page.run_js(f"window.scrollTo(0, {current_position})")
-                time.sleep(0.5)  # 0.5초 대기 (이미지 로드 시간)
+                time.sleep(1.0)  # 0.5초 → 1초로 증가 (이미지 로드 시간)
 
                 # 현재 높이 확인
                 new_height = self.page.run_js("return document.body.scrollHeight")
@@ -178,6 +178,20 @@ class BestBuyTVCrawler:
             # 맨 위로
             self.page.scroll.to_top()
             time.sleep(2)
+
+            # 제품 링크 개수 확인 - 부족하면 추가 대기
+            product_links = self.page.eles('css:a.product-list-item-link')
+            if len(product_links) < 20:
+                print(f"[WARNING] Only {len(product_links)} products found, waiting more...")
+                for _ in range(3):  # 최대 3번 추가 시도
+                    self.page.scroll.to_bottom()
+                    time.sleep(3)
+                    self.page.scroll.to_top()
+                    time.sleep(2)
+                    product_links = self.page.eles('css:a.product-list-item-link')
+                    print(f"[DEBUG] Products after extra scroll: {len(product_links)}")
+                    if len(product_links) >= 20:
+                        break
 
             # 이미지 로드 상태 확인
             print("[INFO] Checking image load status...")

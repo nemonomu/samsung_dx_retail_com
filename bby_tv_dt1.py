@@ -1747,7 +1747,10 @@ class BestBuyDetailCrawler:
                 print(f"  [WARNING] Could not extract electricity_use/SKU (dialog failed): {error}")
 
             # 8. See All Customer Reviews click 및 data collected
-            star_ratings = None
+            # count_of_star_ratings는 count_of_reviews와 동일 값 사용
+            star_ratings = count_of_reviews
+            print(f"  [✓] Count_of_Star_Ratings: {star_ratings} (= count_of_reviews)")
+
             top_mentions = None
             detailed_reviews = None
             recommendation_intent = None
@@ -1761,8 +1764,9 @@ class BestBuyDetailCrawler:
                         print(f"  [✓] Star_Rating (from reviews page): {star_rating}")
 
                 # 9-1. Star ratings collected (review page에서 - 별점별 detail items count)
-                star_ratings = self.extract_star_ratings_from_reviews_page()
-                print(f"  [✓] Count_of_Star_Ratings: {star_ratings}")
+                # NOTE: count_of_star_ratings는 count_of_reviews와 동일하므로 별도 추출 불필요
+                # star_ratings = self.extract_star_ratings_from_reviews_page()
+                # print(f"  [✓] Count_of_Star_Ratings: {star_ratings}")
 
                 # 9-2. Top mentions collected (review page에서)
                 top_mentions = self.extract_top_mentions_from_reviews_page()

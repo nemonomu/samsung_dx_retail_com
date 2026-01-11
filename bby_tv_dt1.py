@@ -870,7 +870,10 @@ class BestBuyDetailCrawler:
                 './/div/div[3]/a/div/span[1]',
                 './/span[@class="font-weight-medium  font-weight-bold order-1"]',
                 './/span[contains(@class, "font-weight-bold") and contains(@class, "order-1")]',
-                './/span[@aria-hidden="true"][contains(@class, "order-1")]'
+                './/span[@aria-hidden="true"][contains(@class, "order-1")]',
+                # 제품 페이지 추가 위치
+                './/span[contains(@class, "X1oPXJyKAwAqyfx_")]',
+                './/span[contains(@class, "heading-2") and contains(@class, "font-weight-medium")]',
             ]
 
             for xpath in rating_xpaths:
@@ -1031,6 +1034,37 @@ class BestBuyDetailCrawler:
         except Exception as e:
             print(f"  [ERROR] Similar products extraction failed: {e}")
             return [None]*4, [None]*4, [None]*4
+
+    def extract_star_rating_from_reviews_page(self):
+        """리뷰 페이지에서 star_rating (평점) 추출 - DrissionPage
+        예: <div class="overall-rating">4.5</div>
+        """
+        try:
+            selectors = [
+                'xpath://div[@class="overall-rating"]',
+                'xpath://*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[1]/div/div[1]',
+                'xpath://div[contains(@class, "overall-rating")]',
+            ]
+
+            for selector in selectors:
+                try:
+                    elem = self.page.ele(selector, timeout=3)
+                    if elem:
+                        text = elem.text.strip()
+                        # "4.5" 형태의 숫자만 추출
+                        match = re.search(r'(\d+\.?\d*)', text)
+                        if match:
+                            rating = match.group(1)
+                            print(f"  [OK] Star_Rating from reviews page: {rating}")
+                            return rating
+                except:
+                    continue
+
+            return None
+
+        except Exception as e:
+            print(f"  [ERROR] Star_Rating extraction from reviews page failed: {e}")
+            return None
 
     def extract_star_ratings_from_reviews_page(self):
         """Count_of_Star_Ratings extraction (See All Customer Reviews page에서) - DrissionPage
@@ -1247,14 +1281,10 @@ class BestBuyDetailCrawler:
             return False
 
     def click_see_all_reviews(self, product_url=None):
-        """See All Customer Reviews - 직접 URL 접근 방식 (DrissionPage)"""
+        """See All Customer Reviews - 버튼 클릭 먼저, 실패 시 직접 URL 접근 (DrissionPage)"""
         try:
-            # 먼저 직접 URL 접근 시도
-            if product_url and self.navigate_to_reviews_page(product_url):
-                return True
-
-            # 실패 시 기존 버튼 클릭 방식 시도
-            print("  [INFO] Fallback: See All Customer Reviews button searching...")
+            # 1. 먼저 버튼 클릭 시도
+            print("  [INFO] See All Customer Reviews button searching...")
             print("  [INFO] page starting scroll...")
             scroll_height = self.page.run_js("return document.body.scrollHeight")
             current_position = 0
@@ -1289,7 +1319,12 @@ class BestBuyDetailCrawler:
                 self.page.run_js(f"window.scrollTo(0, {current_position})")
                 time.sleep(1)
 
-            print("  [WARNING] See All Customer Reviews button not found.")
+            # 2. 버튼 못 찾으면 직접 URL 접근 시도 (fallback)
+            print("  [WARNING] See All Customer Reviews button not found. Trying direct URL...")
+            if product_url and self.navigate_to_reviews_page(product_url):
+                return True
+
+            print("  [ERROR] Both button click and direct URL navigation failed.")
             return False
 
         except Exception as e:
@@ -1698,6 +1733,13 @@ class BestBuyDetailCrawler:
             recommendation_intent = None
 
             if self.click_see_all_reviews(product_url):
+                # 9-0. 상세페이지에서 star_rating 못 찾았으면 리뷰 페이지에서 재추출
+                if not star_rating or star_rating == "Not yet reviewed":
+                    star_rating_from_reviews = self.extract_star_rating_from_reviews_page()
+                    if star_rating_from_reviews:
+                        star_rating = star_rating_from_reviews
+                        print(f"  [✓] Star_Rating (from reviews page): {star_rating}")
+
                 # 9-1. Star ratings collected (review page에서 - 별점별 detail items count)
                 star_ratings = self.extract_star_ratings_from_reviews_page()
                 print(f"  [✓] Count_of_Star_Ratings: {star_ratings}")

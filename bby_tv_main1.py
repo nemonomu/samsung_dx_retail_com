@@ -27,10 +27,7 @@ import os
 import psycopg2
 from datetime import datetime
 import pytz
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from DrissionPage import ChromiumPage, ChromiumOptions
 from lxml import html
 from data_validator import DataValidator
 
@@ -39,8 +36,7 @@ from config import DB_CONFIG
 
 class BestBuyTVCrawler:
     def __init__(self):
-        self.driver = None
-        self.wait = None
+        self.page = None
         self.db_conn = None
         self.total_collected = 0
         self.error_messages = []
@@ -67,36 +63,34 @@ class BestBuyTVCrawler:
             print(f"[ERROR] Database connection failed: {e}")
             return False
 
-    def setup_driver(self):
-        """Setup Chrome WebDriver with undetected-chromedriver"""
+    def setup_browser(self):
+        """Setup DrissionPage ChromiumPage"""
         try:
-            print("[INFO] Setting up Chrome driver...")
+            print("[INFO] Setting up DrissionPage browser...")
 
-            options = uc.ChromeOptions()
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--no-sandbox')
-            options.add_argument('--window-size=1920,1080')
-            options.add_argument('--lang=en-US,en;q=0.9')
+            co = ChromiumOptions()
+            co.set_argument('--disable-dev-shm-usage')
+            co.set_argument('--no-sandbox')
+            co.set_argument('--window-size=1920,1080')
+            co.set_argument('--lang=en-US,en')
+            co.set_argument('--disable-blink-features=AutomationControlled')
+            co.set_timeouts(page_load=60)
 
-            self.driver = uc.Chrome(options=options)
-            self.driver.set_page_load_timeout(60)
-            self.driver.maximize_window()
-            self.wait = WebDriverWait(self.driver, 20)
+            self.page = ChromiumPage(co)
 
-            print("[OK] WebDriver setup complete (undetected-chromedriver)")
+            print("[OK] DrissionPage browser setup complete")
         except Exception as e:
-            print(f"[ERROR] Driver setup failed: {e}")
+            print(f"[ERROR] Browser setup failed: {e}")
             raise
 
-    def close_driver(self):
-        """Close the current driver"""
-        if self.driver:
+    def close_browser(self):
+        """Close the current browser"""
+        if self.page:
             try:
-                self.driver.quit()
+                self.page.quit()
             except:
                 pass
-            self.driver = None
-            self.wait = None
+            self.page = None
 
     def load_page_urls(self):
         """Load page URLs from database"""
@@ -135,14 +129,14 @@ class BestBuyTVCrawler:
         """Scrape a single Best Buy page"""
         try:
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
-            self.driver.get(url)
+            self.page.get(url)
 
             print("[INFO] Waiting for page to load...")
             time.sleep(random.uniform(5, 8))
 
             # Wait for product list to load
             try:
-                self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "product-list-item")))
+                self.page.wait.ele_displayed('.product-list-item', timeout=20)
                 print("[OK] Product list loaded")
             except Exception as e:
                 print(f"[WARNING] Product list not found: {e}")
@@ -153,29 +147,29 @@ class BestBuyTVCrawler:
             # First pass - scroll down to bottom multiple times
             for scroll_round in range(3):
                 print(f"[DEBUG] Scroll round {scroll_round + 1}/3")
-                scroll_height = self.driver.execute_script("return document.body.scrollHeight")
-                screen_height = self.driver.execute_script("return window.innerHeight")
+                scroll_height = self.page.run_js("return document.body.scrollHeight")
+                screen_height = self.page.run_js("return window.innerHeight")
 
                 current_position = 0
                 while current_position < scroll_height:
                     current_position += screen_height
-                    self.driver.execute_script(f"window.scrollTo(0, {current_position})")
+                    self.page.run_js(f"window.scrollTo(0, {current_position})")
                     time.sleep(2)
 
                     # Check if new content loaded
-                    new_scroll_height = self.driver.execute_script("return document.body.scrollHeight")
+                    new_scroll_height = self.page.run_js("return document.body.scrollHeight")
                     if new_scroll_height > scroll_height:
                         scroll_height = new_scroll_height
                         print(f"[DEBUG] Page height increased to {scroll_height}")
 
                 # Scroll to absolute bottom
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight)")
+                self.page.scroll.to_bottom()
                 time.sleep(3)
                 print(f"[DEBUG] Completed scroll round {scroll_round + 1}, final height: {scroll_height}")
 
             # Scroll back to top slowly
             print("[INFO] Scrolling back to top...")
-            self.driver.execute_script("window.scrollTo(0, 0)")
+            self.page.scroll.to_top()
             time.sleep(2)
 
             # Wait until enough products are loaded (target: 20+ product links)
@@ -186,7 +180,7 @@ class BestBuyTVCrawler:
             elapsed = 0
 
             while elapsed < max_wait:
-                product_links = self.driver.find_elements(By.CSS_SELECTOR, 'a.product-list-item-link')
+                product_links = self.page.eles('css:a.product-list-item-link')
                 product_count = len(product_links)
                 print(f"[DEBUG] Product links loaded: {product_count}")
 
@@ -199,15 +193,15 @@ class BestBuyTVCrawler:
 
                 # 추가 스크롤 시도 (lazy loading 트리거)
                 if elapsed % 10 == 0:
-                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight)")
+                    self.page.scroll.to_bottom()
                     time.sleep(1)
-                    self.driver.execute_script("window.scrollTo(0, 0)")
+                    self.page.scroll.to_top()
 
             if elapsed >= max_wait:
                 print(f"[WARNING] Timeout reached, proceeding with {product_count} products")
 
             # Get page source and parse with lxml
-            page_source = self.driver.page_source
+            page_source = self.page.html
             tree = html.fromstring(page_source)
 
             # Find all product containers
@@ -416,16 +410,16 @@ class BestBuyTVCrawler:
                 print("[ERROR] No page URLs found")
                 return
 
-            # Scrape each page with fresh driver (page-by-page restart for bot detection bypass)
+            # Scrape each page with fresh browser (page-by-page restart for bot detection bypass)
             for page_number, url in page_urls:
                 try:
-                    # Setup fresh driver for each page
-                    print(f"\n[INFO] Setting up fresh driver for page {page_number}...")
-                    self.setup_driver()
+                    # Setup fresh browser for each page
+                    print(f"\n[INFO] Setting up fresh browser for page {page_number}...")
+                    self.setup_browser()
 
                     # Visit homepage first for stealth
                     print("[INFO] Visiting homepage first...")
-                    self.driver.get("https://www.bestbuy.com")
+                    self.page.get("https://www.bestbuy.com")
                     time.sleep(random.uniform(3, 5))
 
                     # Scrape the target page
@@ -433,20 +427,20 @@ class BestBuyTVCrawler:
                         # scrape_page returns False if max_products reached or error occurred
                         if self.total_collected >= self.max_products:
                             print(f"[INFO] Stopping page collection - reached maximum {self.max_products} products")
-                            self.close_driver()
+                            self.close_browser()
                             break
                         else:
                             print(f"[WARNING] Failed to scrape page {page_number}, continuing...")
 
-                    # Close driver after each page
-                    self.close_driver()
+                    # Close browser after each page
+                    self.close_browser()
 
                     # Random delay between pages
                     time.sleep(random.uniform(5, 8))
 
                 except Exception as e:
                     print(f"[ERROR] Failed to process page {page_number}: {e}")
-                    self.close_driver()
+                    self.close_browser()
                     continue
 
             print("\n" + "="*80)
@@ -479,7 +473,7 @@ class BestBuyTVCrawler:
             traceback.print_exc()
 
         finally:
-            self.close_driver()
+            self.close_browser()
             if self.db_conn:
                 self.db_conn.close()
 

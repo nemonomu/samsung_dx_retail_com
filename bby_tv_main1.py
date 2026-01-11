@@ -171,11 +171,34 @@ class BestBuyTVCrawler:
             # Scroll back to top slowly
             print("[INFO] Scrolling back to top...")
             self.page.evaluate("window.scrollTo(0, 0)")
-            time.sleep(5)
+            time.sleep(3)
 
-            # Wait for all content to settle
-            print("[INFO] Waiting for content to fully render...")
-            time.sleep(15)  # 8초 → 15초 증가
+            # Wait until enough products are loaded (target: 20+ product links)
+            print("[INFO] Waiting for products to fully render...")
+            target_count = 20
+            max_wait = 60  # 최대 60초 대기
+            wait_interval = 2
+            elapsed = 0
+
+            while elapsed < max_wait:
+                product_count = self.page.locator('a.product-list-item-link').count()
+                print(f"[DEBUG] Product links loaded: {product_count}")
+
+                if product_count >= target_count:
+                    print(f"[OK] {product_count} products loaded, proceeding...")
+                    break
+
+                time.sleep(wait_interval)
+                elapsed += wait_interval
+
+                # 추가 스크롤 시도 (lazy loading 트리거)
+                if elapsed % 10 == 0:
+                    self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    time.sleep(1)
+                    self.page.evaluate("window.scrollTo(0, 0)")
+
+            if elapsed >= max_wait:
+                print(f"[WARNING] Timeout reached, proceeding with {product_count} products")
 
             # Get page source and parse with lxml
             page_source = self.page.content()

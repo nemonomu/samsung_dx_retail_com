@@ -1404,6 +1404,38 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] review collected failed: {e}")
             return None
 
+    def extract_summarized_review_content(self, tree):
+        """Summarized_Review_Content extraction (AI 요약 리뷰) - 상세 페이지에서
+        예: "Customers frequently mention the superb picture quality..."
+        """
+        try:
+            xpaths = [
+                # 제공된 절대 경로
+                '/html/body/div[5]/div[8]/div[2]/div/div[1]/div/p',
+                # 클래스 기반
+                '//p[@class="mt-200 body-copy-lg mb-none"]',
+                # 부분 클래스 매칭
+                '//p[contains(@class, "body-copy-lg") and contains(@class, "mt-200")]',
+                # 컨테이너 기반
+                '//div[contains(@class, "customer-reviews")]//p[contains(@class, "body-copy-lg")]'
+            ]
+
+            for xpath in xpaths:
+                try:
+                    elem = tree.xpath(xpath)
+                    if elem:
+                        text = elem[0].text_content().strip()
+                        if text and len(text) > 20:  # 유효한 요약인지 확인
+                            return text
+                except:
+                    continue
+
+            return None
+
+        except Exception as e:
+            print(f"  [ERROR] Summarized_Review_Content extraction failed: {e}")
+            return None
+
     def extract_recommendation_intent_from_reviews_page(self):
         """Recommendation_Intent extraction (See All Customer Reviews page에서) - DrissionPage"""
         try:
@@ -1717,6 +1749,10 @@ class BestBuyDetailCrawler:
             count_of_reviews = self.extract_count_of_reviews_from_detail(tree)
             print(f"  [✓] Count_of_Reviews: {count_of_reviews}")
 
+            # 2-3. Summarized Review Content extraction (AI 요약 리뷰)
+            summarized_review_content = self.extract_summarized_review_content(tree)
+            print(f"  [✓] Summarized_Review_Content: {summarized_review_content[:50] if summarized_review_content else 'None'}...")
+
             # 3. Compare similar products extraction (사용 안함 - 주석처리)
             # mst_products = self.extract_compare_similar_products(product_url)
 
@@ -1804,6 +1840,7 @@ class BestBuyDetailCrawler:
                 star_ratings=star_ratings,
                 top_mentions=top_mentions,
                 detailed_reviews=detailed_reviews,
+                summarized_review_content=summarized_review_content,
                 recommendation_intent=recommendation_intent,
                 product_url=product_url,
                 # 가격 정보는 crawling한 값 사용 (CHANGED)
@@ -1838,7 +1875,7 @@ class BestBuyDetailCrawler:
 
     def save_to_db(self, page_type, order, retailer_sku_name, item,
                    electricity_use, screen_size, count_of_reviews, star_ratings, top_mentions, detailed_reviews,
-                   recommendation_intent, product_url,
+                   summarized_review_content, recommendation_intent, product_url,
                    final_sku_price, savings, original_sku_price, offer,
                    pick_up_availability, shipping_availability, delivery_availability,
                    sku_status, star_rating_source, promotion_type, promotion_position,
@@ -1961,7 +1998,7 @@ class BestBuyDetailCrawler:
                 sku_status,
                 None,  # retailer_membership_discounts (BestBuy doesn't have this)
                 detailed_reviews,
-                None,  # summarized_review_content (BestBuy doesn't have this)
+                summarized_review_content,  # AI 요약 리뷰
                 top_mentions,
                 recommendation_intent,
                 main_rank,

@@ -64,11 +64,20 @@ class BestBuyTVCrawler:
             return False
 
     def setup_browser(self):
-        """Setup DrissionPage ChromiumPage"""
+        """Setup DrissionPage ChromiumPage using actual Chrome profile"""
         try:
-            print("[INFO] Setting up DrissionPage browser...")
+            print("[INFO] Setting up DrissionPage browser with user profile...")
 
             co = ChromiumOptions()
+
+            # 실제 Chrome 사용자 프로필 사용 (수동 Chrome과 동일한 환경)
+            # Windows 기본 Chrome 프로필 경로
+            user_data_dir = os.path.expandvars(r'%LOCALAPPDATA%\Google\Chrome\User Data')
+            if os.path.exists(user_data_dir):
+                co.set_user_data_path(user_data_dir)
+                co.set_argument('--profile-directory=Default')
+                print(f"[INFO] Using Chrome profile: {user_data_dir}")
+
             co.set_argument('--disable-dev-shm-usage')
             co.set_argument('--no-sandbox')
             co.set_argument('--window-size=1920,1080')
@@ -76,9 +85,13 @@ class BestBuyTVCrawler:
             co.set_argument('--disable-blink-features=AutomationControlled')
             co.set_timeouts(page_load=60)
 
+            # 자동화 감지 우회 추가 설정
+            co.set_argument('--disable-infobars')
+            co.set_argument('--disable-extensions')
+
             self.page = ChromiumPage(co)
 
-            print("[OK] DrissionPage browser setup complete")
+            print("[OK] DrissionPage browser setup complete (with user profile)")
         except Exception as e:
             print(f"[ERROR] Browser setup failed: {e}")
             raise
@@ -141,64 +154,62 @@ class BestBuyTVCrawler:
             except Exception as e:
                 print(f"[WARNING] Product list not found: {e}")
 
-            # Aggressive scroll to trigger lazy loading of all products
-            print("[INFO] Performing aggressive scroll to load all products...")
+            # Slow scroll to trigger lazy loading - scroll by small increments
+            print("[INFO] Performing slow scroll to trigger lazy loading...")
 
-            # First pass - scroll down to bottom multiple times
-            for scroll_round in range(3):
-                print(f"[DEBUG] Scroll round {scroll_round + 1}/3")
-                scroll_height = self.page.run_js("return document.body.scrollHeight")
-                screen_height = self.page.run_js("return window.innerHeight")
+            scroll_step = 300  # 300px씩 스크롤 (작은 단위)
+            current_position = 0
+            last_height = self.page.run_js("return document.body.scrollHeight")
 
-                current_position = 0
-                while current_position < scroll_height:
-                    current_position += screen_height
-                    self.page.run_js(f"window.scrollTo(0, {current_position})")
+            while True:
+                current_position += scroll_step
+                self.page.run_js(f"window.scrollTo(0, {current_position})")
+                time.sleep(0.5)  # 0.5초 대기 (이미지 로드 시간)
+
+                # 현재 높이 확인
+                new_height = self.page.run_js("return document.body.scrollHeight")
+
+                # 페이지 끝에 도달했는지 확인
+                if current_position >= new_height:
+                    # 끝에 도달, 추가 대기 후 확인
                     time.sleep(2)
+                    final_height = self.page.run_js("return document.body.scrollHeight")
+                    if final_height == new_height:
+                        print(f"[DEBUG] Reached bottom at {current_position}px")
+                        break
+                    else:
+                        last_height = final_height
 
-                    # Check if new content loaded
-                    new_scroll_height = self.page.run_js("return document.body.scrollHeight")
-                    if new_scroll_height > scroll_height:
-                        scroll_height = new_scroll_height
-                        print(f"[DEBUG] Page height increased to {scroll_height}")
+                # 10번 스크롤마다 로그
+                if (current_position // scroll_step) % 10 == 0:
+                    print(f"[DEBUG] Scrolled to {current_position}px, page height: {new_height}px")
 
-                # Scroll to absolute bottom
-                self.page.scroll.to_bottom()
-                time.sleep(3)
-                print(f"[DEBUG] Completed scroll round {scroll_round + 1}, final height: {scroll_height}")
+            # 다시 천천히 위로 스크롤 (이미지 로드 확인)
+            print("[INFO] Scrolling back up slowly...")
+            while current_position > 0:
+                current_position -= scroll_step * 2  # 올라갈 땐 좀 더 빠르게
+                if current_position < 0:
+                    current_position = 0
+                self.page.run_js(f"window.scrollTo(0, {current_position})")
+                time.sleep(0.3)
 
-            # Scroll back to top slowly
-            print("[INFO] Scrolling back to top...")
+            # 맨 위로
             self.page.scroll.to_top()
             time.sleep(2)
 
-            # Wait until enough products are loaded (target: 20+ product links)
-            print("[INFO] Waiting for products to fully render...")
-            target_count = 20
-            max_wait = 30  # 최대 30초 대기
-            wait_interval = 2
-            elapsed = 0
-
-            while elapsed < max_wait:
-                product_links = self.page.eles('css:a.product-list-item-link')
-                product_count = len(product_links)
-                print(f"[DEBUG] Product links loaded: {product_count}")
-
-                if product_count >= target_count:
-                    print(f"[OK] {product_count} products loaded, proceeding...")
-                    break
-
-                time.sleep(wait_interval)
-                elapsed += wait_interval
-
-                # 추가 스크롤 시도 (lazy loading 트리거)
-                if elapsed % 10 == 0:
-                    self.page.scroll.to_bottom()
-                    time.sleep(1)
-                    self.page.scroll.to_top()
-
-            if elapsed >= max_wait:
-                print(f"[WARNING] Timeout reached, proceeding with {product_count} products")
+            # 이미지 로드 상태 확인
+            print("[INFO] Checking image load status...")
+            loaded_images = self.page.run_js("""
+                const imgs = document.querySelectorAll('img.product-image');
+                let loaded = 0;
+                imgs.forEach(img => {
+                    if (img.complete && img.naturalHeight > 0 && !img.src.includes('coming-soon')) {
+                        loaded++;
+                    }
+                });
+                return loaded + '/' + imgs.length;
+            """)
+            print(f"[DEBUG] Images loaded: {loaded_images}")
 
             # Get page source and parse with lxml
             page_source = self.page.html

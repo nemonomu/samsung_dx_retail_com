@@ -27,10 +27,8 @@ import os
 import psycopg2
 from datetime import datetime
 import pytz
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from playwright.sync_api import sync_playwright
+from playwright_stealth import stealth_sync
 from lxml import html
 from data_validator import DataValidator
 
@@ -39,8 +37,9 @@ from config import DB_CONFIG
 
 class BestBuyTVCrawler:
     def __init__(self):
-        self.driver = None
-        self.wait = None
+        self.playwright = None
+        self.browser = None
+        self.page = None
         self.db_conn = None
         self.total_collected = 0
         self.error_messages = []
@@ -67,25 +66,31 @@ class BestBuyTVCrawler:
             print(f"[ERROR] Database connection failed: {e}")
             return False
 
-    def setup_driver(self):
-        """Setup Chrome WebDriver with undetected-chromedriver"""
+    def setup_browser(self):
+        """Setup Playwright browser with stealth"""
         try:
-            print("[INFO] Setting up Chrome driver...")
+            print("[INFO] Setting up Playwright browser...")
 
-            options = uc.ChromeOptions()
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--no-sandbox')
-            options.add_argument('--window-size=1920,1080')
-            options.add_argument('--lang=en-US,en;q=0.9')
+            self.playwright = sync_playwright().start()
+            self.browser = self.playwright.chromium.launch(
+                headless=False,
+                args=[
+                    '--disable-dev-shm-usage',
+                    '--no-sandbox',
+                    '--window-size=1920,1080',
+                    '--lang=en-US,en'
+                ]
+            )
+            self.page = self.browser.new_page(
+                viewport={'width': 1920, 'height': 1080},
+                locale='en-US'
+            )
+            self.page.set_default_timeout(60000)  # 60 seconds
+            stealth_sync(self.page)
 
-            self.driver = uc.Chrome(options=options)
-            self.driver.set_page_load_timeout(60)
-            self.driver.maximize_window()
-            self.wait = WebDriverWait(self.driver, 20)
-
-            print("[OK] WebDriver setup complete (undetected-chromedriver)")
+            print("[OK] Playwright browser setup complete (with stealth)")
         except Exception as e:
-            print(f"[ERROR] Driver setup failed: {e}")
+            print(f"[ERROR] Browser setup failed: {e}")
             raise
 
     def load_page_urls(self):
@@ -125,14 +130,14 @@ class BestBuyTVCrawler:
         """Scrape a single Best Buy page"""
         try:
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
-            self.driver.get(url)
+            self.page.goto(url, wait_until='domcontentloaded')
 
             print("[INFO] Waiting for page to load...")
             time.sleep(random.uniform(5, 8))
 
             # Wait for product list to load
             try:
-                self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "product-list-item")))
+                self.page.wait_for_selector('.product-list-item', timeout=20000)
                 print("[OK] Product list loaded")
             except Exception as e:
                 print(f"[WARNING] Product list not found: {e}")
@@ -143,29 +148,29 @@ class BestBuyTVCrawler:
             # First pass - scroll down to bottom multiple times
             for scroll_round in range(3):
                 print(f"[DEBUG] Scroll round {scroll_round + 1}/3")
-                scroll_height = self.driver.execute_script("return document.body.scrollHeight")
-                screen_height = self.driver.execute_script("return window.innerHeight")
+                scroll_height = self.page.evaluate("document.body.scrollHeight")
+                screen_height = self.page.evaluate("window.innerHeight")
 
                 current_position = 0
                 while current_position < scroll_height:
                     current_position += screen_height
-                    self.driver.execute_script(f"window.scrollTo(0, {current_position});")
+                    self.page.evaluate(f"window.scrollTo(0, {current_position})")
                     time.sleep(2)
 
                     # Check if new content loaded
-                    new_scroll_height = self.driver.execute_script("return document.body.scrollHeight")
+                    new_scroll_height = self.page.evaluate("document.body.scrollHeight")
                     if new_scroll_height > scroll_height:
                         scroll_height = new_scroll_height
                         print(f"[DEBUG] Page height increased to {scroll_height}")
 
                 # Scroll to absolute bottom
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 time.sleep(3)
                 print(f"[DEBUG] Completed scroll round {scroll_round + 1}, final height: {scroll_height}")
 
             # Scroll back to top slowly
             print("[INFO] Scrolling back to top...")
-            self.driver.execute_script("window.scrollTo(0, 0);")
+            self.page.evaluate("window.scrollTo(0, 0)")
             time.sleep(5)
 
             # Wait for all content to settle
@@ -173,7 +178,7 @@ class BestBuyTVCrawler:
             time.sleep(8)
 
             # Get page source and parse with lxml
-            page_source = self.driver.page_source
+            page_source = self.page.content()
             tree = html.fromstring(page_source)
 
             # Find all product containers
@@ -382,16 +387,14 @@ class BestBuyTVCrawler:
                 print("[ERROR] No page URLs found")
                 return
 
-            # Setup WebDriver
-            self.setup_driver()
+            # Setup Playwright browser
+            self.setup_browser()
 
-            # 홈페이지 먼저 방문 후 쿠키 삭제 (봇 감지 우회)
+            # 홈페이지 먼저 방문 (stealth 초기화)
             print("[INFO] Visiting homepage first...")
-            self.driver.get("https://www.bestbuy.com")
+            self.page.goto("https://www.bestbuy.com", wait_until='domcontentloaded')
             time.sleep(random.uniform(3, 5))
-            self.driver.delete_all_cookies()
-            print("[OK] Cookies cleared, starting crawl...")
-            time.sleep(1)
+            print("[OK] Homepage visited, starting crawl...")
 
             # Scrape each page
             for page_number, url in page_urls:
@@ -436,8 +439,10 @@ class BestBuyTVCrawler:
             traceback.print_exc()
 
         finally:
-            if self.driver:
-                self.driver.quit()
+            if self.browser:
+                self.browser.close()
+            if self.playwright:
+                self.playwright.stop()
             if self.db_conn:
                 self.db_conn.close()
 

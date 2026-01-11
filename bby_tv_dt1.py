@@ -1712,7 +1712,7 @@ class BestBuyDetailCrawler:
             if self.click_see_all_reviews(product_url):
                 # 9-1. Star ratings collected (review page에서 - 별점별 detail items count)
                 star_ratings = self.extract_star_ratings_from_reviews_page()
-                print(f"  [✓] Star_Ratings: {star_ratings}")
+                print(f"  [✓] Count_of_Star_Ratings: {star_ratings}")
 
                 # 9-2. Top mentions collected (review page에서)
                 top_mentions = self.extract_top_mentions_from_reviews_page()
@@ -1890,7 +1890,7 @@ class BestBuyDetailCrawler:
                 retailer_sku_name,
                 product_url,
                 star_rating_source,
-                count_of_reviews_int,  # count_of_star_ratings = count_of_reviews
+                star_ratings,  # count_of_star_ratings (리뷰페이지에서 추출한 별점 총 개수)
                 screen_size,
                 None,  # sku_popularity (BestBuy doesn't have this)
                 final_sku_price,

@@ -78,16 +78,10 @@ class BestBuyTVCrawler:
                 co.set_argument('--profile-directory=Default')
                 print(f"[INFO] Using Chrome profile: {user_data_dir}")
 
-            co.set_argument('--disable-dev-shm-usage')
-            co.set_argument('--no-sandbox')
             co.set_argument('--window-size=1920,1080')
             co.set_argument('--lang=en-US,en')
             co.set_argument('--disable-blink-features=AutomationControlled')
             co.set_timeouts(page_load=60)
-
-            # 자동화 감지 우회 추가 설정
-            co.set_argument('--disable-infobars')
-            co.set_argument('--disable-extensions')
 
             self.page = ChromiumPage(co)
 
@@ -421,37 +415,32 @@ class BestBuyTVCrawler:
                 print("[ERROR] No page URLs found")
                 return
 
-            # Scrape each page with fresh browser (page-by-page restart for bot detection bypass)
+            # Setup browser once (프로필 충돌 방지)
+            print("[INFO] Setting up browser...")
+            self.setup_browser()
+
+            # Visit homepage first for stealth
+            print("[INFO] Visiting homepage first...")
+            self.page.get("https://www.bestbuy.com")
+            time.sleep(random.uniform(3, 5))
+
+            # Scrape each page with same browser session
             for page_number, url in page_urls:
                 try:
-                    # Setup fresh browser for each page
-                    print(f"\n[INFO] Setting up fresh browser for page {page_number}...")
-                    self.setup_browser()
-
-                    # Visit homepage first for stealth
-                    print("[INFO] Visiting homepage first...")
-                    self.page.get("https://www.bestbuy.com")
-                    time.sleep(random.uniform(3, 5))
-
                     # Scrape the target page
                     if not self.scrape_page(url, page_number):
                         # scrape_page returns False if max_products reached or error occurred
                         if self.total_collected >= self.max_products:
                             print(f"[INFO] Stopping page collection - reached maximum {self.max_products} products")
-                            self.close_browser()
                             break
                         else:
                             print(f"[WARNING] Failed to scrape page {page_number}, continuing...")
 
-                    # Close browser after each page
-                    self.close_browser()
-
                     # Random delay between pages
-                    time.sleep(random.uniform(5, 8))
+                    time.sleep(random.uniform(3, 5))
 
                 except Exception as e:
                     print(f"[ERROR] Failed to process page {page_number}: {e}")
-                    self.close_browser()
                     continue
 
             print("\n" + "="*80)

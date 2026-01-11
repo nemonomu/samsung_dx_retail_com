@@ -691,6 +691,99 @@ def monitor_and_alert(retailer_code, target_count, results_df, error_message=Non
         return False
 
 
+def send_review_url_error_alert(product_url, expected_sku, actual_sku):
+    """
+    Send alert when review page SKU doesn't match product page SKU.
+
+    Args:
+        product_url: Original product page URL
+        expected_sku: SKU extracted from product page
+        actual_sku: SKU found in review page URL
+
+    Returns:
+        bool: Email send success status
+    """
+    try:
+        korea_tz = pytz.timezone('Asia/Seoul')
+        now = datetime.now(korea_tz)
+
+        subject = "[DX]bby_tv_review url error"
+
+        html_content = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: 'Malgun Gothic', Arial, sans-serif; }}
+                .error {{ color: #dc3545; font-weight: bold; }}
+                table {{ border-collapse: collapse; width: 100%; margin: 10px 0; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                th {{ background-color: #dc3545; color: white; }}
+                .header {{ background-color: #333; color: white; padding: 15px; }}
+                .section {{ margin: 20px 0; }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h2>BestBuy TV Review URL Error</h2>
+                <p>Time: {now.strftime('%Y-%m-%d %H:%M:%S')} (KST)</p>
+            </div>
+
+            <div class="section">
+                <h3 class="error">SKU Mismatch Detected</h3>
+                <p>The review page SKU does not match the product page SKU. This may result in collecting reviews from a different product.</p>
+                <table>
+                    <tr>
+                        <th>Item</th>
+                        <th>Value</th>
+                    </tr>
+                    <tr>
+                        <td>Product URL</td>
+                        <td><a href="{product_url}">{product_url}</a></td>
+                    </tr>
+                    <tr>
+                        <td>Expected SKU (from product page)</td>
+                        <td>{expected_sku}</td>
+                    </tr>
+                    <tr>
+                        <td>Actual SKU (from review URL)</td>
+                        <td>{actual_sku}</td>
+                    </tr>
+                </table>
+            </div>
+
+            <div class="section">
+                <p style="color: #666; font-size: 12px;">
+                    This email was sent automatically. Please check the product page and review page URLs.
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = EMAIL_CONFIG['sender_email']
+        msg['To'] = EMAIL_CONFIG['receiver_email']
+
+        msg.attach(MIMEText(html_content, 'html'))
+
+        with smtplib.SMTP(EMAIL_CONFIG['smtp_server'], EMAIL_CONFIG['smtp_port']) as server:
+            server.starttls()
+            server.login(EMAIL_CONFIG['sender_email'], EMAIL_CONFIG['sender_password'])
+            server.sendmail(
+                EMAIL_CONFIG['sender_email'],
+                EMAIL_CONFIG['receiver_email'],
+                msg.as_string()
+            )
+
+        logger.info(f"Review URL error alert sent: {subject}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to send review URL error alert: {e}")
+        return False
+
+
 def send_crawl_alert(retailer, results, failed_stages, elapsed_time, error_message=None):
     """
     Send crawling completion/failure email alert for integrated crawlers.

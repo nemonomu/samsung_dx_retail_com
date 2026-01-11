@@ -46,6 +46,7 @@ import pytz
 from DrissionPage import ChromiumPage, ChromiumOptions
 from lxml import html
 from data_validator import DataValidator
+from alert_monitor import send_review_url_error_alert
 
 # Import database configuration
 from config import DB_CONFIG
@@ -1241,16 +1242,16 @@ class BestBuyDetailCrawler:
             return None
 
     def navigate_to_reviews_page(self, product_url):
-        """리뷰 페이지로 직접 이동 (버튼 클릭 대신)"""
+        """리뷰 페이지로 직접 이동 (버튼 클릭 대신) - SKU 검증 포함"""
         try:
             print("  [INFO] Navigating to reviews page directly...")
 
-            # SKU 번호 추출
-            sku_number = self.extract_bestbuy_sku_number()
-            if not sku_number:
+            # SKU 번호 추출 (상세 페이지에서)
+            expected_sku = self.extract_bestbuy_sku_number()
+            if not expected_sku:
                 print("  [WARNING] Could not extract BestBuy SKU number")
                 return False
-            print(f"  [OK] BestBuy SKU number: {sku_number}")
+            print(f"  [OK] BestBuy SKU number (expected): {expected_sku}")
 
             # 제품 slug 추출
             product_slug = self.extract_product_slug_from_url(product_url)
@@ -1260,12 +1261,27 @@ class BestBuyDetailCrawler:
             print(f"  [OK] Product slug: {product_slug}")
 
             # 리뷰 URL 생성
-            reviews_url = f"https://www.bestbuy.com/site/reviews/{product_slug}/{sku_number}"
+            reviews_url = f"https://www.bestbuy.com/site/reviews/{product_slug}/{expected_sku}"
             print(f"  [INFO] Reviews URL: {reviews_url}")
 
             # 리뷰 페이지 접근
             self.page.get(reviews_url)
             time.sleep(3)
+
+            # SKU 검증: 현재 URL에서 SKU 추출하여 비교
+            current_url = self.page.url
+            actual_sku_match = re.search(r'/reviews/[^/]+/(\d+)', current_url)
+            if actual_sku_match:
+                actual_sku = actual_sku_match.group(1)
+                if actual_sku != expected_sku:
+                    print(f"  [ERROR] SKU mismatch! Expected: {expected_sku}, Actual: {actual_sku}")
+                    print(f"  [ERROR] Sending alert email...")
+                    send_review_url_error_alert(product_url, expected_sku, actual_sku)
+                    return False
+                else:
+                    print(f"  [OK] SKU verified: {actual_sku}")
+            else:
+                print(f"  [WARNING] Could not extract SKU from review page URL for verification")
 
             # 페이지 로드 확인
             page_html = self.page.html
@@ -1332,7 +1348,9 @@ class BestBuyDetailCrawler:
             return False
 
     def extract_reviews(self):
-        """review 20items collected (page네이션 포함) - DrissionPage"""
+        """review 20items collected (page네이션 포함) - DrissionPage
+        저장 형식: "review 1- 내용 | review 2- 내용 | ... | review 20- 내용"
+        """
         try:
             time.sleep(3)  # page 로딩 wait
             reviews = []
@@ -1352,8 +1370,10 @@ class BestBuyDetailCrawler:
                         break
                     review_text = elem.text_content().strip()
                     if review_text:
-                        reviews.append(review_text)
                         collected += 1
+                        # "review N- 내용" 형식으로 저장
+                        formatted_review = f"review {collected}- {review_text}"
+                        reviews.append(formatted_review)
                         print(f"    [review {collected}/20] {review_text[:50]}...")
 
                 # 20items collected complete하면 closed
@@ -1377,7 +1397,7 @@ class BestBuyDetailCrawler:
                     print("  [INFO] next page button not found. collected closed.")
                     break
 
-            # review를 구분자로 connection
+            # review를 구분자로 connection (예: "review 1- 내용 | review 2- 내용 | ...")
             return " | ".join(reviews) if reviews else None
 
         except Exception as e:

@@ -124,11 +124,6 @@ class BestBuyBSRCrawler:
     def scrape_page(self, url, page_number):
         """Scrape a single Best Buy page"""
         try:
-            # 첫 페이지가 아니면 쿠키 삭제 (봇 감지 우회)
-            if page_number > 1:
-                self.driver.delete_all_cookies()
-                time.sleep(1)
-
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
             self.driver.get(url)
 
@@ -389,6 +384,14 @@ class BestBuyBSRCrawler:
 
             # Setup WebDriver
             self.setup_driver()
+
+            # 홈페이지 먼저 방문 후 쿠키 삭제 (봇 감지 우회)
+            print("[INFO] Visiting homepage first...")
+            self.driver.get("https://www.bestbuy.com")
+            time.sleep(random.uniform(3, 5))
+            self.driver.delete_all_cookies()
+            print("[OK] Cookies cleared, starting crawl...")
+            time.sleep(1)
 
             # Scrape each page
             for page_number, url in page_urls:

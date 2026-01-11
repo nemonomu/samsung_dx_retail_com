@@ -1609,6 +1609,13 @@ class BestBuyDetailCrawler:
             detailed_reviews = None
             recommendation_intent = None
 
+            # DEBUG: 페이지 소스에 버튼 텍스트 존재 여부 확인
+            page_html = self.page.html
+            if "See All Customer Reviews" in page_html:
+                print("  [DEBUG] 'See All Customer Reviews' text EXISTS in page source")
+            else:
+                print("  [DEBUG] 'See All Customer Reviews' text NOT in page source - possible bot detection")
+
             if self.click_see_all_reviews():
                 # 9-1. Star ratings collected (review page에서 - 별점별 detail items count)
                 star_ratings = self.extract_star_ratings_from_reviews_page()

@@ -63,15 +63,28 @@ class BestBuyBSRCrawler:
             print(f"[ERROR] Database connection failed: {e}")
             return False
 
+    def kill_chrome_processes(self):
+        """Kill any existing Chrome processes to free the profile"""
+        try:
+            import subprocess
+            subprocess.run(['taskkill', '/F', '/IM', 'chrome.exe'],
+                         capture_output=True, timeout=10)
+            time.sleep(2)  # 프로세스 종료 대기
+            print("[INFO] Killed existing Chrome processes")
+        except Exception as e:
+            print(f"[DEBUG] No Chrome processes to kill or error: {e}")
+
     def setup_browser(self):
         """Setup DrissionPage ChromiumPage using actual Chrome profile"""
         try:
+            # 먼저 기존 Chrome 프로세스 종료
+            self.kill_chrome_processes()
+
             print("[INFO] Setting up DrissionPage browser with user profile...")
 
             co = ChromiumOptions()
 
-            # 실제 Chrome 사용자 프로필 사용 (수동 Chrome과 동일한 환경)
-            # Windows 기본 Chrome 프로필 경로
+            # 실제 Chrome 사용자 프로필 사용
             user_data_dir = os.path.expandvars(r'%LOCALAPPDATA%\Google\Chrome\User Data')
             if os.path.exists(user_data_dir):
                 co.set_user_data_path(user_data_dir)
@@ -80,12 +93,12 @@ class BestBuyBSRCrawler:
 
             co.set_argument('--window-size=1920,1080')
             co.set_argument('--lang=en-US,en')
-            co.set_argument('--disable-blink-features=AutomationControlled')
             co.set_timeouts(page_load=60)
+            co.auto_port()  # 자동 포트 할당
 
             self.page = ChromiumPage(co)
 
-            print("[OK] DrissionPage browser setup complete (with user profile)")
+            print("[OK] DrissionPage browser setup complete")
         except Exception as e:
             print(f"[ERROR] Browser setup failed: {e}")
             raise

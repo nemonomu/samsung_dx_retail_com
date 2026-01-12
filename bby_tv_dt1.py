@@ -683,11 +683,13 @@ class BestBuyDetailCrawler:
                     if price and '$' in price:
                         return price  # "$89.99" 형식 반환
 
-            # Fallback 1: "See price in cart" 패턴 찾기
+            # Fallback 1: "See price in cart" 또는 "See details in checkout" 패턴 찾기
             see_price_xpaths = [
                 './/div[@data-testid="price-restricted-price-tap-for-price"]//span',
                 './/span[contains(text(), "See price in cart")]',
-                './/div[@data-testid="price-block"]//span[contains(text(), "See price in cart")]'
+                './/span[contains(text(), "See details in checkout")]',
+                './/div[@data-testid="price-block"]//span[contains(text(), "See price in cart")]',
+                './/div[@data-testid="price-block"]//span[contains(text(), "See details in checkout")]'
             ]
 
             for xpath in see_price_xpaths:
@@ -696,6 +698,8 @@ class BestBuyDetailCrawler:
                     text = elem[0].text_content().strip()
                     if "See price in cart" in text:
                         return "See price in cart"
+                    if "See details in checkout" in text:
+                        return "See details in checkout"
 
             # Fallback 2: Check for "This item is no longer available in new condition" (outside container)
             no_longer_available_xpaths = [

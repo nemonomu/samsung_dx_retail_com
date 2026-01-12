@@ -182,6 +182,7 @@ class BestBuyDetailCrawler:
                             'star_rating': None,
                             'main_rank': row[6],
                             'bsr_rank': None,
+                            'trend_rank': None,
                             'promotion_position': None,
                             'promotion_type': None
                         }
@@ -220,6 +221,7 @@ class BestBuyDetailCrawler:
                             'star_rating': None,
                             'main_rank': None,
                             'bsr_rank': row[6],
+                            'trend_rank': None,
                             'promotion_position': None,
                             'promotion_type': None
                         }
@@ -257,6 +259,7 @@ class BestBuyDetailCrawler:
                             'star_rating': None,
                             'main_rank': None,
                             'bsr_rank': None,
+                            'trend_rank': None,
                             'promotion_position': row[3],  # promotion_rank -> promotion_position
                             'promotion_type': row[2]
                         }
@@ -1647,7 +1650,7 @@ class BestBuyDetailCrawler:
 
             print(f"\n{'='*80}")
             print(f"[{self.order}] [{page_type.upper()}] Accessing: {product_url[:80]}...")
-            print(f"[INFO] Page type: {page_type} | Main rank: {url_data.get('main_rank', 'N/A')} | BSR rank: {url_data.get('bsr_rank', 'N/A')}")
+            print(f"[INFO] Page type: {page_type} | Main rank: {url_data.get('main_rank', 'N/A')} | BSR rank: {url_data.get('bsr_rank', 'N/A')} | Trend rank: {url_data.get('trend_rank', 'N/A')}")
 
             # page 접속 (DrissionPage)
             print(f"  [INFO] Loading page...")
@@ -1877,6 +1880,7 @@ class BestBuyDetailCrawler:
                 promotion_position=url_data['promotion_position'],
                 bsr_rank=url_data['bsr_rank'],
                 main_rank=url_data['main_rank'],
+                trend_rank=url_data.get('trend_rank'),
                 model_year=model_year,  # ADDED: model_year parameter
                 sku=sku  # ADDED: sku parameter for tv_item_mst
             )
@@ -1898,7 +1902,7 @@ class BestBuyDetailCrawler:
                    final_sku_price, savings, original_sku_price, offer,
                    pick_up_availability, shipping_availability, delivery_availability,
                    sku_status, star_rating_source, promotion_type, promotion_position,
-                   bsr_rank, main_rank, model_year, sku="no sku"):
+                   bsr_rank, main_rank, trend_rank, model_year, sku="no sku"):
         """DB에 save"""
         try:
             print(f"  [DB] Saving to database...")
@@ -1960,7 +1964,7 @@ class BestBuyDetailCrawler:
                 promotion_position,
                 bsr_rank,
                 main_rank,
-                None  # trend_rank (not collected)
+                trend_rank
             ))
 
             # Also insert into unified tv_retail_com table
@@ -2022,7 +2026,7 @@ class BestBuyDetailCrawler:
                 recommendation_intent,
                 main_rank,
                 bsr_rank,
-                None,  # trend_rank (not collected)
+                trend_rank,
                 None,  # rank_1 (BestBuy doesn't have this)
                 None,  # rank_2 (BestBuy doesn't have this)
                 promotion_position,

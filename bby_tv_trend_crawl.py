@@ -81,9 +81,9 @@ class BestBuyTrendCrawler:
                 self.page.run_js(f"window.scrollTo(0, {current_position})")
                 time.sleep(1)
 
-                # Trending Deals 섹션이 나타났는지 확인
+                # Trending Deals 섹션이 나타났는지 확인 (새 구조: data-testid="story-block-trending_deals_story")
                 try:
-                    trending_section = self.page.ele('xpath://div[contains(@id, "Trending-Deals") or contains(@class, "trending-deals")]', timeout=2)
+                    trending_section = self.page.ele('xpath://div[@data-testid="story-block-trending_deals_story"]', timeout=2)
                     if trending_section:
                         print("[OK] Trending Deals 섹션 발견")
                         trending_section.scroll.to_see()
@@ -164,12 +164,11 @@ class BestBuyTrendCrawler:
 
             products = []
 
-            # 모든 제품 아이템 찾기 (여러 XPath 패턴 시도)
+            # 모든 제품 아이템 찾기 (새 구조: data-testid="story-block-trending_deals_story" 내부 ul/li)
             product_items_xpaths = [
-                '//div[@id="Trending-Deals-TVs"]//ul[@class="c-carousel-list"]/li',
-                '//div[@id="Trending-Deals-TVs"]//li',
-                '//div[contains(@id, "Trending-Deals")]//li[.//a]',
-                '//div[contains(@id, "Trending")]//ul//li[.//a[@href]]'
+                '//div[@data-testid="story-block-trending_deals_story"]//ul//li[@data-carousel-index]',
+                '//div[@data-testid="story-block-trending_deals_story"]//li[.//div[@data-testid="ProductCardTestID"]]',
+                '//div[@data-testid="story-block-trending_deals_story"]//li[.//a]',
             ]
 
             product_items = []
@@ -186,33 +185,47 @@ class BestBuyTrendCrawler:
 
             for idx, item in enumerate(product_items, 1):
                 try:
-                    # 순위 추출
-                    rank_xpath = './/div[@data-testid="trending-deals-number-test-id"]'
-                    rank_elem = item.xpath(rank_xpath)
-                    rank = rank_elem[0].text_content().strip() if rank_elem else str(idx)
+                    # 순위 추출 (새 구조: PriceBlockOffer-CarouselProductRank-TestID)
+                    rank_xpaths = [
+                        './/div[@data-testid="PriceBlockOffer-CarouselProductRank-TestID"]//span',
+                        './/div[contains(@data-testid, "CarouselProductRank")]//span',
+                    ]
+                    rank = None
+                    for rank_xpath in rank_xpaths:
+                        rank_elem = item.xpath(rank_xpath)
+                        if rank_elem:
+                            rank_text = rank_elem[0].text_content().strip()
+                            # "#1" -> "1" 형식으로 변환
+                            rank = rank_text.replace('#', '').strip()
+                            break
+                    if not rank:
+                        rank = str(idx)
 
-                    # 제품명 추출
+                    # 제품명 추출 (새 구조: ProductCard-Title-TestID)
                     name_xpaths = [
-                        './/span[contains(@class, "BxIuyHdYvE_KO21sTHqZ")]',
-                        './/div[@data-testid="product-card-title"]//span',
-                        './/a[@data-testid="product-card-title-link"]//span',
-                        './/a//span[string-length(text()) > 10]'
+                        './/span[@data-testid="ProductCard-Title-TestID"]',
+                        './/span[@data-testid="ProductCard-Title-TestID"]/@aria-label',
                     ]
 
                     product_name = None
                     for name_xpath in name_xpaths:
-                        name_elem = item.xpath(name_xpath)
-                        if name_elem:
-                            product_name = name_elem[0].text_content().strip()
-                            if product_name and len(product_name) > 5:
-                                break
+                        if '@aria-label' in name_xpath:
+                            name_elem = item.xpath(name_xpath)
+                            if name_elem:
+                                product_name = name_elem[0].strip()
+                                if product_name and len(product_name) > 5:
+                                    break
+                        else:
+                            name_elem = item.xpath(name_xpath)
+                            if name_elem:
+                                product_name = name_elem[0].text_content().strip()
+                                if product_name and len(product_name) > 5:
+                                    break
 
-                    # URL 추출
+                    # URL 추출 (새 구조: trending-deals-card-TestID)
                     url_xpaths = [
-                        './/a[@data-testid="trending-deals-card-test-id"]/@href',
-                        './/a[@data-testid="product-card-title-link"]/@href',
-                        './/div[@class="content-wrapper"]//a/@href',
-                        './/a[contains(@href, "/site/")]/@href'
+                        './/a[@data-testid="trending-deals-card-TestID"]/@href',
+                        './/a[contains(@href, "/product/")]/@href',
                     ]
 
                     product_url = None

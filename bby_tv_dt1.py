@@ -1,6 +1,6 @@
 """
 Best Buy TV Detail Page Crawler (Modified v1)
-collected table: bby_tv_main1, bby_tv_bsr1, bby_tv_pmt1 (trend_crawl NOT used)
+collected table: bby_tv_main1, bby_tv_bsr1, bby_tv_pmt1, bby_tv_Trend_crawl
 save table: bby_tv_crawl, tv_retail_com
 
 수정사항:
@@ -111,17 +111,16 @@ class BestBuyDetailCrawler:
             main_batch_result = cursor.fetchone()
             main_batch_id = main_batch_result[0] if main_batch_result else None
 
-            # bby_tv_Trend_crawl 테이블은 사용하지 않음 (trend crawler 없음)
-            # cursor.execute("""
-            #     SELECT batch_id
-            #     FROM bby_tv_Trend_crawl
-            #     WHERE batch_id IS NOT NULL
-            #     ORDER BY batch_id DESC
-            #     LIMIT 1
-            # """)
-            # trend_batch_result = cursor.fetchone()
-            # trend_batch_id = trend_batch_result[0] if trend_batch_result else None
-            trend_batch_id = None  # Trend crawler not used
+            # bby_tv_Trend_crawl에서 최신 batch_id 가져오기
+            cursor.execute("""
+                SELECT batch_id
+                FROM bby_tv_Trend_crawl
+                WHERE batch_id IS NOT NULL
+                ORDER BY batch_id DESC
+                LIMIT 1
+            """)
+            trend_batch_result = cursor.fetchone()
+            trend_batch_id = trend_batch_result[0] if trend_batch_result else None
 
             # bby_tv_promotion_crawl에서 최신 batch_id 가져오기
             cursor.execute("""
@@ -145,7 +144,7 @@ class BestBuyDetailCrawler:
             bsr_batch_result = cursor.fetchone()
             bsr_batch_id = bsr_batch_result[0] if bsr_batch_result else None
 
-            print(f"[INFO] Latest batch_id - Main: {main_batch_id}, BSR: {bsr_batch_id}, Promotion: {promo_batch_id}")
+            print(f"[INFO] Latest batch_id - Main: {main_batch_id}, BSR: {bsr_batch_id}, Promotion: {promo_batch_id}, Trend: {trend_batch_id}")
 
             # collected 순서: main → bsr → promotion → trend (우선순위 순서)
             # 각 table의 rank 순서대로 정렬
@@ -263,42 +262,42 @@ class BestBuyDetailCrawler:
                         }
                 print(f"[OK] Promotion URLs (batch {promo_batch_id}): {len(promo_urls)} items")
 
-            # 4. bby_tv_Trend_crawl에서 해당 batch의 URLs와 data 가져오기 (DISABLED - no trend crawler)
-            # if trend_batch_id:
-            #     cursor.execute("""
-            #         SELECT DISTINCT product_url, rank
-            #         FROM bby_tv_Trend_crawl
-            #         WHERE batch_id = %s
-            #         AND product_url IS NOT NULL
-            #         ORDER BY rank
-            #     """, (trend_batch_id,))
-            #     trend_urls = cursor.fetchall()
-            #     for row in trend_urls:
-            #         url = row[0]
-            #         if url in url_data_map:
-            #             # URL already exists - just add trend_rank
-            #             url_data_map[url]['trend_rank'] = row[1]
-            #         else:
-            #             # New URL from trend
-            #             url_data_map[url] = {
-            #                 'page_type': 'Trend',
-            #                 'product_url': url,
-            #                 'final_sku_price': None,
-            #                 'savings': None,
-            #                 'original_sku_price': None,
-            #                 'offer': None,
-            #                 'pick_up_availability': None,
-            #                 'shipping_availability': None,
-            #                 'delivery_availability': None,
-            #                 'sku_status': None,
-            #                 'star_rating': None,
-            #                 'main_rank': None,
-            #                 'bsr_rank': None,
-            #                 'trend_rank': row[1],
-            #                 'promotion_rank': None,
-            #                 'promotion_type': None
-            #             }
-            #     print(f"[OK] Trend URLs (batch {trend_batch_id}): {len(trend_urls)} items")
+            # 4. bby_tv_Trend_crawl에서 해당 batch의 URLs와 data 가져오기
+            if trend_batch_id:
+                cursor.execute("""
+                    SELECT DISTINCT product_url, rank
+                    FROM bby_tv_Trend_crawl
+                    WHERE batch_id = %s
+                    AND product_url IS NOT NULL
+                    ORDER BY rank
+                """, (trend_batch_id,))
+                trend_urls = cursor.fetchall()
+                for row in trend_urls:
+                    url = row[0]
+                    if url in url_data_map:
+                        # URL already exists - just add trend_rank
+                        url_data_map[url]['trend_rank'] = row[1]
+                    else:
+                        # New URL from trend
+                        url_data_map[url] = {
+                            'page_type': 'Trend',
+                            'product_url': url,
+                            'final_sku_price': None,
+                            'savings': None,
+                            'original_sku_price': None,
+                            'offer': None,
+                            'pick_up_availability': None,
+                            'shipping_availability': None,
+                            'delivery_availability': None,
+                            'sku_status': None,
+                            'star_rating': None,
+                            'main_rank': None,
+                            'bsr_rank': None,
+                            'trend_rank': row[1],
+                            'promotion_position': None,
+                            'promotion_type': None
+                        }
+                print(f"[OK] Trend URLs (batch {trend_batch_id}): {len(trend_urls)} items")
 
             cursor.close()
 
@@ -322,18 +321,17 @@ class BestBuyDetailCrawler:
                 cursor.execute("SELECT COUNT(*) FROM bby_tv_pmt1 WHERE batch_id = %s", (promo_batch_id,))
                 total_loaded += cursor.fetchone()[0]
                 cursor.close()
-            # Trend crawler not used
-            # if trend_batch_id:
-            #     cursor = self.db_conn.cursor()
-            #     cursor.execute("SELECT COUNT(*) FROM bby_tv_Trend_crawl WHERE batch_id = %s", (trend_batch_id,))
-            #     total_loaded += cursor.fetchone()[0]
-            #     cursor.close()
+            if trend_batch_id:
+                cursor = self.db_conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM bby_tv_Trend_crawl WHERE batch_id = %s", (trend_batch_id,))
+                total_loaded += cursor.fetchone()[0]
+                cursor.close()
 
             duplicates_count = total_loaded - len(all_urls)
             if duplicates_count > 0:
                 print(f"[INFO] Found {duplicates_count} duplicate URLs - rank information merged")
 
-            print(f"[OK] Total unique URLs from main/bsr/promo: {len(all_urls)}")
+            print(f"[OK] Total unique URLs from main/bsr/promo/trend: {len(all_urls)}")
 
             # Filter out already processed URLs from current session (based on main batch start time)
             print("[INFO] Checking for already processed URLs (current session)...")

@@ -8,7 +8,7 @@ Best Buy TV Integrated Crawler
 3. bby_tv_pmt1.py: Promotion page crawling → bby_tv_pmt1 table
 4. bby_tv_trend_crawl.py: Trending deals crawling → bby_tv_Trend_crawl table
 5. bby_tv_dt1.py: Detail page crawling → bby_tv_crawl + tv_retail_com tables
-   - Uses URLs from: bby_tv_main1, bby_tv_bsr1, bby_tv_pmt1
+   - Uses URLs from: bby_tv_main1, bby_tv_bsr1, bby_tv_pmt1, bby_tv_Trend_crawl
 
 저장 테이블:
 - bby_tv_main1: Main listing data

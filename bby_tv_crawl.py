@@ -1,18 +1,20 @@
 """
 Best Buy TV Integrated Crawler
-통합 크롤러: main1 → bsr1 → pmt1 → dt1 순차 실행
+통합 크롤러: main1 → bsr1 → pmt1 → trend_crawl → dt1 순차 실행
 
 실행 순서:
 1. bby_tv_main1.py: Main page crawling → bby_tv_main1 table
 2. bby_tv_bsr1.py: Best-selling page crawling → bby_tv_bsr1 table
 3. bby_tv_pmt1.py: Promotion page crawling → bby_tv_pmt1 table
-4. bby_tv_dt1.py: Detail page crawling → bby_tv_crawl + tv_retail_com tables
+4. bby_tv_trend_crawl.py: Trending deals crawling → bby_tv_Trend_crawl table
+5. bby_tv_dt1.py: Detail page crawling → bby_tv_crawl + tv_retail_com tables
    - Uses URLs from: bby_tv_main1, bby_tv_bsr1, bby_tv_pmt1
 
 저장 테이블:
 - bby_tv_main1: Main listing data
 - bby_tv_bsr1: Best-selling listing data
 - bby_tv_pmt1: Promotion listing data
+- bby_tv_Trend_crawl: Trending deals data
 - bby_tv_crawl: Detail page data (copy structure from bby_tv_detail_crawled)
 - tv_retail_com: Unified retail data
 
@@ -34,6 +36,7 @@ class IntegratedCrawler:
             'main1': {'success': None, 'duration': None},
             'bsr1': {'success': None, 'duration': None},
             'pmt1': {'success': None, 'duration': None},
+            'trend': {'success': None, 'duration': None},
             'dt1': {'success': None, 'duration': None}
         }
 
@@ -125,11 +128,24 @@ class IntegratedCrawler:
         self.results['pmt1']['duration'] = duration
 
         if not success:
-            print("\n[WARNING] Promotion crawler failed, but continuing with detail crawler...")
+            print("\n[WARNING] Promotion crawler failed, but continuing with trend crawler...")
 
         time.sleep(5)
 
-        # Step 4: Detail page crawler (uses URLs from above)
+        # Step 4: Trending deals crawler
+        success, duration = self.run_crawler(
+            'bby_tv_trend_crawl.py',
+            'Trending Deals Crawler (bby_tv_trend_crawl.py)'
+        )
+        self.results['trend']['success'] = success
+        self.results['trend']['duration'] = duration
+
+        if not success:
+            print("\n[WARNING] Trend crawler failed, but continuing with detail crawler...")
+
+        time.sleep(5)
+
+        # Step 5: Detail page crawler (uses URLs from above)
         success, duration = self.run_crawler(
             'bby_tv_dt1.py',
             'Detail Page Crawler (bby_tv_dt1.py)'
@@ -154,6 +170,7 @@ class IntegratedCrawler:
         print(f"  Main Crawler (bby_tv_main1):      {'SUCCESS' if self.results['main1']['success'] else 'FAILED':8s} ({self.results['main1']['duration']:.2f}s)")
         print(f"  BSR Crawler (bby_tv_bsr1):        {'SUCCESS' if self.results['bsr1']['success'] else 'FAILED':8s} ({self.results['bsr1']['duration']:.2f}s)")
         print(f"  Promotion Crawler (bby_tv_pmt1):  {'SUCCESS' if self.results['pmt1']['success'] else 'FAILED':8s} ({self.results['pmt1']['duration']:.2f}s)")
+        print(f"  Trend Crawler (bby_tv_trend):     {'SUCCESS' if self.results['trend']['success'] else 'FAILED':8s} ({self.results['trend']['duration']:.2f}s)")
         print(f"  Detail Crawler (bby_tv_dt1):      {'SUCCESS' if self.results['dt1']['success'] else 'FAILED':8s} ({self.results['dt1']['duration']:.2f}s)")
         print("="*80)
 

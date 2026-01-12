@@ -63,6 +63,9 @@ class BestBuyDetailCrawler:
         self.total_collected = 0
         self.max_skus = 300  # Maximum SKUs to collect (final limit)
 
+        # NULL detailed_review_content 로그 저장용
+        self.null_review_logs = []
+
         # Data validator sec기화
         session_start_time = os.environ.get('SESSION_START_TIME', datetime.now().strftime('%Y%m%d%H%M'))
         self.validator = DataValidator(session_start_time)
@@ -1816,6 +1819,24 @@ class BestBuyDetailCrawler:
                 detailed_reviews = self.extract_reviews()
                 print(f"  [✓] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
 
+            # 9-4-1. detailed_reviews NULL 로그 기록 (count_of_reviews > 0인데 NULL인 경우)
+            try:
+                cor_int = int(str(count_of_reviews).replace(',', '')) if count_of_reviews else 0
+            except:
+                cor_int = 0
+
+            if cor_int > 0 and not detailed_reviews:
+                log_entry = {
+                    'timestamp': datetime.now(self.korea_tz).strftime('%Y-%m-%d %H:%M:%S'),
+                    'product_url': product_url,
+                    'retailer_sku_name': retailer_sku_name[:80] if retailer_sku_name else 'N/A',
+                    'count_of_reviews': count_of_reviews,
+                    'star_rating': star_rating,
+                    'reason': 'reviews_page_access_failed' if not top_mentions else 'extract_reviews_failed'
+                }
+                self.null_review_logs.append(log_entry)
+                print(f"  [WARNING] detailed_reviews is NULL but count_of_reviews={count_of_reviews}")
+
             # 9-5. data 검증 (문제 감지 및 로깅)
             print(f"\n  [VALIDATION] Checking data quality...")
             self.validator.validate_item(item, product_url, 'bby_tv_dt1')
@@ -2082,6 +2103,29 @@ class BestBuyDetailCrawler:
             print("\n" + "="*80)
             print(f"crawling complete! successful: {success_count}/{len(urls)}items")
             print("="*80)
+
+            # NULL detailed_review_content 로그 파일 저장
+            if self.null_review_logs:
+                log_date = datetime.now(self.korea_tz).strftime('%y%m%d')
+                log_filename = f"null_detailed_review_content_{log_date}.txt"
+                log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), log_filename)
+
+                with open(log_path, 'w', encoding='utf-8') as f:
+                    f.write(f"NULL Detailed Review Content Log - {datetime.now(self.korea_tz).strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"Total: {len(self.null_review_logs)} products\n")
+                    f.write("="*100 + "\n\n")
+
+                    for i, log in enumerate(self.null_review_logs, 1):
+                        f.write(f"[{i}] {log['timestamp']}\n")
+                        f.write(f"    URL: {log['product_url']}\n")
+                        f.write(f"    Product: {log['retailer_sku_name']}\n")
+                        f.write(f"    Count of Reviews: {log['count_of_reviews']}\n")
+                        f.write(f"    Star Rating: {log['star_rating']}\n")
+                        f.write(f"    Reason: {log['reason']}\n")
+                        f.write("-"*100 + "\n")
+
+                print(f"\n[INFO] NULL detailed_review_content log saved: {log_path}")
+                print(f"       Total products with NULL reviews: {len(self.null_review_logs)}")
 
             # data 검증 요약 출력
             summary = self.validator.get_summary()

@@ -1,18 +1,16 @@
 """
-Best Buy Trending Deals - TVs Crawler
-https://www.bestbuy.com/ → Trending deals → TVs
+Best Buy Trending Deals - TVs & Projectors Crawler (DrissionPage)
+https://www.bestbuy.com/ → Trending deals → TVs & Projectors
 수집 항목: rank, product_name, product_url
 저장 테이블: bby_tv_Trend_crawl
 """
 import time
 import random
+import os
 import psycopg2
 from datetime import datetime
 import pytz
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from DrissionPage import ChromiumPage
 from lxml import html
 
 # Import database configuration
@@ -20,7 +18,7 @@ from config import DB_CONFIG
 
 class BestBuyTrendCrawler:
     def __init__(self):
-        self.driver = None
+        self.page = None
         self.db_conn = None
         self.korea_tz = pytz.timezone('Asia/Seoul')
         self.batch_id = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
@@ -36,32 +34,33 @@ class BestBuyTrendCrawler:
             print(f"[ERROR] Database connection failed: {e}")
             return False
 
-    def setup_driver(self):
-        """Chrome 드라이버 설정"""
+    def setup_browser(self):
+        """DrissionPage 브라우저 설정"""
         try:
-            print("[INFO] Chrome 드라이버 설정 중...")
-            self.driver = uc.Chrome()
-            self.driver.maximize_window()
-            print("[OK] 드라이버 설정 완료")
+            print("[INFO] Setting up DrissionPage browser...")
+            self.page = ChromiumPage()
+            print("[OK] DrissionPage browser setup complete")
             return True
         except Exception as e:
-            print(f"[ERROR] 드라이버 설정 실패: {e}")
+            print(f"[ERROR] Browser setup failed: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def click_tvs_category(self):
-        """Trending deals에서 TVs 카테고리 클릭"""
+        """Trending deals에서 TVs & Projectors 카테고리 클릭"""
         try:
             # 홈페이지 접속
             print(f"[INFO] Best Buy 홈페이지 접속...")
-            self.driver.get("https://www.bestbuy.com/")
-            time.sleep(random.uniform(5, 8))  # 대기 시간 증가
+            self.page.get("https://www.bestbuy.com/")
+            time.sleep(random.uniform(5, 8))
 
             print("[INFO] 페이지 로딩 대기 중...")
             time.sleep(3)
 
             # 페이지 소스 저장 (디버깅용)
             try:
-                page_source = self.driver.page_source
+                page_source = self.page.html
                 with open('bby_homepage_debug.html', 'w', encoding='utf-8') as f:
                     f.write(page_source)
                 print("[DEBUG] 홈페이지 소스 저장: bby_homepage_debug.html")
@@ -71,72 +70,80 @@ class BestBuyTrendCrawler:
             # Trending Deals 섹션으로 스크롤
             print("[INFO] Trending Deals 섹션 찾는 중...")
 
-            # 먼저 페이지를 아래로 천천히 스크롤하여 Trending Deals 섹션 로드
-            scroll_height = self.driver.execute_script("return document.body.scrollHeight")
+            # 페이지를 아래로 천천히 스크롤하여 Trending Deals 섹션 로드
+            scroll_height = self.page.run_js("return document.body.scrollHeight")
             current_position = 0
             step = 500
 
+            trending_found = False
             while current_position < scroll_height:
                 current_position += step
-                self.driver.execute_script(f"window.scrollTo(0, {current_position});")
+                self.page.run_js(f"window.scrollTo(0, {current_position})")
                 time.sleep(1)
 
                 # Trending Deals 섹션이 나타났는지 확인
                 try:
-                    trending_section = self.driver.find_element(By.XPATH, "//div[contains(@id, 'Trending-Deals') or contains(@class, 'trending-deals')]")
-                    print("[OK] Trending Deals 섹션 발견")
-                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", trending_section)
-                    time.sleep(2)
-                    break
+                    trending_section = self.page.ele('xpath://div[contains(@id, "Trending-Deals") or contains(@class, "trending-deals")]', timeout=2)
+                    if trending_section:
+                        print("[OK] Trending Deals 섹션 발견")
+                        trending_section.scroll.to_see()
+                        time.sleep(2)
+                        trending_found = True
+                        break
                 except:
                     pass
 
-            # 페이지 로드 대기
-            wait = WebDriverWait(self.driver, 30)  # 대기 시간 증가
+            if not trending_found:
+                print("[WARNING] Trending Deals 섹션을 찾지 못했습니다. 계속 진행...")
 
-            # TVs 버튼 찾기 및 클릭
-            tvs_button_xpaths = [
-                "//button[@data-testid='Trending-Deals-TVs']",
-                "//button[contains(text(), 'TVs')]",
-                "//button[@aria-controls='Trending-Deals-TVs']",
-                "//div[@id='Trending-Deals']//button[contains(., 'TVs')]"
+            # TVs & Projectors 버튼 찾기 및 클릭
+            tvs_button_selectors = [
+                # 제공된 XPath
+                'xpath:/html/body/div[6]/div/div/div/div/div[4]/div/div/div/div/div/div[2]/div[1]/button[1]',
+                # 텍스트 기반
+                'xpath://button[.//span[contains(text(), "TVs") and contains(text(), "Projectors")]]',
+                'xpath://button[contains(., "TVs & Projectors")]',
+                'xpath://span[contains(text(), "TVs") and contains(text(), "Projectors")]/ancestor::button',
+                # 클래스 기반
+                'xpath://button[@role="tab"]//span[contains(text(), "TVs")]/..',
             ]
 
             clicked = False
-            for idx, xpath in enumerate(tvs_button_xpaths, 1):
+            for idx, selector in enumerate(tvs_button_selectors, 1):
                 try:
-                    print(f"[INFO] TVs 버튼 찾기 시도 {idx}/{len(tvs_button_xpaths)}...")
-                    tvs_button = wait.until(EC.presence_of_element_located((By.XPATH, xpath)))
+                    print(f"[INFO] TVs & Projectors 버튼 찾기 시도 {idx}/{len(tvs_button_selectors)}...")
+                    tvs_button = self.page.ele(selector, timeout=5)
 
-                    # 버튼이 보일 때까지 스크롤
-                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", tvs_button)
-                    time.sleep(2)
+                    if tvs_button:
+                        # 버튼이 보일 때까지 스크롤
+                        tvs_button.scroll.to_see()
+                        time.sleep(2)
 
-                    # 클릭
-                    tvs_button.click()
-                    print("[OK] TVs 카테고리 클릭 완료")
-                    clicked = True
-                    time.sleep(random.uniform(3, 5))
-                    break
+                        # 클릭
+                        tvs_button.click()
+                        print("[OK] TVs & Projectors 카테고리 클릭 완료")
+                        clicked = True
+                        time.sleep(random.uniform(3, 5))
+                        break
                 except Exception as e:
-                    print(f"[DEBUG] XPath {idx} 실패: {e}")
+                    print(f"[DEBUG] Selector {idx} 실패: {e}")
                     continue
 
             if not clicked:
-                print("[ERROR] TVs 버튼을 찾을 수 없습니다.")
+                print("[ERROR] TVs & Projectors 버튼을 찾을 수 없습니다.")
                 print("[INFO] bby_homepage_debug.html 파일을 확인하세요.")
                 return False
 
             return True
 
         except Exception as e:
-            print(f"[ERROR] TVs 카테고리 클릭 실패: {e}")
+            print(f"[ERROR] TVs & Projectors 카테고리 클릭 실패: {e}")
             import traceback
             traceback.print_exc()
             return False
 
     def extract_trending_products(self):
-        """Trending deals TVs 제품 정보 추출"""
+        """Trending deals TVs & Projectors 제품 정보 추출"""
         try:
             print("\n[INFO] 제품 정보 추출 시작...")
 
@@ -144,7 +151,7 @@ class BestBuyTrendCrawler:
             time.sleep(3)
 
             # 페이지 소스 가져오기
-            page_source = self.driver.page_source
+            page_source = self.page.html
             tree = html.fromstring(page_source)
 
             # 디버깅용 HTML 저장
@@ -161,7 +168,8 @@ class BestBuyTrendCrawler:
             product_items_xpaths = [
                 '//div[@id="Trending-Deals-TVs"]//ul[@class="c-carousel-list"]/li',
                 '//div[@id="Trending-Deals-TVs"]//li',
-                '//div[contains(@id, "Trending-Deals-TVs")]//li'
+                '//div[contains(@id, "Trending-Deals")]//li[.//a]',
+                '//div[contains(@id, "Trending")]//ul//li[.//a[@href]]'
             ]
 
             product_items = []
@@ -188,7 +196,7 @@ class BestBuyTrendCrawler:
                         './/span[contains(@class, "BxIuyHdYvE_KO21sTHqZ")]',
                         './/div[@data-testid="product-card-title"]//span',
                         './/a[@data-testid="product-card-title-link"]//span',
-                        './/a//span'
+                        './/a//span[string-length(text()) > 10]'
                     ]
 
                     product_name = None
@@ -196,7 +204,7 @@ class BestBuyTrendCrawler:
                         name_elem = item.xpath(name_xpath)
                         if name_elem:
                             product_name = name_elem[0].text_content().strip()
-                            if product_name:  # 빈 문자열이 아닌지 확인
+                            if product_name and len(product_name) > 5:
                                 break
 
                     # URL 추출
@@ -204,7 +212,7 @@ class BestBuyTrendCrawler:
                         './/a[@data-testid="trending-deals-card-test-id"]/@href',
                         './/a[@data-testid="product-card-title-link"]/@href',
                         './/div[@class="content-wrapper"]//a/@href',
-                        './/a/@href'
+                        './/a[contains(@href, "/site/")]/@href'
                     ]
 
                     product_url = None
@@ -220,7 +228,7 @@ class BestBuyTrendCrawler:
                     if product_name and product_url:
                         product = {
                             'page_type': 'Trend',
-                            'rank': int(rank),
+                            'rank': int(rank) if rank.isdigit() else idx,
                             'product_name': product_name,
                             'product_url': product_url
                         }
@@ -231,8 +239,6 @@ class BestBuyTrendCrawler:
 
                 except Exception as e:
                     print(f"  [WARNING] 제품 {idx} 추출 실패: {e}")
-                    import traceback
-                    traceback.print_exc()
                     continue
 
             print(f"\n[OK] 총 {len(products)}개 제품 추출 완료")
@@ -312,7 +318,8 @@ class BestBuyTrendCrawler:
         """메인 실행"""
         try:
             print("="*80)
-            print(f"Best Buy Trending Deals - TVs Crawler (Batch ID: {self.batch_id})")
+            print(f"Best Buy Trending Deals - TVs & Projectors Crawler (DrissionPage)")
+            print(f"Batch ID: {self.batch_id}")
             print("="*80)
 
             # DB 연결
@@ -332,11 +339,11 @@ class BestBuyTrendCrawler:
             except Exception as e:
                 print(f"[WARNING] Could not add batch_id column: {e}")
 
-            # 드라이버 설정
-            if not self.setup_driver():
+            # 브라우저 설정
+            if not self.setup_browser():
                 return
 
-            # TVs 카테고리 클릭
+            # TVs & Projectors 카테고리 클릭
             if not self.click_tvs_category():
                 return
 
@@ -361,9 +368,9 @@ class BestBuyTrendCrawler:
             traceback.print_exc()
 
         finally:
-            if self.driver:
-                self.driver.quit()
-                print("\n[INFO] 드라이버 종료")
+            if self.page:
+                self.page.quit()
+                print("\n[INFO] 브라우저 종료")
             if self.db_conn:
                 self.db_conn.close()
                 print("[INFO] DB 연결 종료")

@@ -97,6 +97,24 @@ class BestBuyDetailCrawler:
     def get_recent_urls(self):
         """최신 batch_id의 product URLs와 추가 data 가져오기"""
         try:
+            # Helper function to extract item from URL for deduplication
+            def _extract_item(url):
+                """Extract item ID from URL for deduplication
+                Example: /product/name/JJ8VPZW5KG/sku/123 -> JJ8VPZW5KG
+                         /product/name/JJ8VPZW5KG -> JJ8VPZW5KG
+                """
+                try:
+                    parts = url.rstrip('/').split('/')
+                    if 'product' in parts:
+                        product_index = parts.index('product')
+                        if len(parts) > product_index + 2:
+                            item = parts[product_index + 2]
+                            if item and item.lower() != 'sku':
+                                return item
+                    return url  # Fallback to URL if item extraction fails
+                except:
+                    return url
+
             cursor = self.db_conn.cursor()
             urls = []
 
@@ -148,9 +166,10 @@ class BestBuyDetailCrawler:
 
             # collected 순서: main → bsr → promotion → trend (우선순위 순서)
             # 각 table의 rank 순서대로 정렬
-            # 중복 URL은 rank 정보 병합 (crawling은 한 번만)
+            # 중복 item은 rank 정보 병합 (crawling은 한 번만)
 
-            # Dictionary to store merged URL data: {url: {page_type, ranks, data...}}
+            # Dictionary to store merged URL data: {item: {page_type, ranks, data...}}
+            # Key는 item ID (URL에서 추출) - 같은 item이면 URL이 달라도 중복 처리
             url_data_map = {}
 
             # 1. bestbuy_tv_main_crawl에서 해당 batch의 URLs와 data 가져오기
@@ -167,8 +186,9 @@ class BestBuyDetailCrawler:
                 main_urls = cursor.fetchall()
                 for row in main_urls:
                     url = row[0]
-                    if url not in url_data_map:
-                        url_data_map[url] = {
+                    item_key = _extract_item(url)  # item ID로 중복 체크
+                    if item_key not in url_data_map:
+                        url_data_map[item_key] = {
                             'page_type': 'main',
                             'product_url': url,
                             'final_sku_price': None,
@@ -202,12 +222,13 @@ class BestBuyDetailCrawler:
                 bsr_urls = cursor.fetchall()
                 for row in bsr_urls:
                     url = row[0]
-                    if url in url_data_map:
-                        # URL already exists - just add bsr_rank
-                        url_data_map[url]['bsr_rank'] = row[6]
+                    item_key = _extract_item(url)  # item ID로 중복 체크
+                    if item_key in url_data_map:
+                        # Item already exists - just add bsr_rank
+                        url_data_map[item_key]['bsr_rank'] = row[6]
                     else:
-                        # New URL from bsr
-                        url_data_map[url] = {
+                        # New item from bsr
+                        url_data_map[item_key] = {
                             'page_type': 'bsr',
                             'product_url': url,
                             'final_sku_price': None,
@@ -239,13 +260,14 @@ class BestBuyDetailCrawler:
                 promo_urls = cursor.fetchall()
                 for row in promo_urls:
                     url = row[0]
-                    if url in url_data_map:
-                        # URL already exists - just add promotion_position and promotion_type
-                        url_data_map[url]['promotion_position'] = row[3]  # promotion_rank -> promotion_position
-                        url_data_map[url]['promotion_type'] = row[2]
+                    item_key = _extract_item(url)  # item ID로 중복 체크
+                    if item_key in url_data_map:
+                        # Item already exists - just add promotion_position and promotion_type
+                        url_data_map[item_key]['promotion_position'] = row[3]  # promotion_rank -> promotion_position
+                        url_data_map[item_key]['promotion_type'] = row[2]
                     else:
-                        # New URL from promotion
-                        url_data_map[url] = {
+                        # New item from promotion
+                        url_data_map[item_key] = {
                             'page_type': 'promotion',
                             'product_url': url,
                             'final_sku_price': None,
@@ -277,12 +299,13 @@ class BestBuyDetailCrawler:
                 trend_urls = cursor.fetchall()
                 for row in trend_urls:
                     url = row[0]
-                    if url in url_data_map:
-                        # URL already exists - just add trend_rank
-                        url_data_map[url]['trend_rank'] = row[1]
+                    item_key = _extract_item(url)  # item ID로 중복 체크
+                    if item_key in url_data_map:
+                        # Item already exists - just add trend_rank
+                        url_data_map[item_key]['trend_rank'] = row[1]
                     else:
-                        # New URL from trend
-                        url_data_map[url] = {
+                        # New item from trend
+                        url_data_map[item_key] = {
                             'page_type': 'Trend',
                             'product_url': url,
                             'final_sku_price': None,
@@ -332,9 +355,9 @@ class BestBuyDetailCrawler:
 
             duplicates_count = total_loaded - len(all_urls)
             if duplicates_count > 0:
-                print(f"[INFO] Found {duplicates_count} duplicate URLs - rank information merged")
+                print(f"[INFO] Found {duplicates_count} duplicate items - rank information merged")
 
-            print(f"[OK] Total unique URLs from main/bsr/promo/trend: {len(all_urls)}")
+            print(f"[OK] Total unique items from main/bsr/promo/trend: {len(all_urls)}")
 
             # Filter out already processed URLs from current session (based on main batch start time)
             print("[INFO] Checking for already processed URLs (current session)...")

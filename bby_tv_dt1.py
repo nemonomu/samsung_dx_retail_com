@@ -1444,6 +1444,37 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Summarized_Review_Content extraction failed: {e}")
             return None
 
+    def extract_summarized_review_content_from_reviews_page(self):
+        """Summarized_Review_Content extraction (리뷰 페이지에서) - DrissionPage
+        상세 페이지에서 추출 못했을 때 fallback으로 사용
+        """
+        try:
+            # 리뷰 페이지의 AI 요약 위치
+            selectors = [
+                # 제공된 XPath
+                'xpath://*[@id="reviews-accordion"]/div[1]/div/p[1]',
+                # class 기반
+                'xpath://p[@class="mb-200 mt-none"]',
+                # 더 넓은 패턴
+                'xpath://div[@id="reviews-accordion"]//p[contains(@class, "mb-200")]',
+            ]
+
+            for selector in selectors:
+                try:
+                    elem = self.page.ele(selector, timeout=3)
+                    if elem:
+                        text = elem.text.strip()
+                        if text and len(text) > 20:  # 유효한 요약인지 확인
+                            return text
+                except:
+                    continue
+
+            return None
+
+        except Exception as e:
+            print(f"  [ERROR] Summarized_Review_Content (reviews page) extraction failed: {e}")
+            return None
+
     def extract_recommendation_intent_from_reviews_page(self):
         """Recommendation_Intent extraction (See All Customer Reviews page에서) - DrissionPage"""
         try:
@@ -1823,6 +1854,12 @@ class BestBuyDetailCrawler:
                 # 9-4. Detailed reviews collected
                 detailed_reviews = self.extract_reviews()
                 print(f"  [✓] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
+
+                # 9-5. Summarized_Review_Content fallback (상세페이지에서 못 찾았으면 리뷰페이지에서)
+                if not summarized_review_content:
+                    summarized_review_content = self.extract_summarized_review_content_from_reviews_page()
+                    if summarized_review_content:
+                        print(f"  [✓] Summarized_Review_Content (from reviews page): {summarized_review_content[:50]}...")
 
             # 9-4-1. detailed_reviews NULL 로그 기록 (count_of_reviews > 0인데 NULL인 경우)
             try:

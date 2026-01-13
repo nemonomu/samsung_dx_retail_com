@@ -1105,14 +1105,30 @@ class WalmartDetailCrawler:
 
             # Priority 2: Extract from "6,602 reviews" link (seeAllReviewsStarRating)
             # <a link-identifier="seeAllReviewsStarRating">6,602 reviews</a>
+            # <span link-identifier="seeAllReviewsStarRating">0 reviews</span>
             reviews_link_xpaths = [
                 '//*[@id="item-review-section"]/div[2]/div[1]/div[1]/div/a',
-                "//a[@link-identifier='seeAllReviewsStarRating']"
+                "//a[@link-identifier='seeAllReviewsStarRating']",
+                "//span[@link-identifier='seeAllReviewsStarRating']"
             ]
             for xpath in reviews_link_xpaths:
                 result = tree.xpath(xpath)
                 if result:
                     text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+
+                    # Handle "0 reviews" case explicitly - return 0 immediately
+                    if re.match(r'^0\s+reviews?$', text, re.IGNORECASE):
+                        print(f"  [INFO] Extracted count from reviews link: 0 (0 reviews)")
+                        return 0
+
+                    # Handle "23.9K reviews" format (K suffix = thousands)
+                    match_k = re.search(r'([\d.]+)K\s+reviews?', text, re.IGNORECASE)
+                    if match_k:
+                        count = int(float(match_k.group(1)) * 1000)
+                        if not is_likely_ratings_count(count):
+                            print(f"  [INFO] Extracted count from reviews link (K format): {count}")
+                            return count
+
                     # Pattern: "6,602 reviews" -> extract 6,602
                     match = re.search(r'([\d,]+)\s+reviews?', text, re.IGNORECASE)
                     if match:
@@ -1123,8 +1139,11 @@ class WalmartDetailCrawler:
                             return count
 
             # Priority 3: Extract from "Showing 1-3 of 4,686 reviews" pattern
-            # XPath: //*[@id="item-review-section"]/div[7]/div[1]
+            # Actual HTML uses h3 tag: <h3 class="w_kV33...">Showing 1-3 of 23,960 reviews</h3>
             showing_xpaths = [
+                '//*[@id="item-review-section"]/div[7]/h3',
+                '//*[@id="item-review-section"]//h3[contains(text(), "Showing")]',
+                '//h3[contains(text(), "Showing") and contains(text(), "reviews")]',
                 '//*[@id="item-review-section"]/div[7]/div[1]',
                 '//*[@id="item-review-section"]//div[@role="heading" and contains(text(), "Showing")]',
                 '//div[@role="heading" and contains(text(), "Showing") and contains(text(), "reviews")]'

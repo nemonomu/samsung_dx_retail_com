@@ -1379,8 +1379,26 @@ class AmazonDetailCrawler:
             # Extract detailed review content and count_of_reviews from review page (up to 20 reviews)
             # Skip review page navigation if star_rating == "No customer reviews"
             # This avoids collecting wrong reviews from bundle products (e.g., Asurion warranty reviews)
-            if star_rating == "No customer reviews":
-                print(f"  [INFO] Skipping review page - No customer reviews")
+
+            # First check for "0 customer reviews" pattern on detail page
+            # e.g., "There are 0 customer reviews and 2 customer ratings."
+            zero_reviews_detected = False
+            zero_reviews_xpaths = [
+                '//*[@id="reviewsMedley"]//div[@class="a-box-inner"]',
+                '//*[@id="reviewsMedley"]/div/div[2]/div/div[2]/div[3]/div[2]/div/div',
+                '//div[contains(text(), "customer reviews and")]'
+            ]
+            for xpath in zero_reviews_xpaths:
+                zero_text = self.extract_text_safe(tree, xpath)
+                if zero_text:
+                    match = re.search(r'(\d+)\s*customer\s*reviews?', zero_text, re.IGNORECASE)
+                    if match and match.group(1) == '0':
+                        print(f"  [INFO] Detected '0 customer reviews' on detail page: {zero_text[:80]}...")
+                        zero_reviews_detected = True
+                        break
+
+            if star_rating == "No customer reviews" or zero_reviews_detected:
+                print(f"  [INFO] Skipping review page - No customer reviews (count_of_reviews=0)")
                 detailed_review_content = None
                 count_of_reviews = "0"
             else:
@@ -1510,7 +1528,23 @@ class AmazonDetailCrawler:
                 final_sku_price = self.extract_final_sku_price(tree)
 
                 # Re-extract count_of_reviews from review page (only if has reviews)
-                if star_rating == "No customer reviews":
+                # First check for "0 customer reviews" pattern on detail page
+                zero_reviews_detected = False
+                zero_reviews_xpaths = [
+                    '//*[@id="reviewsMedley"]//div[@class="a-box-inner"]',
+                    '//*[@id="reviewsMedley"]/div/div[2]/div/div[2]/div[3]/div[2]/div/div',
+                    '//div[contains(text(), "customer reviews and")]'
+                ]
+                for xpath in zero_reviews_xpaths:
+                    zero_text = self.extract_text_safe(tree, xpath)
+                    if zero_text:
+                        match = re.search(r'(\d+)\s*customer\s*reviews?', zero_text, re.IGNORECASE)
+                        if match and match.group(1) == '0':
+                            print(f"  [INFO] Retry: Detected '0 customer reviews' on detail page")
+                            zero_reviews_detected = True
+                            break
+
+                if star_rating == "No customer reviews" or zero_reviews_detected:
                     detailed_review_content = None
                     count_of_reviews = "0"
                 else:
@@ -1569,7 +1603,27 @@ class AmazonDetailCrawler:
 
                     if has_rv_detail_null:
                         # Re-navigate to review page (only if star_rating is not "No customer reviews")
-                        if sr != "No customer reviews":
+                        # First check for "0 customer reviews" pattern on detail page
+                        zero_reviews_detected = False
+                        zero_reviews_xpaths = [
+                            '//*[@id="reviewsMedley"]//div[@class="a-box-inner"]',
+                            '//*[@id="reviewsMedley"]/div/div[2]/div/div[2]/div[3]/div[2]/div/div',
+                            '//div[contains(text(), "customer reviews and")]'
+                        ]
+                        for xpath in zero_reviews_xpaths:
+                            zero_text = self.extract_text_safe(tree, xpath)
+                            if zero_text:
+                                match = re.search(r'(\d+)\s*customer\s*reviews?', zero_text, re.IGNORECASE)
+                                if match and match.group(1) == '0':
+                                    print(f"  [INFO] Error retry: Detected '0 customer reviews' on detail page")
+                                    zero_reviews_detected = True
+                                    break
+
+                        if sr == "No customer reviews" or zero_reviews_detected:
+                            data['Detailed_Review_Content'] = None
+                            data['count_of_reviews'] = "0"
+                            print(f"  [INFO] Retry rv: 0 customer reviews detected, skipping review page")
+                        else:
                             drc, cor = self.extract_detailed_reviews_from_review_page(url)
                             data['Detailed_Review_Content'] = drc
                             data['count_of_reviews'] = cor

@@ -645,6 +645,22 @@ class BestBuyDetailCrawler:
     def extract_final_sku_price(self, tree):
         """Final SKU Price extraction (현재 판매 가격) - 컨테이너 기반"""
         try:
+            # 0단계: "no longer available" 체크를 먼저 수행 (가격 컨테이너가 없을 수 있음)
+            no_longer_available_xpaths = [
+                '/html/body/div[5]/div[3]/div[1]/div/div[2]/div[4]',
+                '//div[@class="text-danger text-4 font-500 leading-4"]',
+                '//div[contains(@class, "text-danger")][contains(text(), "no longer available")]',
+                '//div[contains(text(), "This item is no longer available in new condition")]'
+            ]
+
+            for xpath in no_longer_available_xpaths:
+                elem = tree.xpath(xpath)
+                if elem:
+                    text = elem[0].text_content().strip()
+                    if "no longer available" in text.lower():
+                        print(f"  [INFO] Item no longer available in new condition")
+                        return "no longer available"
+
             # 1단계: 가격 컨테이너 찾기
             container_xpaths = [
                 # 절대 경로 (제공된 것)
@@ -700,21 +716,6 @@ class BestBuyDetailCrawler:
                         return "See price in cart"
                     if "See details in checkout" in text:
                         return "See details in checkout"
-
-            # Fallback 2: Check for "This item is no longer available in new condition" (outside container)
-            no_longer_available_xpaths = [
-                '/html/body/div[5]/div[3]/div[1]/div/div[2]/div[4]',
-                '//div[@class="text-danger text-4 font-500 leading-4"]',
-                '//div[contains(@class, "text-danger")][contains(text(), "no longer available")]',
-                '//div[contains(text(), "This item is no longer available in new condition")]'
-            ]
-
-            for xpath in no_longer_available_xpaths:
-                elem = tree.xpath(xpath)  # Use tree, not price_container
-                if elem:
-                    text = elem[0].text_content().strip()
-                    if "no longer available in new condition" in text.lower():
-                        return "This item is no longer available in new condition."
 
             return None
         except Exception as e:
@@ -1823,8 +1824,8 @@ class BestBuyDetailCrawler:
 
             # 8. See All Customer Reviews click 및 data collected
             # count_of_star_ratings는 count_of_reviews와 동일 값 사용
-            star_ratings = count_of_reviews
-            print(f"  [✓] Count_of_Star_Ratings: {star_ratings} (= count_of_reviews)")
+            count_of_star_ratings = count_of_reviews
+            print(f"  [✓] count_of_star_ratings: {count_of_star_ratings} (= count_of_reviews)")
 
             top_mentions = None
             detailed_reviews = None
@@ -1840,8 +1841,8 @@ class BestBuyDetailCrawler:
 
                 # 9-1. Star ratings collected (review page에서 - 별점별 detail items count)
                 # NOTE: count_of_star_ratings는 count_of_reviews와 동일하므로 별도 추출 불필요
-                # star_ratings = self.extract_star_ratings_from_reviews_page()
-                # print(f"  [✓] Count_of_Star_Ratings: {star_ratings}")
+                # count_of_star_ratings = self.extract_star_ratings_from_reviews_page()
+                # print(f"  [✓] count_of_star_ratings: {count_of_star_ratings}")
 
                 # 9-2. Top mentions collected (review page에서)
                 top_mentions = self.extract_top_mentions_from_reviews_page()
@@ -1900,7 +1901,7 @@ class BestBuyDetailCrawler:
                 electricity_use=electricity_use,
                 screen_size=screen_size,
                 count_of_reviews=count_of_reviews,
-                star_ratings=star_ratings,
+                count_of_star_ratings=count_of_star_ratings,
                 top_mentions=top_mentions,
                 detailed_reviews=detailed_reviews,
                 summarized_review_content=summarized_review_content,
@@ -1938,7 +1939,7 @@ class BestBuyDetailCrawler:
             return False
 
     def save_to_db(self, page_type, order, retailer_sku_name, item,
-                   electricity_use, screen_size, count_of_reviews, star_ratings, top_mentions, detailed_reviews,
+                   electricity_use, screen_size, count_of_reviews, count_of_star_ratings, top_mentions, detailed_reviews,
                    summarized_review_content, recommendation_intent, product_url,
                    final_sku_price, savings, original_sku_price, offer,
                    pick_up_availability, shipping_availability, delivery_availability,
@@ -1959,9 +1960,10 @@ class BestBuyDetailCrawler:
             now = datetime.now()
             crawl_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
 
-            # If "Not yet reviewed", set star_ratings to 0
+            # If "Not yet reviewed", set both to 0
             if star_rating_source == "Not yet reviewed":
-                star_ratings = 0
+                count_of_star_ratings = 0
+                count_of_reviews = 0
 
             # data 삽입
             insert_query = """
@@ -1985,7 +1987,7 @@ class BestBuyDetailCrawler:
                 electricity_use,
                 screen_size,
                 count_of_reviews,
-                star_ratings,
+                count_of_star_ratings,
                 top_mentions,
                 detailed_reviews,
                 recommendation_intent,
@@ -2045,7 +2047,7 @@ class BestBuyDetailCrawler:
                 retailer_sku_name,
                 product_url,
                 star_rating_source,
-                star_ratings,  # count_of_star_ratings (리뷰페이지에서 추출한 별점 총 개수)
+                count_of_star_ratings,
                 screen_size,
                 None,  # sku_popularity (BestBuy doesn't have this)
                 final_sku_price,

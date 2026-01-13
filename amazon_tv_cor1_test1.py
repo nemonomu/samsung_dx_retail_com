@@ -83,7 +83,7 @@ class CountOfReviewsTest:
 
             if not review_link:
                 print("  [WARNING] Could not find review page link")
-                return None
+                return None, None
 
             # Build review URL
             if review_link.startswith('http'):
@@ -98,6 +98,7 @@ class CountOfReviewsTest:
 
             # Wait for count_of_reviews element to load, then extract
             count_of_reviews = None
+            extraction_source = None
             try:
                 WebDriverWait(self.driver, 5).until(
                     EC.presence_of_element_located((By.XPATH, '//*[@id="filter-info-section"] | //div[@data-hook="cr-filter-info-review-rating-count"]'))
@@ -105,33 +106,42 @@ class CountOfReviewsTest:
                 # Element loaded - extract count_of_reviews
                 tree = html.fromstring(self.driver.page_source)
                 count_xpaths = [
-                    '//*[@id="filter-info-section"]/div',
-                    '//div[@data-hook="cr-filter-info-review-rating-count"]',
-                    '//div[contains(@data-hook, "review-rating-count")]'
+                    ('//*[@id="filter-info-section"]/div', 'filter-info-section'),
+                    ('//div[@data-hook="cr-filter-info-review-rating-count"]', 'cr-filter-info-review-rating-count'),
+                    ('//div[contains(@data-hook, "review-rating-count")]', 'review-rating-count')
                 ]
-                for xpath in count_xpaths:
+                for xpath, xpath_name in count_xpaths:
                     count_elements = tree.xpath(xpath)
                     if count_elements:
                         count_text = count_elements[0].text_content().strip() if hasattr(count_elements[0], 'text_content') else str(count_elements[0]).strip()
                         if count_text:
                             print(f"  [DEBUG] count_text found: {count_text}")
-                            match = re.search(r'([\d,]+)\s*customer\s*reviews?', count_text, re.IGNORECASE)
-                            if not match:
-                                match = re.search(r'([\d,]+)\s*with\s*reviews?', count_text, re.IGNORECASE)
-                            if not match:
-                                match = re.search(r'([\d,]+)\s*reviews?', count_text, re.IGNORECASE)
-                            if match:
-                                count_of_reviews = match.group(1)
-                                print(f"  [OK] Extracted count_of_reviews from review page: {count_of_reviews}")
+                            print(f"  [DEBUG] XPath used: {xpath_name}")
+
+                            # Try different regex patterns
+                            regex_patterns = [
+                                (r'([\d,]+)\s*customer\s*reviews?', 'customer reviews'),
+                                (r'([\d,]+)\s*with\s*reviews?', 'with reviews'),
+                                (r'([\d,]+)\s*reviews?', 'reviews')
+                            ]
+                            for pattern, pattern_name in regex_patterns:
+                                match = re.search(pattern, count_text, re.IGNORECASE)
+                                if match:
+                                    count_of_reviews = match.group(1)
+                                    extraction_source = f"review_page/{xpath_name}/{pattern_name}"
+                                    print(f"  [OK] Extracted count_of_reviews: {count_of_reviews}")
+                                    print(f"  [SOURCE] {extraction_source}")
+                                    break
+                            if count_of_reviews:
                                 break
             except Exception as e:
                 print(f"  [WARNING] count_of_reviews element not loaded: {e}")
 
-            return count_of_reviews
+            return count_of_reviews, extraction_source
 
         except Exception as e:
             print(f"  [ERROR] Failed to extract count_of_reviews: {e}")
-            return None
+            return None, None
 
     def test_url(self, url):
         """Test single URL - extract count_of_reviews and count_of_star_ratings"""
@@ -151,7 +161,7 @@ class CountOfReviewsTest:
             print(f"  [RESULT] count_of_star_ratings (from detail page): {count_of_star_ratings}")
 
             # Extract count_of_reviews from review page
-            count_of_reviews = self.extract_count_of_reviews_from_review_page(url)
+            count_of_reviews, extraction_source = self.extract_count_of_reviews_from_review_page(url)
 
             # Navigate back to product page
             print(f"  [INFO] Navigating back to product page...")
@@ -162,8 +172,8 @@ class CountOfReviewsTest:
             print(f"\n  {'='*60}")
             print(f"  [FINAL RESULT]")
             print(f"  product_url: {url}")
-            print(f"  count_of_star_ratings: {count_of_star_ratings}")
-            print(f"  count_of_reviews: {count_of_reviews}")
+            print(f"  count_of_star_ratings: {count_of_star_ratings} (source: detail_page)")
+            print(f"  count_of_reviews: {count_of_reviews} (source: {extraction_source or 'N/A'})")
 
             # Compare values
             if count_of_star_ratings and count_of_reviews:
@@ -180,7 +190,8 @@ class CountOfReviewsTest:
             return {
                 'url': url,
                 'count_of_star_ratings': count_of_star_ratings,
-                'count_of_reviews': count_of_reviews
+                'count_of_reviews': count_of_reviews,
+                'extraction_source': extraction_source
             }
 
         except Exception as e:
@@ -208,9 +219,10 @@ class CountOfReviewsTest:
         for r in results:
             cosr = r['count_of_star_ratings'] or 'N/A'
             cor = r['count_of_reviews'] or 'N/A'
+            src = r.get('extraction_source') or 'N/A'
             print(f"  URL: {r['url']}")
-            print(f"    count_of_star_ratings: {cosr}")
-            print(f"    count_of_reviews: {cor}")
+            print(f"    count_of_star_ratings: {cosr} (source: detail_page)")
+            print(f"    count_of_reviews: {cor} (source: {src})")
             print()
 
         self.driver.quit()

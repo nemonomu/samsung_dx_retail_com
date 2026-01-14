@@ -646,17 +646,33 @@ class AmazonDetailCrawler:
     def extract_star_rating(self, tree):
         """Extract star rating (format: '4.5' or 'No customer reviews')"""
         try:
-            # Try to get star rating from database XPath
-            star_rating_text = self.extract_text_safe(tree, self.xpaths.get('star_rating'))
+            # Try multiple XPaths for star rating
+            star_rating_xpaths = [
+                self.xpaths.get('star_rating'),  # DB XPath
+                '//*[@id="acrPopover"]/@title',
+                '//*[@id="averageCustomerReviews"]//span[@class="a-icon-alt"]',
+                '//span[@data-hook="rating-out-of-text"]',
+                '//*[@id="acrPopover"]/span[1]/a/span'
+            ]
 
-            if star_rating_text:
-                # Check for "No customer reviews" first
-                if "No customer reviews" in star_rating_text:
-                    return "No customer reviews"
+            for xpath in star_rating_xpaths:
+                if not xpath:
+                    continue
+                star_rating_text = self.extract_text_safe(tree, xpath)
 
-                # Return the star rating as-is if it contains a number
-                if re.search(r'\d', star_rating_text):
-                    return star_rating_text
+                if star_rating_text:
+                    # Check for "No customer reviews" first
+                    if "No customer reviews" in star_rating_text:
+                        return "No customer reviews"
+
+                    # Extract "X.X out of 5" pattern
+                    match = re.search(r'(\d+\.?\d*)\s*out of\s*5', star_rating_text)
+                    if match:
+                        return match.group(1)
+
+                    # Return as-is if it contains a number
+                    if re.search(r'\d', star_rating_text):
+                        return star_rating_text
 
             # Fallback: Check for "No customer reviews" at specific location
             no_reviews_xpaths = [
@@ -739,18 +755,28 @@ class AmazonDetailCrawler:
         Returns: integer (e.g., 2449) or None
         """
         try:
-            # Get total count from "2,449 global ratings"
-            total_text = self.extract_text_safe(tree, '//*[@id="cm_cr_dp_d_rating_histogram"]/div[3]')
-            if not total_text:
-                return None
+            # Primary: Get total count from "2,449 global ratings" in histogram section
+            xpaths = [
+                '//*[@id="cm_cr_dp_d_rating_histogram"]/div[3]',
+                '//*[@id="acrCustomerReviewText"]',
+                '//span[@id="acrCustomerReviewText"]',
+                '//a[@id="acrCustomerReviewLink"]//span'
+            ]
 
-            # Extract number from "2,449 global ratings" or "1 global rating"
-            total_match = re.search(r'([\d,]+)\s*global ratings?', total_text)
-            if not total_match:
-                return None
+            for xpath in xpaths:
+                total_text = self.extract_text_safe(tree, xpath)
+                if total_text:
+                    # Try "2,449 global ratings" pattern first
+                    total_match = re.search(r'([\d,]+)\s*global ratings?', total_text)
+                    if total_match:
+                        return int(total_match.group(1).replace(',', ''))
 
-            total_count = int(total_match.group(1).replace(',', ''))
-            return total_count
+                    # Fallback: "2,414 ratings" pattern
+                    total_match = re.search(r'([\d,]+)\s*ratings?', total_text)
+                    if total_match:
+                        return int(total_match.group(1).replace(',', ''))
+
+            return None
 
         except Exception as e:
             print(f"  [WARNING] Failed to extract star ratings count: {e}")
@@ -1000,7 +1026,7 @@ class AmazonDetailCrawler:
             # Wait for count_of_reviews element to load, then extract
             count_of_reviews = None
             try:
-                WebDriverWait(self.driver, 5).until(
+                WebDriverWait(self.driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, '//*[@id="filter-info-section"] | //div[@data-hook="cr-filter-info-review-rating-count"]'))
                 )
                 # Element loaded - extract count_of_reviews
@@ -1008,7 +1034,8 @@ class AmazonDetailCrawler:
                 count_xpaths = [
                     '//*[@id="filter-info-section"]/div',
                     '//div[@data-hook="cr-filter-info-review-rating-count"]',
-                    '//div[contains(@data-hook, "review-rating-count")]'
+                    '//div[contains(@data-hook, "review-rating-count")]',
+                    '//*[@id="filter-info-section"]'
                 ]
                 for xpath in count_xpaths:
                     count_elements = tree.xpath(xpath)
@@ -1016,17 +1043,25 @@ class AmazonDetailCrawler:
                         count_text = count_elements[0].text_content().strip() if hasattr(count_elements[0], 'text_content') else str(count_elements[0]).strip()
                         if count_text:
                             print(f"  [DEBUG] count_text found: {count_text[:100]}...")
+                            # Try multiple patterns
                             match = re.search(r'([\d,]+)\s*customer\s*reviews?', count_text, re.IGNORECASE)
                             if not match:
                                 match = re.search(r'([\d,]+)\s*with\s*reviews?', count_text, re.IGNORECASE)
                             if not match:
                                 match = re.search(r'([\d,]+)\s*reviews?', count_text, re.IGNORECASE)
+                            if not match:
+                                # Fallback: "1,234 total ratings, 567 with reviews" pattern
+                                match = re.search(r'([\d,]+)\s*total\s*ratings?,\s*([\d,]+)', count_text, re.IGNORECASE)
+                                if match:
+                                    count_of_reviews = match.group(2)  # Second number is reviews
+                                    print(f"  [OK] Extracted count_of_reviews from review page (fallback): {count_of_reviews}")
+                                    break
                             if match:
                                 count_of_reviews = match.group(1)
                                 print(f"  [OK] Extracted count_of_reviews from review page: {count_of_reviews}")
                                 break
-            except:
-                print("  [WARNING] count_of_reviews element not loaded - skipping extraction")
+            except Exception as e:
+                print(f"  [WARNING] count_of_reviews element not loaded - {str(e)[:50]}")
 
             # Collect reviews from first page (max 10 reviews per page)
             all_reviews = []
@@ -1371,10 +1406,27 @@ class AmazonDetailCrawler:
             except Exception as e:
                 print(f"  [WARNING] Summarized review not found (may not exist for this product): {str(e)[:100]}")
 
-            # [DISABLED] Extract detailed review content from product detail page (not review page)
-            # detailed_review_content = self.extract_detailed_reviews(url)
-            # count_of_reviews = count_of_star_ratings (same value)
-            # count_of_reviews = count_of_star_ratings
+            # Extract prices from detail page BEFORE navigating to review page
+            # This ensures price extraction happens on the fully loaded detail page
+            final_sku_price = self.extract_final_sku_price(tree)
+            # If final_sku_price is a special text value, set original_sku_price to None
+            special_price_texts = [
+                "Currently unavailable.",
+                "Price higher than typical",
+                "No featured offers available",
+                "See price in cart",
+                "To see our price, add this item to your cart."
+            ]
+            if final_sku_price in special_price_texts:
+                original_sku_price = None
+            else:
+                original_sku_price = self.extract_original_sku_price(tree)
+            savings = self.calculate_savings(final_sku_price, original_sku_price)
+
+            # Extract shipping info, available quantity, and discount type
+            shipping_info = self.extract_shipping_info(tree)
+            available_quantity = self.extract_available_quantity_for_purchase(tree)
+            discount_type = self.extract_discount_type(tree)
 
             # Extract detailed review content and count_of_reviews from review page (up to 20 reviews)
             # Skip review page navigation if star_rating == "No customer reviews"
@@ -1403,37 +1455,6 @@ class AmazonDetailCrawler:
                 count_of_reviews = "0"
             else:
                 detailed_review_content, count_of_reviews = self.extract_detailed_reviews_from_review_page(url)
-
-            # Verify page is properly loaded after returning from review page
-            if not self.verify_page_loaded(wait_for_price=True):
-                print(f"  [WARNING] Page verification failed after review page return - continuing with available data")
-
-            # Re-parse page source after returning from review page
-            tree = html.fromstring(self.driver.page_source)
-
-            # Note: count_of_reviews is ONLY extracted from review page (no fallback to detail page)
-            # Detail page shows "ratings" count, not actual "reviews" count
-
-            # Extract prices from detail page
-            final_sku_price = self.extract_final_sku_price(tree)
-            # If final_sku_price is a special text value, set original_sku_price to None
-            special_price_texts = [
-                "Currently unavailable.",
-                "Price higher than typical",
-                "No featured offers available",
-                "See price in cart",
-                "To see our price, add this item to your cart."
-            ]
-            if final_sku_price in special_price_texts:
-                original_sku_price = None
-            else:
-                original_sku_price = self.extract_original_sku_price(tree)
-            savings = self.calculate_savings(final_sku_price, original_sku_price)
-
-            # Extract shipping info, available quantity, and discount type
-            shipping_info = self.extract_shipping_info(tree)
-            available_quantity = self.extract_available_quantity_for_purchase(tree)
-            discount_type = self.extract_discount_type(tree)
 
             data = {
                 'page_type': page_type,

@@ -1039,9 +1039,8 @@ class WalmartDetailCrawler:
 
         Priority:
         1. Check "No ratings yet" first -> return 0
-        2. "View all reviews (4,686)" button - user-provided XPath (most reliable)
-        3. "Showing 1-3 of 4,686 reviews" pattern
-        4. JSON extraction (numberOfReviews, totalReviewCount)
+        2. "Showing 1-3 of 18,552 reviews" pattern (most accurate)
+        3. "View all reviews (4,686)" button
 
         Args:
             tree: HTML tree
@@ -1077,8 +1076,30 @@ class WalmartDetailCrawler:
                         print(f"  [INFO] Found 'No ratings yet' on page, setting count_of_reviews to 0")
                         return 0
 
-            # Priority 1: Extract from "View all reviews (4,686)" button - USER PROVIDED XPATH
-            # This is the most reliable source for actual review count
+            # Priority 1: Extract from "Showing 1-3 of 18,552 reviews" pattern (most accurate)
+            # Actual HTML uses h3 tag: <h3 class="w_kV33...">Showing 1-3 of 23,960 reviews</h3>
+            showing_xpaths = [
+                '//*[@id="item-review-section"]/div[7]/h3',
+                '//*[@id="item-review-section"]//h3[contains(text(), "Showing")]',
+                '//h3[contains(text(), "Showing") and contains(text(), "reviews")]',
+                '//*[@id="item-review-section"]/div[7]/div[1]',
+                '//*[@id="item-review-section"]//div[@role="heading" and contains(text(), "Showing")]',
+                '//div[@role="heading" and contains(text(), "Showing") and contains(text(), "reviews")]'
+            ]
+            for xpath in showing_xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+                    # Pattern: "Showing 1-3 of 4,686 reviews" -> extract 4,686
+                    match = re.search(r'of\s+([\d,]+)\s+reviews?', text, re.IGNORECASE)
+                    if match:
+                        count_str = match.group(1).replace(',', '')
+                        count = int(count_str)
+                        if not is_likely_ratings_count(count):
+                            print(f"  [INFO] Extracted count from 'Showing X of Y reviews': {count}")
+                            return count
+
+            # Priority 2: Extract from "View all reviews (4,686)" button
             # Note: Button with count has class "tc", button without count has class "tl mr2"
             view_all_xpaths = [
                 # Buttons with data-dca-intent="select" and class containing "tc" (has count)
@@ -1102,82 +1123,6 @@ class WalmartDetailCrawler:
                         if not is_likely_ratings_count(count):
                             print(f"  [INFO] Extracted count from 'View all reviews' button: {count}")
                             return count
-
-            # Priority 2: Extract from "6,602 reviews" link (seeAllReviewsStarRating)
-            # <a link-identifier="seeAllReviewsStarRating">6,602 reviews</a>
-            # <span link-identifier="seeAllReviewsStarRating">0 reviews</span>
-            reviews_link_xpaths = [
-                '//*[@id="item-review-section"]/div[2]/div[1]/div[1]/div/a',
-                "//a[@link-identifier='seeAllReviewsStarRating']",
-                "//span[@link-identifier='seeAllReviewsStarRating']"
-            ]
-            for xpath in reviews_link_xpaths:
-                result = tree.xpath(xpath)
-                if result:
-                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
-
-                    # Handle "0 reviews" case explicitly - return 0 immediately
-                    if re.match(r'^0\s+reviews?$', text, re.IGNORECASE):
-                        print(f"  [INFO] Extracted count from reviews link: 0 (0 reviews)")
-                        return 0
-
-                    # Handle "23.9K reviews" format (K suffix = thousands)
-                    match_k = re.search(r'([\d.]+)K\s+reviews?', text, re.IGNORECASE)
-                    if match_k:
-                        count = int(float(match_k.group(1)) * 1000)
-                        if not is_likely_ratings_count(count):
-                            print(f"  [INFO] Extracted count from reviews link (K format): {count}")
-                            return count
-
-                    # Pattern: "6,602 reviews" -> extract 6,602
-                    match = re.search(r'([\d,]+)\s+reviews?', text, re.IGNORECASE)
-                    if match:
-                        count_str = match.group(1).replace(',', '')
-                        count = int(count_str)
-                        if not is_likely_ratings_count(count):
-                            print(f"  [INFO] Extracted count from reviews link: {count}")
-                            return count
-
-            # Priority 3: Extract from "Showing 1-3 of 4,686 reviews" pattern
-            # Actual HTML uses h3 tag: <h3 class="w_kV33...">Showing 1-3 of 23,960 reviews</h3>
-            showing_xpaths = [
-                '//*[@id="item-review-section"]/div[7]/h3',
-                '//*[@id="item-review-section"]//h3[contains(text(), "Showing")]',
-                '//h3[contains(text(), "Showing") and contains(text(), "reviews")]',
-                '//*[@id="item-review-section"]/div[7]/div[1]',
-                '//*[@id="item-review-section"]//div[@role="heading" and contains(text(), "Showing")]',
-                '//div[@role="heading" and contains(text(), "Showing") and contains(text(), "reviews")]'
-            ]
-            for xpath in showing_xpaths:
-                result = tree.xpath(xpath)
-                if result:
-                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
-                    # Pattern: "Showing 1-3 of 4,686 reviews" -> extract 4,686
-                    match = re.search(r'of\s+([\d,]+)\s+reviews?', text, re.IGNORECASE)
-                    if match:
-                        count_str = match.group(1).replace(',', '')
-                        count = int(count_str)
-                        if not is_likely_ratings_count(count):
-                            print(f"  [INFO] Extracted count from 'Showing X of Y reviews': {count}")
-                            return count
-
-            # Priority 4: Extract from JSON data
-            if page_source:
-                # Try numberOfReviews first (actual written reviews count)
-                match = re.search(r'"numberOfReviews"\s*:\s*(\d+)', page_source)
-                if match:
-                    count = int(match.group(1))
-                    if not is_likely_ratings_count(count):
-                        print(f"  [INFO] Extracted numberOfReviews from JSON: {count}")
-                        return count
-
-                # Try totalReviewCount as alternative
-                match = re.search(r'"totalReviewCount"\s*:\s*(\d+)', page_source)
-                if match:
-                    count = int(match.group(1))
-                    if not is_likely_ratings_count(count):
-                        print(f"  [INFO] Extracted totalReviewCount from JSON: {count}")
-                        return count
 
             # Fallback: Check for "No ratings yet" -> return 0
             no_ratings_xpaths = [
@@ -1680,7 +1625,7 @@ class WalmartDetailCrawler:
 
                     if review_elem:
                         review_text = review_elem[0].text_content().strip() if hasattr(review_elem[0], 'text_content') else str(review_elem[0]).strip()
-                        if review_text and len(review_text) > 10:
+                        if review_text and len(review_text) > 0:
                             reviews.append(review_text)
 
                 # If we need more reviews and haven't reached max pages, click Next Page
@@ -1855,27 +1800,51 @@ class WalmartDetailCrawler:
             # Extract count of star ratings (from review section)
             count_of_star_ratings = self.extract_count_of_star_ratings(tree)
 
-            # Wait for count_of_reviews element to load, then extract
+            # Wait for count_of_reviews element to load, then extract with retry
             # count_of_star_ratings: "4.4 stars out of 50630 reviews" -> 50630 (ratings count)
             # count_of_reviews: "986 reviews" link -> 986 (actual written reviews count)
             count_of_reviews = None
-            try:
-                WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.XPATH, "//*[@id='item-review-section']/div[7]/div[1] | //button[contains(text(), 'View all reviews')] | //span[contains(text(), 'No ratings yet')]"))
-                )
-                # Element loaded - re-parse and extract
-                page_source = self.driver.page_source
-                tree = html.fromstring(page_source)
-                count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source, count_of_star_ratings)
-            except:
-                print("  [WARNING] count_of_reviews element not loaded - trying extraction anyway")
-                count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source, count_of_star_ratings)
+            max_cor_retries = 3
+            for cor_retry in range(max_cor_retries):
+                try:
+                    WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.XPATH, "//*[@id='item-review-section']/div[7]/h3 | //button[contains(text(), 'View all reviews')] | //span[contains(text(), 'No ratings yet')]"))
+                    )
+                    # Element loaded - re-parse and extract
+                    page_source = self.driver.page_source
+                    tree = html.fromstring(page_source)
+                    count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source, count_of_star_ratings)
+                except:
+                    print("  [WARNING] count_of_reviews element not loaded - trying extraction anyway")
+                    count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source, count_of_star_ratings)
+
+                if count_of_reviews is not None:
+                    break
+                elif cor_retry < max_cor_retries - 1:
+                    print(f"  [RETRY {cor_retry + 1}/{max_cor_retries}] count_of_reviews is None, refreshing page...")
+                    self.driver.refresh()
+                    time.sleep(random.uniform(3, 5))
+                    page_source = self.driver.page_source
+                    tree = html.fromstring(page_source)
 
             # Click Specifications and get Model (after static content extraction)
             sku_model = self.click_specifications_and_get_model()
 
-            # Extract detailed reviews (this will navigate to reviews page) - LAST
+            # Extract detailed reviews with retry if count_of_reviews >= 1 but no content
             detailed_review_content = self.extract_detailed_reviews()
+
+            # Retry logic: if count_of_reviews >= 1 but detailed_review_content is empty
+            cor_int_check = int(str(count_of_reviews).replace(',', '')) if count_of_reviews else 0
+            if cor_int_check >= 1 and not detailed_review_content:
+                max_drv_retries = 3
+                for drv_retry in range(max_drv_retries):
+                    print(f"  [RETRY {drv_retry + 1}/{max_drv_retries}] count_of_reviews={cor_int_check} but detailed_review_content is empty, retrying...")
+                    # Navigate back to product page and retry
+                    self.driver.get(url)
+                    time.sleep(random.uniform(3, 5))
+                    detailed_review_content = self.extract_detailed_reviews()
+                    if detailed_review_content:
+                        break
 
             data = {
                 'page_type': page_type,
@@ -1944,8 +1913,18 @@ class WalmartDetailCrawler:
             except Exception as e:
                 print(f"  [WARNING] drv_20_error check failed: {str(e)[:100]}")
 
-            # Save to database
-            if self.save_to_db(data):
+            # Save to database with retry
+            max_db_retries = 3
+            db_saved = False
+            for db_retry in range(max_db_retries):
+                if self.save_to_db(data):
+                    db_saved = True
+                    break
+                elif db_retry < max_db_retries - 1:
+                    print(f"  [RETRY {db_retry + 1}/{max_db_retries}] DB save failed, retrying...")
+                    time.sleep(1)
+
+            if db_saved:
                 self.total_collected += 1
                 print(f"  [OK] Collected: {retailer_sku_name[:50] if retailer_sku_name else '[NO NAME]'}...")
                 print(f"       Model: {sku_model or 'N/A'} | Screen: {screen_size or 'N/A'} | Star: {star_rating or 'N/A'}")
@@ -1959,7 +1938,7 @@ class WalmartDetailCrawler:
 
                 return True
             else:
-                print(f"  [FAILED] Could not save data")
+                print(f"  [FAILED] Could not save data after {max_db_retries} retries")
                 return False
 
         except Exception as e:

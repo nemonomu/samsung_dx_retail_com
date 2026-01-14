@@ -93,7 +93,23 @@ class WalmartTestCrawler:
                         print(f"  [INFO] Found 'No ratings yet', setting count_of_reviews to 0")
                         return 0
 
-            # Priority 1: "View all reviews (4,686)" button
+            # Priority 1: "Showing 1-3 of 18,552 reviews" (most accurate)
+            showing_xpaths = [
+                '//*[@id="item-review-section"]/div[7]/h3',
+                '//*[@id="item-review-section"]//h3[contains(text(), "Showing")]',
+                '//h3[contains(text(), "Showing") and contains(text(), "reviews")]'
+            ]
+            for xpath in showing_xpaths:
+                result = tree.xpath(xpath)
+                if result:
+                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+                    match = re.search(r'of\s+([\d,]+)\s+reviews?', text, re.IGNORECASE)
+                    if match:
+                        count = int(match.group(1).replace(',', ''))
+                        print(f"  [INFO] Extracted count from 'Showing X of Y reviews': {count}")
+                        return count
+
+            # Priority 2: "View all reviews (4,686)" button
             view_all_xpaths = [
                 "//button[contains(text(), 'View all reviews') and @data-dca-intent='select' and contains(@class, 'tc')]",
                 '//*[@id="item-review-section"]/div[6]/button',
@@ -111,7 +127,7 @@ class WalmartTestCrawler:
                         print(f"  [INFO] Extracted count from 'View all reviews' button: {count}")
                         return count
 
-            # Priority 2: "6,602 reviews" link
+            # Priority 3: "6,602 reviews" link (K format is approximation)
             reviews_link_xpaths = [
                 '//*[@id="item-review-section"]/div[2]/div[1]/div[1]/div/a',
                 "//a[@link-identifier='seeAllReviewsStarRating']",
@@ -126,7 +142,7 @@ class WalmartTestCrawler:
                         print(f"  [INFO] Extracted count from reviews link: 0")
                         return 0
 
-                    # Handle "23.9K reviews" format
+                    # Handle "23.9K reviews" format (approximation)
                     match_k = re.search(r'([\d.]+)K\s+reviews?', text, re.IGNORECASE)
                     if match_k:
                         count = int(float(match_k.group(1)) * 1000)
@@ -137,22 +153,6 @@ class WalmartTestCrawler:
                     if match:
                         count = int(match.group(1).replace(',', ''))
                         print(f"  [INFO] Extracted count from reviews link: {count}")
-                        return count
-
-            # Priority 3: "Showing 1-3 of 4,686 reviews"
-            showing_xpaths = [
-                '//*[@id="item-review-section"]/div[7]/h3',
-                '//*[@id="item-review-section"]//h3[contains(text(), "Showing")]',
-                '//h3[contains(text(), "Showing") and contains(text(), "reviews")]'
-            ]
-            for xpath in showing_xpaths:
-                result = tree.xpath(xpath)
-                if result:
-                    text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
-                    match = re.search(r'of\s+([\d,]+)\s+reviews?', text, re.IGNORECASE)
-                    if match:
-                        count = int(match.group(1).replace(',', ''))
-                        print(f"  [INFO] Extracted count from 'Showing X of Y reviews': {count}")
                         return count
 
             # Priority 4: JSON extraction
@@ -249,7 +249,7 @@ class WalmartTestCrawler:
 
                     if review_elem:
                         review_text = review_elem[0].text_content().strip() if hasattr(review_elem[0], 'text_content') else str(review_elem[0]).strip()
-                        if review_text and len(review_text) > 10:
+                        if review_text and len(review_text) > 0:
                             reviews.append(review_text)
 
                 # Click Next Page if needed

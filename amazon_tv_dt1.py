@@ -1581,50 +1581,92 @@ class AmazonDetailCrawler:
 
                 print(f"  [INFO] Retry complete - Name: {'OK' if retailer_sku_name else 'NULL'}, Star: {'OK' if star_rating else 'NULL'}, Price: {'OK' if final_sku_price else 'NULL'}")
 
-            # Check for error conditions and retry once if detected
+            # Check for error conditions and retry up to 3 times
             try:
-                # Initial error detection
-                cor = data.get('count_of_reviews')
-                cosr = data.get('Count_of_Star_Ratings')
-                drc = data.get('Detailed_Review_Content')
-                fsp = data.get('final_sku_price')
-                sr = data.get('Star_Rating')
+                def check_error_conditions(data):
+                    """Check for null/error conditions in extracted data"""
+                    cor = data.get('count_of_reviews')
+                    cosr = data.get('Count_of_Star_Ratings')
+                    drc = data.get('Detailed_Review_Content')
+                    fsp = data.get('final_sku_price')
+                    sr = data.get('Star_Rating')
+                    src = data.get('Summarized_Review_Content')
 
-                cor_int = int(str(cor).replace(',', '')) if cor else 0
-                cosr_int = int(str(cosr).replace(',', '')) if cosr else 0
-                drc_is_null = drc is None or (isinstance(drc, str) and drc.strip() == '')
-                fsp_is_null = fsp is None or (isinstance(fsp, str) and fsp.strip() == '')
-                sr_exists = sr is not None and str(sr).strip() != '' and str(sr).strip().lower() != 'no customer reviews'
-                cosr_is_null = cosr is None
+                    cor_int = int(str(cor).replace(',', '')) if cor else 0
+                    cosr_int = int(str(cosr).replace(',', '')) if cosr else 0
+                    drc_is_null = drc is None or (isinstance(drc, str) and drc.strip() == '')
+                    fsp_is_null = fsp is None or (isinstance(fsp, str) and fsp.strip() == '')
+                    sr_is_null = sr is None or str(sr).strip() == ''
+                    sr_is_no_reviews = sr is not None and str(sr).strip().lower() == 'no customer reviews'
+                    cor_is_null = cor is None
+                    cosr_is_null = cosr is None
+                    src_is_null = src is None or (isinstance(src, str) and src.strip() == '')
 
-                # Check for retryable errors
-                has_fsp_null = fsp_is_null
-                has_cosr_null = sr_exists and cosr_is_null
-                has_rv_detail_null = cor_int > 0 and drc_is_null
+                    # Error conditions
+                    has_sr_null = sr_is_null  # star_rating is null
+                    has_cor_null = cor_is_null  # count_of_reviews is null
+                    has_cosr_null = cosr_is_null  # count_of_star_ratings is null
+                    has_fsp_null = fsp_is_null  # final_sku_price is null
+                    has_rv_detail_null = cor_int > 0 and drc_is_null  # reviews > 0 but content null
+                    has_src_null = cor_int > 0 and src_is_null  # reviews > 0 but summarized review null
 
-                # Retry once if any retryable error detected
-                if has_fsp_null or has_cosr_null or has_rv_detail_null:
-                    print(f"  [INFO] Error detected (fsp_null={has_fsp_null}, cosr_null={has_cosr_null}, rv_detail_null={has_rv_detail_null}), retrying...")
+                    return {
+                        'has_sr_null': has_sr_null,
+                        'has_cor_null': has_cor_null,
+                        'has_cosr_null': has_cosr_null,
+                        'has_fsp_null': has_fsp_null,
+                        'has_rv_detail_null': has_rv_detail_null,
+                        'has_src_null': has_src_null,
+                        'cor_int': cor_int,
+                        'cosr_int': cosr_int,
+                        'sr': sr,
+                        'sr_is_no_reviews': sr_is_no_reviews
+                    }
 
-                    # Refresh page and re-extract
-                    self.driver.refresh()
-                    time.sleep(2)
+                def has_any_error(errors):
+                    """Check if any error condition exists"""
+                    return (errors['has_sr_null'] or errors['has_cor_null'] or
+                            errors['has_cosr_null'] or errors['has_fsp_null'] or
+                            errors['has_rv_detail_null'] or errors['has_src_null'])
+
+                def re_extract_summarized_review():
+                    """Re-extract summarized review content with WebDriverWait"""
+                    try:
+                        wait = WebDriverWait(self.driver, 10)
+                        summary_element = wait.until(
+                            EC.presence_of_element_located((By.XPATH, '//div[@data-testid="overall-summary"]//span[contains(@class, "__SAR2l0zNyyuZ")]'))
+                        )
+                        return summary_element.text.strip() if summary_element.text else None
+                    except:
+                        return None
+
+                def re_extract_fields(errors, url, data):
+                    """Re-extract fields based on error type"""
                     tree = html.fromstring(self.driver.page_source)
 
-                    # Re-extract fields based on error type
-                    if has_fsp_null:
-                        fsp = self.extract_final_sku_price(tree)
-                        data['final_sku_price'] = fsp
-                        print(f"  [INFO] Retry fsp: {fsp}")
+                    if errors['has_sr_null']:
+                        sr = self.extract_star_rating(tree)
+                        data['Star_Rating'] = sr
+                        print(f"    - star_rating: {sr}")
 
-                    if has_cosr_null:
+                    if errors['has_cosr_null']:
                         cosr = self.extract_count_of_star_ratings(tree)
                         data['Count_of_Star_Ratings'] = cosr
-                        print(f"  [INFO] Retry cosr: {cosr}")
+                        print(f"    - count_of_star_ratings: {cosr}")
 
-                    if has_rv_detail_null:
-                        # Re-navigate to review page (only if star_rating is not "No customer reviews")
-                        # First check for "0 customer reviews" pattern on detail page
+                    if errors['has_fsp_null']:
+                        fsp = self.extract_final_sku_price(tree)
+                        data['final_sku_price'] = fsp
+                        print(f"    - final_sku_price: {fsp}")
+
+                    if errors['has_src_null']:
+                        src = re_extract_summarized_review()
+                        data['Summarized_Review_Content'] = src
+                        print(f"    - summarized_review: {'OK' if src else 'NULL'}")
+
+                    if errors['has_cor_null'] or errors['has_rv_detail_null']:
+                        # Check for "0 customer reviews" pattern
+                        sr = data.get('Star_Rating')
                         zero_reviews_detected = False
                         zero_reviews_xpaths = [
                             '//*[@id="reviewsMedley"]//div[@class="a-box-inner"]',
@@ -1636,40 +1678,71 @@ class AmazonDetailCrawler:
                             if zero_text:
                                 match = re.search(r'(\d+)\s*customer\s*reviews?', zero_text, re.IGNORECASE)
                                 if match and match.group(1) == '0':
-                                    print(f"  [INFO] Error retry: Detected '0 customer reviews' on detail page")
                                     zero_reviews_detected = True
                                     break
 
                         if sr == "No customer reviews" or zero_reviews_detected:
                             data['Detailed_Review_Content'] = None
                             data['count_of_reviews'] = "0"
-                            print(f"  [INFO] Retry rv: 0 customer reviews detected, skipping review page")
+                            print(f"    - count_of_reviews: 0 (no customer reviews)")
                         else:
                             drc, cor = self.extract_detailed_reviews_from_review_page(url)
                             data['Detailed_Review_Content'] = drc
                             data['count_of_reviews'] = cor
-                            print(f"  [INFO] Retry rv: reviews={cor}, content={'OK' if drc else 'NULL'}")
+                            print(f"    - count_of_reviews: {cor}, detailed_review: {'OK' if drc else 'NULL'}")
 
-                    # Re-check error conditions after retry
-                    cor = data.get('count_of_reviews')
-                    cosr = data.get('Count_of_Star_Ratings')
-                    drc = data.get('Detailed_Review_Content')
-                    fsp = data.get('final_sku_price')
+                # Initial error check
+                errors = check_error_conditions(data)
 
-                    cor_int = int(str(cor).replace(',', '')) if cor else 0
-                    cosr_int = int(str(cosr).replace(',', '')) if cosr else 0
-                    drc_is_null = drc is None or (isinstance(drc, str) and drc.strip() == '')
-                    fsp_is_null = fsp is None or (isinstance(fsp, str) and fsp.strip() == '')
-                    cosr_is_null = cosr is None
+                # Retry up to 3 times if any error detected
+                if has_any_error(errors):
+                    for retry_num in range(1, 4):
+                        print(f"  [RETRY {retry_num}/3] Errors: sr={errors['has_sr_null']}, cor={errors['has_cor_null']}, cosr={errors['has_cosr_null']}, fsp={errors['has_fsp_null']}, rv={errors['has_rv_detail_null']}, src={errors['has_src_null']}")
 
-                    has_fsp_null = fsp_is_null
-                    has_cosr_null = sr_exists and cosr_is_null
-                    has_rv_detail_null = cor_int > 0 and drc_is_null
+                        if retry_num == 1:
+                            # 1st retry: Refresh page
+                            print(f"  [RETRY 1/3] Refreshing page...")
+                            self.driver.refresh()
+                            time.sleep(3)
+                        elif retry_num == 2:
+                            # 2nd retry: Reload cookies and re-access URL
+                            print(f"  [RETRY 2/3] Reloading cookies and re-accessing URL...")
+                            self.load_cookies()
+                            self.driver.get(url)
+                            time.sleep(random.uniform(3, 5))
+                        else:
+                            # 3rd retry: Re-access URL with extended wait
+                            print(f"  [RETRY 3/3] Re-accessing URL with extended wait...")
+                            self.driver.get(url)
+                            time.sleep(5)
+                            # Wait for key elements
+                            try:
+                                WebDriverWait(self.driver, 15).until(
+                                    EC.presence_of_element_located((By.ID, 'productTitle'))
+                                )
+                            except:
+                                pass
 
-                    print(f"  [INFO] After retry - fsp_null={has_fsp_null}, cosr_null={has_cosr_null}, rv_detail_null={has_rv_detail_null}")
+                        # Re-extract fields
+                        print(f"  [RETRY {retry_num}/3] Re-extracting fields...")
+                        re_extract_fields(errors, url, data)
 
-                # Add to error records only if error persists after retry
-                if has_rv_detail_null:
+                        # Check if errors are resolved
+                        errors = check_error_conditions(data)
+                        if not has_any_error(errors):
+                            print(f"  [OK] All errors resolved after retry {retry_num}")
+                            break
+                    else:
+                        print(f"  [WARNING] Some errors persist after 3 retries")
+
+                # Final error check for logging
+                errors = check_error_conditions(data)
+                cor_int = errors['cor_int']
+                cosr_int = errors['cosr_int']
+                sr = errors['sr']
+
+                # Add to error records only if error persists after all retries
+                if errors['has_rv_detail_null']:
                     print(f"  [WARNING] rv_detail_null persists: count_of_reviews={cor_int}, detailed_review_content=NULL")
                     print(f"            URL: {data.get('product_url', 'N/A')}")
                     self.rv_detail_null_records.append({
@@ -1679,7 +1752,7 @@ class AmazonDetailCrawler:
                         'account': self.current_account
                     })
 
-                if has_fsp_null:
+                if errors['has_fsp_null']:
                     print(f"  [WARNING] fsp_null persists: final_sku_price=NULL")
                     print(f"            URL: {data.get('product_url', 'N/A')}")
                     self.fsp_null_records.append({
@@ -1687,7 +1760,7 @@ class AmazonDetailCrawler:
                         'account': self.current_account
                     })
 
-                if has_cosr_null:
+                if errors['has_cosr_null']:
                     print(f"  [WARNING] cosr_null persists: star_rating={sr}, count_of_star_ratings=NULL")
                     print(f"            URL: {data.get('product_url', 'N/A')}")
                     self.cosr_null_records.append({

@@ -14,6 +14,9 @@ from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from lxml import html
 
@@ -238,26 +241,83 @@ class AmazonTestCrawler:
             print(f"  [WARNING] Failed to extract star rating: {e}")
             return None
 
-    def extract_count_of_reviews(self, tree):
-        """Extract count of reviews"""
+    def extract_count_of_reviews_from_review_page(self, tree):
+        """Navigate to review page and extract count_of_reviews
+
+        Returns:
+            str: count_of_reviews value or None
+        """
         try:
-            xpaths = [
-                '//*[@id="acrCustomerReviewLink"]/span',
-                '//a[@id="acrCustomerReviewLink"]/span',
-                '//span[@data-hook="total-review-count"]'
+            # Find review page link from detail page
+            review_link_xpaths = [
+                '//a[@data-hook="see-all-reviews-link-foot"]/@href',
+                '//*[@id="reviews-medley-footer"]//a[contains(@href, "product-reviews")]/@href',
+                '//*[@id="reviews-medley-footer"]/div[2]/a/@href',
+                '//a[contains(text(), "See more reviews")]/@href',
+                '//a[contains(text(), "See all reviews")]/@href',
+                '//a[contains(@href, "product-reviews")]/@href'
             ]
 
-            for xpath in xpaths:
-                text = self.extract_text_safe(tree, xpath)
-                if text:
-                    text = text.replace(',', '').strip()
-                    match = re.search(r'(\d+)', text)
-                    if match:
-                        return match.group(1)
-            return None
+            review_link = None
+            for idx, xpath in enumerate(review_link_xpaths, 1):
+                result = tree.xpath(xpath)
+                if result:
+                    review_link = result[0]
+                    print(f"  [DEBUG] Found review link with XPath #{idx}: {review_link[:80]}...")
+                    break
+
+            if not review_link:
+                print("  [WARNING] Could not find review page link")
+                return None
+
+            # Build full review URL
+            if review_link.startswith('http'):
+                review_url = review_link
+            else:
+                review_url = "https://www.amazon.com" + review_link
+
+            print(f"  [INFO] Navigating to review page: {review_url[:80]}...")
+            self.driver.get(review_url)
+            time.sleep(random.uniform(3, 4))
+
+            # Wait for count_of_reviews element to load
+            count_of_reviews = None
+            try:
+                WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, '//*[@id="filter-info-section"] | //div[@data-hook="cr-filter-info-review-rating-count"]'))
+                )
+
+                # Extract count_of_reviews from review page
+                review_tree = html.fromstring(self.driver.page_source)
+                count_xpaths = [
+                    '//*[@id="filter-info-section"]/div',
+                    '//div[@data-hook="cr-filter-info-review-rating-count"]',
+                    '//div[contains(@data-hook, "review-rating-count")]'
+                ]
+
+                for xpath in count_xpaths:
+                    count_elements = review_tree.xpath(xpath)
+                    if count_elements:
+                        count_text = count_elements[0].text_content().strip() if hasattr(count_elements[0], 'text_content') else str(count_elements[0]).strip()
+                        if count_text:
+                            print(f"  [DEBUG] count_text found: {count_text[:100]}...")
+                            # Try multiple patterns
+                            match = re.search(r'([\d,]+)\s*customer\s*reviews?', count_text, re.IGNORECASE)
+                            if not match:
+                                match = re.search(r'([\d,]+)\s*with\s*reviews?', count_text, re.IGNORECASE)
+                            if not match:
+                                match = re.search(r'([\d,]+)\s*reviews?', count_text, re.IGNORECASE)
+                            if match:
+                                count_of_reviews = match.group(1)
+                                print(f"  [OK] Extracted count_of_reviews from review page: {count_of_reviews}")
+                                break
+            except Exception as e:
+                print(f"  [WARNING] count_of_reviews element not loaded: {e}")
+
+            return count_of_reviews
 
         except Exception as e:
-            print(f"  [WARNING] Failed to extract count of reviews: {e}")
+            print(f"  [WARNING] Failed to extract count of reviews from review page: {e}")
             return None
 
     def extract_count_of_star_ratings(self, tree):
@@ -297,11 +357,13 @@ class AmazonTestCrawler:
             page_source = self.driver.page_source
             tree = html.fromstring(page_source)
 
-            # Extract fields
+            # Extract fields from detail page
             final_sku_price = self.extract_final_sku_price(tree)
             star_rating = self.extract_star_rating(tree)
-            count_of_reviews = self.extract_count_of_reviews(tree)
             count_of_star_ratings = self.extract_count_of_star_ratings(tree)
+
+            # Extract count_of_reviews from review page
+            count_of_reviews = self.extract_count_of_reviews_from_review_page(tree)
 
             # Print results
             print(f"\n  [RESULT]")

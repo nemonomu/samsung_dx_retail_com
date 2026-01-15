@@ -928,6 +928,7 @@ class BestBuyDetailCrawler:
     def extract_count_of_reviews_from_detail(self, tree):
         """Count of Reviews extraction (메인 detail page에서) - visually-hidden 우선
         Example: '(79 reviews)' -> '79', 'Not yet reviewed' -> 0
+        Note: '(45 reviews from Skyworth USA)' 같은 외부 리뷰는 'EXTERNAL_REVIEWS' 반환
         """
         try:
             # Priority 1: visually-hidden p tag
@@ -940,6 +941,10 @@ class BestBuyDetailCrawler:
                 elem = tree.xpath(xpath)
                 if elem:
                     text = elem[0].text_content().strip()
+                    # 외부 리뷰 감지: "with 45 reviews from Skyworth USA" 같은 패턴
+                    if re.search(r'reviews?\s+from\s+', text, re.IGNORECASE):
+                        print(f"  [INFO] External reviews detected (visually-hidden): {text}")
+                        return 'EXTERNAL_REVIEWS'
                     match = re.search(r'with\s+([\d,]+)\s+reviews', text)
                     if match:
                         return match.group(1).replace(',', '')
@@ -965,7 +970,10 @@ class BestBuyDetailCrawler:
                 './/div/div[3]/a/div/span[2]',
                 './/span[@class="c-reviews order-2"]',
                 './/span[contains(@class, "c-reviews")]',
-                './/span[@aria-hidden="true"][contains(@class, "order-2")]'
+                './/span[@aria-hidden="true"][contains(@class, "order-2")]',
+                # 외부 리뷰 패턴 (예: Skyworth USA) - 감지용
+                './/div/div[3]/a/div/span',
+                './/span[contains(@class, "c-ratings-reviews")]'
             ]
 
             for xpath in reviews_xpaths:
@@ -975,6 +983,12 @@ class BestBuyDetailCrawler:
 
                     if "Not yet reviewed" in text:
                         return 0
+
+                    # 외부 리뷰 감지: "(45 reviews from Skyworth USA)" 같은 패턴
+                    # BestBuy 자체 리뷰가 아니므로 EXTERNAL_REVIEWS 반환
+                    if re.search(r'reviews?\s+from\s+', text, re.IGNORECASE):
+                        print(f"  [INFO] External reviews detected: {text}")
+                        return 'EXTERNAL_REVIEWS'
 
                     match = re.search(r'\(([\d,]+)\s*reviews?[^)]*\)', text, re.IGNORECASE)
                     if match:
@@ -1810,11 +1824,23 @@ class BestBuyDetailCrawler:
             print(f"  [✓] Star_Rating: {star_rating}")
 
             count_of_reviews = self.extract_count_of_reviews_from_detail(tree)
-            print(f"  [✓] Count_of_Reviews: {count_of_reviews}")
+
+            # 외부 리뷰 감지 시 (예: "reviews from Skyworth USA") 0으로 처리
+            is_external_reviews = (count_of_reviews == 'EXTERNAL_REVIEWS')
+            if is_external_reviews:
+                count_of_reviews = 0
+                print(f"  [✓] Count_of_Reviews: 0 (외부 리뷰 - BestBuy 자체 리뷰 아님)")
+            else:
+                print(f"  [✓] Count_of_Reviews: {count_of_reviews}")
 
             # 2-3. Summarized Review Content extraction (AI 요약 리뷰)
-            summarized_review_content = self.extract_summarized_review_content(tree)
-            print(f"  [✓] Summarized_Review_Content: {summarized_review_content[:50] if summarized_review_content else 'None'}...")
+            # 외부 리뷰인 경우 수집하지 않음
+            if is_external_reviews:
+                summarized_review_content = None
+                print(f"  [✓] Summarized_Review_Content: None (외부 리뷰 - 수집 안함)")
+            else:
+                summarized_review_content = self.extract_summarized_review_content(tree)
+                print(f"  [✓] Summarized_Review_Content: {summarized_review_content[:50] if summarized_review_content else 'None'}...")
 
             # 3. Compare similar products extraction (사용 안함 - 주석처리)
             # mst_products = self.extract_compare_similar_products(product_url)
@@ -1854,7 +1880,10 @@ class BestBuyDetailCrawler:
             detailed_reviews = None
             recommendation_intent = None
 
-            if self.click_see_all_reviews(product_url):
+            # 외부 리뷰인 경우 리뷰 페이지 접근 스킵
+            if is_external_reviews:
+                print(f"  [INFO] 외부 리뷰 - 리뷰 페이지 수집 스킵 (detailed_reviews, top_mentions 등 수집 안함)")
+            elif self.click_see_all_reviews(product_url):
                 # 9-0. 상세페이지에서 star_rating 못 찾았으면 리뷰 페이지에서 재추출
                 if not star_rating or star_rating == "Not yet reviewed":
                     star_rating_from_reviews = self.extract_star_rating_from_reviews_page()
@@ -2036,7 +2065,7 @@ class BestBuyDetailCrawler:
             # Also insert into unified tv_retail_com table
             # Convert count_of_reviews to integer (remove commas if present)
             count_of_reviews_int = None
-            if count_of_reviews:
+            if count_of_reviews is not None:
                 try:
                     count_of_reviews_int = int(str(count_of_reviews).replace(',', ''))
                 except:

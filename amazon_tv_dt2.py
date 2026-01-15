@@ -685,17 +685,33 @@ class AmazonDetailCrawler:
     def extract_star_rating(self, tree):
         """Extract star rating (format: '4.5' or 'No customer reviews')"""
         try:
-            # Try to get star rating from database XPath
-            star_rating_text = self.extract_text_safe(tree, self.xpaths.get('star_rating'))
+            # Try multiple XPaths for star rating
+            star_rating_xpaths = [
+                self.xpaths.get('star_rating'),  # DB XPath
+                '//*[@id="acrPopover"]/@title',
+                '//*[@id="averageCustomerReviews"]//span[@class="a-icon-alt"]',
+                '//span[@data-hook="rating-out-of-text"]',
+                '//*[@id="acrPopover"]/span[1]/a/span'
+            ]
 
-            if star_rating_text:
-                # Check for "No customer reviews" first
-                if "No customer reviews" in star_rating_text:
-                    return "No customer reviews"
+            for xpath in star_rating_xpaths:
+                if not xpath:
+                    continue
+                star_rating_text = self.extract_text_safe(tree, xpath)
 
-                # Return the star rating as-is if it contains a number
-                if re.search(r'\d', star_rating_text):
-                    return star_rating_text
+                if star_rating_text:
+                    # Check for "No customer reviews" first
+                    if "No customer reviews" in star_rating_text:
+                        return "No customer reviews"
+
+                    # Extract "X.X out of 5" pattern
+                    match = re.search(r'(\d+\.?\d*)\s*out of\s*5', star_rating_text)
+                    if match:
+                        return match.group(1)
+
+                    # Return as-is if it contains a number
+                    if re.search(r'\d', star_rating_text):
+                        return star_rating_text
 
             # Fallback: Check for "No customer reviews" at specific location
             no_reviews_xpaths = [
@@ -778,18 +794,28 @@ class AmazonDetailCrawler:
         Returns: integer (e.g., 2449) or None
         """
         try:
-            # Get total count from "2,449 global ratings"
-            total_text = self.extract_text_safe(tree, '//*[@id="cm_cr_dp_d_rating_histogram"]/div[3]')
-            if not total_text:
-                return None
+            # Primary: Get total count from "2,449 global ratings" in histogram section
+            xpaths = [
+                '//*[@id="cm_cr_dp_d_rating_histogram"]/div[3]',
+                '//*[@id="acrCustomerReviewText"]',
+                '//span[@id="acrCustomerReviewText"]',
+                '//a[@id="acrCustomerReviewLink"]//span'
+            ]
 
-            # Extract number from "2,449 global ratings" or "1 global rating"
-            total_match = re.search(r'([\d,]+)\s*global ratings?', total_text)
-            if not total_match:
-                return None
+            for xpath in xpaths:
+                total_text = self.extract_text_safe(tree, xpath)
+                if total_text:
+                    # Try "2,449 global ratings" pattern first
+                    total_match = re.search(r'([\d,]+)\s*global ratings?', total_text)
+                    if total_match:
+                        return int(total_match.group(1).replace(',', ''))
 
-            total_count = int(total_match.group(1).replace(',', ''))
-            return total_count
+                    # Fallback: "2,414 ratings" pattern
+                    total_match = re.search(r'([\d,]+)\s*ratings?', total_text)
+                    if total_match:
+                        return int(total_match.group(1).replace(',', ''))
+
+            return None
 
         except Exception as e:
             print(f"  [WARNING] Failed to extract star ratings count: {e}")
@@ -1039,7 +1065,7 @@ class AmazonDetailCrawler:
             # Wait for count_of_reviews element to load, then extract
             count_of_reviews = None
             try:
-                WebDriverWait(self.driver, 5).until(
+                WebDriverWait(self.driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, '//*[@id="filter-info-section"] | //div[@data-hook="cr-filter-info-review-rating-count"]'))
                 )
                 # Element loaded - extract count_of_reviews
@@ -1047,7 +1073,8 @@ class AmazonDetailCrawler:
                 count_xpaths = [
                     '//*[@id="filter-info-section"]/div',
                     '//div[@data-hook="cr-filter-info-review-rating-count"]',
-                    '//div[contains(@data-hook, "review-rating-count")]'
+                    '//div[contains(@data-hook, "review-rating-count")]',
+                    '//*[@id="filter-info-section"]'
                 ]
                 for xpath in count_xpaths:
                     count_elements = tree.xpath(xpath)
@@ -1055,17 +1082,25 @@ class AmazonDetailCrawler:
                         count_text = count_elements[0].text_content().strip() if hasattr(count_elements[0], 'text_content') else str(count_elements[0]).strip()
                         if count_text:
                             print(f"  [DEBUG] count_text found: {count_text[:100]}...")
+                            # Try multiple patterns
                             match = re.search(r'([\d,]+)\s*customer\s*reviews?', count_text, re.IGNORECASE)
                             if not match:
                                 match = re.search(r'([\d,]+)\s*with\s*reviews?', count_text, re.IGNORECASE)
                             if not match:
                                 match = re.search(r'([\d,]+)\s*reviews?', count_text, re.IGNORECASE)
+                            if not match:
+                                # Fallback: "1,234 total ratings, 567 with reviews" pattern
+                                match = re.search(r'([\d,]+)\s*total\s*ratings?,\s*([\d,]+)', count_text, re.IGNORECASE)
+                                if match:
+                                    count_of_reviews = match.group(2)  # Second number is reviews
+                                    print(f"  [OK] Extracted count_of_reviews from review page (fallback): {count_of_reviews}")
+                                    break
                             if match:
                                 count_of_reviews = match.group(1)
                                 print(f"  [OK] Extracted count_of_reviews from review page: {count_of_reviews}")
                                 break
-            except:
-                print("  [WARNING] count_of_reviews element not loaded - skipping extraction")
+            except Exception as e:
+                print(f"  [WARNING] count_of_reviews element not loaded - {str(e)[:50]}")
 
             # Collect reviews from first page (max 10 reviews per page)
             all_reviews = []
@@ -1410,32 +1445,8 @@ class AmazonDetailCrawler:
             except Exception as e:
                 print(f"  [WARNING] Summarized review not found (may not exist for this product): {str(e)[:100]}")
 
-            # [DISABLED] Extract detailed review content from product detail page (not review page)
-            # detailed_review_content = self.extract_detailed_reviews(url)
-            # count_of_reviews = count_of_star_ratings (same value)
-            # count_of_reviews = count_of_star_ratings
-
-            # Extract detailed review content and count_of_reviews from review page (up to 20 reviews)
-            # Skip review page navigation if star_rating == "No customer reviews"
-            # This avoids collecting wrong reviews from bundle products (e.g., Asurion warranty reviews)
-            if star_rating == "No customer reviews":
-                print(f"  [INFO] Skipping review page - No customer reviews")
-                detailed_review_content = None
-                count_of_reviews = "0"
-            else:
-                detailed_review_content, count_of_reviews = self.extract_detailed_reviews_from_review_page(url)
-
-            # Verify page is properly loaded after returning from review page
-            if not self.verify_page_loaded(wait_for_price=True):
-                print(f"  [WARNING] Page verification failed after review page return - continuing with available data")
-
-            # Re-parse page source after returning from review page
-            tree = html.fromstring(self.driver.page_source)
-
-            # Note: count_of_reviews is ONLY extracted from review page (no fallback to detail page)
-            # Detail page shows "ratings" count, not actual "reviews" count
-
-            # Extract prices from detail page
+            # Extract prices from detail page BEFORE navigating to review page
+            # This ensures price extraction happens on the fully loaded detail page
             final_sku_price = self.extract_final_sku_price(tree)
             # If final_sku_price is a special text value, set original_sku_price to None
             special_price_texts = [
@@ -1455,6 +1466,34 @@ class AmazonDetailCrawler:
             shipping_info = self.extract_shipping_info(tree)
             available_quantity = self.extract_available_quantity_for_purchase(tree)
             discount_type = self.extract_discount_type(tree)
+
+            # Extract detailed review content and count_of_reviews from review page (up to 20 reviews)
+            # Skip review page navigation if star_rating == "No customer reviews"
+            # This avoids collecting wrong reviews from bundle products (e.g., Asurion warranty reviews)
+
+            # First check for "0 customer reviews" pattern on detail page
+            # e.g., "There are 0 customer reviews and 2 customer ratings."
+            zero_reviews_detected = False
+            zero_reviews_xpaths = [
+                '//*[@id="reviewsMedley"]//div[@class="a-box-inner"]',
+                '//*[@id="reviewsMedley"]/div/div[2]/div/div[2]/div[3]/div[2]/div/div',
+                '//div[contains(text(), "customer reviews and")]'
+            ]
+            for xpath in zero_reviews_xpaths:
+                zero_text = self.extract_text_safe(tree, xpath)
+                if zero_text:
+                    match = re.search(r'(\d+)\s*customer\s*reviews?', zero_text, re.IGNORECASE)
+                    if match and match.group(1) == '0':
+                        print(f"  [INFO] Detected '0 customer reviews' on detail page: {zero_text[:80]}...")
+                        zero_reviews_detected = True
+                        break
+
+            if star_rating == "No customer reviews" or zero_reviews_detected:
+                print(f"  [INFO] Skipping review page - No customer reviews (count_of_reviews=0)")
+                detailed_review_content = None
+                count_of_reviews = "0"
+            else:
+                detailed_review_content, count_of_reviews = self.extract_detailed_reviews_from_review_page(url)
 
             data = {
                 'page_type': page_type,
@@ -1549,7 +1588,23 @@ class AmazonDetailCrawler:
                 final_sku_price = self.extract_final_sku_price(tree)
 
                 # Re-extract count_of_reviews from review page (only if has reviews)
-                if star_rating == "No customer reviews":
+                # First check for "0 customer reviews" pattern on detail page
+                zero_reviews_detected = False
+                zero_reviews_xpaths = [
+                    '//*[@id="reviewsMedley"]//div[@class="a-box-inner"]',
+                    '//*[@id="reviewsMedley"]/div/div[2]/div/div[2]/div[3]/div[2]/div/div',
+                    '//div[contains(text(), "customer reviews and")]'
+                ]
+                for xpath in zero_reviews_xpaths:
+                    zero_text = self.extract_text_safe(tree, xpath)
+                    if zero_text:
+                        match = re.search(r'(\d+)\s*customer\s*reviews?', zero_text, re.IGNORECASE)
+                        if match and match.group(1) == '0':
+                            print(f"  [INFO] Retry: Detected '0 customer reviews' on detail page")
+                            zero_reviews_detected = True
+                            break
+
+                if star_rating == "No customer reviews" or zero_reviews_detected:
                     detailed_review_content = None
                     count_of_reviews = "0"
                 else:
@@ -1565,75 +1620,168 @@ class AmazonDetailCrawler:
 
                 print(f"  [INFO] Retry complete - Name: {'OK' if retailer_sku_name else 'NULL'}, Star: {'OK' if star_rating else 'NULL'}, Price: {'OK' if final_sku_price else 'NULL'}")
 
-            # Check for error conditions and retry once if detected
+            # Check for error conditions and retry up to 3 times
             try:
-                # Initial error detection
-                cor = data.get('count_of_reviews')
-                cosr = data.get('Count_of_Star_Ratings')
-                drc = data.get('Detailed_Review_Content')
-                fsp = data.get('final_sku_price')
-                sr = data.get('Star_Rating')
-
-                cor_int = int(str(cor).replace(',', '')) if cor else 0
-                cosr_int = int(str(cosr).replace(',', '')) if cosr else 0
-                drc_is_null = drc is None or (isinstance(drc, str) and drc.strip() == '')
-                fsp_is_null = fsp is None or (isinstance(fsp, str) and fsp.strip() == '')
-                sr_exists = sr is not None and str(sr).strip() != '' and str(sr).strip().lower() != 'no customer reviews'
-                cosr_is_null = cosr is None
-
-                # Check for retryable errors
-                has_fsp_null = fsp_is_null
-                has_cosr_null = sr_exists and cosr_is_null
-                has_rv_detail_null = cor_int > 0 and drc_is_null
-
-                # Retry once if any retryable error detected
-                if has_fsp_null or has_cosr_null or has_rv_detail_null:
-                    print(f"  [INFO] Error detected (fsp_null={has_fsp_null}, cosr_null={has_cosr_null}, rv_detail_null={has_rv_detail_null}), retrying...")
-
-                    # Refresh page and re-extract
-                    self.driver.refresh()
-                    time.sleep(2)
-                    tree = html.fromstring(self.driver.page_source)
-
-                    # Re-extract fields based on error type
-                    if has_fsp_null:
-                        fsp = self.extract_final_sku_price(tree)
-                        data['final_sku_price'] = fsp
-                        print(f"  [INFO] Retry fsp: {fsp}")
-
-                    if has_cosr_null:
-                        cosr = self.extract_count_of_star_ratings(tree)
-                        data['Count_of_Star_Ratings'] = cosr
-                        print(f"  [INFO] Retry cosr: {cosr}")
-
-                    if has_rv_detail_null:
-                        # Re-navigate to review page (only if star_rating is not "No customer reviews")
-                        if sr != "No customer reviews":
-                            drc, cor = self.extract_detailed_reviews_from_review_page(url)
-                            data['Detailed_Review_Content'] = drc
-                            data['count_of_reviews'] = cor
-                            print(f"  [INFO] Retry rv: reviews={cor}, content={'OK' if drc else 'NULL'}")
-
-                    # Re-check error conditions after retry
+                def check_error_conditions(data):
+                    """Check for null/error conditions in extracted data"""
                     cor = data.get('count_of_reviews')
                     cosr = data.get('Count_of_Star_Ratings')
                     drc = data.get('Detailed_Review_Content')
                     fsp = data.get('final_sku_price')
+                    sr = data.get('Star_Rating')
+                    src = data.get('Summarized_Review_Content')
 
                     cor_int = int(str(cor).replace(',', '')) if cor else 0
                     cosr_int = int(str(cosr).replace(',', '')) if cosr else 0
                     drc_is_null = drc is None or (isinstance(drc, str) and drc.strip() == '')
                     fsp_is_null = fsp is None or (isinstance(fsp, str) and fsp.strip() == '')
+                    sr_is_null = sr is None or str(sr).strip() == ''
+                    sr_is_no_reviews = sr is not None and str(sr).strip().lower() == 'no customer reviews'
+                    cor_is_null = cor is None
                     cosr_is_null = cosr is None
+                    src_is_null = src is None or (isinstance(src, str) and src.strip() == '')
 
-                    has_fsp_null = fsp_is_null
-                    has_cosr_null = sr_exists and cosr_is_null
-                    has_rv_detail_null = cor_int > 0 and drc_is_null
+                    # Error conditions
+                    has_sr_null = sr_is_null  # star_rating is null
+                    has_cor_null = cor_is_null  # count_of_reviews is null
+                    has_cosr_null = cosr_is_null  # count_of_star_ratings is null
+                    has_fsp_null = fsp_is_null  # final_sku_price is null
+                    has_rv_detail_null = cor_int > 0 and drc_is_null  # reviews > 0 but content null
+                    has_src_null = cor_int > 0 and src_is_null  # reviews > 0 but summarized review null
 
-                    print(f"  [INFO] After retry - fsp_null={has_fsp_null}, cosr_null={has_cosr_null}, rv_detail_null={has_rv_detail_null}")
+                    return {
+                        'has_sr_null': has_sr_null,
+                        'has_cor_null': has_cor_null,
+                        'has_cosr_null': has_cosr_null,
+                        'has_fsp_null': has_fsp_null,
+                        'has_rv_detail_null': has_rv_detail_null,
+                        'has_src_null': has_src_null,
+                        'cor_int': cor_int,
+                        'cosr_int': cosr_int,
+                        'sr': sr,
+                        'sr_is_no_reviews': sr_is_no_reviews
+                    }
 
-                # Add to error records only if error persists after retry
-                if has_rv_detail_null:
+                def has_any_error(errors):
+                    """Check if any error condition exists"""
+                    return (errors['has_sr_null'] or errors['has_cor_null'] or
+                            errors['has_cosr_null'] or errors['has_fsp_null'] or
+                            errors['has_rv_detail_null'] or errors['has_src_null'])
+
+                def re_extract_summarized_review():
+                    """Re-extract summarized review content with WebDriverWait"""
+                    try:
+                        wait = WebDriverWait(self.driver, 10)
+                        summary_element = wait.until(
+                            EC.presence_of_element_located((By.XPATH, '//div[@data-testid="overall-summary"]//span[contains(@class, "__SAR2l0zNyyuZ")]'))
+                        )
+                        return summary_element.text.strip() if summary_element.text else None
+                    except:
+                        return None
+
+                def re_extract_fields(errors, url, data):
+                    """Re-extract fields based on error type"""
+                    tree = html.fromstring(self.driver.page_source)
+
+                    if errors['has_sr_null']:
+                        sr = self.extract_star_rating(tree)
+                        data['Star_Rating'] = sr
+                        print(f"    - star_rating: {sr}")
+
+                    if errors['has_cosr_null']:
+                        cosr = self.extract_count_of_star_ratings(tree)
+                        data['Count_of_Star_Ratings'] = cosr
+                        print(f"    - count_of_star_ratings: {cosr}")
+
+                    if errors['has_fsp_null']:
+                        fsp = self.extract_final_sku_price(tree)
+                        data['final_sku_price'] = fsp
+                        print(f"    - final_sku_price: {fsp}")
+
+                    if errors['has_src_null']:
+                        src = re_extract_summarized_review()
+                        data['Summarized_Review_Content'] = src
+                        print(f"    - summarized_review: {'OK' if src else 'NULL'}")
+
+                    if errors['has_cor_null'] or errors['has_rv_detail_null']:
+                        # Check for "0 customer reviews" pattern
+                        sr = data.get('Star_Rating')
+                        zero_reviews_detected = False
+                        zero_reviews_xpaths = [
+                            '//*[@id="reviewsMedley"]//div[@class="a-box-inner"]',
+                            '//*[@id="reviewsMedley"]/div/div[2]/div/div[2]/div[3]/div[2]/div/div',
+                            '//div[contains(text(), "customer reviews and")]'
+                        ]
+                        for xpath in zero_reviews_xpaths:
+                            zero_text = self.extract_text_safe(tree, xpath)
+                            if zero_text:
+                                match = re.search(r'(\d+)\s*customer\s*reviews?', zero_text, re.IGNORECASE)
+                                if match and match.group(1) == '0':
+                                    zero_reviews_detected = True
+                                    break
+
+                        if sr == "No customer reviews" or zero_reviews_detected:
+                            data['Detailed_Review_Content'] = None
+                            data['count_of_reviews'] = "0"
+                            print(f"    - count_of_reviews: 0 (no customer reviews)")
+                        else:
+                            drc, cor = self.extract_detailed_reviews_from_review_page(url)
+                            data['Detailed_Review_Content'] = drc
+                            data['count_of_reviews'] = cor
+                            print(f"    - count_of_reviews: {cor}, detailed_review: {'OK' if drc else 'NULL'}")
+
+                # Initial error check
+                errors = check_error_conditions(data)
+
+                # Retry up to 3 times if any error detected
+                if has_any_error(errors):
+                    for retry_num in range(1, 4):
+                        print(f"  [RETRY {retry_num}/3] Errors: sr={errors['has_sr_null']}, cor={errors['has_cor_null']}, cosr={errors['has_cosr_null']}, fsp={errors['has_fsp_null']}, rv={errors['has_rv_detail_null']}, src={errors['has_src_null']}")
+
+                        if retry_num == 1:
+                            # 1st retry: Refresh page
+                            print(f"  [RETRY 1/3] Refreshing page...")
+                            self.driver.refresh()
+                            time.sleep(3)
+                        elif retry_num == 2:
+                            # 2nd retry: Reload cookies and re-access URL
+                            print(f"  [RETRY 2/3] Reloading cookies and re-accessing URL...")
+                            self.load_cookies()
+                            self.driver.get(url)
+                            time.sleep(random.uniform(3, 5))
+                        else:
+                            # 3rd retry: Re-access URL with extended wait
+                            print(f"  [RETRY 3/3] Re-accessing URL with extended wait...")
+                            self.driver.get(url)
+                            time.sleep(5)
+                            # Wait for key elements
+                            try:
+                                WebDriverWait(self.driver, 15).until(
+                                    EC.presence_of_element_located((By.ID, 'productTitle'))
+                                )
+                            except:
+                                pass
+
+                        # Re-extract fields
+                        print(f"  [RETRY {retry_num}/3] Re-extracting fields...")
+                        re_extract_fields(errors, url, data)
+
+                        # Check if errors are resolved
+                        errors = check_error_conditions(data)
+                        if not has_any_error(errors):
+                            print(f"  [OK] All errors resolved after retry {retry_num}")
+                            break
+                    else:
+                        print(f"  [WARNING] Some errors persist after 3 retries")
+
+                # Final error check for logging
+                errors = check_error_conditions(data)
+                cor_int = errors['cor_int']
+                cosr_int = errors['cosr_int']
+                sr = errors['sr']
+
+                # Add to error records only if error persists after all retries
+                if errors['has_rv_detail_null']:
                     print(f"  [WARNING] rv_detail_null persists: count_of_reviews={cor_int}, detailed_review_content=NULL")
                     print(f"            URL: {data.get('product_url', 'N/A')}")
                     self.rv_detail_null_records.append({
@@ -1643,7 +1791,7 @@ class AmazonDetailCrawler:
                         'account': self.current_account
                     })
 
-                if has_fsp_null:
+                if errors['has_fsp_null']:
                     print(f"  [WARNING] fsp_null persists: final_sku_price=NULL")
                     print(f"            URL: {data.get('product_url', 'N/A')}")
                     self.fsp_null_records.append({
@@ -1651,7 +1799,7 @@ class AmazonDetailCrawler:
                         'account': self.current_account
                     })
 
-                if has_cosr_null:
+                if errors['has_cosr_null']:
                     print(f"  [WARNING] cosr_null persists: star_rating={sr}, count_of_star_ratings=NULL")
                     print(f"            URL: {data.get('product_url', 'N/A')}")
                     self.cosr_null_records.append({

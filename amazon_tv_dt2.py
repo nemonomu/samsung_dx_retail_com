@@ -700,11 +700,7 @@ class AmazonDetailCrawler:
                 star_rating_text = self.extract_text_safe(tree, xpath)
 
                 if star_rating_text:
-                    # Check for "No customer reviews" first
-                    if "No customer reviews" in star_rating_text:
-                        return "No customer reviews"
-
-                    # Extract "X.X out of 5" pattern
+                    # Extract "X.X out of 5" pattern first (prioritize numeric rating)
                     match = re.search(r'(\d+\.?\d*)\s*out of\s*5', star_rating_text)
                     if match:
                         return match.group(1)
@@ -713,7 +709,12 @@ class AmazonDetailCrawler:
                     if re.search(r'\d', star_rating_text):
                         return star_rating_text
 
+                    # Check for "No customer reviews" only if no numeric rating found
+                    if "No customer reviews" in star_rating_text:
+                        return "No customer reviews"
+
             # Fallback: Check for "No customer reviews" at specific location
+            # Only reached if no numeric rating was found above
             no_reviews_xpaths = [
                 '//*[@id="cm-cr-dp-review-header"]/h3/span',
                 '//span[@data-hook="top-customer-reviews-title"]',
@@ -897,7 +898,8 @@ class AmazonDetailCrawler:
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[3]/span[2]/span[1]',  # Main with span[1]
                 '//span[@class="a-price aok-align-center reinventPricePriceToPayMargin priceToPay"]//span[@class="a-offscreen"]',  # Generic offscreen
                 '//*[@id="corePrice_feature_div"]/div/div/span[1]/span[1]',  # Side container
-                '//*[@id="corePrice_feature_div"]//span[@class="a-offscreen"]'  # Side generic
+                '//*[@id="corePrice_feature_div"]//span[@class="a-offscreen"]',  # Side generic
+                '//*[@id="corePrice_desktop"]/div/table/tbody/tr/td[2]/span[1]/span[1]'  # Table-based price (a-offscreen)
             ]
 
             for xpath in xpaths:

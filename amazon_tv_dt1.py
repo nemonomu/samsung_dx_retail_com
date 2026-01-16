@@ -644,7 +644,9 @@ class AmazonDetailCrawler:
             return "no sku"
 
     def extract_star_rating(self, tree):
-        """Extract star rating (format: '4.5' or 'No customer reviews')"""
+        """Extract star rating (format: '4.5' or 'No customer reviews')
+        PRIORITY: Actual star rating first, then "No customer reviews" fallback
+        """
         try:
             # Try multiple XPaths for star rating
             star_rating_xpaths = [
@@ -655,31 +657,37 @@ class AmazonDetailCrawler:
                 '//*[@id="acrPopover"]/span[1]/a/span'
             ]
 
+            # PRIORITY 1: Try to extract actual star rating first
             for xpath in star_rating_xpaths:
                 if not xpath:
                     continue
                 star_rating_text = self.extract_text_safe(tree, xpath)
 
                 if star_rating_text:
-                    # Check for "No customer reviews" first
-                    if "No customer reviews" in star_rating_text:
-                        return "No customer reviews"
-
                     # Extract "X.X out of 5" pattern
                     match = re.search(r'(\d+\.?\d*)\s*out of\s*5', star_rating_text)
                     if match:
                         return match.group(1)
 
-                    # Return as-is if it contains a number
-                    if re.search(r'\d', star_rating_text):
+                    # Return as-is if it contains a number (but not "No customer reviews" text)
+                    if re.search(r'\d', star_rating_text) and "No customer reviews" not in star_rating_text:
                         return star_rating_text
 
-            # Fallback: Check for "No customer reviews" at specific location
+            # PRIORITY 2: Only check for "No customer reviews" if no star rating found
+            # Check from the same XPaths first
+            for xpath in star_rating_xpaths:
+                if not xpath:
+                    continue
+                star_rating_text = self.extract_text_safe(tree, xpath)
+                if star_rating_text and "No customer reviews" in star_rating_text:
+                    return "No customer reviews"
+
+            # Fallback: Check for "No customer reviews" at specific locations (narrowed scope)
             no_reviews_xpaths = [
                 '//*[@id="cm-cr-dp-review-header"]/h3/span',
                 '//span[@data-hook="top-customer-reviews-title"]',
-                '//div[@id="cm-cr-dp-review-header"]//span[contains(text(), "No customer reviews")]',
-                '//span[contains(text(), "No customer reviews")]'
+                '//div[@id="cm-cr-dp-review-header"]//span[contains(text(), "No customer reviews")]'
+                # Removed broad '//span[contains(text(), "No customer reviews")]' - causes false positives
             ]
 
             for xpath in no_reviews_xpaths:
@@ -858,7 +866,8 @@ class AmazonDetailCrawler:
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[3]/span[2]/span[1]',  # Main with span[1]
                 '//span[@class="a-price aok-align-center reinventPricePriceToPayMargin priceToPay"]//span[@class="a-offscreen"]',  # Generic offscreen
                 '//*[@id="corePrice_feature_div"]/div/div/span[1]/span[1]',  # Side container
-                '//*[@id="corePrice_feature_div"]//span[@class="a-offscreen"]'  # Side generic
+                '//*[@id="corePrice_feature_div"]//span[@class="a-offscreen"]',  # Side generic
+                '//*[@id="corePrice_desktop"]/div/table/tbody/tr/td[2]/span[1]/span[1]'  # Table-based price (fallback)
             ]
 
             for xpath in xpaths:

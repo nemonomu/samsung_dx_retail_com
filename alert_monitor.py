@@ -591,6 +591,72 @@ def send_alert_email(analysis, error_message=None):
             </div>
             """
 
+        # screen_size_mismatch section
+        ss_mismatch_records = analysis.get('screen_size_mismatch_records', [])
+        if analysis.get('has_screen_size_mismatch', False) and ss_mismatch_records:
+            html_content += f"""
+            <div class="section">
+                <h3 style="color: #ff6600;">Screen Size Mismatch Warning ({len(ss_mismatch_records)} items)</h3>
+                <p>The following items have different screen_size values between extracted and tv_item_mst:</p>
+                <table>
+                    <tr>
+                        <th>Item</th>
+                        <th>Extracted</th>
+                        <th>tv_item_mst</th>
+                        <th>URL</th>
+                    </tr>
+            """
+            for record in ss_mismatch_records:
+                item = record.get('item', 'N/A')
+                extracted = record.get('extracted', 'N/A')
+                mst_value = record.get('mst_value', 'N/A')
+                url = record.get('url', 'N/A')
+                html_content += f"""
+                    <tr>
+                        <td>{item}</td>
+                        <td>{extracted}</td>
+                        <td>{mst_value}</td>
+                        <td><a href="{url}">{url[:60]}...</a></td>
+                    </tr>
+                """
+            html_content += """
+                </table>
+            </div>
+            """
+
+        # electricity_use_mismatch section
+        elec_mismatch_records = analysis.get('electricity_use_mismatch_records', [])
+        if analysis.get('has_electricity_use_mismatch', False) and elec_mismatch_records:
+            html_content += f"""
+            <div class="section">
+                <h3 style="color: #ff6600;">Electricity Use Mismatch Warning ({len(elec_mismatch_records)} items)</h3>
+                <p>The following items have different electricity_use values between extracted and tv_item_mst:</p>
+                <table>
+                    <tr>
+                        <th>Item</th>
+                        <th>Extracted</th>
+                        <th>tv_item_mst</th>
+                        <th>URL</th>
+                    </tr>
+            """
+            for record in elec_mismatch_records:
+                item = record.get('item', 'N/A')
+                extracted = record.get('extracted', 'N/A')
+                mst_value = record.get('mst_value', 'N/A')
+                url = record.get('url', 'N/A')
+                html_content += f"""
+                    <tr>
+                        <td>{item}</td>
+                        <td>{extracted}</td>
+                        <td>{mst_value}</td>
+                        <td><a href="{url}">{url[:60]}...</a></td>
+                    </tr>
+                """
+            html_content += """
+                </table>
+            </div>
+            """
+
         html_content += """
             <div class="section">
                 <p style="color: #666; font-size: 12px;">
@@ -629,7 +695,8 @@ def send_alert_email(analysis, error_message=None):
 
 def monitor_and_alert(retailer_code, target_count, results_df, error_message=None,
                       rv_detail_null_records=None, reviews_equals_ratings_records=None,
-                      fsp_null_records=None, cosr_null_records=None, drv_20_error_records=None):
+                      fsp_null_records=None, cosr_null_records=None, drv_20_error_records=None,
+                      screen_size_mismatch_records=None, electricity_use_mismatch_records=None):
     """
     Monitor crawling results and send alerts (main function)
 
@@ -682,6 +749,14 @@ def monitor_and_alert(retailer_code, target_count, results_df, error_message=Non
         if drv_20_error_records is not None:
             analysis['drv_20_error_records'] = drv_20_error_records
             analysis['has_drv_20_error'] = len(drv_20_error_records) > 0
+
+        if screen_size_mismatch_records is not None:
+            analysis['screen_size_mismatch_records'] = screen_size_mismatch_records
+            analysis['has_screen_size_mismatch'] = len(screen_size_mismatch_records) > 0
+
+        if electricity_use_mismatch_records is not None:
+            analysis['electricity_use_mismatch_records'] = electricity_use_mismatch_records
+            analysis['has_electricity_use_mismatch'] = len(electricity_use_mismatch_records) > 0
 
         # Always send email (daily report)
         return send_alert_email(analysis, error_message)

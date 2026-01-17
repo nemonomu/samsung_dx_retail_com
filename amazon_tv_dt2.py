@@ -48,6 +48,7 @@ class AmazonDetailCrawler:
         self.reviews_equals_ratings_records = []  # count_of_reviews == count_of_star_ratings
         self.fsp_null_records = []  # final_sku_price is null
         self.cosr_null_records = []  # count_of_star_ratings is null but star_rating exists
+        self.screen_size_mismatch_records = []  # screen_size mismatch between extracted and tv_item_mst
         self.current_account = 'unsandev0002'  # Current Amazon account (starts with first)
 
     def connect_db(self):
@@ -60,6 +61,24 @@ class AmazonDetailCrawler:
         except Exception as e:
             print(f"[ERROR] Database connection failed: {e}")
             return False
+
+    def get_item_mst_data(self, item):
+        """Get screen_size from tv_item_mst for given item"""
+        try:
+            if not self.db_conn or not item:
+                return None
+            cursor = self.db_conn.cursor()
+            cursor.execute("""
+                SELECT screen_size FROM tv_item_mst WHERE item = %s
+            """, (item,))
+            row = cursor.fetchone()
+            cursor.close()
+            if row:
+                return {'screen_size': row[0]}
+            return None
+        except Exception as e:
+            print(f"  [WARNING] Failed to get item_mst data: {e}")
+            return None
 
     def load_xpaths(self):
         """Load XPath selectors from database"""
@@ -1420,8 +1439,29 @@ class AmazonDetailCrawler:
                 rank_2_raw = self.extract_text_safe(tree, '//*[@id="detailBullets_feature_div"]/ul/li[7]/span/ul')
             rank_2 = self.clean_rank(rank_2_raw)
 
-            # Extract screen_size (NEW) - pass retailer_sku_name as fallback
-            screen_size = self.extract_screen_size(tree, retailer_sku_name)
+            # Extract screen_size with tv_item_mst fallback
+            extracted_screen_size = self.extract_screen_size(tree, retailer_sku_name)
+            item_mst_data = self.get_item_mst_data(item)
+            mst_screen_size = item_mst_data.get('screen_size') if item_mst_data else None
+
+            # Determine final screen_size with fallback and mismatch tracking
+            if extracted_screen_size and mst_screen_size:
+                if extracted_screen_size != mst_screen_size:
+                    print(f"  [WARNING] screen_size mismatch: extracted='{extracted_screen_size}', tv_item_mst='{mst_screen_size}'")
+                    self.screen_size_mismatch_records.append({
+                        'item': item,
+                        'url': url,
+                        'extracted': extracted_screen_size,
+                        'mst_value': mst_screen_size
+                    })
+                screen_size = extracted_screen_size  # Use extracted value
+            elif extracted_screen_size:
+                screen_size = extracted_screen_size  # No mst value, use extracted
+            elif mst_screen_size:
+                screen_size = mst_screen_size  # Fallback to mst value
+                print(f"  [INFO] Using screen_size from tv_item_mst: {mst_screen_size}")
+            else:
+                screen_size = None
 
             # Extract model_year (NEW)
             model_year = self.extract_model_year(tree)
@@ -1980,19 +2020,21 @@ class AmazonDetailCrawler:
                 crawl_datetime
             ))
 
-            # Insert into tv_item_mst (with duplicate check on item)
+            # Insert into tv_item_mst (with duplicate check on item, update screen_size on conflict)
             if data.get('item'):
                 cursor.execute("""
-                    INSERT INTO tv_item_mst (item, product_url, sku, account_name)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (item) DO NOTHING
+                    INSERT INTO tv_item_mst (item, product_url, sku, account_name, screen_size)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (item) DO UPDATE SET
+                        screen_size = COALESCE(tv_item_mst.screen_size, EXCLUDED.screen_size)
                 """, (
                     data['item'],
                     data['product_url'],
                     data.get('sku', 'no sku'),
-                    'Amazon'
+                    'Amazon',
+                    data.get('screen_size')
                 ))
-                print(f"  [DB] ✓ tv_item_mst insert attempted (item: {data['item']}, sku: {data.get('sku', 'no sku')})")
+                print(f"  [DB] ✓ tv_item_mst upsert (item: {data['item']}, sku: {data.get('sku', 'no sku')}, screen_size: {data.get('screen_size')})")
 
             # Commit transaction
             self.db_conn.commit()
@@ -2136,7 +2178,8 @@ class AmazonDetailCrawler:
                                  rv_detail_null_records=self.rv_detail_null_records,
                                  reviews_equals_ratings_records=self.reviews_equals_ratings_records,
                                  fsp_null_records=self.fsp_null_records,
-                                 cosr_null_records=self.cosr_null_records)
+                                 cosr_null_records=self.cosr_null_records,
+                                 screen_size_mismatch_records=self.screen_size_mismatch_records)
             except Exception as e:
                 print(f"[WARNING] Failed to send alert: {e}")
 

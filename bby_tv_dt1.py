@@ -66,6 +66,10 @@ class BestBuyDetailCrawler:
         # NULL detailed_review_content 로그 저장용
         self.null_review_logs = []
 
+        # Mismatch tracking for tv_item_mst
+        self.screen_size_mismatch_records = []
+        self.electricity_use_mismatch_records = []
+
         # Data validator sec기화
         session_start_time = os.environ.get('SESSION_START_TIME', datetime.now().strftime('%Y%m%d%H%M'))
         self.validator = DataValidator(session_start_time)
@@ -80,6 +84,24 @@ class BestBuyDetailCrawler:
         except Exception as e:
             print(f"[ERROR] Database connection failed: {e}")
             return False
+
+    def get_item_mst_data(self, item):
+        """Get screen_size and estimated_annual_electricity_use from tv_item_mst for given item"""
+        try:
+            if not self.db_conn or not item:
+                return None
+            cursor = self.db_conn.cursor()
+            cursor.execute("""
+                SELECT screen_size, estimated_annual_electricity_use FROM tv_item_mst WHERE item = %s
+            """, (item,))
+            row = cursor.fetchone()
+            cursor.close()
+            if row:
+                return {'screen_size': row[0], 'estimated_annual_electricity_use': row[1]}
+            return None
+        except Exception as e:
+            print(f"  [WARNING] Failed to get item_mst data: {e}")
+            return None
 
     def setup_browser(self):
         """Setup DrissionPage ChromiumPage - 최소 설정"""
@@ -1786,8 +1808,8 @@ class BestBuyDetailCrawler:
             print(f"  [✓] Retailer_SKU_Name: {retailer_sku_name}")
 
             # 2. Screen Size extraction (메인 page에서)
-            screen_size = self.extract_screen_size(tree)
-            print(f"  [✓] Screen Size: {screen_size}")
+            extracted_screen_size = self.extract_screen_size(tree)
+            print(f"  [✓] Screen Size (extracted): {extracted_screen_size}")
 
             # 2-0. Model Year extraction (specifications - general dialog에서)
             model_year = self.extract_model_year(tree)
@@ -1849,7 +1871,7 @@ class BestBuyDetailCrawler:
             item = self.extract_item_from_url(product_url)
 
             # Electricity use and SKU - need to open dialog for these fields
-            electricity_use = None
+            extracted_electricity_use = None
             sku = "no sku"
             success, error = self.click_specifications_with_retry()
 
@@ -1860,8 +1882,8 @@ class BestBuyDetailCrawler:
                 dialog_tree = html.fromstring(dialog_source)
 
                 # Extract Estimated_Annual_Electricity_Use (숫자만)
-                electricity_use = self.extract_electricity_use(dialog_tree)
-                print(f"  [✓] Estimated_Annual_Electricity_Use: {electricity_use}")
+                extracted_electricity_use = self.extract_electricity_use(dialog_tree)
+                print(f"  [✓] Estimated_Annual_Electricity_Use (extracted): {extracted_electricity_use}")
 
                 # Extract SKU (Model Number) from dialog
                 sku = self.extract_sku(dialog_tree)
@@ -1870,6 +1892,49 @@ class BestBuyDetailCrawler:
                 self.close_specifications_dialog()
             else:
                 print(f"  [WARNING] Could not extract electricity_use/SKU (dialog failed): {error}")
+
+            # tv_item_mst fallback for screen_size and electricity_use
+            item_mst_data = self.get_item_mst_data(item)
+            mst_screen_size = item_mst_data.get('screen_size') if item_mst_data else None
+            mst_electricity_use = item_mst_data.get('estimated_annual_electricity_use') if item_mst_data else None
+
+            # Determine final screen_size with fallback and mismatch tracking
+            if extracted_screen_size and mst_screen_size:
+                if extracted_screen_size != mst_screen_size:
+                    print(f"  [WARNING] screen_size mismatch: extracted='{extracted_screen_size}', tv_item_mst='{mst_screen_size}'")
+                    self.screen_size_mismatch_records.append({
+                        'item': item,
+                        'url': product_url,
+                        'extracted': extracted_screen_size,
+                        'mst_value': mst_screen_size
+                    })
+                screen_size = extracted_screen_size
+            elif extracted_screen_size:
+                screen_size = extracted_screen_size
+            elif mst_screen_size:
+                screen_size = mst_screen_size
+                print(f"  [INFO] Using screen_size from tv_item_mst: {mst_screen_size}")
+            else:
+                screen_size = None
+
+            # Determine final electricity_use with fallback and mismatch tracking
+            if extracted_electricity_use and mst_electricity_use:
+                if extracted_electricity_use != mst_electricity_use:
+                    print(f"  [WARNING] electricity_use mismatch: extracted='{extracted_electricity_use}', tv_item_mst='{mst_electricity_use}'")
+                    self.electricity_use_mismatch_records.append({
+                        'item': item,
+                        'url': product_url,
+                        'extracted': extracted_electricity_use,
+                        'mst_value': mst_electricity_use
+                    })
+                electricity_use = extracted_electricity_use
+            elif extracted_electricity_use:
+                electricity_use = extracted_electricity_use
+            elif mst_electricity_use:
+                electricity_use = mst_electricity_use
+                print(f"  [INFO] Using electricity_use from tv_item_mst: {mst_electricity_use}")
+            else:
+                electricity_use = None
 
             # 8. See All Customer Reviews click 및 data collected
             # count_of_star_ratings는 count_of_reviews와 동일 값 사용
@@ -2136,14 +2201,16 @@ class BestBuyDetailCrawler:
                 crawl_datetime
             ))
 
-            # Insert into tv_item_mst (item 중복 시 무시)
+            # Insert into tv_item_mst (update screen_size and electricity_use on conflict)
             if item:
                 cursor.execute("""
-                    INSERT INTO tv_item_mst (item, product_url, sku, account_name)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (item) DO NOTHING
-                """, (item, product_url, sku, 'Bestbuy'))
-                print(f"  [DB] ✓ tv_item_mst insert attempted (item: {item}, sku: {sku})")
+                    INSERT INTO tv_item_mst (item, product_url, sku, account_name, screen_size, estimated_annual_electricity_use)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (item) DO UPDATE SET
+                        screen_size = COALESCE(tv_item_mst.screen_size, EXCLUDED.screen_size),
+                        estimated_annual_electricity_use = COALESCE(tv_item_mst.estimated_annual_electricity_use, EXCLUDED.estimated_annual_electricity_use)
+                """, (item, product_url, sku, 'Bestbuy', screen_size, electricity_use))
+                print(f"  [DB] ✓ tv_item_mst upsert (item: {item}, sku: {sku}, screen_size: {screen_size}, electricity: {electricity_use})")
 
             cursor.close()
             print(f"  [DB] ✓ Successfully saved to bby_tv_crawl + tv_retail_com + tv_item_mst")
@@ -2273,7 +2340,9 @@ class BestBuyDetailCrawler:
                 results_df = pd.DataFrame(rows, columns=columns)
                 cursor.close()
 
-                monitor_and_alert('bestbuy', len(urls), results_df)
+                monitor_and_alert('bestbuy', len(urls), results_df,
+                                 screen_size_mismatch_records=self.screen_size_mismatch_records,
+                                 electricity_use_mismatch_records=self.electricity_use_mismatch_records)
             except Exception as e:
                 print(f"[WARNING] Failed to send alert: {e}")
 

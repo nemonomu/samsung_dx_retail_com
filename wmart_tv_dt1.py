@@ -32,6 +32,7 @@ class WalmartDetailCrawler:
         self.max_skus = 300  # Maximum SKUs to collect (final limit)
         # Error tracking for alert email
         self.drv_20_error_records = []  # count_of_reviews <= 20 but collected fewer reviews
+        self.screen_size_mismatch_records = []  # screen_size mismatch between extracted and tv_item_mst
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -43,6 +44,24 @@ class WalmartDetailCrawler:
         except Exception as e:
             print(f"[ERROR] Database connection failed: {e}")
             return False
+
+    def get_item_mst_data(self, item):
+        """Get screen_size from tv_item_mst for given item"""
+        try:
+            if not self.db_conn or not item:
+                return None
+            cursor = self.db_conn.cursor()
+            cursor.execute("""
+                SELECT screen_size FROM tv_item_mst WHERE item = %s
+            """, (item,))
+            row = cursor.fetchone()
+            cursor.close()
+            if row:
+                return {'screen_size': row[0]}
+            return None
+        except Exception as e:
+            print(f"  [WARNING] Failed to get item_mst data: {e}")
+            return None
 
     def load_xpaths(self):
         """Load XPath selectors from database"""
@@ -1785,7 +1804,7 @@ class WalmartDetailCrawler:
             similar_products = self.extract_similar_products(tree)
 
             # Extract screen size (from main page, with fallback to product name)
-            screen_size = self.extract_screen_size(tree, retailer_sku_name)
+            extracted_screen_size = self.extract_screen_size(tree, retailer_sku_name)
 
             # Scroll to review section for lazy loading content
             try:
@@ -1829,6 +1848,28 @@ class WalmartDetailCrawler:
 
             # Click Specifications and get Model (after static content extraction)
             sku_model = self.click_specifications_and_get_model()
+
+            # tv_item_mst fallback for screen_size
+            item_mst_data = self.get_item_mst_data(sku_model)
+            mst_screen_size = item_mst_data.get('screen_size') if item_mst_data else None
+
+            if extracted_screen_size and mst_screen_size:
+                if extracted_screen_size != mst_screen_size:
+                    print(f"  [WARNING] screen_size mismatch: extracted='{extracted_screen_size}', tv_item_mst='{mst_screen_size}'")
+                    self.screen_size_mismatch_records.append({
+                        'item': sku_model,
+                        'url': url,
+                        'extracted': extracted_screen_size,
+                        'mst_value': mst_screen_size
+                    })
+                screen_size = extracted_screen_size
+            elif extracted_screen_size:
+                screen_size = extracted_screen_size
+            elif mst_screen_size:
+                screen_size = mst_screen_size
+                print(f"  [INFO] Using screen_size from tv_item_mst: {mst_screen_size}")
+            else:
+                screen_size = None
 
             # Extract detailed reviews with retry if count_of_reviews >= 1 but no content
             detailed_review_content = self.extract_detailed_reviews()
@@ -2085,22 +2126,24 @@ class WalmartDetailCrawler:
                 crawl_datetime
             ))
 
-            # Insert into tv_item_mst (with duplicate check on item)
+            # Insert into tv_item_mst (update screen_size on conflict)
             # Extract SKU from product name
             sku = self.extract_sku(data['Retailer_SKU_Name'])
 
             if data.get('item'):
                 cursor.execute("""
-                    INSERT INTO tv_item_mst (item, product_url, sku, account_name)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (item) DO NOTHING
+                    INSERT INTO tv_item_mst (item, product_url, sku, account_name, screen_size)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (item) DO UPDATE SET
+                        screen_size = COALESCE(tv_item_mst.screen_size, EXCLUDED.screen_size)
                 """, (
                     data['item'],
                     data['product_url'],
                     sku,
-                    'Walmart'
+                    'Walmart',
+                    data.get('screen_size')
                 ))
-                print(f"  [DB] ✓ tv_item_mst insert attempted (item: {data['item']}, sku: {sku})")
+                print(f"  [DB] ✓ tv_item_mst upsert (item: {data['item']}, sku: {sku}, screen_size: {data.get('screen_size')})")
 
             # Commit transaction
             self.db_conn.commit()
@@ -2241,7 +2284,8 @@ class WalmartDetailCrawler:
                 cursor.close()
 
                 monitor_and_alert('walmart', len(product_urls), results_df,
-                                 drv_20_error_records=self.drv_20_error_records)
+                                 drv_20_error_records=self.drv_20_error_records,
+                                 screen_size_mismatch_records=self.screen_size_mismatch_records)
             except Exception as e:
                 print(f"[WARNING] Failed to send alert: {e}")
 

@@ -291,38 +291,31 @@ class WalmartTVBSRCrawler:
                 product_url_raw = self.extract_text_safe(product, self.xpaths['product_url']['xpath'])
                 product_url = self.normalize_product_url(product_url_raw) if product_url_raw else None
 
-                # Extract other fields (numbers only for offer: "4 free offers from Apple" -> "4")
-                offer_raw = self.extract_text_safe(product, self.xpaths['offer']['xpath'])
-                offer = self.extract_number_only(offer_raw) if offer_raw else None
-                pickup = self.extract_text_safe(product, self.xpaths['pickup_availability']['xpath'])
-                shipping = self.extract_text_safe(product, self.xpaths['shipping_availability']['xpath'])
-                delivery = self.extract_text_safe(product, self.xpaths['delivery_availability']['xpath'])
+                # Below fields are collected by dt1.py (detail page) - commented out to avoid duplication
+                # # Extract other fields (numbers only for offer: "4 free offers from Apple" -> "4")
+                # offer_raw = self.extract_text_safe(product, self.xpaths['offer']['xpath'])
+                # offer = self.extract_number_only(offer_raw) if offer_raw else None
+                # pickup = self.extract_text_safe(product, self.xpaths['pickup_availability']['xpath'])
+                # shipping = self.extract_text_safe(product, self.xpaths['shipping_availability']['xpath'])
+                # delivery = self.extract_text_safe(product, self.xpaths['delivery_availability']['xpath'])
 
-                # Extract SKU status
-                rollback = self.extract_text_safe(product, self.xpaths['sku_status_rollback']['xpath'])
-                sponsored = self.extract_text_safe(product, self.xpaths['sku_status_sponsored']['xpath'])
-                sku_status = "Rollback" if rollback else ("Sponsored" if sponsored else None)
+                # # Extract SKU status
+                # rollback = self.extract_text_safe(product, self.xpaths['sku_status_rollback']['xpath'])
+                # sponsored = self.extract_text_safe(product, self.xpaths['sku_status_sponsored']['xpath'])
+                # sku_status = "Rollback" if rollback else ("Sponsored" if sponsored else None)
 
-                # Extract membership discount
-                membership_discount_elem = self.extract_text_safe(product, self.xpaths['membership_discount']['xpath'])
-                membership_discount = "Walmart Plus" if membership_discount_elem else None
+                # # Extract membership discount
+                # membership_discount_elem = self.extract_text_safe(product, self.xpaths['membership_discount']['xpath'])
+                # membership_discount = "Walmart Plus" if membership_discount_elem else None
 
-                # Extract availability (numbers only: "only 1 left" -> "1")
-                available_quantity_raw = self.extract_text_safe(product, self.xpaths['available_quantity']['xpath'])
-                available_quantity = self.extract_number_only(available_quantity_raw) if available_quantity_raw else None
-                inventory_status = self.extract_text_safe(product, self.xpaths['inventory_status']['xpath'])
+                # # Extract availability (numbers only: "only 1 left" -> "1")
+                # available_quantity_raw = self.extract_text_safe(product, self.xpaths['available_quantity']['xpath'])
+                # available_quantity = self.extract_number_only(available_quantity_raw) if available_quantity_raw else None
+                # inventory_status = self.extract_text_safe(product, self.xpaths['inventory_status']['xpath'])
 
                 data = {
                     'page_type': 'bsr',
                     'Retailer_SKU_Name': product_name,
-                    'Offer': offer,
-                    'Pick_Up_Availability': pickup,
-                    'Shipping_Availability': shipping,
-                    'Delivery_Availability': delivery,
-                    'SKU_Status': sku_status,
-                    'Retailer_Membership_Discounts': membership_discount,
-                    'Available_Quantity_for_Purchase': available_quantity,
-                    'Inventory_Status': inventory_status,
                     'Product_url': product_url
                 }
 
@@ -428,31 +421,22 @@ class WalmartTVBSRCrawler:
             now = datetime.now()
             crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + '0000'
 
+            # Simplified INSERT - other fields collected by dt1.py (detail page)
             cursor.execute("""
                 INSERT INTO wmart_tv_bsr_crawl
                 (account_name, bsr_rank, page_type, Retailer_SKU_Name,
-                 Offer, Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
-                 SKU_Status, Retailer_Membership_Discounts, Available_Quantity_for_Purchase,
-                 Inventory_Status, Product_url, batch_id, calendar_week, crawl_strdatetime)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 Product_url, batch_id, calendar_week, crawl_strdatetime)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
             """, (
                 'Walmart',  # account_name
-                bsr_rank,  # Changed from "order" to bsr_rank
+                bsr_rank,
                 data['page_type'],
                 data['Retailer_SKU_Name'],
-                data['Offer'],
-                data['Pick_Up_Availability'],
-                data['Shipping_Availability'],
-                data['Delivery_Availability'],
-                data['SKU_Status'],
-                data['Retailer_Membership_Discounts'],
-                data['Available_Quantity_for_Purchase'],
-                data['Inventory_Status'],
                 data['Product_url'],
                 self.batch_id,
                 calendar_week,
-                crawl_strdatetime  # New field
+                crawl_strdatetime
             ))
 
             result = cursor.fetchone()

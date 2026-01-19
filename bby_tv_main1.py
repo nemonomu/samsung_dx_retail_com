@@ -136,17 +136,17 @@ class BestBuyTVCrawler:
             except Exception as e:
                 print(f"[WARNING] Product list not found: {e}")
 
-            # Scroll to trigger lazy loading (목록 페이지는 안정성 우선)
-            print("[INFO] Performing scroll to trigger lazy loading...")
+            # Slow scroll to trigger lazy loading - scroll by small increments
+            print("[INFO] Performing slow scroll to trigger lazy loading...")
 
-            scroll_step = 400  # 적당한 스크롤 단위
+            scroll_step = 300  # 300px씩 스크롤 (작은 단위)
             current_position = 0
             last_height = self.page.run_js("return document.body.scrollHeight")
 
             while True:
                 current_position += scroll_step
                 self.page.run_js(f"window.scrollTo(0, {current_position})")
-                time.sleep(0.7)  # lazy loading 대기
+                time.sleep(1.0)  # 이미지 로드 시간
 
                 # 현재 높이 확인
                 new_height = self.page.run_js("return document.body.scrollHeight")
@@ -154,7 +154,7 @@ class BestBuyTVCrawler:
                 # 페이지 끝에 도달했는지 확인
                 if current_position >= new_height:
                     # 끝에 도달, 추가 대기 후 확인
-                    time.sleep(1.5)
+                    time.sleep(2)
                     final_height = self.page.run_js("return document.body.scrollHeight")
                     if final_height == new_height:
                         print(f"[DEBUG] Reached bottom at {current_position}px")
@@ -166,10 +166,10 @@ class BestBuyTVCrawler:
                 if (current_position // scroll_step) % 10 == 0:
                     print(f"[DEBUG] Scrolled to {current_position}px, page height: {new_height}px")
 
-            # 다시 위로 스크롤
-            print("[INFO] Scrolling back up...")
+            # 다시 천천히 위로 스크롤 (이미지 로드 확인)
+            print("[INFO] Scrolling back up slowly...")
             while current_position > 0:
-                current_position -= scroll_step * 2
+                current_position -= scroll_step * 2  # 올라갈 땐 좀 더 빠르게
                 if current_position < 0:
                     current_position = 0
                 self.page.run_js(f"window.scrollTo(0, {current_position})")
@@ -177,7 +177,7 @@ class BestBuyTVCrawler:
 
             # 맨 위로
             self.page.scroll.to_top()
-            time.sleep(1.5)
+            time.sleep(2)
 
             # 제품 링크 개수 확인 - 부족하면 추가 대기
             product_links = self.page.eles('css:a.product-list-item-link')

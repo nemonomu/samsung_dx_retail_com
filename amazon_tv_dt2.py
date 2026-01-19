@@ -1155,11 +1155,12 @@ class AmazonDetailCrawler:
             # Store collected reviews for duplicate check
             collected_reviews = set(all_reviews)
 
-            # If 20+ reviews exist and we have less than 20, go to next pages (up to 3 pages)
+            # If more reviews exist than collected, go to next pages (up to 3 pages)
+            # Changed from count_int >= 20 to count_int > len(all_reviews) to handle cases like 11 reviews with only 10 collected
             current_page = 1
             max_pages = 3
 
-            while len(all_reviews) < 20 and current_page < max_pages and count_int >= 20:
+            while len(all_reviews) < 20 and current_page < max_pages and count_int > len(all_reviews):
                 try:
                     # Scroll to bottom of page to ensure Next button is visible
                     self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
@@ -1172,6 +1173,19 @@ class AmazonDetailCrawler:
                     time.sleep(random.uniform(3, 5))
 
                     current_page += 1
+
+                    # Sorry page 감지 및 새로고침 (최대 10회, 5초 간격)
+                    for refresh_attempt in range(10):
+                        page_source_lower = self.driver.page_source.lower()
+                        if 'sorry' in page_source_lower or 'something went wrong' in page_source_lower:
+                            print(f"  [WARNING] Sorry page detected on page {current_page}, refreshing ({refresh_attempt + 1}/10)...")
+                            self.driver.refresh()
+                            time.sleep(5)
+                        else:
+                            break
+                    else:
+                        print(f"  [ERROR] Sorry page persists after 10 refreshes on page {current_page}")
+                        break
 
                     # Verify we're on expected page
                     current_url = self.driver.current_url
@@ -1706,15 +1720,23 @@ class AmazonDetailCrawler:
                     has_rv_detail_null = cor_int > 0 and drc_is_null  # reviews > 0 but content null
                     has_src_null = cor_int > 0 and src_is_null  # reviews > 0 but summarized review null
 
+                    # 수집된 리뷰 개수 계산 (count가 수집된 개수보다 크면 재시도, 최대 20개까지)
+                    collected_review_count = 0
+                    if drc and isinstance(drc, str):
+                        collected_review_count = len([r for r in drc.split(', ') if r and '-' in r])
+                    has_rv_insufficient = cor_int > collected_review_count and collected_review_count < 20
+
                     return {
                         'has_sr_null': has_sr_null,
                         'has_cor_null': has_cor_null,
                         'has_cosr_null': has_cosr_null,
                         'has_fsp_null': has_fsp_null,
                         'has_rv_detail_null': has_rv_detail_null,
+                        'has_rv_insufficient': has_rv_insufficient,
                         'has_src_null': has_src_null,
                         'cor_int': cor_int,
                         'cosr_int': cosr_int,
+                        'collected_review_count': collected_review_count,
                         'sr': sr,
                         'sr_is_no_reviews': sr_is_no_reviews
                     }
@@ -1723,7 +1745,8 @@ class AmazonDetailCrawler:
                     """Check if any error condition exists"""
                     return (errors['has_sr_null'] or errors['has_cor_null'] or
                             errors['has_cosr_null'] or errors['has_fsp_null'] or
-                            errors['has_rv_detail_null'] or errors['has_src_null'])
+                            errors['has_rv_detail_null'] or errors['has_rv_insufficient'] or
+                            errors['has_src_null'])
 
                 def re_extract_summarized_review():
                     """Re-extract summarized review content with WebDriverWait"""
@@ -1760,7 +1783,7 @@ class AmazonDetailCrawler:
                         data['Summarized_Review_Content'] = src
                         print(f"    - summarized_review: {'OK' if src else 'NULL'}")
 
-                    if errors['has_cor_null'] or errors['has_rv_detail_null']:
+                    if errors['has_cor_null'] or errors['has_rv_detail_null'] or errors['has_rv_insufficient']:
                         # Check for "0 customer reviews" pattern
                         sr = data.get('Star_Rating')
                         zero_reviews_detected = False
@@ -1782,10 +1805,14 @@ class AmazonDetailCrawler:
                             data['count_of_reviews'] = "0"
                             print(f"    - count_of_reviews: 0 (no customer reviews)")
                         else:
+                            if errors['has_rv_insufficient']:
+                                print(f"    - rv_insufficient: count={errors['cor_int']}, collected={errors['collected_review_count']}, retrying...")
                             drc, cor = self.extract_detailed_reviews_from_review_page(url)
                             data['Detailed_Review_Content'] = drc
                             data['count_of_reviews'] = cor
-                            print(f"    - count_of_reviews: {cor}, detailed_review: {'OK' if drc else 'NULL'}")
+                            # 재수집 후 리뷰 개수 계산
+                            new_collected = len([r for r in drc.split(', ') if r and '-' in r]) if drc else 0
+                            print(f"    - count_of_reviews: {cor}, detailed_review: {new_collected} collected")
 
                 # Initial error check
                 errors = check_error_conditions(data)
@@ -1793,7 +1820,7 @@ class AmazonDetailCrawler:
                 # Retry up to 3 times if any error detected
                 if has_any_error(errors):
                     for retry_num in range(1, 4):
-                        print(f"  [RETRY {retry_num}/3] Errors: sr={errors['has_sr_null']}, cor={errors['has_cor_null']}, cosr={errors['has_cosr_null']}, fsp={errors['has_fsp_null']}, rv={errors['has_rv_detail_null']}, src={errors['has_src_null']}")
+                        print(f"  [RETRY {retry_num}/3] Errors: sr={errors['has_sr_null']}, cor={errors['has_cor_null']}, cosr={errors['has_cosr_null']}, fsp={errors['has_fsp_null']}, rv={errors['has_rv_detail_null']}, rv_insuf={errors['has_rv_insufficient']}, src={errors['has_src_null']}")
 
                         if retry_num == 1:
                             # 1st retry: Refresh page
@@ -1848,6 +1875,10 @@ class AmazonDetailCrawler:
                         'account': self.current_account
                     })
 
+                if errors['has_rv_insufficient']:
+                    print(f"  [WARNING] rv_insufficient persists: count_of_reviews={cor_int}, collected={errors['collected_review_count']}")
+                    print(f"            URL: {data.get('product_url', 'N/A')}")
+
                 if errors['has_fsp_null']:
                     print(f"  [WARNING] fsp_null persists: final_sku_price=NULL")
                     print(f"            URL: {data.get('product_url', 'N/A')}")
@@ -1889,11 +1920,12 @@ class AmazonDetailCrawler:
                 print(f"       Star Counts: {count_of_star_ratings or 'N/A'}")
                 print(f"       Review Summary: {summarized_review_content[:80] + '...' if summarized_review_content and len(summarized_review_content) > 80 else summarized_review_content or 'N/A'}")
 
-                # Show detailed review count
-                if detailed_review_content:
+                # Show detailed review count (use data dict for retry-updated value)
+                final_drc = data.get('Detailed_Review_Content')
+                if final_drc:
                     try:
                         # Count reviews by counting "N-" patterns
-                        review_count = len([r for r in detailed_review_content.split(', ') if r and '-' in r])
+                        review_count = len([r for r in final_drc.split(', ') if r and '-' in r])
                         print(f"       Detailed Reviews: {review_count} collected")
                     except:
                         print(f"       Detailed Reviews: N/A")

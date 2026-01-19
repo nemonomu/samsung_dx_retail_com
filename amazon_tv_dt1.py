@@ -1470,6 +1470,21 @@ class AmazonDetailCrawler:
                 original_sku_price = None
             else:
                 original_sku_price = self.extract_original_sku_price(tree)
+
+            # final_sku_price가 original_sku_price보다 높으면 original_sku_price를 None으로 설정
+            if final_sku_price and original_sku_price:
+                try:
+                    final_match = re.search(r'[\d,]+\.?\d*', final_sku_price.replace(',', ''))
+                    original_match = re.search(r'[\d,]+\.?\d*', original_sku_price.replace(',', ''))
+                    if final_match and original_match:
+                        final_val = float(final_match.group().replace(',', ''))
+                        original_val = float(original_match.group().replace(',', ''))
+                        if final_val > original_val:
+                            print(f"  [INFO] final_sku_price({final_sku_price}) > original_sku_price({original_sku_price}), setting original to None")
+                            original_sku_price = None
+                except Exception as e:
+                    print(f"  [WARNING] Price comparison failed: {e}")
+
             savings = self.calculate_savings(final_sku_price, original_sku_price)
 
             # Extract shipping info, available quantity, and discount type

@@ -1779,26 +1779,38 @@ class BestBuyDetailCrawler:
                 print(f"  [ERROR] page loading timeout: {e}")
                 return False
 
-            # Slow scroll for lazy loading
-            print(f"  [INFO] Starting slow scroll for lazy loading...")
-            scroll_step = 300
-            current_position = 0
+            # DOM 우선 탐색 + 조건부 스크롤 (최적화)
+            # 주요 요소들이 DOM에 이미 있으면 스크롤 생략
+            print(f"  [INFO] Checking DOM for key elements...")
+            page_source = self.page.html
+            tree = html.fromstring(page_source)
 
-            while True:
-                current_position += scroll_step
-                self.page.run_js(f"window.scrollTo(0, {current_position})")
-                time.sleep(0.8)
+            # 핵심 요소 존재 여부 확인
+            key_elements = {
+                'price': tree.xpath('//div[@data-testid="price-block-customer-price"] | //span[contains(text(), "See price in cart")]'),
+                'rating': tree.xpath('//p[contains(@class, "visually-hidden")][contains(text(), "Rating")]'),
+                'title': tree.xpath('//h1[contains(@class, "heading")]//span')
+            }
 
-                page_height = self.page.run_js("return document.body.scrollHeight")
-                if current_position >= page_height:
-                    break
-                if current_position > 15000:  # Safety limit for detail page
-                    break
+            elements_found = sum(1 for v in key_elements.values() if v)
+            print(f"  [INFO] DOM check: {elements_found}/3 key elements found")
 
-            # Scroll back to top
-            self.page.run_js("window.scrollTo(0, 0)")
-            time.sleep(2)
-            print(f"  [OK] Slow scroll complete")
+            # 핵심 요소가 2개 이상 있으면 스크롤 생략
+            if elements_found >= 2:
+                print(f"  [OK] Key elements found in DOM - skipping full scroll")
+            else:
+                # 요소가 부족하면 스크롤 수행 (최적화된 버전)
+                print(f"  [INFO] Starting optimized scroll for lazy loading...")
+                scroll_positions = [1000, 3000, 5000, 8000]  # 주요 위치만 스크롤
+
+                for pos in scroll_positions:
+                    self.page.run_js(f"window.scrollTo(0, {pos})")
+                    time.sleep(0.3)
+
+                # Scroll back to top
+                self.page.run_js("window.scrollTo(0, 0)")
+                time.sleep(0.5)
+                print(f"  [OK] Optimized scroll complete")
 
             # page 소스 가져오기 (retry logic for failed extraction)
             max_retries = 2
@@ -1863,11 +1875,13 @@ class BestBuyDetailCrawler:
 
             count_of_reviews = self.extract_count_of_reviews_from_detail(tree)
 
-            # 외부 리뷰 감지 시 (예: "reviews from Skyworth USA") 0으로 처리
+            # 외부 리뷰 감지 시 (예: "reviews from Skyworth USA") 0으로 처리, star_rating도 변경
             is_external_reviews = (count_of_reviews == 'EXTERNAL_REVIEWS')
             if is_external_reviews:
                 count_of_reviews = 0
+                star_rating = "Not yet reviewed"  # 외부 리뷰는 BestBuy 리뷰가 아니므로
                 print(f"  [✓] Count_of_Reviews: 0 (외부 리뷰 - BestBuy 자체 리뷰 아님)")
+                print(f"  [✓] Star_Rating: Not yet reviewed (외부 리뷰)")
             else:
                 print(f"  [✓] Count_of_Reviews: {count_of_reviews}")
 

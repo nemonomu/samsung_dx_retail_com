@@ -1901,8 +1901,12 @@ class BestBuyDetailCrawler:
                 summarized_review_content = self.extract_summarized_review_content(tree)
                 print(f"  [✓] Summarized_Review_Content: {summarized_review_content[:50] if summarized_review_content else 'None'}...")
 
-            # 3. Compare similar products extraction (사용 안함 - 주석처리)
-            # mst_products = self.extract_compare_similar_products(product_url)
+            # 3. Compare similar products extraction
+            similar_products = self.extract_compare_similar_products(product_url)
+            if similar_products:
+                print(f"  [✓] Similar Products: {len(similar_products)} items found")
+            else:
+                print(f"  [✓] Similar Products: None (섹션 없음 또는 로드 실패)")
 
             # 4. Item extraction from URL (simplified - no dialog needed)
             item = self.extract_item_from_url(product_url)
@@ -2078,7 +2082,8 @@ class BestBuyDetailCrawler:
                 main_rank=url_data['main_rank'],
                 trend_rank=url_data.get('trend_rank'),
                 model_year=model_year,  # ADDED: model_year parameter
-                sku=sku  # ADDED: sku parameter for tv_item_mst
+                sku=sku,  # ADDED: sku parameter for tv_item_mst
+                similar_products=similar_products  # Similar products for retailer_sku_name_similar
             )
 
             # Increment total collected after successful save
@@ -2098,7 +2103,7 @@ class BestBuyDetailCrawler:
                    final_sku_price, savings, original_sku_price, offer,
                    pick_up_availability, shipping_availability, delivery_availability,
                    sku_status, star_rating_source, promotion_type, promotion_position,
-                   bsr_rank, main_rank, trend_rank, model_year, sku="no sku"):
+                   bsr_rank, main_rank, trend_rank, model_year, sku="no sku", similar_products=None):
         """DB에 save"""
         try:
             print(f"  [DB] Saving to database...")
@@ -2230,7 +2235,7 @@ class BestBuyDetailCrawler:
                 None,  # number_of_ppl_purchased_yesterday (BestBuy doesn't have this)
                 None,  # number_of_ppl_added_to_carts (BestBuy doesn't have this)
                 None,  # number_of_units_purchased_past_month (BestBuy doesn't have this)
-                None,  # retailer_sku_name_similar (BestBuy doesn't have this)
+                ' ||| '.join([p.get('product_name', '') for p in similar_products if p.get('product_name')]) if similar_products else None,  # retailer_sku_name_similar
                 electricity_use,
                 promotion_type,
                 model_year,

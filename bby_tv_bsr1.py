@@ -281,6 +281,11 @@ class BestBuyBSRCrawler:
                     else:
                         product_url = None
 
+                    # Skip Open Box products
+                    if product_url and 'openbox' in product_url.lower():
+                        print(f"  [SKIP {idx}] Open Box product - excluded")
+                        continue
+
                     # Extract Offer (+ X offers) - 숫자만 저장
                     offer_elem = container.xpath('.//div[@data-testid="plus-x-offers"]//span[@class="font-sans text-default text-style-body-md-400"]')
                     offer = None

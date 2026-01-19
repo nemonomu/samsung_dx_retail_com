@@ -352,6 +352,13 @@ class BestBuyDetailCrawler:
             # Convert dictionary to list (maintains insertion order: main, bsr, promotion, trend)
             all_urls = list(url_data_map.values())
 
+            # Filter out Open Box products (URL에 "openbox" 포함된 제품 제외)
+            before_openbox_filter = len(all_urls)
+            all_urls = [u for u in all_urls if 'openbox' not in u['product_url'].lower()]
+            openbox_filtered = before_openbox_filter - len(all_urls)
+            if openbox_filtered > 0:
+                print(f"[INFO] Filtered out {openbox_filtered} Open Box products")
+
             # Count duplicates from source tables
             total_loaded = 0
             if main_batch_id:

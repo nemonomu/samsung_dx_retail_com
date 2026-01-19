@@ -136,17 +136,17 @@ class BestBuyTVCrawler:
             except Exception as e:
                 print(f"[WARNING] Product list not found: {e}")
 
-            # Optimized scroll to trigger lazy loading
-            print("[INFO] Performing optimized scroll to trigger lazy loading...")
+            # Scroll to trigger lazy loading (목록 페이지는 안정성 우선)
+            print("[INFO] Performing scroll to trigger lazy loading...")
 
-            scroll_step = 500  # 300 → 500px로 증가
+            scroll_step = 400  # 적당한 스크롤 단위
             current_position = 0
             last_height = self.page.run_js("return document.body.scrollHeight")
 
             while True:
                 current_position += scroll_step
                 self.page.run_js(f"window.scrollTo(0, {current_position})")
-                time.sleep(0.5)  # 1.0 → 0.5초로 감소
+                time.sleep(0.7)  # lazy loading 대기
 
                 # 현재 높이 확인
                 new_height = self.page.run_js("return document.body.scrollHeight")
@@ -154,7 +154,7 @@ class BestBuyTVCrawler:
                 # 페이지 끝에 도달했는지 확인
                 if current_position >= new_height:
                     # 끝에 도달, 추가 대기 후 확인
-                    time.sleep(1)  # 2 → 1초로 감소
+                    time.sleep(1.5)
                     final_height = self.page.run_js("return document.body.scrollHeight")
                     if final_height == new_height:
                         print(f"[DEBUG] Reached bottom at {current_position}px")
@@ -166,18 +166,18 @@ class BestBuyTVCrawler:
                 if (current_position // scroll_step) % 10 == 0:
                     print(f"[DEBUG] Scrolled to {current_position}px, page height: {new_height}px")
 
-            # 다시 위로 스크롤 (빠르게)
+            # 다시 위로 스크롤
             print("[INFO] Scrolling back up...")
             while current_position > 0:
-                current_position -= scroll_step * 3  # 더 빠르게 올라감
+                current_position -= scroll_step * 2
                 if current_position < 0:
                     current_position = 0
                 self.page.run_js(f"window.scrollTo(0, {current_position})")
-                time.sleep(0.2)  # 0.3 → 0.2초로 감소
+                time.sleep(0.3)
 
             # 맨 위로
             self.page.scroll.to_top()
-            time.sleep(1)  # 2 → 1초로 감소
+            time.sleep(1.5)
 
             # 제품 링크 개수 확인 - 부족하면 추가 대기
             product_links = self.page.eles('css:a.product-list-item-link')

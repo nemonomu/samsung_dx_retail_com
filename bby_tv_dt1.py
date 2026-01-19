@@ -948,30 +948,13 @@ class BestBuyDetailCrawler:
             return None
 
     def extract_count_of_reviews_from_detail(self, tree):
-        """Count of Reviews extraction (메인 detail page에서) - visually-hidden 우선
+        """Count of Reviews extraction (메인 detail page에서)
         Example: '(79 reviews)' -> '79', 'Not yet reviewed' -> 0
         Note: '(45 reviews from Skyworth USA)' 같은 외부 리뷰는 'EXTERNAL_REVIEWS' 반환
         """
         try:
-            # Priority 1: visually-hidden p tag
-            # <p class="visually-hidden">Rating 4.8 out of 5 stars with 286 reviews</p>
-            hidden_xpaths = [
-                '//p[@class="visually-hidden"][contains(text(), "reviews")]',
-                '//p[contains(@class, "visually-hidden")][contains(text(), "out of 5 stars")]'
-            ]
-            for xpath in hidden_xpaths:
-                elem = tree.xpath(xpath)
-                if elem:
-                    text = elem[0].text_content().strip()
-                    # 외부 리뷰 감지: "with 45 reviews from Skyworth USA" 같은 패턴
-                    if re.search(r'reviews?\s+from\s+', text, re.IGNORECASE):
-                        print(f"  [INFO] External reviews detected (visually-hidden): {text}")
-                        return 'EXTERNAL_REVIEWS'
-                    match = re.search(r'with\s+([\d,]+)\s+reviews', text)
-                    if match:
-                        return match.group(1).replace(',', '')
-
-            # Priority 2: 컨테이너 기반 extraction (fallback)
+            # Step 1: 먼저 visible 요소에서 외부 리뷰 여부 확인
+            # visually-hidden에는 외부 리뷰 정보가 없을 수 있으므로 visible 요소를 먼저 체크
             container_xpaths = [
                 '/html/body/div[5]/div[4]/div[1]',
                 '//div[@class="order-2 t3V0AOwowrTfUzPn "]',
@@ -985,6 +968,41 @@ class BestBuyDetailCrawler:
                     price_container = containers[0]
                     break
 
+            # visible 요소에서 외부 리뷰 감지 (먼저 체크)
+            if price_container is not None:
+                external_review_xpaths = [
+                    './/div/div[3]/a/div/span',
+                    './/span[contains(@class, "c-ratings-reviews")]',
+                    './/span[contains(@class, "c-reviews")]'
+                ]
+
+                for xpath in external_review_xpaths:
+                    elem = price_container.xpath(xpath)
+                    if elem:
+                        text = elem[0].text_content().strip()
+                        # 외부 리뷰 감지: "(45 reviews from Skyworth USA)" 같은 패턴
+                        if re.search(r'reviews?\s+from\s+', text, re.IGNORECASE):
+                            print(f"  [INFO] External reviews detected (visible): {text}")
+                            return 'EXTERNAL_REVIEWS'
+
+            # Step 2: 외부 리뷰가 아닌 경우 visually-hidden에서 리뷰 수 추출
+            hidden_xpaths = [
+                '//p[@class="visually-hidden"][contains(text(), "reviews")]',
+                '//p[contains(@class, "visually-hidden")][contains(text(), "out of 5 stars")]'
+            ]
+            for xpath in hidden_xpaths:
+                elem = tree.xpath(xpath)
+                if elem:
+                    text = elem[0].text_content().strip()
+                    # visually-hidden에서도 외부 리뷰 체크 (혹시 있을 경우)
+                    if re.search(r'reviews?\s+from\s+', text, re.IGNORECASE):
+                        print(f"  [INFO] External reviews detected (visually-hidden): {text}")
+                        return 'EXTERNAL_REVIEWS'
+                    match = re.search(r'with\s+([\d,]+)\s+reviews', text)
+                    if match:
+                        return match.group(1).replace(',', '')
+
+            # Step 3: 컨테이너 기반 extraction (fallback)
             if price_container is None or len(price_container) == 0:
                 return None
 
@@ -993,7 +1011,6 @@ class BestBuyDetailCrawler:
                 './/span[@class="c-reviews order-2"]',
                 './/span[contains(@class, "c-reviews")]',
                 './/span[@aria-hidden="true"][contains(@class, "order-2")]',
-                # 외부 리뷰 패턴 (예: Skyworth USA) - 감지용
                 './/div/div[3]/a/div/span',
                 './/span[contains(@class, "c-ratings-reviews")]'
             ]
@@ -1006,8 +1023,7 @@ class BestBuyDetailCrawler:
                     if "Not yet reviewed" in text:
                         return 0
 
-                    # 외부 리뷰 감지: "(45 reviews from Skyworth USA)" 같은 패턴
-                    # BestBuy 자체 리뷰가 아니므로 EXTERNAL_REVIEWS 반환
+                    # 외부 리뷰 감지 (이미 위에서 체크했지만 안전하게 한번 더)
                     if re.search(r'reviews?\s+from\s+', text, re.IGNORECASE):
                         print(f"  [INFO] External reviews detected: {text}")
                         return 'EXTERNAL_REVIEWS'

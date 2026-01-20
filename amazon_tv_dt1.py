@@ -1002,238 +1002,265 @@ class AmazonDetailCrawler:
         Returns:
             tuple: (detailed_review_content, count_of_reviews)
         """
-        try:
-            # Get current page HTML
-            tree = html.fromstring(self.driver.page_source)
-
-            # Extract "See more reviews" link
-            # Priority: data-hook attribute is most reliable
-            review_link_xpaths = [
-                '//a[@data-hook="see-all-reviews-link-foot"]/@href',  # Most reliable - data-hook attribute
-                '//*[@id="reviews-medley-footer"]//a[contains(@href, "product-reviews")]/@href',  # Footer container
-                '//*[@id="reviews-medley-footer"]/div[2]/a/@href',  # Legacy structure
-                '//a[contains(text(), "See more reviews")]/@href',
-                '//a[contains(text(), "See all reviews")]/@href',
-                '//a[contains(@href, "product-reviews")]/@href'
-            ]
-
-            review_link = None
-            for idx, xpath in enumerate(review_link_xpaths, 1):
-                result = tree.xpath(xpath)
-                if result:
-                    review_link = result[0]
-                    print(f"  [DEBUG] Found review link with XPath #{idx}: {review_link[:80]}...")
-                    break
-                else:
-                    print(f"  [DEBUG] XPath #{idx} not found")
-
-            if not review_link:
-                print("  [WARNING] Could not find review page link, falling back to detail page reviews")
-                return self.extract_detailed_reviews(product_url), None
-
-            # Extract ASIN from review link
-            asin_match = re.search(r'/product-reviews/([A-Z0-9]{10})', review_link)
-            if asin_match:
-                asin = asin_match.group(1)
-                print(f"  [DEBUG] Extracted ASIN from review link: {asin}")
-            else:
-                asin = None
-                print(f"  [WARNING] Could not extract ASIN from review link")
-
-            # Use original review link (Amazon requires specific ref parameter for pagination)
-            if review_link.startswith('http'):
-                review_url = review_link
-            else:
-                review_url = "https://www.amazon.com" + review_link
-
-            print(f"  [INFO] Navigating to review page: {review_url}")
-            self.driver.get(review_url)
-            time.sleep(random.uniform(3, 4))
-            print(f"  [DEBUG] Actual URL after navigation: {self.driver.current_url}")
-
-            # Wait for count_of_reviews element to load, then extract
-            count_of_reviews = None
+        # 재시도 포함 최대 2회 시도
+        for attempt in range(2):
             try:
-                WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.XPATH, '//*[@id="filter-info-section"] | //div[@data-hook="cr-filter-info-review-rating-count"]'))
-                )
-                # Element loaded - extract count_of_reviews
-                tree = html.fromstring(self.driver.page_source)
-                count_xpaths = [
-                    '//*[@id="filter-info-section"]/div',
-                    '//div[@data-hook="cr-filter-info-review-rating-count"]',
-                    '//div[contains(@data-hook, "review-rating-count")]',
-                    '//*[@id="filter-info-section"]'
-                ]
-                for xpath in count_xpaths:
-                    count_elements = tree.xpath(xpath)
-                    if count_elements:
-                        count_text = count_elements[0].text_content().strip() if hasattr(count_elements[0], 'text_content') else str(count_elements[0]).strip()
-                        if count_text:
-                            print(f"  [DEBUG] count_text found: {count_text[:100]}...")
-                            # Try multiple patterns
-                            match = re.search(r'([\d,]+)\s*customer\s*reviews?', count_text, re.IGNORECASE)
-                            if not match:
-                                match = re.search(r'([\d,]+)\s*with\s*reviews?', count_text, re.IGNORECASE)
-                            if not match:
-                                match = re.search(r'([\d,]+)\s*reviews?', count_text, re.IGNORECASE)
-                            if not match:
-                                # Fallback: "1,234 total ratings, 567 with reviews" pattern
-                                match = re.search(r'([\d,]+)\s*total\s*ratings?,\s*([\d,]+)', count_text, re.IGNORECASE)
-                                if match:
-                                    count_of_reviews = match.group(2)  # Second number is reviews
-                                    print(f"  [OK] Extracted count_of_reviews from review page (fallback): {count_of_reviews}")
-                                    break
-                            if match:
-                                count_of_reviews = match.group(1)
-                                print(f"  [OK] Extracted count_of_reviews from review page: {count_of_reviews}")
-                                break
-            except Exception as e:
-                print(f"  [WARNING] count_of_reviews element not loaded - {str(e)[:50]}")
-
-            # Collect reviews from first page (max 10 reviews per page)
-            all_reviews = []
-
-            # Debug: Print current URL to verify we're on review page
-            current_url = self.driver.current_url
-            print(f"  [DEBUG] Current URL before extracting reviews: {current_url[:100]}...")
-
-            tree = html.fromstring(self.driver.page_source)
-
-            # Extract reviews from first page
-            review_xpath = '//span[@data-hook="review-body"]/span'
-            review_elements = tree.xpath(review_xpath)
-
-            if review_elements:
-                for elem in review_elements[:10]:  # Max 10 from first page
-                    review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
-                    if review_text:
-                        all_reviews.append(review_text)
-
-            print(f"  [INFO] Review page 1: collected {len(all_reviews)} reviews")
-
-            # Check if we need to go to next page (count_of_reviews > 10)
-            count_int = 0
-            if count_of_reviews:
-                try:
-                    count_int = int(str(count_of_reviews).replace(',', ''))
-                except:
-                    count_int = 0
-
-            # Store collected reviews for duplicate check
-            collected_reviews = set(all_reviews)
-
-            # If more reviews exist than collected, go to next pages (up to 3 pages)
-            # Changed from count_int >= 20 to count_int > len(all_reviews) to handle cases like 11 reviews with only 10 collected
-            current_page = 1
-            max_pages = 3
-
-            while len(all_reviews) < 20 and current_page < max_pages and count_int > len(all_reviews):
-                try:
-                    # Scroll to bottom of page to ensure Next button is visible
-                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    time.sleep(1)
-
-                    # Find and click Next page button
-                    next_button = self.driver.find_element(By.XPATH, '//li[@class="a-last"]/a')
-                    print(f"  [INFO] Clicking Next page button (page {current_page} -> {current_page + 1})...")
-                    self.driver.execute_script("arguments[0].click();", next_button)
-                    time.sleep(random.uniform(3, 5))
-
-                    current_page += 1
-
-                    # Verify we're on expected page
-                    current_url = self.driver.current_url
-                    if f'pageNumber={current_page}' not in current_url:
-                        print(f"  [WARNING] Page {current_page} not loaded properly, current URL: {current_url[:80]}...")
-                    else:
-                        print(f"  [DEBUG] Confirmed on page {current_page}: {current_url[:80]}...")
-
-                    # Extract reviews from current page
+                if attempt > 0:
+                    print(f"  [INFO] Retrying review extraction (attempt {attempt + 1}/2)...")
+                    # 크롬 종료 후 재시작
+                    self.driver.quit()
+                    self.setup_driver()
+                    self.load_cookies()
+                    self.driver.get(product_url)
+                    time.sleep(random.uniform(4, 5))
+                    # 대기 후 로드 안되면 새로고침
                     tree = html.fromstring(self.driver.page_source)
-                    review_elements = tree.xpath(review_xpath)
+                    if not tree.xpath('//a[contains(@href, "product-reviews")]/@href'):
+                        print(f"  [INFO] Page not loaded properly, refreshing...")
+                        self.driver.refresh()
+                        time.sleep(random.uniform(4, 5))
 
-                    print(f"  [DEBUG] Review page {current_page}: found {len(review_elements)} review elements")
+                # Get current page HTML
+                tree = html.fromstring(self.driver.page_source)
 
-                    # Collect reviews with duplicate check
-                    page_count = 0
-                    duplicates = 0
-                    if review_elements:
-                        for elem in review_elements[:10]:  # Max 10 per page
-                            if len(all_reviews) >= 20:
-                                break
-                            review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
-                            if review_text:
-                                # Skip if duplicate
-                                if review_text in collected_reviews:
-                                    duplicates += 1
-                                    continue
-                                all_reviews.append(review_text)
-                                collected_reviews.add(review_text)
-                                page_count += 1
+                # Extract "See more reviews" link
+                # Priority: data-hook attribute is most reliable
+                review_link_xpaths = [
+                    '//a[@data-hook="see-all-reviews-link-foot"]/@href',  # Most reliable - data-hook attribute
+                    '//*[@id="reviews-medley-footer"]//a[contains(@href, "product-reviews")]/@href',  # Footer container
+                    '//*[@id="reviews-medley-footer"]/div[2]/a/@href',  # Legacy structure
+                    '//a[contains(text(), "See more reviews")]/@href',
+                    '//a[contains(text(), "See all reviews")]/@href',
+                    '//a[contains(@href, "product-reviews")]/@href'
+                ]
 
-                    if duplicates > 0:
-                        print(f"  [WARNING] Found {duplicates} duplicate reviews on page {current_page}")
-                    print(f"  [INFO] Review page {current_page}: added {page_count} reviews, total {len(all_reviews)} reviews")
+                review_link = None
+                for idx, xpath in enumerate(review_link_xpaths, 1):
+                    result = tree.xpath(xpath)
+                    if result:
+                        review_link = result[0]
+                        print(f"  [DEBUG] Found review link with XPath #{idx}: {review_link[:80]}...")
+                        break
+                    else:
+                        print(f"  [DEBUG] XPath #{idx} not found")
 
-                    # 리뷰가 0개일 때만 Sorry page 감지 및 새로고침 (최대 10회, 5초 간격)
-                    if page_count == 0:
-                        sorry_page_detected = False
-                        for refresh_attempt in range(10):
-                            page_source_lower = self.driver.page_source.lower()
-                            # Sorry page 패턴 확인 (리뷰 텍스트가 아닌 페이지 구조로 판단)
-                            if ('sorry' in page_source_lower and 'review' not in page_source_lower) or 'something went wrong' in page_source_lower:
-                                print(f"  [WARNING] Sorry page detected on page {current_page}, refreshing ({refresh_attempt + 1}/10)...")
-                                self.driver.refresh()
-                                time.sleep(5)
-                                # 새로고침 후 리뷰 다시 추출 시도
-                                tree = html.fromstring(self.driver.page_source)
-                                review_elements = tree.xpath(review_xpath)
-                                if review_elements:
-                                    print(f"  [INFO] Reviews found after refresh, continuing...")
-                                    for elem in review_elements[:10]:
-                                        if len(all_reviews) >= 20:
-                                            break
-                                        review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
-                                        if review_text and review_text not in collected_reviews:
-                                            all_reviews.append(review_text)
-                                            collected_reviews.add(review_text)
-                                            page_count += 1
+                if not review_link:
+                    print("  [WARNING] Could not find review page link, falling back to detail page reviews")
+                    return self.extract_detailed_reviews(product_url), None
+
+                # Extract ASIN from review link
+                asin_match = re.search(r'/product-reviews/([A-Z0-9]{10})', review_link)
+                if asin_match:
+                    asin = asin_match.group(1)
+                    print(f"  [DEBUG] Extracted ASIN from review link: {asin}")
+                else:
+                    asin = None
+                    print(f"  [WARNING] Could not extract ASIN from review link")
+
+                # Use original review link (Amazon requires specific ref parameter for pagination)
+                if review_link.startswith('http'):
+                    review_url = review_link
+                else:
+                    review_url = "https://www.amazon.com" + review_link
+
+                print(f"  [INFO] Navigating to review page: {review_url}")
+                self.driver.get(review_url)
+                time.sleep(random.uniform(3, 4))
+                print(f"  [DEBUG] Actual URL after navigation: {self.driver.current_url}")
+
+                # Wait for count_of_reviews element to load, then extract
+                count_of_reviews = None
+                try:
+                    WebDriverWait(self.driver, 10).until(
+                        EC.presence_of_element_located((By.XPATH, '//*[@id="filter-info-section"] | //div[@data-hook="cr-filter-info-review-rating-count"]'))
+                    )
+                    # Element loaded - extract count_of_reviews
+                    tree = html.fromstring(self.driver.page_source)
+                    count_xpaths = [
+                        '//*[@id="filter-info-section"]/div',
+                        '//div[@data-hook="cr-filter-info-review-rating-count"]',
+                        '//div[contains(@data-hook, "review-rating-count")]',
+                        '//*[@id="filter-info-section"]'
+                    ]
+                    for xpath in count_xpaths:
+                        count_elements = tree.xpath(xpath)
+                        if count_elements:
+                            count_text = count_elements[0].text_content().strip() if hasattr(count_elements[0], 'text_content') else str(count_elements[0]).strip()
+                            if count_text:
+                                print(f"  [DEBUG] count_text found: {count_text[:100]}...")
+                                # Try multiple patterns
+                                match = re.search(r'([\d,]+)\s*customer\s*reviews?', count_text, re.IGNORECASE)
+                                if not match:
+                                    match = re.search(r'([\d,]+)\s*with\s*reviews?', count_text, re.IGNORECASE)
+                                if not match:
+                                    match = re.search(r'([\d,]+)\s*reviews?', count_text, re.IGNORECASE)
+                                if not match:
+                                    # Fallback: "1,234 total ratings, 567 with reviews" pattern
+                                    match = re.search(r'([\d,]+)\s*total\s*ratings?,\s*([\d,]+)', count_text, re.IGNORECASE)
+                                    if match:
+                                        count_of_reviews = match.group(2)  # Second number is reviews
+                                        print(f"  [OK] Extracted count_of_reviews from review page (fallback): {count_of_reviews}")
+                                        break
+                                if match:
+                                    count_of_reviews = match.group(1)
+                                    print(f"  [OK] Extracted count_of_reviews from review page: {count_of_reviews}")
+                                    break
+                except Exception as e:
+                    print(f"  [WARNING] count_of_reviews element not loaded - {str(e)[:50]}")
+
+                # Collect reviews from first page (max 10 reviews per page)
+                all_reviews = []
+
+                # Debug: Print current URL to verify we're on review page
+                current_url = self.driver.current_url
+                print(f"  [DEBUG] Current URL before extracting reviews: {current_url[:100]}...")
+
+                tree = html.fromstring(self.driver.page_source)
+
+                # Extract reviews from first page
+                review_xpath = '//span[@data-hook="review-body"]/span'
+                review_elements = tree.xpath(review_xpath)
+
+                if review_elements:
+                    for elem in review_elements[:10]:  # Max 10 from first page
+                        review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
+                        if review_text:
+                            all_reviews.append(review_text)
+
+                print(f"  [INFO] Review page 1: collected {len(all_reviews)} reviews")
+
+                # Check if we need to go to next page (count_of_reviews > 10)
+                count_int = 0
+                if count_of_reviews:
+                    try:
+                        count_int = int(str(count_of_reviews).replace(',', ''))
+                    except:
+                        count_int = 0
+
+                # Store collected reviews for duplicate check
+                collected_reviews = set(all_reviews)
+
+                # If more reviews exist than collected, go to next pages (up to 3 pages)
+                # Changed from count_int >= 20 to count_int > len(all_reviews) to handle cases like 11 reviews with only 10 collected
+                current_page = 1
+                max_pages = 3
+
+                while len(all_reviews) < 20 and current_page < max_pages and count_int > len(all_reviews):
+                    try:
+                        # Scroll to bottom of page to ensure Next button is visible
+                        self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                        time.sleep(1)
+
+                        # Find and click Next page button
+                        next_button = self.driver.find_element(By.XPATH, '//li[@class="a-last"]/a')
+                        print(f"  [INFO] Clicking Next page button (page {current_page} -> {current_page + 1})...")
+                        self.driver.execute_script("arguments[0].click();", next_button)
+                        time.sleep(random.uniform(3, 5))
+
+                        current_page += 1
+
+                        # Verify we're on expected page
+                        current_url = self.driver.current_url
+                        if f'pageNumber={current_page}' not in current_url:
+                            print(f"  [WARNING] Page {current_page} not loaded properly, current URL: {current_url[:80]}...")
+                        else:
+                            print(f"  [DEBUG] Confirmed on page {current_page}: {current_url[:80]}...")
+
+                        # Extract reviews from current page
+                        tree = html.fromstring(self.driver.page_source)
+                        review_elements = tree.xpath(review_xpath)
+
+                        print(f"  [DEBUG] Review page {current_page}: found {len(review_elements)} review elements")
+
+                        # Collect reviews with duplicate check
+                        page_count = 0
+                        duplicates = 0
+                        if review_elements:
+                            for elem in review_elements[:10]:  # Max 10 per page
+                                if len(all_reviews) >= 20:
+                                    break
+                                review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
+                                if review_text:
+                                    # Skip if duplicate
+                                    if review_text in collected_reviews:
+                                        duplicates += 1
+                                        continue
+                                    all_reviews.append(review_text)
+                                    collected_reviews.add(review_text)
+                                    page_count += 1
+
+                        if duplicates > 0:
+                            print(f"  [WARNING] Found {duplicates} duplicate reviews on page {current_page}")
+                        print(f"  [INFO] Review page {current_page}: added {page_count} reviews, total {len(all_reviews)} reviews")
+
+                        # 리뷰가 0개일 때만 Sorry page 감지 및 새로고침 (최대 10회, 5초 간격)
+                        if page_count == 0:
+                            sorry_page_detected = False
+                            for refresh_attempt in range(10):
+                                page_source_lower = self.driver.page_source.lower()
+                                # Sorry page 패턴 확인 (리뷰 텍스트가 아닌 페이지 구조로 판단)
+                                if ('sorry' in page_source_lower and 'review' not in page_source_lower) or 'something went wrong' in page_source_lower:
+                                    print(f"  [WARNING] Sorry page detected on page {current_page}, refreshing ({refresh_attempt + 1}/10)...")
+                                    self.driver.refresh()
+                                    time.sleep(5)
+                                    # 새로고침 후 리뷰 다시 추출 시도
+                                    tree = html.fromstring(self.driver.page_source)
+                                    review_elements = tree.xpath(review_xpath)
+                                    if review_elements:
+                                        print(f"  [INFO] Reviews found after refresh, continuing...")
+                                        for elem in review_elements[:10]:
+                                            if len(all_reviews) >= 20:
+                                                break
+                                            review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
+                                            if review_text and review_text not in collected_reviews:
+                                                all_reviews.append(review_text)
+                                                collected_reviews.add(review_text)
+                                                page_count += 1
+                                        break
+                                else:
                                     break
                             else:
+                                print(f"  [ERROR] Sorry page persists after 10 refreshes on page {current_page}")
+                                sorry_page_detected = True
+
+                            if sorry_page_detected or page_count == 0:
+                                print(f"  [INFO] No new reviews on page {current_page}, stopping pagination")
                                 break
-                        else:
-                            print(f"  [ERROR] Sorry page persists after 10 refreshes on page {current_page}")
-                            sorry_page_detected = True
 
-                        if sorry_page_detected or page_count == 0:
-                            print(f"  [INFO] No new reviews on page {current_page}, stopping pagination")
-                            break
+                    except Exception as e:
+                        print(f"  [WARNING] Could not navigate to page {current_page + 1}: {e}")
+                        break
 
-                except Exception as e:
-                    print(f"  [WARNING] Could not navigate to page {current_page + 1}: {e}")
-                    break
+                # Navigate back to product page
+                print(f"  [INFO] Navigating back to product page...")
+                self.driver.get(product_url)
+                time.sleep(random.uniform(2, 3))
 
-            # Navigate back to product page
-            print(f"  [INFO] Navigating back to product page...")
-            self.driver.get(product_url)
-            time.sleep(random.uniform(2, 3))
+                # 3페이지까지 갔는데 20개 미만이면 재시도
+                if count_int >= 20 and len(all_reviews) < 20 and attempt == 0:
+                    print(f"  [INFO] Only collected {len(all_reviews)} reviews (expected 20), will retry...")
+                    continue
 
-            # Limit to 20 reviews and format as "1-review, 2-review, ..."
-            reviews = all_reviews[:20]
-            if reviews:
-                formatted_reviews = []
-                for idx, review in enumerate(reviews, 1):
-                    formatted_reviews.append(f"{idx}-{review}")
-                print(f"  [OK] Collected {len(reviews)} detailed reviews from review page")
-                return ", ".join(formatted_reviews), count_of_reviews
-            else:
-                print("  [WARNING] No reviews found on review page, falling back to detail page reviews")
-                return self.extract_detailed_reviews(product_url), count_of_reviews
+                # Limit to 20 reviews and format as "1-review, 2-review, ..."
+                reviews = all_reviews[:20]
+                if reviews:
+                    formatted_reviews = []
+                    for idx, review in enumerate(reviews, 1):
+                        formatted_reviews.append(f"{idx}-{review}")
+                    print(f"  [OK] Collected {len(reviews)} detailed reviews from review page")
+                    return ", ".join(formatted_reviews), count_of_reviews
+                else:
+                    print("  [WARNING] No reviews found on review page, falling back to detail page reviews")
+                    return self.extract_detailed_reviews(product_url), count_of_reviews
 
-        except Exception as e:
-            print(f"  [WARNING] Failed to extract detailed reviews from review page: {e}")
-            return self.extract_detailed_reviews(product_url), None
+            except Exception as e:
+                print(f"  [WARNING] Failed to extract detailed reviews from review page: {e}")
+                if attempt == 0:
+                    continue
+                return self.extract_detailed_reviews(product_url), None
+
+        print(f"  [WARNING] No reviews extracted after retries")
+        return self.extract_detailed_reviews(product_url), None
 
     def clean_shipping_text(self, text):
         """Clean shipping text by removing JavaScript and stopping at 'Join Prime'"""

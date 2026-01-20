@@ -1533,166 +1533,191 @@ class WalmartDetailCrawler:
             traceback.print_exc()
             return None
 
-    def extract_detailed_reviews(self):
+    def extract_detailed_reviews(self, count_of_reviews=None):
         """Click 'View all reviews' and extract up to 20 reviews"""
         try:
-            # Find and click "View all reviews" button
-            try:
-                # Scroll to reviews section first
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(2)
+            # 상품 페이지 URL 저장 (재시도용)
+            product_url = self.driver.current_url
 
-                # Try multiple XPaths to find the button (there might be 2 on the page)
-                view_all_xpaths = [
-                    # Priority 1: Button with data-dca-intent="select" (most reliable)
-                    "//button[contains(text(), 'View all reviews') and @data-dca-intent='select']",
-                    # Priority 2: Specific XPaths (div index varies by page)
-                    '//*[@id="item-review-section"]/div[6]/button',
-                    '//*[@id="item-review-section"]/div[8]/button',
-                    # Priority 3: Specific XPath without review count
-                    '//*[@id="item-review-section"]/div[2]/div[1]/div[3]/button',
-                    # Priority 4: Any button with "View all reviews" text
-                    "//button[contains(text(), 'View all reviews')]",
-                    # Priority 5: Database XPath as fallback
-                    self.xpaths.get('view_all_reviews_button')
-                ]
+            # 기본 2페이지, count_of_reviews >= 20이면 3페이지까지 수집 가능
+            cor_int = int(str(count_of_reviews).replace(',', '')) if count_of_reviews else 0
+            max_pages = 3 if cor_int >= 20 else 2
 
-                view_all_btn = None
-                for xpath in view_all_xpaths:
-                    if xpath:
-                        try:
-                            buttons = self.driver.find_elements(By.XPATH, xpath)
-                            # If multiple buttons found, prefer the one with number in parentheses
-                            for btn in buttons:
-                                if '(' in btn.text and ')' in btn.text:
-                                    view_all_btn = btn
-                                    break
-                            # If no button with number, use the first one found
-                            if not view_all_btn and buttons:
-                                view_all_btn = buttons[0]
-                            if view_all_btn:
-                                break
-                        except:
-                            continue
+            # 재시도 포함 최대 2회 시도
+            for attempt in range(2):
+                if attempt > 0:
+                    print(f"  [INFO] Retrying review extraction (attempt {attempt + 1}/2)...")
+                    # 크롬 종료 후 재시작
+                    self.driver.quit()
+                    self.setup_driver()
+                    self.driver.get(product_url)
+                    time.sleep(random.uniform(3, 4))
 
-                if not view_all_btn:
-                    print(f"  [WARNING] Could not find View all reviews button")
-                    return None
+                # Find and click "View all reviews" button
+                try:
+                    # Scroll to reviews section first
+                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(2)
 
-                # Scroll to button with offset to avoid header
-                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", view_all_btn)
-                time.sleep(1)
+                    # Try multiple XPaths to find the button (there might be 2 on the page)
+                    view_all_xpaths = [
+                        # Priority 1: Button with data-dca-intent="select" (most reliable)
+                        "//button[contains(text(), 'View all reviews') and @data-dca-intent='select']",
+                        # Priority 2: Specific XPaths (div index varies by page)
+                        '//*[@id="item-review-section"]/div[6]/button',
+                        '//*[@id="item-review-section"]/div[8]/button',
+                        # Priority 3: Specific XPath without review count
+                        '//*[@id="item-review-section"]/div[2]/div[1]/div[3]/button',
+                        # Priority 4: Any button with "View all reviews" text
+                        "//button[contains(text(), 'View all reviews')]",
+                        # Priority 5: Database XPath as fallback
+                        self.xpaths.get('view_all_reviews_button')
+                    ]
 
-                # Log button info before click
-                btn_text = view_all_btn.text if view_all_btn else "N/A"
-                print(f"  [DEBUG] Found View all reviews button: '{btn_text[:50]}...' ")
-
-                # Get URL before click
-                url_before = self.driver.current_url
-
-                # Use JavaScript click to avoid interception
-                self.driver.execute_script("arguments[0].click();", view_all_btn)
-                time.sleep(random.uniform(3, 4))
-
-                # Check if URL changed (page navigated)
-                url_after = self.driver.current_url
-                if url_before == url_after:
-                    print(f"  [WARNING] URL did not change after clicking View all reviews button")
-                    print(f"  [DEBUG] URL: {url_after[:80]}...")
-                else:
-                    print(f"  [DEBUG] Navigated to reviews page: {url_after[:80]}...")
-
-            except Exception as e:
-                print(f"  [WARNING] Could not click View all reviews: {e}")
-                return None
-
-            # Extract reviews from multiple pages (up to 20 reviews)
-            reviews = []
-            page_num = 1
-            max_pages = 2  # We'll collect from 2 pages to get 20 reviews
-
-            while len(reviews) < 20 and page_num <= max_pages:
-                # Get current page HTML
-                page_source = self.driver.page_source
-                tree = html.fromstring(page_source)
-
-                # Get review containers - try multiple XPaths
-                # Find all review containers using data-testid attribute
-                review_content_divs = tree.xpath('//div[@data-testid="enhanced-review-content"]')
-
-                # If not found, try alternative XPaths
-                if not review_content_divs:
-                    review_content_divs = tree.xpath('//div[contains(@class, "review-content")]')
-                if not review_content_divs:
-                    review_content_divs = tree.xpath('//div[@data-testid="review-card"]')
-                if not review_content_divs:
-                    # Try to find any review-like containers
-                    review_content_divs = tree.xpath('//div[contains(@class, "CustomerReview")]')
-
-                if not review_content_divs:
-                    print(f"  [WARNING] No review content divs found on page {page_num}")
-                    break
-
-                # Extract reviews from current page
-                for idx, content_div in enumerate(review_content_divs):
-                    if len(reviews) >= 20:
-                        break
-
-                    # Extract review text
-                    review_xpath = './/p/span[@class="tl-m db-m"]'
-                    review_elem = content_div.xpath(review_xpath)
-
-                    if review_elem:
-                        review_text = review_elem[0].text_content().strip() if hasattr(review_elem[0], 'text_content') else str(review_elem[0]).strip()
-                        if review_text and len(review_text) > 0:
-                            reviews.append(review_text)
-
-                # If we need more reviews and haven't reached max pages, click Next Page
-                if len(reviews) < 20 and page_num < max_pages:
-                    try:
-                        # Try multiple XPaths to find Next Page button
-                        next_page_xpaths = [
-                            '//*[@id="maincontent"]/main/nav/ul/li[4]/a',  # Specific XPath
-                            "//a[@data-testid='NextPage']",                 # data-testid based
-                            "//a[@aria-label='Next Page']",                 # aria-label based
-                        ]
-
-                        next_page_btn = None
-                        for xpath in next_page_xpaths:
+                    view_all_btn = None
+                    for xpath in view_all_xpaths:
+                        if xpath:
                             try:
-                                next_page_btn = self.driver.find_element(By.XPATH, xpath)
-                                if next_page_btn:
+                                buttons = self.driver.find_elements(By.XPATH, xpath)
+                                # If multiple buttons found, prefer the one with number in parentheses
+                                for btn in buttons:
+                                    if '(' in btn.text and ')' in btn.text:
+                                        view_all_btn = btn
+                                        break
+                                # If no button with number, use the first one found
+                                if not view_all_btn and buttons:
+                                    view_all_btn = buttons[0]
+                                if view_all_btn:
                                     break
                             except:
                                 continue
 
-                        if not next_page_btn:
-                            print(f"  [WARNING] Could not find Next Page button")
+                    if not view_all_btn:
+                        print(f"  [WARNING] Could not find View all reviews button")
+                        # if attempt == 0:
+                        #     continue  # 재시도
+                        return None
+
+                    # Scroll to button with offset to avoid header
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", view_all_btn)
+                    time.sleep(1)
+
+                    # Log button info before click
+                    btn_text = view_all_btn.text if view_all_btn else "N/A"
+                    print(f"  [DEBUG] Found View all reviews button: '{btn_text[:50]}...' ")
+
+                    # Get URL before click
+                    url_before = self.driver.current_url
+
+                    # Use JavaScript click to avoid interception
+                    self.driver.execute_script("arguments[0].click();", view_all_btn)
+                    time.sleep(random.uniform(3, 4))
+
+                    # Check if URL changed (page navigated)
+                    url_after = self.driver.current_url
+                    if url_before == url_after:
+                        print(f"  [WARNING] URL did not change after clicking View all reviews button")
+                        print(f"  [DEBUG] URL: {url_after[:80]}...")
+                    else:
+                        print(f"  [DEBUG] Navigated to reviews page: {url_after[:80]}...")
+
+                except Exception as e:
+                    print(f"  [WARNING] Could not click View all reviews: {e}")
+                    # if attempt == 0:
+                    #     continue  # 재시도
+                    return None
+
+                # Extract reviews from multiple pages (up to 20 reviews)
+                reviews = []
+                page_num = 1
+
+                while len(reviews) < 20 and page_num <= max_pages:
+                    # Get current page HTML
+                    page_source = self.driver.page_source
+                    tree = html.fromstring(page_source)
+
+                    # Get review containers - try multiple XPaths
+                    # Find all review containers using data-testid attribute
+                    review_content_divs = tree.xpath('//div[@data-testid="enhanced-review-content"]')
+
+                    # If not found, try alternative XPaths
+                    if not review_content_divs:
+                        review_content_divs = tree.xpath('//div[contains(@class, "review-content")]')
+                    if not review_content_divs:
+                        review_content_divs = tree.xpath('//div[@data-testid="review-card"]')
+                    if not review_content_divs:
+                        # Try to find any review-like containers
+                        review_content_divs = tree.xpath('//div[contains(@class, "CustomerReview")]')
+
+                    if not review_content_divs:
+                        print(f"  [WARNING] No review content divs found on page {page_num}")
+                        break
+
+                    # Extract reviews from current page
+                    for idx, content_div in enumerate(review_content_divs):
+                        if len(reviews) >= 20:
                             break
 
-                        # Scroll to button
-                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_page_btn)
-                        time.sleep(1)
+                        # Extract review text
+                        review_xpath = './/p/span[@class="tl-m db-m"]'
+                        review_elem = content_div.xpath(review_xpath)
 
-                        # Click Next Page
-                        self.driver.execute_script("arguments[0].click();", next_page_btn)
+                        if review_elem:
+                            review_text = review_elem[0].text_content().strip() if hasattr(review_elem[0], 'text_content') else str(review_elem[0]).strip()
+                            if review_text and len(review_text) > 0:
+                                reviews.append(review_text)
 
-                        # Wait for next page to load
-                        time.sleep(random.uniform(3, 4))
-                        page_num += 1
-                    except Exception as e:
-                        print(f"  [WARNING] Could not find or click Next Page button: {e}")
+                    # If we need more reviews and haven't reached max pages, click Next Page
+                    if len(reviews) < 20 and page_num < max_pages:
+                        try:
+                            # Try multiple XPaths to find Next Page button
+                            next_page_xpaths = [
+                                '//*[@id="maincontent"]/main/nav/ul/li[4]/a',  # Specific XPath
+                                "//a[@data-testid='NextPage']",                 # data-testid based
+                                "//a[@aria-label='Next Page']",                 # aria-label based
+                            ]
+
+                            next_page_btn = None
+                            for xpath in next_page_xpaths:
+                                try:
+                                    next_page_btn = self.driver.find_element(By.XPATH, xpath)
+                                    if next_page_btn:
+                                        break
+                                except:
+                                    continue
+
+                            if not next_page_btn:
+                                print(f"  [WARNING] Could not find Next Page button")
+                                break
+
+                            # Scroll to button
+                            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_page_btn)
+                            time.sleep(1)
+
+                            # Click Next Page
+                            self.driver.execute_script("arguments[0].click();", next_page_btn)
+
+                            # Wait for next page to load
+                            time.sleep(random.uniform(3, 4))
+                            page_num += 1
+                        except Exception as e:
+                            print(f"  [WARNING] Could not find or click Next Page button: {e}")
+                            break
+                    else:
                         break
-                else:
-                    break
 
-            # Format as "review1-content, review2-content, ..."
-            if reviews:
-                print(f"  [INFO] Extracted {len(reviews)} reviews from {page_num} page(s)")
-                formatted = []
-                for idx, review in enumerate(reviews[:20], 1):
-                    formatted.append(f"review{idx}-{review}")
-                return ', '.join(formatted)
+                # 3페이지까지 갔는데 20개 미만이면 재시도
+                if max_pages == 3 and len(reviews) < 20 and attempt == 0:
+                    print(f"  [INFO] Only collected {len(reviews)} reviews after {page_num} pages, will retry...")
+                    continue
+
+                # Format as "review1-content, review2-content, ..."
+                if reviews:
+                    print(f"  [INFO] Extracted {len(reviews)} reviews from {page_num} page(s)")
+                    formatted = []
+                    for idx, review in enumerate(reviews[:20], 1):
+                        formatted.append(f"review{idx}-{review}")
+                    return ', '.join(formatted)
 
             print(f"  [WARNING] No reviews extracted")
             return None
@@ -1872,7 +1897,7 @@ class WalmartDetailCrawler:
                 screen_size = None
 
             # Extract detailed reviews with retry if count_of_reviews >= 1 but no content
-            detailed_review_content = self.extract_detailed_reviews()
+            detailed_review_content = self.extract_detailed_reviews(count_of_reviews)
 
             # Retry logic: if count_of_reviews >= 1 but detailed_review_content is empty
             cor_int_check = int(str(count_of_reviews).replace(',', '')) if count_of_reviews else 0
@@ -1883,7 +1908,7 @@ class WalmartDetailCrawler:
                     # Navigate back to product page and retry
                     self.driver.get(url)
                     time.sleep(random.uniform(3, 5))
-                    detailed_review_content = self.extract_detailed_reviews()
+                    detailed_review_content = self.extract_detailed_reviews(count_of_reviews)
                     if detailed_review_content:
                         break
 

@@ -1012,7 +1012,7 @@ class AmazonDetailCrawler:
             if review_elements:
                 for elem in review_elements:
                     review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
-                    if review_text and len(review_text) > 10:
+                    if review_text:
                         all_reviews.append(review_text)
 
             # Format as "1-review, 2-review, ..."
@@ -1139,7 +1139,7 @@ class AmazonDetailCrawler:
             if review_elements:
                 for elem in review_elements[:10]:  # Max 10 from first page
                     review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
-                    if review_text and len(review_text) > 10:
+                    if review_text:
                         all_reviews.append(review_text)
 
             print(f"  [INFO] Review page 1: collected {len(all_reviews)} reviews")
@@ -1195,7 +1195,7 @@ class AmazonDetailCrawler:
                             if len(all_reviews) >= 20:
                                 break
                             review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
-                            if review_text and len(review_text) > 10:
+                            if review_text:
                                 # Skip if duplicate
                                 if review_text in collected_reviews:
                                     duplicates += 1
@@ -1227,7 +1227,7 @@ class AmazonDetailCrawler:
                                         if len(all_reviews) >= 20:
                                             break
                                         review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
-                                        if review_text and len(review_text) > 10 and review_text not in collected_reviews:
+                                        if review_text and review_text not in collected_reviews:
                                             all_reviews.append(review_text)
                                             collected_reviews.add(review_text)
                                             page_count += 1

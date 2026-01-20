@@ -1174,19 +1174,6 @@ class AmazonDetailCrawler:
 
                     current_page += 1
 
-                    # Sorry page 감지 및 새로고침 (최대 10회, 5초 간격)
-                    for refresh_attempt in range(10):
-                        page_source_lower = self.driver.page_source.lower()
-                        if 'sorry' in page_source_lower or 'something went wrong' in page_source_lower:
-                            print(f"  [WARNING] Sorry page detected on page {current_page}, refreshing ({refresh_attempt + 1}/10)...")
-                            self.driver.refresh()
-                            time.sleep(5)
-                        else:
-                            break
-                    else:
-                        print(f"  [ERROR] Sorry page persists after 10 refreshes on page {current_page}")
-                        break
-
                     # Verify we're on expected page
                     current_url = self.driver.current_url
                     if f'pageNumber={current_page}' not in current_url:
@@ -1221,10 +1208,39 @@ class AmazonDetailCrawler:
                         print(f"  [WARNING] Found {duplicates} duplicate reviews on page {current_page}")
                     print(f"  [INFO] Review page {current_page}: added {page_count} reviews, total {len(all_reviews)} reviews")
 
-                    # If no new reviews found, stop pagination
+                    # 리뷰가 0개일 때만 Sorry page 감지 및 새로고침 (최대 10회, 5초 간격)
                     if page_count == 0:
-                        print(f"  [INFO] No new reviews on page {current_page}, stopping pagination")
-                        break
+                        sorry_page_detected = False
+                        for refresh_attempt in range(10):
+                            page_source_lower = self.driver.page_source.lower()
+                            # Sorry page 패턴 확인 (리뷰 텍스트가 아닌 페이지 구조로 판단)
+                            if ('sorry' in page_source_lower and 'review' not in page_source_lower) or 'something went wrong' in page_source_lower:
+                                print(f"  [WARNING] Sorry page detected on page {current_page}, refreshing ({refresh_attempt + 1}/10)...")
+                                self.driver.refresh()
+                                time.sleep(5)
+                                # 새로고침 후 리뷰 다시 추출 시도
+                                tree = html.fromstring(self.driver.page_source)
+                                review_elements = tree.xpath(review_xpath)
+                                if review_elements:
+                                    print(f"  [INFO] Reviews found after refresh, continuing...")
+                                    for elem in review_elements[:10]:
+                                        if len(all_reviews) >= 20:
+                                            break
+                                        review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
+                                        if review_text and len(review_text) > 10 and review_text not in collected_reviews:
+                                            all_reviews.append(review_text)
+                                            collected_reviews.add(review_text)
+                                            page_count += 1
+                                    break
+                            else:
+                                break
+                        else:
+                            print(f"  [ERROR] Sorry page persists after 10 refreshes on page {current_page}")
+                            sorry_page_detected = True
+
+                        if sorry_page_detected or page_count == 0:
+                            print(f"  [INFO] No new reviews on page {current_page}, stopping pagination")
+                            break
 
                 except Exception as e:
                     print(f"  [WARNING] Could not navigate to page {current_page + 1}: {e}")

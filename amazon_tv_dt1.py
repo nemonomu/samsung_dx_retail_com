@@ -1068,45 +1068,69 @@ class AmazonDetailCrawler:
                 time.sleep(random.uniform(3, 4))
                 print(f"  [DEBUG] Actual URL after navigation: {self.driver.current_url}")
 
-                # Wait for count_of_reviews element to load, then extract
+                # Wait for count_of_reviews element to load, with sorry page retry (max 10 times)
                 count_of_reviews = None
-                try:
-                    WebDriverWait(self.driver, 10).until(
-                        EC.presence_of_element_located((By.XPATH, '//*[@id="filter-info-section"] | //div[@data-hook="cr-filter-info-review-rating-count"]'))
-                    )
-                    # Element loaded - extract count_of_reviews
-                    tree = html.fromstring(self.driver.page_source)
-                    count_xpaths = [
-                        '//*[@id="filter-info-section"]/div',
-                        '//div[@data-hook="cr-filter-info-review-rating-count"]',
-                        '//div[contains(@data-hook, "review-rating-count")]',
-                        '//*[@id="filter-info-section"]'
-                    ]
-                    for xpath in count_xpaths:
-                        count_elements = tree.xpath(xpath)
-                        if count_elements:
-                            count_text = count_elements[0].text_content().strip() if hasattr(count_elements[0], 'text_content') else str(count_elements[0]).strip()
-                            if count_text:
-                                print(f"  [DEBUG] count_text found: {count_text[:100]}...")
-                                # Try multiple patterns
-                                match = re.search(r'([\d,]+)\s*customer\s*reviews?', count_text, re.IGNORECASE)
-                                if not match:
-                                    match = re.search(r'([\d,]+)\s*with\s*reviews?', count_text, re.IGNORECASE)
-                                if not match:
-                                    match = re.search(r'([\d,]+)\s*reviews?', count_text, re.IGNORECASE)
-                                if not match:
-                                    # Fallback: "1,234 total ratings, 567 with reviews" pattern
-                                    match = re.search(r'([\d,]+)\s*total\s*ratings?,\s*([\d,]+)', count_text, re.IGNORECASE)
+                count_xpaths = [
+                    '//*[@id="filter-info-section"]/div',
+                    '//div[@data-hook="cr-filter-info-review-rating-count"]',
+                    '//div[contains(@data-hook, "review-rating-count")]',
+                    '//*[@id="filter-info-section"]'
+                ]
+
+                for refresh_attempt in range(10):
+                    try:
+                        # Sorry page 감지
+                        page_source_lower = self.driver.page_source.lower()
+                        if ('sorry' in page_source_lower and 'review' not in page_source_lower) or 'something went wrong' in page_source_lower:
+                            print(f"  [WARNING] Sorry page detected on review page, refreshing ({refresh_attempt + 1}/10)...")
+                            self.driver.refresh()
+                            time.sleep(5)
+                            continue
+
+                        # 요소 대기
+                        WebDriverWait(self.driver, 10).until(
+                            EC.presence_of_element_located((By.XPATH, '//*[@id="filter-info-section"] | //div[@data-hook="cr-filter-info-review-rating-count"]'))
+                        )
+
+                        # 텍스트가 있을 때까지 추출 시도
+                        tree = html.fromstring(self.driver.page_source)
+                        for xpath in count_xpaths:
+                            count_elements = tree.xpath(xpath)
+                            if count_elements:
+                                count_text = count_elements[0].text_content().strip() if hasattr(count_elements[0], 'text_content') else str(count_elements[0]).strip()
+                                if count_text:
+                                    print(f"  [DEBUG] count_text found: {count_text[:100]}...")
+                                    # Try multiple patterns
+                                    match = re.search(r'([\d,]+)\s*customer\s*reviews?', count_text, re.IGNORECASE)
+                                    if not match:
+                                        match = re.search(r'([\d,]+)\s*with\s*reviews?', count_text, re.IGNORECASE)
+                                    if not match:
+                                        match = re.search(r'([\d,]+)\s*reviews?', count_text, re.IGNORECASE)
+                                    if not match:
+                                        # Fallback: "1,234 total ratings, 567 with reviews" pattern
+                                        match = re.search(r'([\d,]+)\s*total\s*ratings?,\s*([\d,]+)', count_text, re.IGNORECASE)
+                                        if match:
+                                            count_of_reviews = match.group(2)  # Second number is reviews
+                                            print(f"  [OK] Extracted count_of_reviews from review page (fallback): {count_of_reviews}")
+                                            break
                                     if match:
-                                        count_of_reviews = match.group(2)  # Second number is reviews
-                                        print(f"  [OK] Extracted count_of_reviews from review page (fallback): {count_of_reviews}")
+                                        count_of_reviews = match.group(1)
+                                        print(f"  [OK] Extracted count_of_reviews from review page: {count_of_reviews}")
                                         break
-                                if match:
-                                    count_of_reviews = match.group(1)
-                                    print(f"  [OK] Extracted count_of_reviews from review page: {count_of_reviews}")
-                                    break
-                except Exception as e:
-                    print(f"  [WARNING] count_of_reviews element not loaded - {str(e)[:50]}")
+
+                        # 추출 성공하면 루프 종료
+                        if count_of_reviews:
+                            break
+
+                        # 텍스트 없으면 새로고침 후 재시도
+                        print(f"  [WARNING] count_of_reviews text not found, refreshing ({refresh_attempt + 1}/10)...")
+                        self.driver.refresh()
+                        time.sleep(5)
+
+                    except Exception as e:
+                        print(f"  [WARNING] count_of_reviews element not loaded ({refresh_attempt + 1}/10) - {str(e)[:50]}")
+                        self.driver.refresh()
+                        time.sleep(5)
 
                 # Collect reviews from first page (max 10 reviews per page)
                 all_reviews = []

@@ -510,6 +510,22 @@ class AmazonDetailCrawler:
         except Exception as e:
             return None
 
+    def extract_with_xpaths(self, tree, xpaths_key, fallback_xpaths=None):
+        """Extract text using multiple XPaths from DB, with fallback
+        Args:
+            tree: lxml tree object
+            xpaths_key: key in self.xpaths (e.g., 'product_name')
+            fallback_xpaths: list of fallback xpaths if DB returns None
+        Returns:
+            Extracted text or None
+        """
+        xpaths = self.xpaths.get(xpaths_key) or fallback_xpaths or []
+        for xpath in xpaths:
+            result = self.extract_text_safe(tree, xpath)
+            if result:
+                return result
+        return None
+
     def clean_rank(self, rank_text):
         """Remove parentheses content from rank text"""
         if not rank_text:
@@ -1514,15 +1530,15 @@ class AmazonDetailCrawler:
                 retailer_sku_name = None  # Skip extraction due to page load failure
                 print(f"  [INFO] Skipping retailer_sku_name extraction (page load failed)")
             else:
-                retailer_sku_name = self.extract_text_safe(tree, self.xpaths.get('product_name'))
+                retailer_sku_name = self.extract_with_xpaths(tree, 'product_name', ['//*[@id="productTitle"]'])
             star_rating = self.extract_star_rating(tree)
 
             # SKU_Popularity - only collect if "Amazon's Choice"
-            sku_popularity_raw = self.extract_text_safe(tree, self.xpaths.get('sku_popularity'))
+            sku_popularity_raw = self.extract_with_xpaths(tree, 'sku_popularity')
             sku_popularity = sku_popularity_raw if sku_popularity_raw and "Amazon's" in sku_popularity_raw and "Choice" in sku_popularity_raw else None
 
             # Retailer_Membership_Discounts - clean Prime text
-            membership_discount_raw = self.extract_text_safe(tree, self.xpaths.get('membership_discount'))
+            membership_discount_raw = self.extract_with_xpaths(tree, 'membership_discount')
             membership_discount = self.clean_membership_discount(membership_discount_raw)
 
             # Item - Extract ASIN from final URL (after redirect)
@@ -1761,7 +1777,7 @@ class AmazonDetailCrawler:
                 tree = html.fromstring(page_source)
 
                 # Re-extract key fields
-                retailer_sku_name = self.extract_text_safe(tree, self.xpaths.get('product_name'))
+                retailer_sku_name = self.extract_with_xpaths(tree, 'product_name', ['//*[@id="productTitle"]'])
                 star_rating = self.extract_star_rating(tree)
                 count_of_star_ratings = self.extract_count_of_star_ratings(tree)
                 final_sku_price = self.extract_final_sku_price(tree)

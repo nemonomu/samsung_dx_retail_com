@@ -1415,12 +1415,7 @@ class BestBuyDetailCrawler:
     def click_see_all_reviews(self, product_url=None):
         """See All Customer Reviews - 버튼 클릭 먼저, 실패 시 직접 URL 접근 (DrissionPage)"""
         try:
-            # 1. 먼저 버튼 클릭 시도
             print("  [INFO] See All Customer Reviews button searching...")
-            print("  [INFO] page starting scroll...")
-            scroll_height = self.page.run_js("return document.body.scrollHeight")
-            current_position = 0
-            step = 400
 
             selectors = self.config.get_xpath_list('see_all_reviews_btn', self.file_name) or [
                 'xpath://button[contains(., "See All Customer Reviews")]',
@@ -1428,30 +1423,41 @@ class BestBuyDetailCrawler:
                 'css:button.Op9coqeII1kYHR9Q'
             ]
 
-            while current_position < scroll_height:
-                for selector in selectors:
-                    try:
-                        button = self.page.ele(selector, timeout=1)
-                        if button:
-                            print("  [OK] See All Customer Reviews button found")
-                            button.scroll.to_see()
-                            time.sleep(2)
-                            try:
-                                button.click()
-                                print("  [OK] See All Customer Reviews click successful")
-                                time.sleep(5)
-                                return True
-                            except Exception as click_err:
-                                print(f"  [WARNING] click failed: {click_err}")
-                                continue
-                    except Exception as e:
-                        continue
+            # 1. DOM에서 바로 버튼 검색 (스크롤 없이)
+            for selector in selectors:
+                try:
+                    button = self.page.ele(selector, timeout=2)
+                    if button:
+                        print("  [OK] See All Customer Reviews button found (in DOM)")
+                        button.scroll.to_see()
+                        time.sleep(0.5)
+                        button.click()
+                        print("  [OK] See All Customer Reviews click successful")
+                        time.sleep(3)
+                        return True
+                except:
+                    continue
 
-                current_position += step
-                self.page.run_js(f"window.scrollTo(0, {current_position})")
-                time.sleep(1)
+            # 2. 리뷰 섹션으로 빠르게 스크롤 후 검색
+            print("  [INFO] Scrolling to review section...")
+            self.page.run_js("window.scrollTo(0, document.body.scrollHeight * 0.7)")
+            time.sleep(1)
 
-            # 2. 버튼 못 찾으면 직접 URL 접근 시도 (fallback)
+            for selector in selectors:
+                try:
+                    button = self.page.ele(selector, timeout=2)
+                    if button:
+                        print("  [OK] See All Customer Reviews button found (after scroll)")
+                        button.scroll.to_see()
+                        time.sleep(0.5)
+                        button.click()
+                        print("  [OK] See All Customer Reviews click successful")
+                        time.sleep(3)
+                        return True
+                except:
+                    continue
+
+            # 3. 버튼 못 찾으면 직접 URL 접근 시도 (fallback)
             print("  [WARNING] See All Customer Reviews button not found. Trying direct URL...")
             if product_url and self.navigate_to_reviews_page(product_url):
                 return True

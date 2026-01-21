@@ -1999,8 +1999,8 @@ class AmazonDetailCrawler:
                 final_drc = data.get('Detailed_Review_Content')
                 if final_drc:
                     try:
-                        # Count reviews by counting "N-" patterns
-                        review_count = len([r for r in final_drc.split(', ') if r and '-' in r])
+                        # Count reviews by counting "N-" patterns (number followed by dash at start)
+                        review_count = len(re.findall(r'\b\d+-', final_drc))
                         print(f"       Detailed Reviews: {review_count} collected")
                     except:
                         print(f"       Detailed Reviews: N/A")

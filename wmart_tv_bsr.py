@@ -3,10 +3,7 @@ import random
 import psycopg2
 from datetime import datetime
 import pytz
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+from DrissionPage import ChromiumPage
 from lxml import html
 import re
 from urllib.parse import urlparse, parse_qs, unquote
@@ -17,11 +14,11 @@ from wmart_config_loader import get_wmart_config
 
 class WalmartTVBSRCrawler:
     def __init__(self):
-        self.driver = None
-        self.wait = None
+        self.page = None
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
+        self.excluded_urls = set()  # URLs to exclude (is_product=false)
         # Load config from DB
         self.config = get_wmart_config()
         self.max_skus = self.config.get_constant_int('max_skus', 'wmart_tv_bsr', default=100)
@@ -39,6 +36,27 @@ class WalmartTVBSRCrawler:
         except Exception as e:
             print(f"[ERROR] Database connection failed: {e}")
             return False
+
+    def load_excluded_urls(self):
+        """Load URLs to exclude (is_product=false from tv_item_mst)"""
+        try:
+            cursor = self.db_conn.cursor()
+            cursor.execute("""
+                SELECT product_url FROM tv_item_mst
+                WHERE is_product = FALSE AND product_url IS NOT NULL
+            """)
+
+            for row in cursor.fetchall():
+                if row[0]:
+                    # Normalize: remove trailing slash for consistent comparison
+                    self.excluded_urls.add(row[0].rstrip('/'))
+
+            cursor.close()
+            print(f"[OK] Loaded {len(self.excluded_urls)} excluded URLs (is_product=false)")
+            return True
+        except Exception as e:
+            print(f"[WARNING] Failed to load excluded URLs: {e}")
+            return True  # Continue anyway
 
     def load_xpaths(self):
         """Load XPath selectors from database"""
@@ -85,37 +103,16 @@ class WalmartTVBSRCrawler:
             return []
 
     def setup_driver(self):
-        """Setup Chrome WebDriver with undetected-chromedriver (bot detection bypass)"""
-        options = uc.ChromeOptions()
-
-        # Bot detection bypass options
-        options.add_argument('--disable-blink-features=AutomationControlled')
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-setuid-sandbox')
-        options.add_argument('--start-maximized')
-        options.add_argument('--disable-infobars')
-        options.add_argument('--disable-gpu')
-        window_size = self.config.get_browser('window_size', default='1920,1080')
-        options.add_argument(f'--window-size={window_size}')
-        options.add_argument('--lang=en-US,en;q=0.9')
-
-        # Preferences
-        prefs = {
-            "profile.default_content_setting_values.notifications": 2,
-            "credentials_enable_service": False,
-            "profile.password_manager_enabled": False,
-        }
-        options.add_experimental_option("prefs", prefs)
-
-        # Use undetected_chromedriver with subprocess for better bot detection bypass
-        self.driver = uc.Chrome(options=options, use_subprocess=True)
-        page_load_timeout = self.config.get_browser_int('page_load_timeout', default=60)
-        self.driver.set_page_load_timeout(page_load_timeout)
-        webdriver_wait = self.config.get_browser_int('webdriver_wait', default=20)
-        self.wait = WebDriverWait(self.driver, webdriver_wait)
-
-        print("[OK] WebDriver setup complete (bot detection bypass enabled)")
+        """Setup DrissionPage browser"""
+        try:
+            self.page = ChromiumPage()
+            print("[OK] Browser setup complete (DrissionPage)")
+            return True
+        except Exception as e:
+            print(f"[ERROR] Browser setup failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def check_robot_page(self, page_source):
         """Check if page is showing 'Robot or human?' challenge"""
@@ -129,7 +126,7 @@ class WalmartTVBSRCrawler:
         """Handle 'PRESS & HOLD' CAPTCHA if present"""
         try:
             print("[INFO] Checking for CAPTCHA...")
-            page_content = self.driver.page_source.lower()
+            page_content = self.page.html.lower()
             captcha_keywords = self.config.get_captcha_keywords()
             if any(keyword in page_content for keyword in captcha_keywords):
                 print("[WARNING] CAPTCHA keywords found in page")
@@ -159,35 +156,35 @@ class WalmartTVBSRCrawler:
             recovery_scroll_range = self.config.get_scroll_range('recovery_amount') or (200, 500)
             homepage_url = self.config.get_url('homepage') or "https://www.walmart.com"
 
-            self.driver.get(homepage_url)
+            self.page.get(homepage_url)
             time.sleep(random.uniform(*homepage_wait))
 
             # Check for robot detection
-            if self.check_robot_page(self.driver.page_source):
+            if self.check_robot_page(self.page.html):
                 print("[WARNING] Robot detection on homepage. Handling CAPTCHA...")
                 self.handle_captcha()
                 captcha_after_wait = self.config.get_timing_range('captcha_after_wait') or (3, 5)
                 time.sleep(random.uniform(*captcha_after_wait))
 
-                if self.check_robot_page(self.driver.page_source):
+                if self.check_robot_page(self.page.html):
                     print("[WARNING] Still showing robot detection, trying recovery...")
                     # Slow scroll down
                     scroll_between_wait = self.config.get_timing_range('scroll_between_wait') or (1.5, 2.5)
                     for i in range(5):
                         scroll_amount = random.randint(*random_scroll_range)
-                        self.driver.execute_script(f"window.scrollBy(0, {scroll_amount})")
+                        self.page.run_js(f"window.scrollBy(0, {scroll_amount})")
                         time.sleep(random.uniform(*scroll_between_wait))
-                    self.driver.execute_script("window.scrollBy(0, -200)")
+                    self.page.run_js("window.scrollBy(0, -200)")
                     time.sleep(random.uniform(*scroll_wait_range))
 
                 print(f"[INFO] Waiting {int(robot_recovery_wait)} seconds...")
                 time.sleep(robot_recovery_wait)
 
                 print("[INFO] Reloading page...")
-                self.driver.refresh()
+                self.page.refresh()
                 time.sleep(random.uniform(*browse_wait))
 
-                if self.check_robot_page(self.driver.page_source):
+                if self.check_robot_page(self.page.html):
                     print("[ERROR] Still getting robot detection after recovery")
                     print("[INFO] Attempting to continue anyway...")
 
@@ -198,11 +195,11 @@ class WalmartTVBSRCrawler:
             # Random scrolling
             for _ in range(random.randint(2, 4)):
                 scroll_amount = random.randint(*recovery_scroll_range)
-                self.driver.execute_script(f"window.scrollBy(0, {scroll_amount})")
+                self.page.run_js(f"window.scrollBy(0, {scroll_amount})")
                 time.sleep(random.uniform(*scroll_wait_range))
 
             # Scroll back to top
-            self.driver.execute_script("window.scrollTo(0, 0)")
+            self.page.run_js("window.scrollTo(0, 0)")
             time.sleep(random.uniform(*scroll_wait_range) + 1)
 
             print("[OK] Session initialized")
@@ -215,22 +212,8 @@ class WalmartTVBSRCrawler:
             return False
 
     def add_random_mouse_movements(self):
-        """Add random mouse movements to appear more human"""
-        try:
-            from selenium.webdriver.common.action_chains import ActionChains
-            actions = ActionChains(self.driver)
-
-            # Random small movements
-            actions_pause = self.config.get_timing_range('actions_pause', 'wmart_tv_bsr') or (0.1, 0.3)
-            for _ in range(random.randint(2, 4)):
-                x_offset = random.randint(-100, 100)
-                y_offset = random.randint(-100, 100)
-                actions.move_by_offset(x_offset, y_offset)
-                actions.pause(random.uniform(*actions_pause))
-
-            actions.perform()
-        except Exception as e:
-            pass  # Silent fail if mouse movement doesn't work
+        """Add random mouse movements to appear more human (DrissionPage handles this internally)"""
+        pass  # DrissionPage has built-in bot detection bypass
 
     def extract_text_safe(self, element, xpath):
         """Safely extract text from element using xpath"""
@@ -264,7 +247,7 @@ class WalmartTVBSRCrawler:
                 print("[INFO] Navigating to Walmart browse page first...")
                 try:
                     # Try browse electronics category first
-                    self.driver.get(browse_tvs_url)
+                    self.page.get(browse_tvs_url)
                     time.sleep(random.uniform(*browse_wait))
 
                     print("[OK] Browse page loaded successfully")
@@ -274,32 +257,32 @@ class WalmartTVBSRCrawler:
 
                     # Scroll a bit
                     for _ in range(2):
-                        self.driver.execute_script("window.scrollBy(0, 400);")
+                        self.page.run_js("window.scrollBy(0, 400);")
                         time.sleep(random.uniform(*scroll_wait_range))
 
                     # Now access the best seller URL directly
                     print("[INFO] Now navigating to best seller page...")
-                    self.driver.get(url)
+                    self.page.get(url)
                     time.sleep(random.uniform(*page_load_wait))
                 except Exception as e:
                     print(f"[WARNING] Browse navigation failed: {e}, using direct URL...")
-                    self.driver.get(url)
+                    self.page.get(url)
                     time.sleep(random.uniform(*direct_url_wait))
             else:
                 # For other pages, direct access
-                self.driver.get(url)
+                self.page.get(url)
                 time.sleep(random.uniform(*page_load_wait))
 
             # Scroll to load all products
             print("[INFO] Scrolling to load products...")
             for _ in range(scroll_max_rounds):
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                self.page.run_js("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(scroll_wait)
-            self.driver.execute_script("window.scrollTo(0, 0);")
+            self.page.run_js("window.scrollTo(0, 0);")
             time.sleep(scroll_wait)
 
             # Get page source and parse
-            page_source = self.driver.page_source
+            page_source = self.page.html
             tree = html.fromstring(page_source)
 
             # Find all product containers
@@ -322,6 +305,11 @@ class WalmartTVBSRCrawler:
                 # Extract product URL
                 product_url_raw = self.extract_text_safe(product, self.xpaths['product_url']['xpath'])
                 product_url = self.normalize_product_url(product_url_raw) if product_url_raw else None
+
+                # Skip if URL is in excluded list (is_product=false)
+                if product_url and product_url.rstrip('/') in self.excluded_urls:
+                    print(f"  [{idx}/{len(products)}] SKIP: is_product=false - {product_name[:40]}...")
+                    continue
 
                 # Extract availability fields
                 pickup = self.extract_text_safe(product, self.xpaths['pickup_availability']['xpath'])
@@ -510,6 +498,9 @@ class WalmartTVBSRCrawler:
             if not self.load_xpaths():
                 return
 
+            # Load excluded URLs (is_product=false)
+            self.load_excluded_urls()
+
             page_urls = self.load_page_urls()
             if not page_urls:
                 print("[ERROR] No page URLs found")
@@ -544,9 +535,9 @@ class WalmartTVBSRCrawler:
             traceback.print_exc()
 
         finally:
-            if self.driver:
+            if self.page:
                 try:
-                    self.driver.quit()
+                    self.page.quit()
                 except Exception as e:
                     print(f"[WARNING] Error closing driver: {e}")
                     try:

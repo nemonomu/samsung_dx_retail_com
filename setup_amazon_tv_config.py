@@ -168,12 +168,15 @@ def insert_configs():
             # =====================================================
             # XPATH - 공통 XPath (dt1, dt2 공유)
             # =====================================================
-            # 화면 크기 추출
-            ('xpath', 'screen_size_1', '//*[@id="productDetails_techSpec_section_1"]//tr[th[contains(text(), "Screen Size")]]/td', None, 1, '화면 크기 XPath 1'),
-            ('xpath', 'screen_size_2', '//*[@id="productDetails_techSpec_section_1"]//tr[th[contains(text(), "Standing screen display size")]]/td', None, 2, '화면 크기 XPath 2'),
-            ('xpath', 'screen_size_3', '//*[@id="productDetails_detailBullets_sections1"]//tr[th[contains(text(), "Screen Size")]]/td', None, 3, '화면 크기 XPath 3'),
-            ('xpath', 'screen_size_4', '//table[@id="productDetails_techSpec_section_1"]//th[contains(., "Screen Size")]/following-sibling::td', None, 4, '화면 크기 XPath 4'),
-            ('xpath', 'screen_size_5', '//div[@id="detailBullets_feature_div"]//span[contains(text(), "Screen Size")]/../span[2]', None, 5, '화면 크기 XPath 5'),
+            # 화면 크기 추출 (코드 fallback과 동일하게)
+            ('xpath', 'screen_size_1', '//tr[contains(@class, "po-display.size")]//td[@class="a-span9"]//span[@class="a-size-base po-break-word"]', None, 1, '화면 크기 XPath 1 - po-display.size'),
+            ('xpath', 'screen_size_2', '//table[@class="a-normal a-spacing-small"]//tr[contains(@class, "po-display.size")]//td[@class="a-span9"]//span[@class="a-size-base po-break-word"]', None, 2, '화면 크기 XPath 2 - table po-display'),
+            ('xpath', 'screen_size_3', '//*[@id="poExpander"]/div[1]/div/table/tbody/tr[2]/td[2]/span', None, 3, '화면 크기 XPath 3 - poExpander'),
+            ('xpath', 'screen_size_4', '//*[@id="productDetails_techSpec_section_1"]//tr[th[contains(text(), "Screen Size")]]/td', None, 4, '화면 크기 XPath 4 - techSpec'),
+            ('xpath', 'screen_size_5', '//*[@id="productDetails_techSpec_section_1"]//tr[th[contains(text(), "Standing screen display size")]]/td', None, 5, '화면 크기 XPath 5 - Standing'),
+            ('xpath', 'screen_size_6', '//*[@id="productDetails_detailBullets_sections1"]//tr[th[contains(text(), "Screen Size")]]/td', None, 6, '화면 크기 XPath 6 - detailBullets'),
+            ('xpath', 'screen_size_7', '//table[@id="productDetails_techSpec_section_1"]//th[contains(., "Screen Size")]/following-sibling::td', None, 7, '화면 크기 XPath 7 - following-sibling'),
+            ('xpath', 'screen_size_8', '//div[@id="detailBullets_feature_div"]//span[contains(text(), "Screen Size")]/../span[2]', None, 8, '화면 크기 XPath 8 - detailBullets div'),
 
             # 모델 연도 추출
             ('xpath', 'model_year_1', '//*[@id="productDetails_techSpec_section_1"]//tr[th[contains(text(), "Model Year")]]/td', None, 1, '모델 연도 XPath 1'),
@@ -267,10 +270,13 @@ def insert_configs():
             ('xpath', 'add_cart_price_1', '//span[contains(text(), "add this item to your cart")]', None, 1, '장바구니 추가 가격 XPath 1'),
             ('xpath', 'add_cart_price_2', '//span[contains(text(), "To see our price")]', None, 2, '장바구니 추가 가격 XPath 2'),
 
-            # 리뷰 없음
-            ('xpath', 'no_reviews_1', '//*[@id="cm_cr_dp_d_rating_histogram"]//span[contains(text(), "No customer reviews")]', None, 1, '리뷰 없음 XPath 1'),
-            ('xpath', 'no_reviews_2', '//span[contains(text(), "Be the first to review")]', None, 2, '리뷰 없음 XPath 2'),
-            ('xpath', 'no_reviews_3', '//div[@id="averageCustomerReviews"]//span[contains(text(), "No customer")]', None, 3, '리뷰 없음 XPath 3'),
+            # 리뷰 없음 (하단 리뷰 섹션)
+            ('xpath', 'no_reviews_1', '//*[@id="cm-cr-dp-review-header"]/h3/span', None, 1, '리뷰 없음 XPath 1 - 리뷰 헤더'),
+            ('xpath', 'no_reviews_2', '//span[@data-hook="top-customer-reviews-title"]', None, 2, '리뷰 없음 XPath 2 - 고객 리뷰 타이틀'),
+            ('xpath', 'no_reviews_3', '//div[@id="cm-cr-dp-review-header"]//span[contains(text(), "No customer reviews")]', None, 3, '리뷰 없음 XPath 3 - 리뷰 헤더 div'),
+            ('xpath', 'no_reviews_4', '//*[@id="cm_cr_dp_d_rating_histogram"]//span[contains(text(), "No customer reviews")]', None, 4, '리뷰 없음 XPath 4 - 히스토그램'),
+            ('xpath', 'no_reviews_5', '//span[contains(text(), "Be the first to review")]', None, 5, '리뷰 없음 XPath 5 - 첫 리뷰 작성'),
+            ('xpath', 'no_reviews_6', '//div[@id="averageCustomerReviews"]//span[contains(text(), "No customer")]', None, 6, '리뷰 없음 XPath 6 - 평균 리뷰'),
 
             # 0개 리뷰
             ('xpath', 'zero_reviews_1', '//*[@id="acrCustomerReviewText"]', None, 1, '0개 리뷰 확인 XPath 1'),

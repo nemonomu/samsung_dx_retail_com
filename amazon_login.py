@@ -74,8 +74,19 @@ def login_to_amazon(driver, email, password):
         driver.get("https://www.amazon.com")
         time.sleep(3)
 
+        # Check if already logged in
+        print("\n[2] Checking if already logged in...")
+        try:
+            account_element = driver.find_element(By.ID, "nav-link-accountList")
+            account_text = account_element.text.lower()
+            if "hello" in account_text and "sign in" not in account_text:
+                print("    ✓ Already logged in!")
+                return True
+        except:
+            pass
+
         # Click "Sign in" button
-        print("\n[2] Clicking 'Sign in' button...")
+        print("\n[3] Clicking 'Sign in' button...")
         try:
             # Try multiple selectors
             sign_in_selectors = [
@@ -105,8 +116,14 @@ def login_to_amazon(driver, email, password):
         except Exception as e:
             print(f"    [WARNING] Error clicking sign-in: {e}")
 
+        # Check if redirected to account page (already logged in)
+        current_url = driver.current_url
+        if '/gp/css/homepage' in current_url or '/gp/yourstore' in current_url:
+            print("    ✓ Redirected to account page - already logged in!")
+            return True
+
         # Check for account selection screen first
-        print("\n[3] Checking for account selection screen...")
+        print("\n[4] Checking for account selection screen...")
         print(f"    Current URL: {driver.current_url}")
 
         # Save page source for debugging

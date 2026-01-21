@@ -1538,15 +1538,17 @@ class BestBuyDetailCrawler:
         예: "Customers frequently mention the superb picture quality..."
         """
         try:
-            xpaths = [
-                # 제공된 절대 경로
-                '/html/body/div[5]/div[8]/div[2]/div/div[1]/div/p',
+            xpaths = self.config.get_xpath_list('summarized_review', self.file_name) or [
+                # review-summary 컨테이너 기반 (우선순위 높음)
+                '//div[contains(@class, "review-summary")]//p[contains(@class, "body-copy-lg")]',
+                # "Customers are saying" 헤더 기준
+                '//h4[contains(text(), "Customers are saying")]/following-sibling::p',
                 # 클래스 기반
                 '//p[@class="mt-200 body-copy-lg mb-none"]',
                 # 부분 클래스 매칭
-                '//p[contains(@class, "body-copy-lg") and contains(@class, "mt-200")]',
-                # 컨테이너 기반
-                '//div[contains(@class, "customer-reviews")]//p[contains(@class, "body-copy-lg")]'
+                '//p[contains(@class, "body-copy-lg") and contains(@class, "mb-none")]',
+                # 제공된 절대 경로 (fallback)
+                '/html/body/div[5]/div[8]/div[2]/div/div[1]/div/p',
             ]
 
             for xpath in xpaths:
@@ -1554,7 +1556,8 @@ class BestBuyDetailCrawler:
                     elem = tree.xpath(xpath)
                     if elem:
                         text = elem[0].text_content().strip()
-                        if text and len(text) > 20:  # 유효한 요약인지 확인
+                        if text:
+                            print(f"  [OK] Summarized_Review_Content found: {text[:60]}...")
                             return text
                 except:
                     continue
@@ -1571,12 +1574,9 @@ class BestBuyDetailCrawler:
         """
         try:
             # 리뷰 페이지의 AI 요약 위치
-            xpaths = [
-                # 제공된 XPath
+            xpaths = self.config.get_xpath_list('summarized_review_reviews_page', self.file_name) or [
                 '//*[@id="reviews-accordion"]/div[1]/div/p[1]',
-                # class 기반
                 '//p[@class="mb-200 mt-none"]',
-                # 더 넓은 패턴
                 '//div[@id="reviews-accordion"]//p[contains(@class, "mb-200")]',
             ]
 
@@ -1585,7 +1585,7 @@ class BestBuyDetailCrawler:
                     elem = tree.xpath(xpath)
                     if elem:
                         text = elem[0].text_content().strip()
-                        if text and len(text) > 20:  # 유효한 요약인지 확인
+                        if text:
                             return text
                 except:
                     continue

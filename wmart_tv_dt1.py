@@ -19,6 +19,7 @@ import re
 
 # Import database configuration
 from config import DB_CONFIG
+from wmart_config_loader import get_wmart_config
 import pandas as pd
 from alert_monitor import monitor_and_alert
 
@@ -29,7 +30,9 @@ class WalmartDetailCrawler:
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
-        self.max_skus = 300  # Maximum SKUs to collect (final limit)
+        # Load config from DB
+        self.config = get_wmart_config()
+        self.max_skus = self.config.get_constant_int('max_skus', 'wmart_tv_dt1', default=300)
         # Error tracking for alert email
         self.drv_20_error_records = []  # count_of_reviews <= 20 but collected fewer reviews
         self.screen_size_mismatch_records = []  # screen_size mismatch between extracted and tv_item_mst
@@ -322,7 +325,8 @@ class WalmartDetailCrawler:
         options.add_argument('--start-maximized')
         options.add_argument('--disable-infobars')
         options.add_argument('--disable-gpu')
-        options.add_argument('--window-size=1920,1080')
+        window_size = self.config.get_browser('window_size', default='1920,1080')
+        options.add_argument(f'--window-size={window_size}')
         options.add_argument('--lang=en-US,en;q=0.9')
 
         # Preferences
@@ -336,14 +340,17 @@ class WalmartDetailCrawler:
         # Use undetected_chromedriver with subprocess for better bot detection bypass
         self.driver = uc.Chrome(options=options, use_subprocess=True)
         self.driver.set_page_load_timeout(120)  # Increased to 120 seconds as backup
-        self.wait = WebDriverWait(self.driver, 20)
+        webdriver_wait = self.config.get_browser_int('webdriver_wait', default=20)
+        self.wait = WebDriverWait(self.driver, webdriver_wait)
 
         print("[OK] WebDriver setup complete (bot detection bypass enabled)")
 
     def check_robot_page(self, page_source):
         """Check if page is showing 'Robot or human?' challenge"""
-        if "Robot or human?" in page_source or "Enter the characters you see below" in page_source:
-            return True
+        robot_texts = self.config.get_robot_check_texts()
+        for text in robot_texts:
+            if text in page_source:
+                return True
         return False
 
     def handle_captcha(self):
@@ -351,10 +358,12 @@ class WalmartDetailCrawler:
         try:
             print("[INFO] Checking for CAPTCHA...")
             page_content = self.driver.page_source.lower()
-            if any(keyword in page_content for keyword in ['press & hold', 'press and hold', 'captcha', 'human verification']):
+            captcha_keywords = self.config.get_captcha_keywords()
+            if any(keyword in page_content for keyword in captcha_keywords):
                 print("[WARNING] CAPTCHA keywords found in page")
-                print("[INFO] CAPTCHA detection - waiting 60 seconds for manual intervention...")
-                time.sleep(60)
+                captcha_wait = self.config.get_float('timing', 'captcha_wait', default=60)
+                print(f"[INFO] CAPTCHA detection - waiting {int(captcha_wait)} seconds for manual intervention...")
+                time.sleep(captcha_wait)
                 print("[INFO] Continuing after wait...")
                 return True
             else:
@@ -368,31 +377,43 @@ class WalmartDetailCrawler:
         """Initialize session with natural browsing pattern to avoid bot detection"""
         try:
             print("[INFO] Initializing session - navigating to Walmart homepage...")
-            self.driver.get("https://www.walmart.com")
-            time.sleep(random.uniform(8, 12))
+
+            # Get timing and scroll config values
+            homepage_wait = self.config.get_timing_range('homepage_wait') or (8, 12)
+            browse_wait = self.config.get_timing_range('browse_wait') or (10, 15)
+            scroll_wait_range = self.config.get_timing_range('scroll_wait') or (1, 2)
+            robot_recovery_wait = self.config.get_float('timing', 'robot_recovery_wait', default=30)
+            random_scroll_range = self.config.get_scroll_range('random_amount') or (150, 300)
+            recovery_scroll_range = self.config.get_scroll_range('recovery_amount') or (200, 500)
+            homepage_url = self.config.get_url('homepage') or "https://www.walmart.com"
+
+            self.driver.get(homepage_url)
+            time.sleep(random.uniform(*homepage_wait))
 
             # Check for robot detection
             if self.check_robot_page(self.driver.page_source):
                 print("[WARNING] Robot detection on homepage. Handling CAPTCHA...")
                 self.handle_captcha()
-                time.sleep(random.uniform(3, 5))
+                captcha_after_wait = self.config.get_timing_range('captcha_after_wait') or (3, 5)
+                time.sleep(random.uniform(*captcha_after_wait))
 
                 if self.check_robot_page(self.driver.page_source):
                     print("[WARNING] Still showing robot detection, trying recovery...")
                     # Slow scroll down
+                    scroll_between_wait = self.config.get_timing_range('scroll_between_wait') or (1.5, 2.5)
                     for i in range(5):
-                        scroll_amount = random.randint(150, 300)
+                        scroll_amount = random.randint(*random_scroll_range)
                         self.driver.execute_script(f"window.scrollBy(0, {scroll_amount})")
-                        time.sleep(random.uniform(1.5, 2.5))
+                        time.sleep(random.uniform(*scroll_between_wait))
                     self.driver.execute_script("window.scrollBy(0, -200)")
-                    time.sleep(random.uniform(1, 2))
+                    time.sleep(random.uniform(*scroll_wait_range))
 
-                print("[INFO] Waiting 30 seconds...")
-                time.sleep(30)
+                print(f"[INFO] Waiting {int(robot_recovery_wait)} seconds...")
+                time.sleep(robot_recovery_wait)
 
                 print("[INFO] Reloading page...")
                 self.driver.refresh()
-                time.sleep(random.uniform(10, 15))
+                time.sleep(random.uniform(*browse_wait))
 
                 if self.check_robot_page(self.driver.page_source):
                     print("[ERROR] Still getting robot detection after recovery")
@@ -400,17 +421,17 @@ class WalmartDetailCrawler:
 
             # Simple homepage exploration
             print("[INFO] Exploring homepage...")
-            time.sleep(random.uniform(2, 4))
+            time.sleep(random.uniform(*scroll_wait_range) * 2)
 
             # Random scrolling
             for _ in range(random.randint(2, 4)):
-                scroll_amount = random.randint(200, 500)
+                scroll_amount = random.randint(*recovery_scroll_range)
                 self.driver.execute_script(f"window.scrollBy(0, {scroll_amount})")
-                time.sleep(random.uniform(1, 2))
+                time.sleep(random.uniform(*scroll_wait_range))
 
             # Scroll back to top
             self.driver.execute_script("window.scrollTo(0, 0)")
-            time.sleep(random.uniform(2, 3))
+            time.sleep(random.uniform(*scroll_wait_range) + 1)
 
             print("[OK] Session initialized")
             return True
@@ -1551,7 +1572,8 @@ class WalmartDetailCrawler:
                     self.driver.quit()
                     self.setup_driver()
                     self.driver.get(product_url)
-                    time.sleep(random.uniform(3, 4))
+                    scroll_step_wait = self.config.get_timing_range('scroll_step_wait', 'wmart_tv_dt1') or (3, 4)
+                    time.sleep(random.uniform(*scroll_step_wait))
 
                 # Find and click "View all reviews" button
                 try:
@@ -1611,7 +1633,8 @@ class WalmartDetailCrawler:
 
                     # Use JavaScript click to avoid interception
                     self.driver.execute_script("arguments[0].click();", view_all_btn)
-                    time.sleep(random.uniform(3, 4))
+                    scroll_step_wait = self.config.get_timing_range('scroll_step_wait', 'wmart_tv_dt1') or (3, 4)
+                    time.sleep(random.uniform(*scroll_step_wait))
 
                     # Check if URL changed (page navigated)
                     url_after = self.driver.current_url
@@ -1698,7 +1721,8 @@ class WalmartDetailCrawler:
                             self.driver.execute_script("arguments[0].click();", next_page_btn)
 
                             # Wait for next page to load
-                            time.sleep(random.uniform(3, 4))
+                            scroll_step_wait = self.config.get_timing_range('scroll_step_wait', 'wmart_tv_dt1') or (3, 4)
+                            time.sleep(random.uniform(*scroll_step_wait))
                             page_num += 1
                         except Exception as e:
                             print(f"  [WARNING] Could not find or click Next Page button: {e}")
@@ -1763,7 +1787,8 @@ class WalmartDetailCrawler:
 
             print(f"  [INFO] Loading page...")
             self.driver.get(url)
-            time.sleep(random.uniform(6, 10))
+            detail_page_load_wait = self.config.get_timing_range('detail_page_load_wait', 'wmart_tv_dt1') or (6, 10)
+            time.sleep(random.uniform(*detail_page_load_wait))
 
             print(f"  [INFO] Page loaded, extracting data...")
 
@@ -1867,7 +1892,8 @@ class WalmartDetailCrawler:
                 elif cor_retry < max_cor_retries - 1:
                     print(f"  [RETRY {cor_retry + 1}/{max_cor_retries}] count_of_reviews is None, refreshing page...")
                     self.driver.refresh()
-                    time.sleep(random.uniform(3, 5))
+                    captcha_after_wait = self.config.get_timing_range('captcha_after_wait') or (3, 5)
+                    time.sleep(random.uniform(*captcha_after_wait))
                     page_source = self.driver.page_source
                     tree = html.fromstring(page_source)
 
@@ -1907,7 +1933,8 @@ class WalmartDetailCrawler:
                     print(f"  [RETRY {drv_retry + 1}/{max_drv_retries}] count_of_reviews={cor_int_check} but detailed_review_content is empty, retrying...")
                     # Navigate back to product page and retry
                     self.driver.get(url)
-                    time.sleep(random.uniform(3, 5))
+                    captcha_after_wait = self.config.get_timing_range('captcha_after_wait') or (3, 5)
+                    time.sleep(random.uniform(*captcha_after_wait))
                     detailed_review_content = self.extract_detailed_reviews(count_of_reviews)
                     if detailed_review_content:
                         break
@@ -2026,6 +2053,9 @@ class WalmartDetailCrawler:
             print(f"       Product: {data.get('Retailer_SKU_Name', 'N/A')[:60]}...")
             print(f"       Item (SKU): {data.get('item', 'N/A')}")
 
+            # Get account_name from config
+            account_name = self.config.get_constant('account_name', default='Walmart')
+
             # Temporarily disable autocommit for transaction
             self.db_conn.autocommit = False
 
@@ -2108,7 +2138,7 @@ class WalmartDetailCrawler:
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 data['item'],
-                'Walmart',  # account_name
+                account_name,
                 data['page_type'],
                 count_of_reviews_int,  # Converted to integer
                 data['Retailer_SKU_Name'],
@@ -2165,7 +2195,7 @@ class WalmartDetailCrawler:
                     data['item'],
                     data['product_url'],
                     sku,
-                    'Walmart',
+                    account_name,
                     data.get('screen_size')
                 ))
                 print(f"  [DB] ✓ tv_item_mst upsert (item: {data['item']}, sku: {sku}, screen_size: {data.get('screen_size')})")
@@ -2263,12 +2293,14 @@ class WalmartDetailCrawler:
                     else:  # Failed
                         if attempt < max_retries - 1:  # Not the last attempt
                             print(f"  [RETRY] Attempt {attempt + 1} failed, retrying... ({attempt + 2}/{max_retries})")
-                            time.sleep(random.uniform(5, 8))  # Wait before retry
+                            api_retry_wait = self.config.get_timing_range('api_retry_wait', 'wmart_tv_dt1') or (5, 8)
+                            time.sleep(random.uniform(*api_retry_wait))  # Wait before retry
                         else:
                             print(f"  [FAILED] All {max_retries} attempts failed for this URL")
 
                 # Random delay between requests
-                time.sleep(random.uniform(3, 5))
+                captcha_after_wait = self.config.get_timing_range('captcha_after_wait') or (3, 5)
+                time.sleep(random.uniform(*captcha_after_wait))
 
             print("\n" + "="*80)
             print(f"Detail Crawling completed! Total collected: {self.total_collected}/{len(product_urls)}")

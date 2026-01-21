@@ -13,6 +13,11 @@ import time
 import os
 from datetime import datetime
 from alert_monitor import send_crawl_alert
+from amazon_config_loader import get_amazon_config
+
+# Load config from DB
+_config = get_amazon_config()
+SCRIPT_TIMEOUT = _config.get_int('timing', 'script_timeout', 'amazon_tv_crawl', 21600)
 
 
 def print_separator():
@@ -53,7 +58,7 @@ def run_crawler(script_name, stage_name):
             text=True,
             encoding='utf-8',
             errors='replace',
-            timeout=21600  # 6 hours timeout
+            timeout=SCRIPT_TIMEOUT
         )
 
         elapsed_time = time.time() - start_time
@@ -69,7 +74,7 @@ def run_crawler(script_name, stage_name):
 
     except subprocess.TimeoutExpired:
         elapsed_time = time.time() - start_time
-        print(f"\n[ERROR] {stage_name} timed out after 6 hours")
+        print(f"\n[ERROR] {stage_name} timed out after {SCRIPT_TIMEOUT // 3600} hours")
         print(f"[INFO] Elapsed time: {elapsed_time:.1f} seconds")
         return False
     except Exception as e:

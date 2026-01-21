@@ -20,6 +20,10 @@ if sys.stdout.encoding != 'utf-8':
 
 # Import database configuration
 from config import DB_CONFIG
+from amazon_config_loader import get_amazon_config
+
+# Load config from DB
+_config = get_amazon_config()
 
 class AmazonBSRCrawler:
     def __init__(self):
@@ -30,6 +34,9 @@ class AmazonBSRCrawler:
         self.total_collected = 0
         self.error_messages = []
         self.batch_id = None  # Batch ID for this crawling session
+        self.sorry_page_max_retry = _config.get_retry('sorry_page_max', 'amazon_tv_bsr1', 20)
+        self.throttling_max_retry = _config.get_retry('throttling_max', 'amazon_tv_bsr1', 2)
+        self.throttling_wait_range = _config.get_timing_range('throttling_wait', 'amazon_tv_bsr1') or (15, 20)
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -93,9 +100,10 @@ class AmazonBSRCrawler:
 
     def setup_driver(self):
         """Setup Chrome WebDriver"""
+        user_agent = _config.get_browser('user_agent', 'amazon_tv_bsr1') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
         chrome_options = Options()
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
+        chrome_options.add_argument(f'--user-agent={user_agent}')
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--no-sandbox')
         chrome_options.add_argument('--window-size=1920,1080')
@@ -216,8 +224,10 @@ class AmazonBSRCrawler:
         except Exception as e:
             return None
 
-    def check_and_handle_throttling(self, page_number, url, max_retries=2):
+    def check_and_handle_throttling(self, page_number, url, max_retries=None):
         """Check for throttling message and refresh if needed"""
+        if max_retries is None:
+            max_retries = self.throttling_max_retry
         for retry in range(max_retries):
             page_source = self.driver.page_source.lower()
 
@@ -225,7 +235,7 @@ class AmazonBSRCrawler:
             if "request was throttled" in page_source or "please wait a moment and refresh" in page_source:
                 print(f"[WARNING] Throttling detected on page {page_number} (attempt {retry + 1}/{max_retries})")
                 print("[INFO] Waiting before refresh...")
-                time.sleep(random.uniform(15, 20))
+                time.sleep(random.uniform(*self.throttling_wait_range))
 
                 print("[INFO] Refreshing page...")
                 self.driver.refresh()
@@ -255,12 +265,14 @@ class AmazonBSRCrawler:
 
         return True
 
-    def check_and_handle_sorry_page(self, max_retries=20):
+    def check_and_handle_sorry_page(self, max_retries=None):
         """Check for sorry/robot check page and refresh if needed
 
         Returns:
             bool: True if page is OK, False if still sorry page after retries
         """
+        if max_retries is None:
+            max_retries = self.sorry_page_max_retry
         for attempt in range(max_retries):
             page_source = self.driver.page_source.lower()
             title = self.driver.title.lower()
@@ -303,7 +315,7 @@ class AmazonBSRCrawler:
             time.sleep(random.uniform(8, 12))
 
             # Check and handle sorry page with refresh retries
-            if not self.check_and_handle_sorry_page(max_retries=20):
+            if not self.check_and_handle_sorry_page():
                 print(f"[SKIP] Skipping page {page_number} due to persistent sorry/robot check page")
                 return False
 

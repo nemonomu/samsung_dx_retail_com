@@ -24,9 +24,13 @@ if sys.stdout.encoding != 'utf-8':
 # Import database and account configuration
 from config import DB_CONFIG, AMAZON_ACCOUNTS
 from amazon_login import login_to_amazon, save_cookies
+from amazon_config_loader import get_amazon_config
+
+# Load config from DB
+_config = get_amazon_config()
 
 # Account configuration (uses unsandev0004 for amazon_tv_crawl.py)
-ACCOUNT_NAME = 'unsandev0004'
+ACCOUNT_NAME = _config.get_account('primary', 'amazon_tv_dt1') or 'unsandev0004'
 COOKIE_FILE = AMAZON_ACCOUNTS[ACCOUNT_NAME]['cookie_file']
 AMAZON_EMAIL = AMAZON_ACCOUNTS[ACCOUNT_NAME]['email']
 AMAZON_PASSWORD = AMAZON_ACCOUNTS[ACCOUNT_NAME]['password']
@@ -39,7 +43,11 @@ class AmazonDetailCrawler:
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
-        self.max_skus = 300  # Maximum SKUs to collect (final limit)
+        self.max_skus = _config.get_constant_int('max_skus', 'amazon_tv_dt1', 300)
+        self.target_reviews = _config.get_constant_int('target_reviews', 'amazon_tv_dt1', 20)
+        self.max_review_pages = _config.get_constant_int('max_review_pages', 'amazon_tv_dt1', 3)
+        self.sorry_page_max_retry = _config.get_retry('sorry_page_max', 'amazon_tv_dt1', 5)
+        self.browser_restart_after_fail = _config.get_retry('browser_restart_after_fail', 'amazon_tv_dt1', 5)
         # Generate batch_id using Korea timezone
         korea_tz = pytz.timezone('Asia/Seoul')
         self.batch_id = datetime.now(korea_tz).strftime('%Y%m%d_%H%M%S')
@@ -49,7 +57,7 @@ class AmazonDetailCrawler:
         self.fsp_null_records = []  # final_sku_price is null
         self.cosr_null_records = []  # count_of_star_ratings is null but star_rating exists
         self.screen_size_mismatch_records = []  # screen_size mismatch between extracted and tv_item_mst
-        self.current_account = 'unsandev0004'  # Current Amazon account
+        self.current_account = _config.get_account('primary', 'amazon_tv_dt1') or 'unsandev0004'
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -81,43 +89,55 @@ class AmazonDetailCrawler:
             return None
 
     def load_xpaths(self):
-        """Load XPath selectors from database"""
+        """Load XPath selectors from amazon_tv_config table"""
         try:
-            print("[INFO] Loading XPath selectors from database...")
+            print("[INFO] Loading XPath selectors from amazon_tv_config...")
             cursor = self.db_conn.cursor()
 
-            # Check if table exists
+            # Load XPath entries from amazon_tv_config (category='xpath')
+            # Group by prefix (e.g., star_rating_1, star_rating_2 -> star_rating)
             cursor.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = 'xpath_selectors'
-                )
-            """)
-            table_exists = cursor.fetchone()[0]
-
-            if not table_exists:
-                print("[ERROR] Table 'xpath_selectors' does not exist")
-                cursor.close()
-                return False
-
-            cursor.execute("""
-                SELECT data_field, xpath
-                FROM xpath_selectors
-                WHERE mall_name = 'Amazon' AND page_type = 'detail_page' AND is_active = TRUE
+                SELECT config_key, config_value, priority
+                FROM amazon_tv_config
+                WHERE category = 'xpath' AND is_active = TRUE
+                ORDER BY config_key, priority
             """)
 
             rows = cursor.fetchall()
+            xpath_groups = {}
+
             for row in rows:
-                self.xpaths[row[0]] = row[1]
-                print(f"  [DEBUG] Loaded XPath: {row[0]} = {row[1][:50]}...")
+                config_key, config_value, priority = row
+                # Extract prefix from key (e.g., star_rating_1 -> star_rating)
+                # Handle keys like 'screen_size_1', 'review_link_1', etc.
+                import re
+                match = re.match(r'^(.+?)_(\d+)$', config_key)
+                if match:
+                    prefix = match.group(1)
+                else:
+                    prefix = config_key  # Use as-is if no _N suffix
+
+                if prefix not in xpath_groups:
+                    xpath_groups[prefix] = []
+                xpath_groups[prefix].append({'value': config_value, 'priority': priority})
+
+            # Sort each group by priority and store as list
+            for prefix, entries in xpath_groups.items():
+                sorted_entries = sorted(entries, key=lambda x: x['priority'])
+                self.xpaths[prefix] = [e['value'] for e in sorted_entries]
 
             cursor.close()
 
             if len(self.xpaths) == 0:
-                print("[WARNING] No XPath selectors found for Amazon detail_page")
-                print("[INFO] You may need to populate xpath_selectors table first")
+                print("[WARNING] No XPath selectors found in amazon_tv_config")
+                print("[INFO] Run setup_amazon_tv_config.py to populate XPath entries")
             else:
-                print(f"[OK] Loaded {len(self.xpaths)} XPath selectors")
+                total_xpaths = sum(len(v) for v in self.xpaths.values())
+                print(f"[OK] Loaded {total_xpaths} XPaths in {len(self.xpaths)} groups")
+                for prefix in sorted(self.xpaths.keys())[:5]:
+                    print(f"  [DEBUG] {prefix}: {len(self.xpaths[prefix])} XPaths")
+                if len(self.xpaths) > 5:
+                    print(f"  [DEBUG] ... and {len(self.xpaths) - 5} more groups")
 
             return True
 
@@ -345,9 +365,10 @@ class AmazonDetailCrawler:
         """Setup Chrome WebDriver"""
         try:
             print("[INFO] Setting up Chrome WebDriver...")
+            user_agent = _config.get_browser('user_agent', 'amazon_tv_dt1') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
             chrome_options = Options()
             chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
+            chrome_options.add_argument(f'--user-agent={user_agent}')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--window-size=1920,1080')
@@ -391,7 +412,8 @@ class AmazonDetailCrawler:
 
         try:
             print("[INFO] Accessing Amazon.com to set cookies...")
-            self.driver.get("https://www.amazon.com")
+            homepage_url = _config.get_url('homepage') or 'https://www.amazon.com'
+            self.driver.get(homepage_url)
             time.sleep(2)
 
             with open(COOKIE_FILE, 'rb') as f:
@@ -520,8 +542,8 @@ class AmazonDetailCrawler:
         Falls back to extracting from retailer_sku_name if not found in tree
         """
         try:
-            # Use po-display.size class to find Screen Size row (most reliable)
-            xpaths = [
+            # Use DB XPaths if available, otherwise use hardcoded fallback
+            xpaths = self.xpaths.get('screen_size') or [
                 '//tr[contains(@class, "po-display.size")]//td[@class="a-span9"]//span[@class="a-size-base po-break-word"]',
                 '//table[@class="a-normal a-spacing-small"]//tr[contains(@class, "po-display.size")]//td[@class="a-span9"]//span[@class="a-size-base po-break-word"]',
                 '//*[@id="poExpander"]/div[1]/div/table/tbody/tr[2]/td[2]/span',  # tr[2] typically contains Screen Size
@@ -671,9 +693,8 @@ class AmazonDetailCrawler:
         PRIORITY: Actual star rating first, then "No customer reviews" fallback
         """
         try:
-            # Try multiple XPaths for star rating
-            star_rating_xpaths = [
-                self.xpaths.get('star_rating'),  # DB XPath
+            # Use DB XPaths if available, otherwise use hardcoded fallback
+            star_rating_xpaths = self.xpaths.get('star_rating') or [
                 '//*[@id="acrPopover"]/@title',
                 '//*[@id="averageCustomerReviews"]//span[@class="a-icon-alt"]',
                 '//span[@data-hook="rating-out-of-text"]',
@@ -682,8 +703,6 @@ class AmazonDetailCrawler:
 
             # PRIORITY 1: Try to extract actual star rating first
             for xpath in star_rating_xpaths:
-                if not xpath:
-                    continue
                 star_rating_text = self.extract_text_safe(tree, xpath)
 
                 if star_rating_text:
@@ -706,7 +725,7 @@ class AmazonDetailCrawler:
                     return "No customer reviews"
 
             # Fallback: Check for "No customer reviews" at specific locations (narrowed scope)
-            no_reviews_xpaths = [
+            no_reviews_xpaths = self.xpaths.get('no_reviews') or [
                 '//*[@id="cm-cr-dp-review-header"]/h3/span',
                 '//span[@data-hook="top-customer-reviews-title"]',
                 '//div[@id="cm-cr-dp-review-header"]//span[contains(text(), "No customer reviews")]'
@@ -729,7 +748,7 @@ class AmazonDetailCrawler:
         try:
             # First check for "0 customer reviews" pattern in reviewsMedley section
             # e.g., "There are 0 customer reviews and 2 customer ratings."
-            zero_reviews_xpaths = [
+            zero_reviews_xpaths = self.xpaths.get('zero_reviews') or [
                 '//*[@id="reviewsMedley"]//div[@class="a-box-inner"]',
                 '//*[@id="reviewsMedley"]/div/div[2]/div/div[2]/div[3]/div[2]/div/div',
                 '//div[contains(text(), "customer reviews and")]'
@@ -743,7 +762,7 @@ class AmazonDetailCrawler:
                         return "0"
 
             # XPath: //*[@id="acrCustomerReviewText"]
-            xpaths = [
+            xpaths = self.xpaths.get('review_count') or [
                 '//*[@id="acrCustomerReviewText"]',
                 '//span[@id="acrCustomerReviewText"]',
                 '//a[@id="acrCustomerReviewLink"]//span'
@@ -821,7 +840,7 @@ class AmazonDetailCrawler:
             import re
 
             # PRIORITY 1: Check for "Currently unavailable."
-            currently_unavailable_xpaths = [
+            currently_unavailable_xpaths = self.xpaths.get('unavailable') or [
                 '//*[@id="outOfStock"]/div/div[1]/span[1]',
                 '//*[@id="availability"]/span[2]/span',
                 '//span[@class="a-color-price a-text-bold"]',
@@ -835,7 +854,7 @@ class AmazonDetailCrawler:
 
             # PRIORITY 2: Check for "Price higher than typical"
             # NOTE: Checked before "No featured offers" because they use same XPath location
-            price_higher_xpaths = [
+            price_higher_xpaths = self.xpaths.get('price_higher') or [
                 '//*[@id="fod-cx-message-with-learn-more"]/span[1]',
                 '//span[@id="fod-cx-message-with-learn-more"]/span[1]',
                 '//span[contains(text(), "Price higher than typical")]'
@@ -847,7 +866,7 @@ class AmazonDetailCrawler:
                     return "Price higher than typical"
 
             # PRIORITY 3: Check for "No featured offers available"
-            no_offers_xpaths = [
+            no_offers_xpaths = self.xpaths.get('no_offers') or [
                 '//*[@id="fod-cx-message-with-learn-more"]/span[1]',
                 '//span[@id="fod-cx-message-with-learn-more"]/span[1]',
                 '//span[contains(text(), "No featured offers available")]'
@@ -859,7 +878,7 @@ class AmazonDetailCrawler:
                     return "No featured offers available"
 
             # PRIORITY 4: Check for "See price in cart"
-            see_price_xpaths = [
+            see_price_xpaths = self.xpaths.get('see_price_cart') or [
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/table/tbody/tr/td[2]/span/a',
                 '//a[contains(text(), "See price in cart")]',
                 '//span[@class="a-declarative"]//a[contains(text(), "See price in cart")]'
@@ -871,7 +890,7 @@ class AmazonDetailCrawler:
                     return "See price in cart"
 
             # PRIORITY 5: Check for "To see our price, add this item to your cart."
-            add_to_cart_xpaths = [
+            add_to_cart_xpaths = self.xpaths.get('add_cart_price') or [
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/table/tbody/tr/td[2]',
                 '//table[@class="a-lineitem"]//td[contains(text(), "To see our price")]',
                 '//td[contains(text(), "To see our price, add this item to your cart")]'
@@ -883,7 +902,7 @@ class AmazonDetailCrawler:
                     return "To see our price, add this item to your cart."
 
             # NORMAL EXTRACTION: Try to extract regular price
-            xpaths = [
+            xpaths = self.xpaths.get('price') or [
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[1]',  # New primary xpath
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[3]/span[2]',  # Main container
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[3]/span[2]/span[1]',  # Main with span[1]
@@ -916,7 +935,7 @@ class AmazonDetailCrawler:
         """
         try:
             # Only search within corePriceDisplay_desktop_feature_div container
-            xpaths = [
+            xpaths = self.xpaths.get('original_price') or [
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/div[2]/span/span[1]/span[2]/span/span[1]',
                 '//*[@id="corePriceDisplay_desktop_feature_div"]/div[2]//span[@class="a-offscreen"]'
             ]
@@ -1029,7 +1048,7 @@ class AmazonDetailCrawler:
 
                 # Extract "See more reviews" link
                 # Priority: data-hook attribute is most reliable
-                review_link_xpaths = [
+                review_link_xpaths = self.xpaths.get('review_link') or [
                     '//a[@data-hook="see-all-reviews-link-foot"]/@href',  # Most reliable - data-hook attribute
                     '//*[@id="reviews-medley-footer"]//a[contains(@href, "product-reviews")]/@href',  # Footer container
                     '//*[@id="reviews-medley-footer"]/div[2]/a/@href',  # Legacy structure
@@ -1099,7 +1118,7 @@ class AmazonDetailCrawler:
                         '//*[@id="filter-info-section"]'
                     ]
 
-                    for refresh_attempt in range(5):
+                    for refresh_attempt in range(self.sorry_page_max_retry):
                         try:
                             # 로그인 페이지 체크
                             current_url = self.driver.current_url
@@ -1116,9 +1135,9 @@ class AmazonDetailCrawler:
                                 # 요소 못 찾으면 sorry page인지 확인
                                 page_source_lower = self.driver.page_source.lower()
                                 if 'sorry' in page_source_lower or 'something went wrong' in page_source_lower:
-                                    print(f"  [WARNING] Sorry page detected, refreshing ({refresh_attempt + 1}/5)...")
+                                    print(f"  [WARNING] Sorry page detected, refreshing ({refresh_attempt + 1}/{self.sorry_page_max_retry})...")
                                 else:
-                                    print(f"  [WARNING] Review elements not found, refreshing ({refresh_attempt + 1}/5)...")
+                                    print(f"  [WARNING] Review elements not found, refreshing ({refresh_attempt + 1}/{self.sorry_page_max_retry})...")
                                 self.driver.refresh()
                                 time.sleep(5)
                                 continue
@@ -1154,18 +1173,18 @@ class AmazonDetailCrawler:
                                 break
 
                             # 텍스트 없으면 새로고침 후 재시도
-                            print(f"  [WARNING] count_of_reviews text not found, refreshing ({refresh_attempt + 1}/5)...")
+                            print(f"  [WARNING] count_of_reviews text not found, refreshing ({refresh_attempt + 1}/{self.sorry_page_max_retry})...")
                             self.driver.refresh()
                             time.sleep(5)
 
                         except Exception as e:
-                            print(f"  [WARNING] Error during review extraction ({refresh_attempt + 1}/5) - {str(e)[:50]}")
+                            print(f"  [WARNING] Error during review extraction ({refresh_attempt + 1}/{self.sorry_page_max_retry}) - {str(e)[:50]}")
                             self.driver.refresh()
                             time.sleep(5)
 
-                    # 5회 시도 후에도 실패하면 브라우저 재시작 후 재시도
+                    # sorry_page_max_retry회 시도 후에도 실패하면 브라우저 재시작 후 재시도
                     if not count_of_reviews:
-                        print(f"  [WARNING] Failed after 5 attempts, restarting browser...")
+                        print(f"  [WARNING] Failed after {self.sorry_page_max_retry} attempts, restarting browser...")
                         self.driver.quit()
                         self.setup_driver()
                         self.load_cookies()
@@ -1204,12 +1223,12 @@ class AmazonDetailCrawler:
                 # Store collected reviews for duplicate check
                 collected_reviews = set(all_reviews)
 
-                # If more reviews exist than collected, go to next pages (up to 3 pages)
-                # Changed from count_int >= 20 to count_int > len(all_reviews) to handle cases like 11 reviews with only 10 collected
+                # If more reviews exist than collected, go to next pages
+                # Changed from count_int >= target to count_int > len(all_reviews) to handle cases like 11 reviews with only 10 collected
                 current_page = 1
-                max_pages = 3
+                max_pages = self.max_review_pages
 
-                while len(all_reviews) < 20 and current_page < max_pages and count_int > len(all_reviews):
+                while len(all_reviews) < self.target_reviews and current_page < max_pages and count_int > len(all_reviews):
                     try:
                         # Scroll to bottom of page to ensure Next button is visible
                         self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
@@ -1241,7 +1260,7 @@ class AmazonDetailCrawler:
                         duplicates = 0
                         if review_elements:
                             for elem in review_elements[:10]:  # Max 10 per page
-                                if len(all_reviews) >= 20:
+                                if len(all_reviews) >= self.target_reviews:
                                     break
                                 review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
                                 if review_text:
@@ -1273,7 +1292,7 @@ class AmazonDetailCrawler:
                                     if review_elements:
                                         print(f"  [INFO] Reviews found after refresh, continuing...")
                                         for elem in review_elements[:10]:
-                                            if len(all_reviews) >= 20:
+                                            if len(all_reviews) >= self.target_reviews:
                                                 break
                                             review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
                                             if review_text and review_text not in collected_reviews:
@@ -1300,13 +1319,13 @@ class AmazonDetailCrawler:
                 self.driver.get(product_url)
                 time.sleep(random.uniform(2, 3))
 
-                # 3페이지까지 갔는데 20개 미만이면 재시도
-                if count_int >= 20 and len(all_reviews) < 20 and attempt == 0:
-                    print(f"  [INFO] Only collected {len(all_reviews)} reviews (expected 20), will retry...")
+                # max_pages까지 갔는데 target_reviews개 미만이면 재시도
+                if count_int >= self.target_reviews and len(all_reviews) < self.target_reviews and attempt == 0:
+                    print(f"  [INFO] Only collected {len(all_reviews)} reviews (expected {self.target_reviews}), will retry...")
                     continue
 
-                # Limit to 20 reviews and format as "1-review, 2-review, ..."
-                reviews = all_reviews[:20]
+                # Limit to target_reviews and format as "1-review, 2-review, ..."
+                reviews = all_reviews[:self.target_reviews]
                 if reviews:
                     formatted_reviews = []
                     for idx, review in enumerate(reviews, 1):

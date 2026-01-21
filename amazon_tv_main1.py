@@ -20,6 +20,10 @@ if sys.stdout.encoding != 'utf-8':
 
 # Import database configuration
 from config import DB_CONFIG
+from amazon_config_loader import get_amazon_config
+
+# Load config from DB
+_config = get_amazon_config()
 
 class AmazonTVCrawler:
     def __init__(self):
@@ -28,8 +32,9 @@ class AmazonTVCrawler:
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
-        self.max_skus = 400
-        self.sequential_id = 1  # ID counter for 1-400
+        self.max_skus = _config.get_constant_int('max_skus', 'amazon_tv_main1', 400)
+        self.sorry_page_max_retry = _config.get_retry('sorry_page_max', 'amazon_tv_main1', 3)
+        self.sequential_id = 1  # ID counter for 1-max_skus
         self.batch_id = None  # Batch ID for this crawling session
 
     def connect_db(self):
@@ -89,9 +94,10 @@ class AmazonTVCrawler:
 
     def setup_driver(self):
         """Setup Chrome WebDriver"""
+        user_agent = _config.get_browser('user_agent', 'amazon_tv_main1') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         chrome_options = Options()
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        chrome_options.add_argument(f'--user-agent={user_agent}')
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
 

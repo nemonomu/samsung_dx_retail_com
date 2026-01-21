@@ -50,6 +50,7 @@ from alert_monitor import send_review_url_error_alert
 
 # Import database configuration
 from config import DB_CONFIG
+from bby_config_loader import get_config
 import pandas as pd
 from alert_monitor import monitor_and_alert
 
@@ -61,7 +62,12 @@ class BestBuyDetailCrawler:
         self.batch_id = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
         self.order = 0
         self.total_collected = 0
-        self.max_skus = 300  # Maximum SKUs to collect (final limit)
+
+        # Config loader 초기화
+        self.config = get_config()
+        self.file_name = 'bby_tv_dt1'
+
+        self.max_skus = self.config.get_int('constant', 'max_products_detail', self.file_name, 300)
 
         # NULL detailed_review_content 로그 저장용
         self.null_review_logs = []
@@ -70,7 +76,7 @@ class BestBuyDetailCrawler:
         self.screen_size_mismatch_records = []
         self.electricity_use_mismatch_records = []
 
-        # Data validator sec기화
+        # Data validator 초기화
         session_start_time = os.environ.get('SESSION_START_TIME', datetime.now().strftime('%Y%m%d%H%M'))
         self.validator = DataValidator(session_start_time)
 
@@ -91,8 +97,9 @@ class BestBuyDetailCrawler:
             if not self.db_conn or not item:
                 return None
             cursor = self.db_conn.cursor()
-            cursor.execute("""
-                SELECT screen_size, estimated_annual_electricity_use FROM tv_item_mst WHERE item = %s
+            table_name = self.config.get_table('item_master') or 'tv_item_mst'
+            cursor.execute(f"""
+                SELECT screen_size, estimated_annual_electricity_use FROM {table_name} WHERE item = %s
             """, (item,))
             row = cursor.fetchone()
             cursor.close()
@@ -140,10 +147,16 @@ class BestBuyDetailCrawler:
             cursor = self.db_conn.cursor()
             urls = []
 
+            # Config에서 테이블명 가져오기
+            main_table = self.config.get_table('main_data') or 'bby_tv_main1'
+            bsr_table = self.config.get_table('bsr_data') or 'bby_tv_bsr1'
+            pmt_table = self.config.get_table('pmt_data') or 'bby_tv_pmt1'
+            trend_table = self.config.get_table('trend_data') or 'bby_tv_Trend_crawl'
+
             # bestbuy_tv_main_crawl에서 최신 batch_id 가져오기
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT batch_id
-                FROM bby_tv_main1
+                FROM {main_table}
                 WHERE batch_id IS NOT NULL
                 ORDER BY batch_id DESC
                 LIMIT 1
@@ -152,9 +165,9 @@ class BestBuyDetailCrawler:
             main_batch_id = main_batch_result[0] if main_batch_result else None
 
             # bby_tv_Trend_crawl에서 최신 batch_id 가져오기
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT batch_id
-                FROM bby_tv_Trend_crawl
+                FROM {trend_table}
                 WHERE batch_id IS NOT NULL
                 ORDER BY batch_id DESC
                 LIMIT 1
@@ -163,9 +176,9 @@ class BestBuyDetailCrawler:
             trend_batch_id = trend_batch_result[0] if trend_batch_result else None
 
             # bby_tv_promotion_crawl에서 최신 batch_id 가져오기
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT batch_id
-                FROM bby_tv_pmt1
+                FROM {pmt_table}
                 WHERE batch_id IS NOT NULL
                 ORDER BY batch_id DESC
                 LIMIT 1
@@ -174,9 +187,9 @@ class BestBuyDetailCrawler:
             promo_batch_id = promo_batch_result[0] if promo_batch_result else None
 
             # bby_tv_bsr_crawl에서 최신 batch_id 가져오기
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT batch_id
-                FROM bby_tv_bsr1
+                FROM {bsr_table}
                 WHERE batch_id IS NOT NULL
                 ORDER BY batch_id DESC
                 LIMIT 1
@@ -196,11 +209,11 @@ class BestBuyDetailCrawler:
 
             # 1. bestbuy_tv_main_crawl에서 해당 batch의 URLs와 data 가져오기
             if main_batch_id:
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT DISTINCT product_url, offer,
                            pick_up_availability, shipping_availability, delivery_availability,
                            sku_status, main_rank
-                    FROM bby_tv_main1
+                    FROM {main_table}
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
                     ORDER BY main_rank
@@ -232,11 +245,11 @@ class BestBuyDetailCrawler:
 
             # 2. bby_tv_bsr_crawl에서 해당 batch의 URLs와 data 가져오기
             if bsr_batch_id:
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT DISTINCT product_url, offer,
                            pick_up_availability, shipping_availability, delivery_availability,
                            sku_status, bsr_rank
-                    FROM bby_tv_bsr1
+                    FROM {bsr_table}
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
                     ORDER BY bsr_rank
@@ -272,9 +285,9 @@ class BestBuyDetailCrawler:
 
             # 3. bby_tv_promotion_crawl에서 해당 batch의 URLs와 data 가져오기
             if promo_batch_id:
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT DISTINCT product_url, offer, promotion_type, promotion_rank
-                    FROM bby_tv_pmt1
+                    FROM {pmt_table}
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
                     ORDER BY promotion_rank
@@ -311,9 +324,9 @@ class BestBuyDetailCrawler:
 
             # 4. bby_tv_Trend_crawl에서 해당 batch의 URLs와 data 가져오기
             if trend_batch_id:
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT DISTINCT product_url, rank
-                    FROM bby_tv_Trend_crawl
+                    FROM {trend_table}
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
                     ORDER BY rank
@@ -363,22 +376,22 @@ class BestBuyDetailCrawler:
             total_loaded = 0
             if main_batch_id:
                 cursor = self.db_conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM bby_tv_main1 WHERE batch_id = %s", (main_batch_id,))
+                cursor.execute(f"SELECT COUNT(*) FROM {main_table} WHERE batch_id = %s", (main_batch_id,))
                 total_loaded += cursor.fetchone()[0]
                 cursor.close()
             if bsr_batch_id:
                 cursor = self.db_conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM bby_tv_bsr1 WHERE batch_id = %s", (bsr_batch_id,))
+                cursor.execute(f"SELECT COUNT(*) FROM {bsr_table} WHERE batch_id = %s", (bsr_batch_id,))
                 total_loaded += cursor.fetchone()[0]
                 cursor.close()
             if promo_batch_id:
                 cursor = self.db_conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM bby_tv_pmt1 WHERE batch_id = %s", (promo_batch_id,))
+                cursor.execute(f"SELECT COUNT(*) FROM {pmt_table} WHERE batch_id = %s", (promo_batch_id,))
                 total_loaded += cursor.fetchone()[0]
                 cursor.close()
             if trend_batch_id:
                 cursor = self.db_conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM bby_tv_Trend_crawl WHERE batch_id = %s", (trend_batch_id,))
+                cursor.execute(f"SELECT COUNT(*) FROM {trend_table} WHERE batch_id = %s", (trend_batch_id,))
                 total_loaded += cursor.fetchone()[0]
                 cursor.close()
 
@@ -393,6 +406,7 @@ class BestBuyDetailCrawler:
             cursor = self.db_conn.cursor()
 
             # Use main batch_id as session start time
+            detail_table = self.config.get_table('detail_data') or 'bby_tv_crawl'
             if main_batch_id:
                 session_start_time = datetime.strptime(main_batch_id, '%Y%m%d_%H%M%S')
                 session_start_str = session_start_time.strftime('%Y-%m-%d %H:%M:%S')
@@ -401,9 +415,9 @@ class BestBuyDetailCrawler:
 
                 # Get all distinct processed URLs from current session in bby_tv_crawl
                 # 핵심 필드(retailer_sku_name, final_sku_price, Detailed_Review_Content)가 모두 있는 경우만 완료로 간주
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT DISTINCT product_url
-                    FROM bby_tv_crawl
+                    FROM {detail_table}
                     WHERE product_url IS NOT NULL
                       AND crawl_datetime >= %s
                       AND retailer_sku_name IS NOT NULL
@@ -1263,6 +1277,26 @@ class BestBuyDetailCrawler:
                 # 모든 mentions를 콤마로 구분하여 반환
                 return ', '.join(mentions)
 
+            # Fallback: distillation-card에서 Pros + Cons mentioned 수집 (data-feature-name 속성 사용)
+            try:
+                fallback_mentions = []
+                # Pros mentioned 먼저
+                pros_elements = self.page.eles('xpath://div[contains(@class, "pros-container")]//button[@data-feature-name]')
+                for elem in pros_elements:
+                    feature_name = elem.attr('data-feature-name')
+                    if feature_name:
+                        fallback_mentions.append(feature_name.strip())
+                # Cons mentioned 다음
+                cons_elements = self.page.eles('xpath://div[contains(@class, "cons-container")]//button[@data-feature-name]')
+                for elem in cons_elements:
+                    feature_name = elem.attr('data-feature-name')
+                    if feature_name:
+                        fallback_mentions.append(feature_name.strip())
+                if fallback_mentions:
+                    return ', '.join(fallback_mentions)
+            except Exception:
+                pass
+
             return None
 
         except Exception as e:
@@ -1737,11 +1771,12 @@ class BestBuyDetailCrawler:
                 return None
 
             cursor = self.db_conn.cursor()
+            detail_table = self.config.get_table('detail_data') or 'bby_tv_crawl'
 
             # 가장 최근 data에서 retailer_sku_name과 product_name이 일치하는 것 찾기
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT item
-                FROM bby_tv_crawl
+                FROM {detail_table}
                 WHERE retailer_sku_name = %s
                 AND item IS NOT NULL
                 ORDER BY crawl_datetime DESC
@@ -1901,12 +1936,19 @@ class BestBuyDetailCrawler:
                 summarized_review_content = self.extract_summarized_review_content(tree)
                 print(f"  [✓] Summarized_Review_Content: {summarized_review_content[:50] if summarized_review_content else 'None'}...")
 
-            # 3. Compare similar products extraction
+            # 3. Compare similar products extraction (실패 시 새로고침 후 재시도)
             similar_products = self.extract_compare_similar_products(product_url)
             if similar_products:
                 print(f"  [✓] Similar Products: {len(similar_products)} items found")
             else:
-                print(f"  [✓] Similar Products: None (섹션 없음 또는 로드 실패)")
+                print(f"  [INFO] Similar Products 추출 실패, 페이지 새로고침 후 재시도...")
+                self.page.refresh()
+                time.sleep(5)
+                similar_products = self.extract_compare_similar_products(product_url)
+                if similar_products:
+                    print(f"  [✓] Similar Products (재시도 성공): {len(similar_products)} items found")
+                else:
+                    print(f"  [✓] Similar Products: None (섹션 없음 또는 로드 실패)")
 
             # 4. Item extraction from URL (simplified - no dialog needed)
             item = self.extract_item_from_url(product_url)
@@ -2112,6 +2154,12 @@ class BestBuyDetailCrawler:
 
             cursor = self.db_conn.cursor()
 
+            # Config에서 테이블명 가져오기
+            detail_table = self.config.get_table('detail_data') or 'bby_tv_crawl'
+            retail_com_table = self.config.get_table('retail_com') or 'tv_retail_com'
+            item_mst_table = self.config.get_table('item_master') or 'tv_item_mst'
+            account_name = self.config.get_constant('account_name', None, 'Bestbuy')
+
             # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
 
@@ -2125,8 +2173,8 @@ class BestBuyDetailCrawler:
                 count_of_reviews = 0
 
             # data 삽입
-            insert_query = """
-                INSERT INTO bby_tv_crawl
+            insert_query = f"""
+                INSERT INTO {detail_table}
                 (account_name, batch_id, page_type, "order", retailer_sku_name, item,
                  Estimated_Annual_Electricity_Use, screen_size, count_of_reviews, Count_of_Star_Ratings, Top_Mentions,
                  Detailed_Review_Content, Recommendation_Intent, product_url, crawl_datetime, calendar_week,
@@ -2137,7 +2185,7 @@ class BestBuyDetailCrawler:
             """
 
             cursor.execute(insert_query, (
-                'Bestbuy',
+                account_name,
                 self.batch_id,
                 page_type,
                 order,
@@ -2185,8 +2233,8 @@ class BestBuyDetailCrawler:
                     print(f"  [FIX] Setting count_of_reviews to 0")
                 count_of_reviews_int = 0
 
-            cursor.execute("""
-                INSERT INTO tv_retail_com
+            cursor.execute(f"""
+                INSERT INTO {retail_com_table}
                 (item, account_name, page_type, count_of_reviews, retailer_sku_name, product_url,
                  star_rating, count_of_star_ratings, screen_size, sku_popularity,
                  final_sku_price, original_sku_price, savings, discount_type, offer,
@@ -2200,7 +2248,7 @@ class BestBuyDetailCrawler:
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 item,
-                'Bestbuy',  # account_name
+                account_name,  # account_name
                 page_type,
                 count_of_reviews_int,  # Converted to integer
                 retailer_sku_name,
@@ -2245,17 +2293,17 @@ class BestBuyDetailCrawler:
 
             # Insert into tv_item_mst (update screen_size and electricity_use on conflict)
             if item:
-                cursor.execute("""
-                    INSERT INTO tv_item_mst (item, product_url, sku, account_name, screen_size, estimated_annual_electricity_use)
+                cursor.execute(f"""
+                    INSERT INTO {item_mst_table} (item, product_url, sku, account_name, screen_size, estimated_annual_electricity_use)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (item) DO UPDATE SET
-                        screen_size = COALESCE(tv_item_mst.screen_size, EXCLUDED.screen_size),
-                        estimated_annual_electricity_use = COALESCE(tv_item_mst.estimated_annual_electricity_use, EXCLUDED.estimated_annual_electricity_use)
-                """, (item, product_url, sku, 'Bestbuy', screen_size, electricity_use))
-                print(f"  [DB] ✓ tv_item_mst upsert (item: {item}, sku: {sku}, screen_size: {screen_size}, electricity: {electricity_use})")
+                        screen_size = COALESCE({item_mst_table}.screen_size, EXCLUDED.screen_size),
+                        estimated_annual_electricity_use = COALESCE({item_mst_table}.estimated_annual_electricity_use, EXCLUDED.estimated_annual_electricity_use)
+                """, (item, product_url, sku, account_name, screen_size, electricity_use))
+                print(f"  [DB] ✓ {item_mst_table} upsert (item: {item}, sku: {sku}, screen_size: {screen_size}, electricity: {electricity_use})")
 
             cursor.close()
-            print(f"  [DB] ✓ Successfully saved to bby_tv_crawl + tv_retail_com + tv_item_mst")
+            print(f"  [DB] ✓ Successfully saved to {detail_table} + {retail_com_table} + {item_mst_table}")
             return True
 
         except Exception as e:
@@ -2351,7 +2399,9 @@ class BestBuyDetailCrawler:
             # Send alert email
             try:
                 cursor = self.db_conn.cursor()
-                cursor.execute("""
+                retail_com_table = self.config.get_table('retail_com') or 'tv_retail_com'
+                account_name = self.config.get_constant('account_name', None, 'Bestbuy')
+                cursor.execute(f"""
                     SELECT retailer_sku_name, star_rating, count_of_star_ratings, count_of_reviews,
                            screen_size, sku_popularity, final_sku_price, original_sku_price,
                            savings, discount_type, offer, pick_up_availability,
@@ -2362,10 +2412,10 @@ class BestBuyDetailCrawler:
                            rank_1, rank_2, promotion_position, number_of_ppl_purchased_yesterday,
                            number_of_ppl_added_to_carts, number_of_units_purchased_past_month,
                            retailer_sku_name_similar, estimated_annual_electricity_use, promotion_type, model_year
-                    FROM tv_retail_com
-                    WHERE account_name = 'Bestbuy'
+                    FROM {retail_com_table}
+                    WHERE account_name = %s
                     AND crawl_datetime::timestamp >= NOW() - INTERVAL '4 hours'
-                """)
+                """, (account_name,))
                 rows = cursor.fetchall()
                 columns = [
                     'retailer_sku_name', 'star_rating', 'count_of_star_ratings', 'count_of_reviews',

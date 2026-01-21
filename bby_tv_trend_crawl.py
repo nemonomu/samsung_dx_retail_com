@@ -15,6 +15,7 @@ from lxml import html
 
 # Import database configuration
 from config import DB_CONFIG
+from bby_config_loader import get_config
 
 class BestBuyTrendCrawler:
     def __init__(self):
@@ -22,6 +23,10 @@ class BestBuyTrendCrawler:
         self.db_conn = None
         self.korea_tz = pytz.timezone('Asia/Seoul')
         self.batch_id = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
+
+        # Config loader 초기화
+        self.config = get_config()
+        self.file_name = 'bby_tv_trend_crawl'
 
     def connect_db(self):
         """DB 연결"""
@@ -50,13 +55,24 @@ class BestBuyTrendCrawler:
     def click_tvs_category(self):
         """Trending deals에서 TVs & Projectors 카테고리 클릭"""
         try:
+            # Config values
+            homepage_url = self.config.get_url('homepage', self.file_name) or 'https://www.bestbuy.com/'
+            homepage_load_range = self.config.get_timing_range('homepage_load_wait', self.file_name) or (5, 8)
+            page_load_wait = self.config.get_float('timing', 'page_load_wait', self.file_name, 3)
+            scroll_step = self.config.get_int('timing', 'scroll_step', self.file_name, 500)
+            scroll_wait = self.config.get_float('timing', 'scroll_wait', self.file_name, 1)
+            trending_section_xpath = self.config.get('xpath', 'trending_section', self.file_name) or '//div[@data-testid="story-block-trending_deals_story"]'
+            trending_section_wait = self.config.get_float('timing', 'trending_section_wait', self.file_name, 2)
+            button_view_wait = self.config.get_float('timing', 'button_view_wait', self.file_name, 2)
+            category_click_range = self.config.get_timing_range('category_click_wait', self.file_name) or (3, 5)
+
             # 홈페이지 접속
             print(f"[INFO] Best Buy 홈페이지 접속...")
-            self.page.get("https://www.bestbuy.com/")
-            time.sleep(random.uniform(5, 8))
+            self.page.get(homepage_url)
+            time.sleep(random.uniform(*homepage_load_range))
 
             print("[INFO] 페이지 로딩 대기 중...")
-            time.sleep(3)
+            time.sleep(page_load_wait)
 
             # 페이지 소스 저장 (디버깅용)
             try:
@@ -73,21 +89,20 @@ class BestBuyTrendCrawler:
             # 페이지를 아래로 천천히 스크롤하여 Trending Deals 섹션 로드
             scroll_height = self.page.run_js("return document.body.scrollHeight")
             current_position = 0
-            step = 500
 
             trending_found = False
             while current_position < scroll_height:
-                current_position += step
+                current_position += scroll_step
                 self.page.run_js(f"window.scrollTo(0, {current_position})")
-                time.sleep(1)
+                time.sleep(scroll_wait)
 
-                # Trending Deals 섹션이 나타났는지 확인 (새 구조: data-testid="story-block-trending_deals_story")
+                # Trending Deals 섹션이 나타났는지 확인
                 try:
-                    trending_section = self.page.ele('xpath://div[@data-testid="story-block-trending_deals_story"]', timeout=2)
+                    trending_section = self.page.ele(f'xpath:{trending_section_xpath}', timeout=2)
                     if trending_section:
                         print("[OK] Trending Deals 섹션 발견")
                         trending_section.scroll.to_see()
-                        time.sleep(2)
+                        time.sleep(trending_section_wait)
                         trending_found = True
                         break
                 except:
@@ -96,17 +111,12 @@ class BestBuyTrendCrawler:
             if not trending_found:
                 print("[WARNING] Trending Deals 섹션을 찾지 못했습니다. 계속 진행...")
 
-            # TVs & Projectors 버튼 찾기 및 클릭
-            tvs_button_selectors = [
-                # 제공된 XPath
-                'xpath:/html/body/div[6]/div/div/div/div/div[4]/div/div/div/div/div/div[2]/div[1]/button[1]',
-                # 텍스트 기반
-                'xpath://button[.//span[contains(text(), "TVs") and contains(text(), "Projectors")]]',
-                'xpath://button[contains(., "TVs & Projectors")]',
-                'xpath://span[contains(text(), "TVs") and contains(text(), "Projectors")]/ancestor::button',
-                # 클래스 기반
-                'xpath://button[@role="tab"]//span[contains(text(), "TVs")]/..',
+            # TVs & Projectors 버튼 찾기 및 클릭 (fallback list from config)
+            tvs_button_xpaths = self.config.get_xpath_list('tvs_button', self.file_name) or [
+                '/html/body/div[6]/div/div/div/div/div[4]/div/div/div/div/div/div[2]/div[1]/button[1]',
+                '//button[.//span[contains(text(), "TVs") and contains(text(), "Projectors")]]',
             ]
+            tvs_button_selectors = [f'xpath:{xpath}' for xpath in tvs_button_xpaths]
 
             clicked = False
             for idx, selector in enumerate(tvs_button_selectors, 1):
@@ -117,13 +127,13 @@ class BestBuyTrendCrawler:
                     if tvs_button:
                         # 버튼이 보일 때까지 스크롤
                         tvs_button.scroll.to_see()
-                        time.sleep(2)
+                        time.sleep(button_view_wait)
 
                         # 클릭
                         tvs_button.click()
                         print("[OK] TVs & Projectors 카테고리 클릭 완료")
                         clicked = True
-                        time.sleep(random.uniform(3, 5))
+                        time.sleep(random.uniform(*category_click_range))
                         break
                 except Exception as e:
                     print(f"[DEBUG] Selector {idx} 실패: {e}")
@@ -147,8 +157,24 @@ class BestBuyTrendCrawler:
         try:
             print("\n[INFO] 제품 정보 추출 시작...")
 
+            # Config values
+            extract_wait = self.config.get_float('timing', 'extract_wait', self.file_name, 3)
+            page_type = self.config.get_constant('page_type_trend', self.file_name) or 'Trend'
+            product_items_xpaths = self.config.get_xpath_list('product_items', self.file_name) or [
+                '//div[@data-testid="story-block-trending_deals_story"]//ul//li[@data-carousel-index]'
+            ]
+            rank_xpaths = self.config.get_xpath_list('rank', self.file_name) or [
+                './/div[@data-testid="PriceBlockOffer-CarouselProductRank-TestID"]//span'
+            ]
+            name_xpaths = self.config.get_xpath_list('product_name', self.file_name) or [
+                './/span[@data-testid="ProductCard-Title-TestID"]'
+            ]
+            url_xpaths = self.config.get_xpath_list('product_url', self.file_name) or [
+                './/a[@data-testid="trending-deals-card-TestID"]/@href'
+            ]
+
             # 추가 대기 시간
-            time.sleep(3)
+            time.sleep(extract_wait)
 
             # 페이지 소스 가져오기
             page_source = self.page.html
@@ -164,13 +190,7 @@ class BestBuyTrendCrawler:
 
             products = []
 
-            # 모든 제품 아이템 찾기 (새 구조: data-testid="story-block-trending_deals_story" 내부 ul/li)
-            product_items_xpaths = [
-                '//div[@data-testid="story-block-trending_deals_story"]//ul//li[@data-carousel-index]',
-                '//div[@data-testid="story-block-trending_deals_story"]//li[.//div[@data-testid="ProductCardTestID"]]',
-                '//div[@data-testid="story-block-trending_deals_story"]//li[.//a]',
-            ]
-
+            # 모든 제품 아이템 찾기 (fallback list from config)
             product_items = []
             for xpath in product_items_xpaths:
                 product_items = tree.xpath(xpath)
@@ -185,11 +205,7 @@ class BestBuyTrendCrawler:
 
             for idx, item in enumerate(product_items, 1):
                 try:
-                    # 순위 추출 (새 구조: PriceBlockOffer-CarouselProductRank-TestID)
-                    rank_xpaths = [
-                        './/div[@data-testid="PriceBlockOffer-CarouselProductRank-TestID"]//span',
-                        './/div[contains(@data-testid, "CarouselProductRank")]//span',
-                    ]
+                    # 순위 추출 (fallback list from config)
                     rank = None
                     for rank_xpath in rank_xpaths:
                         rank_elem = item.xpath(rank_xpath)
@@ -201,12 +217,7 @@ class BestBuyTrendCrawler:
                     if not rank:
                         rank = str(idx)
 
-                    # 제품명 추출 (새 구조: ProductCard-Title-TestID)
-                    name_xpaths = [
-                        './/span[@data-testid="ProductCard-Title-TestID"]',
-                        './/span[@data-testid="ProductCard-Title-TestID"]/@aria-label',
-                    ]
-
+                    # 제품명 추출 (fallback list from config)
                     product_name = None
                     for name_xpath in name_xpaths:
                         if '@aria-label' in name_xpath:
@@ -222,12 +233,7 @@ class BestBuyTrendCrawler:
                                 if product_name and len(product_name) > 5:
                                     break
 
-                    # URL 추출 (새 구조: trending-deals-card-TestID)
-                    url_xpaths = [
-                        './/a[@data-testid="trending-deals-card-TestID"]/@href',
-                        './/a[contains(@href, "/product/")]/@href',
-                    ]
-
+                    # URL 추출 (fallback list from config)
                     product_url = None
                     for url_xpath in url_xpaths:
                         url_elem = item.xpath(url_xpath)
@@ -240,7 +246,7 @@ class BestBuyTrendCrawler:
 
                     if product_name and product_url:
                         product = {
-                            'page_type': 'Trend',
+                            'page_type': page_type,
                             'rank': int(rank) if rank.isdigit() else idx,
                             'product_name': product_name,
                             'product_url': product_url
@@ -272,9 +278,13 @@ class BestBuyTrendCrawler:
         try:
             cursor = self.db_conn.cursor()
 
+            # Config values
+            table_name = self.config.get_table('trend_data') or 'bby_tv_Trend_crawl'
+            account_name = self.config.get_constant('account_name', None, 'Bestbuy')
+
             # 테이블 존재 확인 및 생성
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS bby_tv_Trend_crawl (
+            cursor.execute(f"""
+                CREATE TABLE IF NOT EXISTS {table_name} (
                     id SERIAL PRIMARY KEY,
                     account_name VARCHAR(50),
                     page_type VARCHAR(50),
@@ -295,8 +305,8 @@ class BestBuyTrendCrawler:
             crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + now.strftime('%f')[:4]
 
             # 데이터 삽입
-            insert_query = """
-                INSERT INTO bby_tv_Trend_crawl (account_name, batch_id, page_type, rank, product_name, product_url, crawl_strdatetime, calendar_week)
+            insert_query = f"""
+                INSERT INTO {table_name} (account_name, batch_id, page_type, rank, product_name, product_url, crawl_strdatetime, calendar_week)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """
 
@@ -304,7 +314,7 @@ class BestBuyTrendCrawler:
             for product in products:
                 try:
                     cursor.execute(insert_query, (
-                        'Bestbuy',
+                        account_name,
                         self.batch_id,
                         product['page_type'],
                         product['rank'],
@@ -342,8 +352,9 @@ class BestBuyTrendCrawler:
             # Add batch_id column if not exists
             try:
                 cursor = self.db_conn.cursor()
-                cursor.execute("""
-                    ALTER TABLE bby_tv_Trend_crawl
+                table_name = self.config.get_table('trend_data') or 'bby_tv_Trend_crawl'
+                cursor.execute(f"""
+                    ALTER TABLE {table_name}
                     ADD COLUMN IF NOT EXISTS batch_id VARCHAR(50)
                 """)
                 self.db_conn.commit()

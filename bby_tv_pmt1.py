@@ -34,6 +34,7 @@ from data_validator import DataValidator
 
 # Import database configuration
 from config import DB_CONFIG
+from bby_config_loader import get_config
 
 class BestBuyPromotionCrawler:
     def __init__(self):
@@ -41,7 +42,13 @@ class BestBuyPromotionCrawler:
         self.db_conn = None
         self.korea_tz = pytz.timezone('Asia/Seoul')
         self.batch_id = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
-        self.url = "https://www.bestbuy.com/site/all-tv-home-theater-on-sale/tvs-on-sale/pcmcat1720647543741.c?id=pcmcat1720647543741"
+
+        # Config loader 초기화
+        self.config = get_config()
+        self.file_name = 'bby_tv_pmt1'
+
+        # URL from config
+        self.url = self.config.get_url('promo_page', self.file_name)
 
         # Data validator 초기화
         session_start_time = os.environ.get('SESSION_START_TIME', datetime.now().strftime('%Y%m%d%H%M'))
@@ -76,28 +83,32 @@ class BestBuyPromotionCrawler:
         try:
             print(f"[INFO] Accessing Best Buy TV Promotion page...")
             self.page.get(self.url)
-            time.sleep(3)
+            page_access_wait = self.config.get_float('timing', 'page_access_wait', self.file_name, 3)
+            time.sleep(page_access_wait)
 
             # Slow scroll to trigger lazy loading
             print("[INFO] Starting slow scroll for lazy loading...")
-            scroll_step = 300
+            scroll_step = self.config.get_int('timing', 'scroll_step', self.file_name, 300)
+            scroll_wait = self.config.get_float('timing', 'scroll_wait', self.file_name, 0.8)
+            scroll_limit = self.config.get_int('constant', 'scroll_limit_px', self.file_name, 10000)
             current_position = 0
             last_height = self.page.run_js("return document.body.scrollHeight")
 
             while True:
                 current_position += scroll_step
                 self.page.run_js(f"window.scrollTo(0, {current_position})")
-                time.sleep(0.8)
+                time.sleep(scroll_wait)
 
                 new_height = self.page.run_js("return document.body.scrollHeight")
                 if current_position >= new_height:
                     break
-                if current_position > 10000:  # Safety limit
+                if current_position > scroll_limit:  # Safety limit
                     break
 
             # Scroll back to top
             self.page.run_js("window.scrollTo(0, 0)")
-            time.sleep(2)
+            scroll_top_wait = self.config.get_float('timing', 'scroll_top_wait', self.file_name, 2)
+            time.sleep(scroll_top_wait)
 
             print("[OK] Page loaded successfully")
             return True
@@ -149,9 +160,8 @@ class BestBuyPromotionCrawler:
         """프로모션 타입 추출 (h2 + p 결합)"""
         try:
             # h2 텍스트 추출 (모든 텍스트 포함)
-            h2_xpaths = [
-                '//h2[contains(@class, "headline80")]',
-                '//h2[@class="headline80 font-weight-bold font-condensed"]'
+            h2_xpaths = self.config.get_xpath_list('h2_headline', self.file_name) or [
+                '//h2[contains(@class, "headline80")]'
             ]
 
             h2_text = None
@@ -164,9 +174,8 @@ class BestBuyPromotionCrawler:
                     break
 
             # p 텍스트 추출
-            p_xpaths = [
-                '//p[contains(@class, "heading-4") and contains(@class, "font-weight-light")]',
-                '//p[@class="heading-4 font-weight-light v-text-pure-white mb-200"]'
+            p_xpaths = self.config.get_xpath_list('p_subtitle', self.file_name) or [
+                '//p[contains(@class, "heading-4") and contains(@class, "font-weight-light")]'
             ]
 
             p_text = None
@@ -201,13 +210,20 @@ class BestBuyPromotionCrawler:
         """
         sections = []
 
+        # XPath from config
+        all_sections_xpath = self.config.get('xpath', 'all_sections', self.file_name) or '//section'
+        carousel_list_xpath = self.config.get('xpath', 'carousel_list', self.file_name) or '//ul[@class="c-carousel-list"]'
+        promo_type_hero_xpath = self.config.get('xpath', 'promo_type_hero', self.file_name) or './/span[contains(@class, "hero-fluid-headline-2")]'
+        section_title_xpath = self.config.get('xpath', 'section_title', self.file_name) or './/h2'
+        section_p_xpath = self.config.get('xpath', 'section_p', self.file_name) or './/p[contains(@class, "heading") or contains(@class, "subhead")]'
+
         try:
             # Find all sections (exclude facet)
-            all_sections = tree.xpath('//section')
+            all_sections = tree.xpath(all_sections_xpath)
             print(f"[INFO] Found {len(all_sections)} sections total")
 
             # 각 섹션이 프로모션 섹션인지 확인 (carousel 매핑 여부로 판단)
-            all_carousels = tree.xpath('//ul[@class="c-carousel-list"]')
+            all_carousels = tree.xpath(carousel_list_xpath)
 
             for section in all_sections:
                 try:
@@ -232,15 +248,15 @@ class BestBuyPromotionCrawler:
 
                     # 방법 1: hero-holiday-blue-gradient 섹션 (span 태그에서 추출)
                     if 'hero-holiday-blue-gradient' in section_class:
-                        span_elem = section.xpath('.//span[contains(@class, "hero-fluid-headline-2")]')
+                        span_elem = section.xpath(promo_type_hero_xpath)
                         if span_elem:
                             promotion_type = self.extract_promotion_type_text(span_elem[0])
 
                     # 방법 2: 일반 섹션 (h2 + p 또는 첫 2줄)
                     else:
                         # h2 태그 먼저 시도
-                        h2_elem = section.xpath('.//h2')
-                        p_elem = section.xpath('.//p[contains(@class, "heading") or contains(@class, "subhead")]')
+                        h2_elem = section.xpath(section_title_xpath)
+                        p_elem = section.xpath(section_p_xpath)
 
                         if h2_elem and p_elem:
                             h2_text = h2_elem[0].text_content().strip()
@@ -309,6 +325,21 @@ class BestBuyPromotionCrawler:
 
             all_products = []
 
+            # Config values
+            carousel_list_xpath = self.config.get('xpath', 'carousel_list', self.file_name) or '//ul[@class="c-carousel-list"]'
+            product_item_xpath = self.config.get('xpath', 'product_item', self.file_name) or './/li[@class="item c-carousel-item "]'
+            section_max_products = self.config.get_int('constant', 'section_max_products', self.file_name, 6)
+            page_type = self.config.get_constant('page_type_promo', self.file_name) or 'Top deals'
+            name_xpaths = self.config.get_xpath_list('product_name', self.file_name) or [
+                './/span[contains(@class, "BxIuyHdYvE_KO21sTHqZ")]'
+            ]
+            url_xpaths = self.config.get_xpath_list('product_url', self.file_name) or [
+                './/a[@data-testid="hero-experience-deal-card-test-id"]/@href'
+            ]
+            offer_xpaths = self.config.get_xpath_list('offer', self.file_name) or [
+                './/button[@id="offer-link"]//div'
+            ]
+
             # Process each section
             for section_idx, (section_elem, section_type, promotion_type) in enumerate(sections, 1):
                 try:
@@ -318,7 +349,7 @@ class BestBuyPromotionCrawler:
                     # 섹션 이후의 모든 c-carousel-list를 찾아서
                     # 각 carousel의 preceding::section[-1]이 현재 섹션인지 확인
 
-                    all_carousels = tree.xpath('//ul[@class="c-carousel-list"]')
+                    all_carousels = tree.xpath(carousel_list_xpath)
                     section_carousels = []
 
                     for carousel in all_carousels:
@@ -332,30 +363,24 @@ class BestBuyPromotionCrawler:
 
                     print(f"[OK] Section {section_idx} mapped carousels: {len(section_carousels)}")
 
-                    # 모든 carousel에서 li 아이템 수집 (최대 6개)
+                    # 모든 carousel에서 li 아이템 수집
                     product_items = []
                     for carousel in section_carousels:
-                        items = carousel.xpath('.//li[@class="item c-carousel-item "]')
+                        items = carousel.xpath(product_item_xpath)
                         product_items.extend(items)
-                        if len(product_items) >= 6:
+                        if len(product_items) >= section_max_products:
                             break
 
-                    product_items = product_items[:6]  # Limit to max 6
+                    product_items = product_items[:section_max_products]  # Limit to max
                     print(f"[OK] Section {section_idx} collected {len(product_items)} products")
 
-                    # 각 제품 처리 (promotion_rank는 섹션 내에서 1-6)
-                    for idx, item in enumerate(product_items[:6], 1):
+                    # 각 제품 처리 (promotion_rank는 섹션 내에서 1-N)
+                    for idx, item in enumerate(product_items[:section_max_products], 1):
                         try:
                             # promotion_rank는 섹션 내에서 1부터 시작
                             promotion_rank = idx
 
                             # 제품명 추출 (retailer_sku_name)
-                            name_xpaths = [
-                                './/span[contains(@class, "BxIuyHdYvE_KO21sTHqZ")]',
-                                './/div[@data-testid="product-card-title"]//span',
-                                './/a[@data-testid="product-card-title-link"]//span'
-                            ]
-
                             product_name = None
                             for name_xpath in name_xpaths:
                                 name_elem = item.xpath(name_xpath)
@@ -364,13 +389,6 @@ class BestBuyPromotionCrawler:
                                     break
 
                             # URL 추출
-                            url_xpaths = [
-                                './/a[@data-testid="hero-experience-deal-card-test-id"]/@href',
-                                './/a[@data-testid="product-card-title-link"]/@href',
-                                './/div[@class="content-wrapper"]//a/@href',
-                                './/a/@href'
-                            ]
-
                             product_url = None
                             for url_xpath in url_xpaths:
                                 url_elem = item.xpath(url_xpath)
@@ -382,10 +400,6 @@ class BestBuyPromotionCrawler:
                                     break
 
                             # offer 추출 (숫자만)
-                            offer_xpaths = [
-                                './/button[@id="offer-link"]//div',
-                                './/button[@data-testid="offer-link"]//div'
-                            ]
                             offer = None
                             for xpath in offer_xpaths:
                                 elem = item.xpath(xpath)
@@ -402,7 +416,7 @@ class BestBuyPromotionCrawler:
                                 self.validator.validate_item(product_name, product_url, 'bby_tv_pmt1')
 
                                 product = {
-                                    'page_type': 'Top deals',
+                                    'page_type': page_type,
                                     'retailer_sku_name': product_name,
                                     'promotion_rank': promotion_rank,
                                     'offer': offer,
@@ -451,9 +465,13 @@ class BestBuyPromotionCrawler:
             now = datetime.now()
             crawl_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
 
+            # Config values
+            table_name = self.config.get_table('pmt_data') or 'bby_tv_pmt1'
+            account_name = self.config.get_constant('account_name', None, 'Bestbuy')
+
             # 데이터 삽입
-            insert_query = """
-                INSERT INTO bby_tv_pmt1
+            insert_query = f"""
+                INSERT INTO {table_name}
                 (account_name, page_type, retailer_sku_name, promotion_rank, offer,
                  promotion_type, product_url, crawl_datetime, calendar_week, batch_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -463,7 +481,7 @@ class BestBuyPromotionCrawler:
             for product in products:
                 try:
                     cursor.execute(insert_query, (
-                        'Bestbuy',
+                        account_name,
                         product['page_type'],
                         product['retailer_sku_name'],
                         product['promotion_rank'],

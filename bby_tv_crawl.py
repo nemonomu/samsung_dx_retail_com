@@ -26,6 +26,7 @@ import time
 import os
 from datetime import datetime
 from alert_monitor import send_crawl_alert
+from bby_config_loader import get_config
 
 class IntegratedCrawler:
     def __init__(self):
@@ -40,6 +41,11 @@ class IntegratedCrawler:
             'dt1': {'success': None, 'duration': None}
         }
 
+        # Config loader 초기화
+        self.config = get_config()
+        self.file_name = 'bby_tv_crawl'
+        self.retailer_name = self.config.get_constant('retailer_name', self.file_name) or 'BestBuy'
+
         # 환경변수 설정 (각 크롤러가 사용)
         os.environ['SESSION_START_TIME'] = self.session_start_time
 
@@ -53,13 +59,16 @@ class IntegratedCrawler:
         print("="*80)
 
         try:
+            # Config에서 timeout 가져오기
+            subprocess_timeout = self.config.get_int('timing', 'subprocess_timeout', self.file_name, 21600)
+
             # Run with real-time output (no buffering)
             result = subprocess.run(
                 [sys.executable, '-u', script_name],  # -u: unbuffered output
                 stdout=None,  # Inherit parent's stdout for real-time output
                 stderr=None,  # Inherit parent's stderr
                 text=True,
-                timeout=21600  # 6 hours timeout
+                timeout=subprocess_timeout
             )
 
             end_time = datetime.now()
@@ -78,8 +87,8 @@ class IntegratedCrawler:
                 return False, duration
 
         except subprocess.TimeoutExpired:
-            print(f"[FAILED] {description} - Timed out after 6 hours")
-            return False, 21600
+            print(f"[FAILED] {description} - Timed out after {subprocess_timeout} seconds")
+            return False, subprocess_timeout
         except Exception as e:
             print(f"[FAILED] {description} - Error: {e}")
             return False, 0
@@ -93,6 +102,9 @@ class IntegratedCrawler:
         print(f"Overall Start Time: {self.overall_start_time.strftime('%Y-%m-%d %H:%M:%S')}")
         print("="*80)
 
+        # Config에서 크롤러 간 대기 시간 가져오기
+        between_crawlers_wait = self.config.get_int('timing', 'between_crawlers_wait', self.file_name, 5)
+
         # Step 1: Main page crawler
         success, duration = self.run_crawler(
             'bby_tv_main1.py',
@@ -104,7 +116,7 @@ class IntegratedCrawler:
         if not success:
             print("\n[WARNING] Main crawler failed, but continuing with other crawlers...")
 
-        time.sleep(5)  # Brief pause between crawlers
+        time.sleep(between_crawlers_wait)  # Brief pause between crawlers
 
         # Step 2: Best-selling page crawler
         success, duration = self.run_crawler(
@@ -117,7 +129,7 @@ class IntegratedCrawler:
         if not success:
             print("\n[WARNING] BSR crawler failed, but continuing with other crawlers...")
 
-        time.sleep(5)
+        time.sleep(between_crawlers_wait)
 
         # Step 3: Promotion page crawler
         success, duration = self.run_crawler(
@@ -130,7 +142,7 @@ class IntegratedCrawler:
         if not success:
             print("\n[WARNING] Promotion crawler failed, but continuing with trend crawler...")
 
-        time.sleep(5)
+        time.sleep(between_crawlers_wait)
 
         # Step 4: Trending deals crawler
         success, duration = self.run_crawler(
@@ -143,7 +155,7 @@ class IntegratedCrawler:
         if not success:
             print("\n[WARNING] Trend crawler failed, but continuing with detail crawler...")
 
-        time.sleep(5)
+        time.sleep(between_crawlers_wait)
 
         # Step 5: Detail page crawler (uses URLs from above)
         success, duration = self.run_crawler(
@@ -192,7 +204,7 @@ def main():
 
         # Send email notification
         send_crawl_alert(
-            retailer='BestBuy',
+            retailer=crawler.retailer_name,
             results=crawler.results,
             failed_stages=failed_stages,
             elapsed_time=total_duration
@@ -209,7 +221,7 @@ def main():
         print("\n[!] Interrupted by user")
         # Send alert for interruption
         send_crawl_alert(
-            retailer='BestBuy',
+            retailer=crawler.retailer_name if crawler else 'BestBuy',
             results=crawler.results if crawler else {},
             failed_stages=['Interrupted by user'],
             elapsed_time=0,
@@ -222,7 +234,7 @@ def main():
         traceback.print_exc()
         # Send alert for fatal error
         send_crawl_alert(
-            retailer='BestBuy',
+            retailer=crawler.retailer_name if crawler else 'BestBuy',
             results=crawler.results if crawler else {},
             failed_stages=['Fatal error'],
             elapsed_time=0,

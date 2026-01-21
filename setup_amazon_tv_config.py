@@ -178,17 +178,19 @@ def insert_configs():
             ('xpath', 'screen_size_7', '//table[@id="productDetails_techSpec_section_1"]//th[contains(., "Screen Size")]/following-sibling::td', None, 7, '화면 크기 XPath 7 - following-sibling'),
             ('xpath', 'screen_size_8', '//div[@id="detailBullets_feature_div"]//span[contains(text(), "Screen Size")]/../span[2]', None, 8, '화면 크기 XPath 8 - detailBullets div'),
 
-            # 모델 연도 추출
-            ('xpath', 'model_year_1', '//*[@id="productDetails_techSpec_section_1"]//tr[th[contains(text(), "Model Year")]]/td', None, 1, '모델 연도 XPath 1'),
-            ('xpath', 'model_year_2', '//*[@id="productDetails_detailBullets_sections1"]//tr[th[contains(text(), "Model Year")]]/td', None, 2, '모델 연도 XPath 2'),
-            ('xpath', 'model_year_3', '//*[@id="productDetails_techSpec_section_1"]//tr[th[contains(text(), "Item model number")]]/td', None, 3, '모델 연도 XPath 3'),
-            ('xpath', 'model_year_4', '//*[@id="productDetails_detailBullets_sections1"]//tr[th[contains(text(), "Item model number")]]/td', None, 4, '모델 연도 XPath 4'),
-            ('xpath', 'model_year_5', '//table[@id="productDetails_techSpec_section_1"]//th[contains(., "Model Year")]/following-sibling::td', None, 5, '모델 연도 XPath 5'),
+            # 모델 연도 추출 (코드 fallback과 동일하게)
+            ('xpath', 'model_year_1', '//tr[.//th[contains(text(), "Model Year")]]/td[@class="a-size-base prodDetAttrValue"]', None, 1, '모델 연도 XPath 1 - prodDetAttrValue'),
+            ('xpath', 'model_year_2', '//table[@id="productDetails_techSpec_section_1"]//tr[.//th[contains(text(), "Model Year")]]/td', None, 2, '모델 연도 XPath 2 - techSpec table'),
+            ('xpath', 'model_year_3', '//*[@id="productDetails_techSpec_section_1"]//tr[th[contains(text(), "Model Year")]]/td', None, 3, '모델 연도 XPath 3 - techSpec'),
+            ('xpath', 'model_year_4', '//*[@id="productDetails_detailBullets_sections1"]//tr[th[contains(text(), "Model Year")]]/td', None, 4, '모델 연도 XPath 4 - detailBullets'),
+            ('xpath', 'model_year_5', '//table[@id="productDetails_techSpec_section_1"]//th[contains(., "Model Year")]/following-sibling::td', None, 5, '모델 연도 XPath 5 - following-sibling'),
 
-            # 모델 번호 추출
-            ('xpath', 'model_number_1', '//*[@id="productDetails_techSpec_section_1"]//tr[th[contains(text(), "Item model number")]]/td', None, 1, '모델 번호 XPath 1'),
-            ('xpath', 'model_number_2', '//*[@id="productDetails_detailBullets_sections1"]//tr[th[contains(text(), "Item model number")]]/td', None, 2, '모델 번호 XPath 2'),
-            ('xpath', 'model_number_3', '//table[@id="productDetails_techSpec_section_1"]//th[contains(., "Item model number")]/following-sibling::td', None, 3, '모델 번호 XPath 3'),
+            # 모델 번호 추출 (코드 fallback과 동일하게 - Model Number 텍스트 사용)
+            ('xpath', 'model_number_1', '//tr[.//th[contains(text(), "Model Number")]]/td[@class="a-size-base prodDetAttrValue"]', None, 1, '모델 번호 XPath 1 - Model Number prodDetAttrValue'),
+            ('xpath', 'model_number_2', '//table[@id="productDetails_techSpec_section_1"]//tr[.//th[contains(text(), "Model Number")]]/td', None, 2, '모델 번호 XPath 2 - Model Number table'),
+            ('xpath', 'model_number_3', '//*[@id="productDetails_techSpec_section_1"]//tr[th[contains(text(), "Item model number")]]/td', None, 3, '모델 번호 XPath 3 - Item model number'),
+            ('xpath', 'model_number_4', '//*[@id="productDetails_detailBullets_sections1"]//tr[th[contains(text(), "Item model number")]]/td', None, 4, '모델 번호 XPath 4 - detailBullets'),
+            ('xpath', 'model_number_5', '//table[@id="productDetails_techSpec_section_1"]//th[contains(., "Item model number")]/following-sibling::td', None, 5, '모델 번호 XPath 5 - following-sibling'),
 
             # 리뷰 페이지 링크
             ('xpath', 'review_link_1', '//*[@id="reviews-medley-footer"]//a[contains(@href, "product-reviews")]/@href', None, 1, '리뷰 페이지 링크 XPath 1'),
@@ -221,22 +223,32 @@ def insert_configs():
             # 상품 상세 버튼
             ('xpath', 'item_details_button', '//span[contains(text(), "Item details")]/ancestor::a[contains(@class, "a-expander-header")]', None, 1, '상품 상세 펼치기 버튼 XPath'),
 
-            # 가격 XPath
-            ('xpath', 'price_1', '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[1]', None, 1, '가격 XPath 1'),
-            ('xpath', 'price_2', '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[2]/span[2]', None, 2, '가격 XPath 2'),
-            ('xpath', 'price_3', '//*[@id="corePrice_desktop"]/div/table/tbody/tr/td[2]/span[1]/span[2]', None, 3, '가격 XPath 3'),
-            ('xpath', 'price_4', '//*[@id="corePrice_feature_div"]/div/div/span[1]/span[2]/span[2]', None, 4, '가격 XPath 4'),
-            ('xpath', 'price_5', '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[3]/span[2]/span[2]', None, 5, '가격 XPath 5'),
+            # 가격 XPath (코드 fallback + 기존 DB 통합)
+            ('xpath', 'price_1', '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[1]', None, 1, '가격 XPath 1 - primary'),
+            ('xpath', 'price_2', '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[3]/span[2]', None, 2, '가격 XPath 2 - main container'),
+            ('xpath', 'price_3', '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[3]/span[2]/span[1]', None, 3, '가격 XPath 3 - main span[1]'),
+            ('xpath', 'price_4', '//span[@class="a-price aok-align-center reinventPricePriceToPayMargin priceToPay"]//span[@class="a-offscreen"]', None, 4, '가격 XPath 4 - priceToPay offscreen'),
+            ('xpath', 'price_5', '//*[@id="corePrice_feature_div"]/div/div/span[1]/span[1]', None, 5, '가격 XPath 5 - side container'),
+            ('xpath', 'price_6', '//*[@id="corePrice_feature_div"]//span[@class="a-offscreen"]', None, 6, '가격 XPath 6 - side generic'),
+            ('xpath', 'price_7', '//*[@id="corePrice_desktop"]/div/table/tbody/tr/td[2]/span[1]/span[1]', None, 7, '가격 XPath 7 - table based'),
+            ('xpath', 'price_8', '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[2]/span[2]', None, 8, '가격 XPath 8 - span[2]'),
+            ('xpath', 'price_9', '//*[@id="corePrice_desktop"]/div/table/tbody/tr/td[2]/span[1]/span[2]', None, 9, '가격 XPath 9 - table span[2]'),
+            ('xpath', 'price_10', '//*[@id="corePrice_feature_div"]/div/div/span[1]/span[2]/span[2]', None, 10, '가격 XPath 10 - feature div'),
+            ('xpath', 'price_11', '//*[@id="corePriceDisplay_desktop_feature_div"]/div[1]/span[3]/span[2]/span[2]', None, 11, '가격 XPath 11 - span[3] nested'),
 
-            # 원가 XPath
-            ('xpath', 'original_price_1', '//*[@id="corePriceDisplay_desktop_feature_div"]//span[@class="aok-relative"]/span[contains(@class, "a-offscreen")]', None, 1, '원가 XPath 1'),
-            ('xpath', 'original_price_2', '//*[@id="corePrice_desktop"]//span[@data-a-strike="true"]//span[@class="a-offscreen"]', None, 2, '원가 XPath 2'),
+            # 원가 XPath (코드 fallback + 기존 DB 통합)
+            ('xpath', 'original_price_1', '//*[@id="corePriceDisplay_desktop_feature_div"]/div[2]/span/span[1]/span[2]/span/span[1]', None, 1, '원가 XPath 1 - div[2] nested'),
+            ('xpath', 'original_price_2', '//*[@id="corePriceDisplay_desktop_feature_div"]/div[2]//span[@class="a-offscreen"]', None, 2, '원가 XPath 2 - div[2] offscreen'),
+            ('xpath', 'original_price_3', '//*[@id="corePriceDisplay_desktop_feature_div"]//span[@class="aok-relative"]/span[contains(@class, "a-offscreen")]', None, 3, '원가 XPath 3 - aok-relative'),
+            ('xpath', 'original_price_4', '//*[@id="corePrice_desktop"]//span[@data-a-strike="true"]//span[@class="a-offscreen"]', None, 4, '원가 XPath 4 - data-a-strike'),
 
-            # 별점
-            ('xpath', 'star_rating_1', '//*[@id="acrPopover"]/span[1]/a/span', None, 1, '별점 XPath 1'),
-            ('xpath', 'star_rating_2', '//*[@id="acrPopover"]//span[contains(@class, "a-icon-alt")]', None, 2, '별점 XPath 2'),
-            ('xpath', 'star_rating_3', '//span[@data-hook="rating-out-of-text"]', None, 3, '별점 XPath 3'),
-            ('xpath', 'star_rating_4', '//*[@id="averageCustomerReviews"]//span[contains(@class, "a-icon-alt")]', None, 4, '별점 XPath 4'),
+            # 별점 (코드 fallback과 동일하게)
+            ('xpath', 'star_rating_1', '//*[@id="acrPopover"]/@title', None, 1, '별점 XPath 1 - title 속성'),
+            ('xpath', 'star_rating_2', '//*[@id="averageCustomerReviews"]//span[@class="a-icon-alt"]', None, 2, '별점 XPath 2 - a-icon-alt'),
+            ('xpath', 'star_rating_3', '//span[@data-hook="rating-out-of-text"]', None, 3, '별점 XPath 3 - data-hook'),
+            ('xpath', 'star_rating_4', '//*[@id="acrPopover"]/span[1]/a/span', None, 4, '별점 XPath 4 - acrPopover span'),
+            ('xpath', 'star_rating_5', '//*[@id="acrPopover"]//span[contains(@class, "a-icon-alt")]', None, 5, '별점 XPath 5 - contains a-icon-alt'),
+            ('xpath', 'star_rating_6', '//*[@id="averageCustomerReviews"]//span[contains(@class, "a-icon-alt")]', None, 6, '별점 XPath 6 - averageCustomerReviews'),
 
             # 리뷰 개수 (제품 페이지)
             ('xpath', 'count_reviews_1', '//*[@id="acrCustomerReviewText"]', None, 1, '리뷰 개수 XPath 1'),
@@ -248,27 +260,38 @@ def insert_configs():
             ('xpath', 'total_ratings_2', '//span[@id="acrCustomerReviewText"]', None, 2, '평점 개수 XPath 2'),
             ('xpath', 'total_ratings_3', '//div[@id="averageCustomerReviews"]//span[contains(text(), "ratings")]', None, 3, '평점 개수 XPath 3'),
 
-            # 품절 확인
-            ('xpath', 'unavailable_1', '//*[@id="availability"]/span', None, 1, '품절 확인 XPath 1'),
-            ('xpath', 'unavailable_2', '//div[@id="availability"]//span[contains(text(), "unavailable")]', None, 2, '품절 확인 XPath 2'),
-            ('xpath', 'unavailable_3', '//*[@id="outOfStock"]//span', None, 3, '품절 확인 XPath 3'),
+            # 품절 확인 (코드 fallback과 동일하게)
+            ('xpath', 'unavailable_1', '//*[@id="outOfStock"]/div/div[1]/span[1]', None, 1, '품절 확인 XPath 1 - outOfStock specific'),
+            ('xpath', 'unavailable_2', '//*[@id="availability"]/span[2]/span', None, 2, '품절 확인 XPath 2 - availability nested'),
+            ('xpath', 'unavailable_3', '//span[@class="a-color-price a-text-bold"]', None, 3, '품절 확인 XPath 3 - a-color-price'),
+            ('xpath', 'unavailable_4', '//*[@id="availability"]/span', None, 4, '품절 확인 XPath 4 - availability span'),
+            ('xpath', 'unavailable_5', '//div[@id="availability"]//span[contains(text(), "unavailable")]', None, 5, '품절 확인 XPath 5 - unavailable text'),
+            ('xpath', 'unavailable_6', '//*[@id="outOfStock"]//span', None, 6, '품절 확인 XPath 6 - outOfStock span'),
 
-            # 평소보다 높은 가격
-            ('xpath', 'price_higher_1', '//*[@id="apex_desktop_qualifiedBuybox"]//*[contains(text(), "higher")]', None, 1, '높은 가격 경고 XPath 1'),
-            ('xpath', 'price_higher_2', '//span[contains(text(), "Price higher than typical")]', None, 2, '높은 가격 경고 XPath 2'),
+            # 평소보다 높은 가격 (코드 fallback과 동일하게)
+            ('xpath', 'price_higher_1', '//*[@id="fod-cx-message-with-learn-more"]/span[1]', None, 1, '높은 가격 경고 XPath 1 - fod-cx-message'),
+            ('xpath', 'price_higher_2', '//span[@id="fod-cx-message-with-learn-more"]/span[1]', None, 2, '높은 가격 경고 XPath 2 - span fod-cx'),
+            ('xpath', 'price_higher_3', '//span[contains(text(), "Price higher than typical")]', None, 3, '높은 가격 경고 XPath 3 - text'),
+            ('xpath', 'price_higher_4', '//*[@id="apex_desktop_qualifiedBuybox"]//*[contains(text(), "higher")]', None, 4, '높은 가격 경고 XPath 4 - apex_desktop'),
 
-            # 판매 제안 없음
-            ('xpath', 'no_offers_1', '//*[@id="apex_offerDisplay_desktop"]//span[contains(text(), "No featured offers")]', None, 1, '제안 없음 XPath 1'),
-            ('xpath', 'no_offers_2', '//span[contains(text(), "No featured offers available")]', None, 2, '제안 없음 XPath 2'),
-            ('xpath', 'no_offers_3', '//*[@id="availability"]//span[contains(text(), "No featured")]', None, 3, '제안 없음 XPath 3'),
+            # 판매 제안 없음 (코드 fallback과 동일하게)
+            ('xpath', 'no_offers_1', '//*[@id="fod-cx-message-with-learn-more"]/span[1]', None, 1, '제안 없음 XPath 1 - fod-cx-message'),
+            ('xpath', 'no_offers_2', '//span[@id="fod-cx-message-with-learn-more"]/span[1]', None, 2, '제안 없음 XPath 2 - span fod-cx'),
+            ('xpath', 'no_offers_3', '//span[contains(text(), "No featured offers available")]', None, 3, '제안 없음 XPath 3 - text'),
+            ('xpath', 'no_offers_4', '//*[@id="apex_offerDisplay_desktop"]//span[contains(text(), "No featured offers")]', None, 4, '제안 없음 XPath 4 - apex_offerDisplay'),
+            ('xpath', 'no_offers_5', '//*[@id="availability"]//span[contains(text(), "No featured")]', None, 5, '제안 없음 XPath 5 - availability'),
 
-            # 장바구니에서 가격 확인
-            ('xpath', 'see_price_cart_1', '//a[contains(text(), "See price in cart")]', None, 1, '장바구니 가격 확인 XPath 1'),
-            ('xpath', 'see_price_cart_2', '//span[@class="a-declarative"]//a[contains(text(), "See price in cart")]', None, 2, '장바구니 가격 확인 XPath 2'),
+            # 장바구니에서 가격 확인 (코드 fallback과 동일하게)
+            ('xpath', 'see_price_cart_1', '//*[@id="corePriceDisplay_desktop_feature_div"]/table/tbody/tr/td[2]/span/a', None, 1, '장바구니 가격 확인 XPath 1 - corePriceDisplay'),
+            ('xpath', 'see_price_cart_2', '//a[contains(text(), "See price in cart")]', None, 2, '장바구니 가격 확인 XPath 2 - text'),
+            ('xpath', 'see_price_cart_3', '//span[@class="a-declarative"]//a[contains(text(), "See price in cart")]', None, 3, '장바구니 가격 확인 XPath 3 - a-declarative'),
 
-            # 장바구니 추가 후 가격 확인
-            ('xpath', 'add_cart_price_1', '//span[contains(text(), "add this item to your cart")]', None, 1, '장바구니 추가 가격 XPath 1'),
-            ('xpath', 'add_cart_price_2', '//span[contains(text(), "To see our price")]', None, 2, '장바구니 추가 가격 XPath 2'),
+            # 장바구니 추가 후 가격 확인 (코드 fallback과 동일하게 - td 요소)
+            ('xpath', 'add_cart_price_1', '//*[@id="corePriceDisplay_desktop_feature_div"]/table/tbody/tr/td[2]', None, 1, '장바구니 추가 가격 XPath 1 - td'),
+            ('xpath', 'add_cart_price_2', '//table[@class="a-lineitem"]//td[contains(text(), "To see our price")]', None, 2, '장바구니 추가 가격 XPath 2 - a-lineitem td'),
+            ('xpath', 'add_cart_price_3', '//td[contains(text(), "To see our price, add this item to your cart")]', None, 3, '장바구니 추가 가격 XPath 3 - full text td'),
+            ('xpath', 'add_cart_price_4', '//span[contains(text(), "add this item to your cart")]', None, 4, '장바구니 추가 가격 XPath 4 - span'),
+            ('xpath', 'add_cart_price_5', '//span[contains(text(), "To see our price")]', None, 5, '장바구니 추가 가격 XPath 5 - span To see'),
 
             # 리뷰 없음 (하단 리뷰 섹션)
             ('xpath', 'no_reviews_1', '//*[@id="cm-cr-dp-review-header"]/h3/span', None, 1, '리뷰 없음 XPath 1 - 리뷰 헤더'),
@@ -278,9 +301,12 @@ def insert_configs():
             ('xpath', 'no_reviews_5', '//span[contains(text(), "Be the first to review")]', None, 5, '리뷰 없음 XPath 5 - 첫 리뷰 작성'),
             ('xpath', 'no_reviews_6', '//div[@id="averageCustomerReviews"]//span[contains(text(), "No customer")]', None, 6, '리뷰 없음 XPath 6 - 평균 리뷰'),
 
-            # 0개 리뷰
-            ('xpath', 'zero_reviews_1', '//*[@id="acrCustomerReviewText"]', None, 1, '0개 리뷰 확인 XPath 1'),
-            ('xpath', 'zero_reviews_2', '//span[@id="acrCustomerReviewText"]', None, 2, '0개 리뷰 확인 XPath 2'),
+            # 0개 리뷰 (코드 fallback과 동일하게 - reviewsMedley 기반)
+            ('xpath', 'zero_reviews_1', '//*[@id="reviewsMedley"]//div[@class="a-box-inner"]', None, 1, '0개 리뷰 확인 XPath 1 - reviewsMedley box'),
+            ('xpath', 'zero_reviews_2', '//*[@id="reviewsMedley"]/div/div[2]/div/div[2]/div[3]/div[2]/div/div', None, 2, '0개 리뷰 확인 XPath 2 - reviewsMedley nested'),
+            ('xpath', 'zero_reviews_3', '//div[contains(text(), "customer reviews and")]', None, 3, '0개 리뷰 확인 XPath 3 - customer reviews text'),
+            ('xpath', 'zero_reviews_4', '//*[@id="acrCustomerReviewText"]', None, 4, '0개 리뷰 확인 XPath 4 - acrCustomerReviewText'),
+            ('xpath', 'zero_reviews_5', '//span[@id="acrCustomerReviewText"]', None, 5, '0개 리뷰 확인 XPath 5 - span acrCustomerReviewText'),
 
             # AI 생성 리뷰 요약
             ('xpath', 'summarized_review_1', '//div[@data-testid="overall-summary"]//span[contains(@class, "__SAR2l0zNyyuZ")]', None, 1, 'AI 리뷰 요약 XPath 1'),

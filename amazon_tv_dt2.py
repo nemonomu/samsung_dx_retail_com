@@ -2084,7 +2084,7 @@ class AmazonDetailCrawler:
         cursor = None
         try:
             print(f"  [DB] Saving to database...")
-            print(f"       Product: {data.get('Retailer_SKU_Name', 'N/A')[:60]}...")
+            print(f"       Product: {(data.get('Retailer_SKU_Name') or 'N/A')[:60]}...")
             print(f"       Item (SKU): {data.get('item', 'N/A')}")
 
             # Temporarily disable autocommit for transaction

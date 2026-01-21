@@ -1101,23 +1101,27 @@ class AmazonDetailCrawler:
 
                     for refresh_attempt in range(5):
                         try:
-                            # Sorry page 감지 (로그인 페이지 제외)
+                            # 로그인 페이지 체크
                             current_url = self.driver.current_url
                             if '/ap/signin' in current_url:
                                 print(f"  [WARNING] Redirected to login page, stopping retry")
                                 break
 
-                            page_source_lower = self.driver.page_source.lower()
-                            if ('sorry' in page_source_lower and 'review' not in page_source_lower) or 'something went wrong' in page_source_lower:
-                                print(f"  [WARNING] Sorry page detected on review page, refreshing ({refresh_attempt + 1}/5)...")
+                            # 먼저 리뷰 요소 찾기 시도 (짧은 timeout)
+                            try:
+                                WebDriverWait(self.driver, 5).until(
+                                    EC.presence_of_element_located((By.XPATH, '//*[@id="filter-info-section"] | //div[@data-hook="cr-filter-info-review-rating-count"]'))
+                                )
+                            except:
+                                # 요소 못 찾으면 sorry page인지 확인
+                                page_source_lower = self.driver.page_source.lower()
+                                if 'sorry' in page_source_lower or 'something went wrong' in page_source_lower:
+                                    print(f"  [WARNING] Sorry page detected, refreshing ({refresh_attempt + 1}/5)...")
+                                else:
+                                    print(f"  [WARNING] Review elements not found, refreshing ({refresh_attempt + 1}/5)...")
                                 self.driver.refresh()
                                 time.sleep(5)
                                 continue
-
-                            # 요소 대기
-                            WebDriverWait(self.driver, 10).until(
-                                EC.presence_of_element_located((By.XPATH, '//*[@id="filter-info-section"] | //div[@data-hook="cr-filter-info-review-rating-count"]'))
-                            )
 
                             # 텍스트가 있을 때까지 추출 시도
                             tree = html.fromstring(self.driver.page_source)
@@ -1155,9 +1159,18 @@ class AmazonDetailCrawler:
                             time.sleep(5)
 
                         except Exception as e:
-                            print(f"  [WARNING] count_of_reviews element not loaded ({refresh_attempt + 1}/5) - {str(e)[:50]}")
+                            print(f"  [WARNING] Error during review extraction ({refresh_attempt + 1}/5) - {str(e)[:50]}")
                             self.driver.refresh()
                             time.sleep(5)
+
+                    # 5회 시도 후에도 실패하면 브라우저 재시작 후 재시도
+                    if not count_of_reviews:
+                        print(f"  [WARNING] Failed after 5 attempts, restarting browser...")
+                        self.driver.quit()
+                        self.setup_driver()
+                        self.load_cookies()
+                        self.driver.get(review_url)
+                        time.sleep(random.uniform(4, 5))
 
                 # Collect reviews from first page (max 10 reviews per page)
                 all_reviews = []

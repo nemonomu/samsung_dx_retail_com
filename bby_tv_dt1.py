@@ -212,7 +212,7 @@ class BestBuyDetailCrawler:
                 cursor.execute(f"""
                     SELECT DISTINCT product_url, offer,
                            pick_up_availability, shipping_availability, delivery_availability,
-                           sku_status, main_rank
+                           sku_status, main_rank, retailer_sku_name
                     FROM {main_table}
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
@@ -226,6 +226,7 @@ class BestBuyDetailCrawler:
                         url_data_map[item_key] = {
                             'page_type': 'main',
                             'product_url': url,
+                            'retailer_sku_name': row[7],
                             'final_sku_price': None,
                             'savings': None,
                             'original_sku_price': None,
@@ -248,7 +249,7 @@ class BestBuyDetailCrawler:
                 cursor.execute(f"""
                     SELECT DISTINCT product_url, offer,
                            pick_up_availability, shipping_availability, delivery_availability,
-                           sku_status, bsr_rank
+                           sku_status, bsr_rank, retailer_sku_name
                     FROM {bsr_table}
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
@@ -266,6 +267,7 @@ class BestBuyDetailCrawler:
                         url_data_map[item_key] = {
                             'page_type': 'bsr',
                             'product_url': url,
+                            'retailer_sku_name': row[7],
                             'final_sku_price': None,
                             'savings': None,
                             'original_sku_price': None,
@@ -286,7 +288,7 @@ class BestBuyDetailCrawler:
             # 3. bby_tv_promotion_crawl에서 해당 batch의 URLs와 data 가져오기
             if promo_batch_id:
                 cursor.execute(f"""
-                    SELECT DISTINCT product_url, offer, promotion_type, promotion_rank
+                    SELECT DISTINCT product_url, offer, promotion_type, promotion_rank, retailer_sku_name
                     FROM {pmt_table}
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
@@ -305,6 +307,7 @@ class BestBuyDetailCrawler:
                         url_data_map[item_key] = {
                             'page_type': 'promotion',
                             'product_url': url,
+                            'retailer_sku_name': row[4],
                             'final_sku_price': None,
                             'savings': None,
                             'original_sku_price': None,
@@ -325,7 +328,7 @@ class BestBuyDetailCrawler:
             # 4. bby_tv_Trend_crawl에서 해당 batch의 URLs와 data 가져오기
             if trend_batch_id:
                 cursor.execute(f"""
-                    SELECT DISTINCT product_url, rank
+                    SELECT DISTINCT product_url, rank, product_name
                     FROM {trend_table}
                     WHERE batch_id = %s
                     AND product_url IS NOT NULL
@@ -343,6 +346,7 @@ class BestBuyDetailCrawler:
                         url_data_map[item_key] = {
                             'page_type': 'Trend',
                             'product_url': url,
+                            'retailer_sku_name': row[2],  # product_name -> retailer_sku_name
                             'final_sku_price': None,
                             'savings': None,
                             'original_sku_price': None,
@@ -1129,22 +1133,22 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Similar products extraction failed: {e}")
             return [None]*4, [None]*4, [None]*4
 
-    def extract_star_rating_from_reviews_page(self):
-        """리뷰 페이지에서 star_rating (평점) 추출 - DrissionPage
+    def extract_star_rating_from_reviews_page(self, tree):
+        """리뷰 페이지에서 star_rating (평점) 추출 - lxml tree
         예: <div class="overall-rating">4.5</div>
         """
         try:
-            selectors = self.config.get_xpath_list('star_rating_reviews_page', self.file_name) or [
-                'xpath://div[@class="overall-rating"]',
-                'xpath://*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[1]/div/div[1]',
-                'xpath://div[contains(@class, "overall-rating")]',
+            xpaths = self.config.get_xpath_list('star_rating_reviews_page', self.file_name) or [
+                '//div[@class="overall-rating"]',
+                '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[1]/div/div[1]',
+                '//div[contains(@class, "overall-rating")]',
             ]
 
-            for selector in selectors:
+            for xpath in xpaths:
                 try:
-                    elem = self.page.ele(selector, timeout=3)
+                    elem = tree.xpath(xpath)
                     if elem:
-                        text = elem.text.strip()
+                        text = elem[0].text_content().strip()
                         # "4.5" 형태의 숫자만 추출
                         match = re.search(r'(\d+\.?\d*)', text)
                         if match:
@@ -1225,27 +1229,27 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Count of reviews extraction failed: {e}")
             return None
 
-    def extract_top_mentions_from_reviews_page(self):
-        """Top_Mentions extraction (See All Customer Reviews page에서) - DrissionPage
+    def extract_top_mentions_from_reviews_page(self, tree):
+        """Top_Mentions extraction (See All Customer Reviews page에서) - lxml tree
         Returns: 콤마로 구분된 모든 mentions (예: "Picture Quality, Setup, Size")
         """
         try:
-            # Selector 패턴 - 제공된 HTML 구조 기반
-            selectors = self.config.get_xpath_list('top_mentions', self.file_name) or [
-                'xpath:/html/body/div[5]/div[8]/div[2]/aside/ul/li/a',
-                'xpath://ul[@class="list-unstyled"]/li/a[contains(@class, "v-text-tech-black")]',
-                'xpath://ul[@class="list-unstyled"]/li/a',
-                'xpath://div[contains(@class, "customer-review-pros-stats")]//span[@class="text-nowrap"]',
-                'xpath://div[contains(., "Highly rated by customers for")]//span[@class="text-nowrap"]'
+            # XPath 패턴 - 제공된 HTML 구조 기반
+            xpaths = self.config.get_xpath_list('top_mentions', self.file_name) or [
+                '/html/body/div[5]/div[8]/div[2]/aside/ul/li/a',
+                '//ul[@class="list-unstyled"]/li/a[contains(@class, "v-text-tech-black")]',
+                '//ul[@class="list-unstyled"]/li/a',
+                '//div[contains(@class, "customer-review-pros-stats")]//span[@class="text-nowrap"]',
+                '//div[contains(., "Highly rated by customers for")]//span[@class="text-nowrap"]'
             ]
 
             mentions = []
-            for selector in selectors:
+            for xpath in xpaths:
                 try:
-                    elements = self.page.eles(selector)
+                    elements = tree.xpath(xpath)
                     if elements:
                         for elem in elements:
-                            text = elem.text.strip()
+                            text = elem.text_content().strip()
                             if text:
                                 # 숫자와 괄호 제거 (예: "Picture Quality (1014)" -> "Picture Quality")
                                 # "&nbsp;" 처리 및 괄호+숫자 패턴 제거 (콤마 포함 숫자도 처리)
@@ -1266,15 +1270,13 @@ class BestBuyDetailCrawler:
             try:
                 fallback_mentions = []
                 # Pros mentioned 먼저
-                pros_elements = self.page.eles('xpath://div[contains(@class, "pros-container")]//button[@data-feature-name]')
-                for elem in pros_elements:
-                    feature_name = elem.attr('data-feature-name')
+                pros_elements = tree.xpath('//div[contains(@class, "pros-container")]//button[@data-feature-name]/@data-feature-name')
+                for feature_name in pros_elements:
                     if feature_name:
                         fallback_mentions.append(feature_name.strip())
                 # Cons mentioned 다음
-                cons_elements = self.page.eles('xpath://div[contains(@class, "cons-container")]//button[@data-feature-name]')
-                for elem in cons_elements:
-                    feature_name = elem.attr('data-feature-name')
+                cons_elements = tree.xpath('//div[contains(@class, "cons-container")]//button[@data-feature-name]/@data-feature-name')
+                for feature_name in cons_elements:
                     if feature_name:
                         fallback_mentions.append(feature_name.strip())
                 if fallback_mentions:
@@ -1557,26 +1559,26 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Summarized_Review_Content extraction failed: {e}")
             return None
 
-    def extract_summarized_review_content_from_reviews_page(self):
-        """Summarized_Review_Content extraction (리뷰 페이지에서) - DrissionPage
+    def extract_summarized_review_content_from_reviews_page(self, tree):
+        """Summarized_Review_Content extraction (리뷰 페이지에서) - lxml tree
         상세 페이지에서 추출 못했을 때 fallback으로 사용
         """
         try:
             # 리뷰 페이지의 AI 요약 위치
-            selectors = [
+            xpaths = [
                 # 제공된 XPath
-                'xpath://*[@id="reviews-accordion"]/div[1]/div/p[1]',
+                '//*[@id="reviews-accordion"]/div[1]/div/p[1]',
                 # class 기반
-                'xpath://p[@class="mb-200 mt-none"]',
+                '//p[@class="mb-200 mt-none"]',
                 # 더 넓은 패턴
-                'xpath://div[@id="reviews-accordion"]//p[contains(@class, "mb-200")]',
+                '//div[@id="reviews-accordion"]//p[contains(@class, "mb-200")]',
             ]
 
-            for selector in selectors:
+            for xpath in xpaths:
                 try:
-                    elem = self.page.ele(selector, timeout=3)
+                    elem = tree.xpath(xpath)
                     if elem:
-                        text = elem.text.strip()
+                        text = elem[0].text_content().strip()
                         if text and len(text) > 20:  # 유효한 요약인지 확인
                             return text
                 except:
@@ -1588,23 +1590,23 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Summarized_Review_Content (reviews page) extraction failed: {e}")
             return None
 
-    def extract_recommendation_intent_from_reviews_page(self):
-        """Recommendation_Intent extraction (See All Customer Reviews page에서) - DrissionPage"""
+    def extract_recommendation_intent_from_reviews_page(self, tree):
+        """Recommendation_Intent extraction (See All Customer Reviews page에서) - lxml tree"""
         try:
-            # Selector 패턴
-            selectors = [
+            # XPath 패턴
+            xpaths = [
                 # 제공된 HTML 기준
-                'xpath://div[contains(@class, "recommendation-card-no-donut")]//span[@class="recommendation-percent v-fw-medium"]',
+                '//div[contains(@class, "recommendation-card-no-donut")]//span[@class="recommendation-percent v-fw-medium"]',
                 # 더 넓은 패턴
-                'xpath://span[contains(@class, "recommendation-percent")]'
+                '//span[contains(@class, "recommendation-percent")]'
             ]
 
             percent = None
-            for selector in selectors:
+            for xpath in xpaths:
                 try:
-                    elem = self.page.ele(selector, timeout=3)
+                    elem = tree.xpath(xpath)
                     if elem:
-                        percent = elem.text.strip()
+                        percent = elem[0].text_content().strip()
                         if percent:
                             break
                 except Exception:
@@ -1850,27 +1852,15 @@ class BestBuyDetailCrawler:
                 time.sleep(0.5)
                 print(f"  [OK] Optimized scroll complete")
 
-            # page 소스 가져오기 (retry logic for failed extraction)
-            max_retries = 2
-            retailer_sku_name = None
-            tree = None
+            # page 소스 가져오기
+            page_source = self.page.html
+            tree = html.fromstring(page_source)
 
-            for attempt in range(max_retries + 1):
-                page_source = self.page.html
-                tree = html.fromstring(page_source)
-
-                # 1. Retailer_SKU_Name extraction
+            # 1. Retailer_SKU_Name - 소스 테이블에서 가져온 값 사용, 없으면 detail에서 추출
+            retailer_sku_name = url_data.get('retailer_sku_name')
+            if not retailer_sku_name or len(retailer_sku_name) < 3:
+                print(f"  [INFO] retailer_sku_name 없음 - detail 페이지에서 추출 시도")
                 retailer_sku_name = self.extract_retailer_sku_name(tree)
-
-                # Check if extraction succeeded and value is valid
-                if retailer_sku_name and retailer_sku_name != 'undefined' and len(retailer_sku_name) > 3:
-                    break
-
-                if attempt < max_retries:
-                    wait_time = 3 + (attempt * 2)  # 3초, 5초
-                    print(f"  [WARNING] Retailer_SKU_Name extraction failed, retrying in {wait_time}s... (attempt {attempt + 1}/{max_retries})")
-                    time.sleep(wait_time)
-
             print(f"  [✓] Retailer_SKU_Name: {retailer_sku_name}")
 
             # 2. Screen Size extraction (메인 page에서)
@@ -2028,9 +2018,20 @@ class BestBuyDetailCrawler:
             if is_external_reviews:
                 print(f"  [INFO] 외부 리뷰 - 리뷰 페이지 수집 스킵 (detailed_reviews, top_mentions 등 수집 안함)")
             elif self.click_see_all_reviews(product_url):
+                # 리뷰 페이지 로드 대기 (요소 기반) 및 tree 파싱
+                try:
+                    review_elem = self.page.ele('xpath://div[@class="overall-rating"] | //div[@id="reviews-accordion"]', timeout=10)
+                    if review_elem:
+                        print(f"  [OK] Reviews page loaded")
+                except:
+                    print(f"  [WARNING] Reviews page element wait timeout")
+
+                reviews_page_source = self.page.html
+                reviews_tree = html.fromstring(reviews_page_source)
+
                 # 9-0. 상세페이지에서 star_rating 못 찾았으면 리뷰 페이지에서 재추출
                 if not star_rating or star_rating == "Not yet reviewed":
-                    star_rating_from_reviews = self.extract_star_rating_from_reviews_page()
+                    star_rating_from_reviews = self.extract_star_rating_from_reviews_page(reviews_tree)
                     if star_rating_from_reviews:
                         star_rating = star_rating_from_reviews
                         print(f"  [✓] Star_Rating (from reviews page): {star_rating}")
@@ -2041,11 +2042,11 @@ class BestBuyDetailCrawler:
                 # print(f"  [✓] count_of_star_ratings: {count_of_star_ratings}")
 
                 # 9-2. Top mentions collected (review page에서)
-                top_mentions = self.extract_top_mentions_from_reviews_page()
+                top_mentions = self.extract_top_mentions_from_reviews_page(reviews_tree)
                 print(f"  [✓] Top_Mentions: {top_mentions}")
 
                 # 9-3. Recommendation intent collected (review page에서)
-                recommendation_intent = self.extract_recommendation_intent_from_reviews_page()
+                recommendation_intent = self.extract_recommendation_intent_from_reviews_page(reviews_tree)
                 print(f"  [✓] Recommendation_Intent: {recommendation_intent}")
 
                 # 9-4. Detailed reviews collected
@@ -2054,7 +2055,7 @@ class BestBuyDetailCrawler:
 
                 # 9-5. Summarized_Review_Content fallback (상세페이지에서 못 찾았으면 리뷰페이지에서)
                 if not summarized_review_content:
-                    summarized_review_content = self.extract_summarized_review_content_from_reviews_page()
+                    summarized_review_content = self.extract_summarized_review_content_from_reviews_page(reviews_tree)
                     if summarized_review_content:
                         print(f"  [✓] Summarized_Review_Content (from reviews page): {summarized_review_content[:50]}...")
 

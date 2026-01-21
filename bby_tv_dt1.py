@@ -459,7 +459,7 @@ class BestBuyDetailCrawler:
     def extract_retailer_sku_name(self, tree):
         """Retailer_SKU_Name extraction"""
         try:
-            xpaths = [
+            xpaths = self.config.get_xpath_list('retailer_sku_name', self.file_name) or [
                 '//h1[contains(@class, "h4")]',
                 '//div[@class="sku-title"]//h1'
             ]
@@ -477,7 +477,7 @@ class BestBuyDetailCrawler:
         try:
             print("  [INFO] Specification button click...")
             # CSS/XPath를 사용한 여러 attempt
-            selectors = [
+            selectors = self.config.get_selectors('specs_button', self.file_name) or [
                 'xpath://button[contains(@class, "specs-accordion")]',
                 'xpath://button[.//h3[text()="Specifications"]]',
                 'css:button.specs-accordion'
@@ -592,13 +592,10 @@ class BestBuyDetailCrawler:
         """Estimated_Annual_Electricity_Use extraction (숫자만)"""
         try:
             # dialog에서 Estimated Annual Electricity Use 찾기 (여러 패턴 attempt)
-            xpaths = [
-                # 새로운 패턴
+            xpaths = self.config.get_xpath_list('electricity_use', self.file_name) or [
                 '//div[contains(@class, "dB7j8sHUbncyf79K")]//div[contains(text(), "Estimated Annual Electricity Use")]/following-sibling::div[@class="grow basis-none pl-300"]',
-                # 기존 패턴
                 '//li[.//h4[text()="Power"]]//div[.//div[contains(text(), "Estimated Annual Electricity Use")]]//div[@class="grow basis-none pl-300"]',
                 '//div[contains(text(), "Estimated Annual Electricity Use")]/following-sibling::div[@class="grow basis-none pl-300"]',
-                # 더 넓은 패턴
                 '//div[contains(text(), "Estimated Annual Electricity Use")]/..//div[@class="grow basis-none pl-300"]',
                 '//div[contains(., "Estimated Annual Electricity Use")]//div[contains(@class, "pl-300")]'
             ]
@@ -621,10 +618,8 @@ class BestBuyDetailCrawler:
         """Screen Size extraction"""
         try:
             # XPath 패턴
-            xpaths = [
-                # 제공된 HTML 패턴
+            xpaths = self.config.get_xpath_list('screen_size', self.file_name) or [
                 '/html/body/div[5]/div[4]/div[2]/div/div[3]/div[1]/button[2]/div/div/div[2]',
-                # 더 범용적인 패턴
                 '//div[contains(text(), "Screen Size Class")]/following-sibling::div[@class="flex font-500 items-center"]',
                 '//div[text()="Screen Size Class"]/..//div[contains(@class, "flex font-500")]'
             ]
@@ -649,7 +644,7 @@ class BestBuyDetailCrawler:
         """Extract model year from specifications - general dialog"""
         try:
             # Find div with "Model Year" text and get the next sibling div
-            xpaths = [
+            xpaths = self.config.get_xpath_list('model_year', self.file_name) or [
                 '//div[contains(text(), "Model Year")]/following-sibling::div',
                 '//div[text()="Model Year"]/../div[contains(@class, "grow basis-none")]',
                 '//div[contains(@class, "font-weight-medium") and contains(text(), "Model Year")]/../div[contains(@class, "grow basis-none pl-300")]'
@@ -682,14 +677,10 @@ class BestBuyDetailCrawler:
         """
         try:
             # XPath 패턴 - Model Number 텍스트가 있는 div의 형제 div에서 값 추출
-            xpaths = [
-                # 가장 정확한 패턴 - dB7j8sHUbncyf79K 클래스 컨테이너 내에서 Model Number 찾기
+            xpaths = self.config.get_xpath_list('sku_model_number', self.file_name) or [
                 '//div[contains(@class, "dB7j8sHUbncyf79K")][.//div[contains(text(), "Model Number")]]/div[contains(@class, "pl-300")]',
-                # 더 넓은 패턴 - Model Number 텍스트의 형제 div
                 '//div[contains(text(), "Model Number")]/following-sibling::div[contains(@class, "pl-300")]',
-                # 부모 기반 패턴
                 '//div[contains(text(), "Model Number")]/../div[contains(@class, "pl-300")]',
-                # 클래스 없이 형제 관계만
                 '//div[contains(text(), "Model Number")]/following-sibling::div'
             ]
 
@@ -712,7 +703,7 @@ class BestBuyDetailCrawler:
         """Final SKU Price extraction (현재 판매 가격) - 컨테이너 기반"""
         try:
             # 0단계: "no longer available" 체크를 먼저 수행 (가격 컨테이너가 없을 수 있음)
-            no_longer_available_xpaths = [
+            no_longer_available_xpaths = self.config.get_xpath_list('no_longer_available', self.file_name) or [
                 '/html/body/div[5]/div[3]/div[1]/div/div[2]/div[4]',
                 '//div[@class="text-danger text-4 font-500 leading-4"]',
                 '//div[contains(@class, "text-danger")][contains(text(), "no longer available")]',
@@ -728,12 +719,9 @@ class BestBuyDetailCrawler:
                         return "no longer available"
 
             # 1단계: 가격 컨테이너 찾기
-            container_xpaths = [
-                # 절대 경로 (제공된 것)
+            container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
                 '/html/body/div[5]/div[4]/div[1]',
-                # class 기반
                 '//div[@class="order-2 t3V0AOwowrTfUzPn "]',
-                # 컨테이너 구조 기반 (더 넓은 패턴)
                 '//div[contains(@class, "order-2")]'
             ]
 
@@ -749,11 +737,9 @@ class BestBuyDetailCrawler:
                 return None
 
             # 2단계: 컨테이너 내부에서만 가격 extraction
-            price_xpaths = [
-                # data-testid 기반 (가장 안정적)
+            price_xpaths = self.config.get_xpath_list('final_price_inner', self.file_name) or [
                 './/div[@data-testid="price-block-customer-price"]//span',
                 './/div[@data-lu-target="customer_price"]//span',
-                # class 기반 fallback
                 './/span[@class="font-sans text-default text-style-body-md-400 font-500 text-7 leading-7"]'
             ]
 
@@ -766,7 +752,7 @@ class BestBuyDetailCrawler:
                         return price  # "$89.99" 형식 반환
 
             # Fallback 1: "See price in cart" 또는 "See details in checkout" 패턴 찾기
-            see_price_xpaths = [
+            see_price_xpaths = self.config.get_xpath_list('see_price_in_cart', self.file_name) or [
                 './/div[@data-testid="price-restricted-price-tap-for-price"]//span',
                 './/span[contains(text(), "See price in cart")]',
                 './/span[contains(text(), "See details in checkout")]',
@@ -798,12 +784,9 @@ class BestBuyDetailCrawler:
         """
         try:
             # 1단계: 가격 컨테이너 찾기
-            container_xpaths = [
-                # 절대 경로 (제공된 것)
+            container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
                 '/html/body/div[5]/div[4]/div[1]',
-                # class 기반
                 '//div[@class="order-2 t3V0AOwowrTfUzPn "]',
-                # 컨테이너 구조 기반
                 '//div[contains(@class, "order-2")]'
             ]
 
@@ -819,12 +802,9 @@ class BestBuyDetailCrawler:
                 return None
 
             # 2단계: 컨테이너 내부에서만 원가 extraction
-            price_xpaths = [
-                # data-lu-target 기반 (가장 안정적)
+            price_xpaths = self.config.get_xpath_list('original_price_inner', self.file_name) or [
                 './/span[@data-lu-target="comp_value"]',
-                # data-testid 기반
                 './/span[@data-testid="price-block-regular-price-message-text"]//span[@data-lu-target="comp_value"]',
-                # 회색 작은 글씨 (원가 특징)
                 './/span[contains(@style, "color: rgb(108, 111, 117)") and contains(., "$")]'
             ]
 
@@ -839,10 +819,8 @@ class BestBuyDetailCrawler:
             # Fallback: "Buy New: $X,XXX.XX" 패턴 찾기 (전체 페이지에서)
             # 조건: savings와 final_sku_price를 모두 수집했을 때만 시도
             if savings and final_sku_price:
-                buy_new_xpaths = [
-                    # User-provided specific path
+                buy_new_xpaths = self.config.get_xpath_list('buy_new_price', self.file_name) or [
                     '/html/body/div[4]/div[4]/div[1]/div/div[4]/div/div/div/div/div[1]/div[2]/div/div/div/div/div[2]/div[2]/div/a',
-                    # data-testid based (more generic)
                     '//a[@data-testid="price-block-regular-price-message-link"]//span',
                     '//div[@data-testid="price-block-regular-price-link-text-wrapper"]//a//span'
                 ]
@@ -864,12 +842,9 @@ class BestBuyDetailCrawler:
         """Savings extraction (할인 금액) - 컨테이너 기반"""
         try:
             # 1단계: 가격 컨테이너 찾기
-            container_xpaths = [
-                # 절대 경로 (제공된 것)
+            container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
                 '/html/body/div[5]/div[4]/div[1]',
-                # class 기반
                 '//div[@class="order-2 t3V0AOwowrTfUzPn "]',
-                # 컨테이너 구조 기반
                 '//div[contains(@class, "order-2")]'
             ]
 
@@ -885,12 +860,9 @@ class BestBuyDetailCrawler:
                 return None
 
             # 2단계: 컨테이너 내부에서만 할인 금액 extraction
-            savings_xpaths = [
-                # data-testid 기반 (가장 안정적)
+            savings_xpaths = self.config.get_xpath_list('savings_inner', self.file_name) or [
                 './/span[@data-testid="price-block-total-savings-text"]',
-                # data-testid 컨테이너 기반
                 './/div[@data-testid="price-block-total-savings"]//span',
-                # 빨간색 "Save" 텍스트
                 './/span[contains(@style, "color: rgb(232, 30, 37)") and contains(., "Save")]'
             ]
 
@@ -911,8 +883,7 @@ class BestBuyDetailCrawler:
         """Star Rating extraction (평점 점수) - 실제 평점 먼저 찾고, 없으면 Not yet reviewed"""
         try:
             # Priority 1: visually-hidden p tag (가장 정확)
-            # <p class="visually-hidden">Rating 4.8 out of 5 stars with 286 reviews</p>
-            hidden_xpaths = [
+            hidden_xpaths = self.config.get_xpath_list('star_rating_hidden', self.file_name) or [
                 '//p[@class="visually-hidden"][contains(text(), "Rating")]',
                 '//p[contains(@class, "visually-hidden")][contains(text(), "out of 5 stars")]'
             ]
@@ -925,7 +896,7 @@ class BestBuyDetailCrawler:
                         return match.group(1)
 
             # Priority 2: 컨테이너 기반 extraction (fallback)
-            container_xpaths = [
+            container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
                 '/html/body/div[5]/div[4]/div[1]',
                 '//div[@class="order-2 t3V0AOwowrTfUzPn "]',
                 '//div[contains(@class, "order-2")]'
@@ -941,13 +912,12 @@ class BestBuyDetailCrawler:
             if price_container is None or len(price_container) == 0:
                 return None
 
-            rating_xpaths = [
+            rating_xpaths = self.config.get_xpath_list('star_rating_inner', self.file_name) or [
                 './/div/div[4]/a/div/span[1]',
                 './/div/div[3]/a/div/span[1]',
                 './/span[@class="font-weight-medium  font-weight-bold order-1"]',
                 './/span[contains(@class, "font-weight-bold") and contains(@class, "order-1")]',
                 './/span[@aria-hidden="true"][contains(@class, "order-1")]',
-                # 제품 페이지 추가 위치
                 './/span[contains(@class, "X1oPXJyKAwAqyfx_")]',
                 './/span[contains(@class, "heading-2") and contains(@class, "font-weight-medium")]',
             ]
@@ -976,7 +946,7 @@ class BestBuyDetailCrawler:
         try:
             # Step 1: 먼저 visible 요소에서 외부 리뷰 여부 확인
             # visually-hidden에는 외부 리뷰 정보가 없을 수 있으므로 visible 요소를 먼저 체크
-            container_xpaths = [
+            container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
                 '/html/body/div[5]/div[4]/div[1]',
                 '//div[@class="order-2 t3V0AOwowrTfUzPn "]',
                 '//div[contains(@class, "order-2")]'
@@ -991,7 +961,7 @@ class BestBuyDetailCrawler:
 
             # visible 요소에서 외부 리뷰 감지 (먼저 체크)
             if price_container is not None:
-                external_review_xpaths = [
+                external_review_xpaths = self.config.get_xpath_list('external_reviews', self.file_name) or [
                     './/div/div[3]/a/div/span',
                     './/span[contains(@class, "c-ratings-reviews")]',
                     './/span[contains(@class, "c-reviews")]'
@@ -1007,7 +977,7 @@ class BestBuyDetailCrawler:
                             return 'EXTERNAL_REVIEWS'
 
             # Step 2: 외부 리뷰가 아닌 경우 visually-hidden에서 리뷰 수 추출
-            hidden_xpaths = [
+            hidden_xpaths = self.config.get_xpath_list('star_rating_hidden', self.file_name) or [
                 '//p[@class="visually-hidden"][contains(text(), "reviews")]',
                 '//p[contains(@class, "visually-hidden")][contains(text(), "out of 5 stars")]'
             ]
@@ -1027,7 +997,7 @@ class BestBuyDetailCrawler:
             if price_container is None or len(price_container) == 0:
                 return None
 
-            reviews_xpaths = [
+            reviews_xpaths = self.config.get_xpath_list('reviews_count_inner', self.file_name) or [
                 './/div/div[3]/a/div/span[2]',
                 './/span[@class="c-reviews order-2"]',
                 './/span[contains(@class, "c-reviews")]',
@@ -1055,7 +1025,7 @@ class BestBuyDetailCrawler:
                         return count
 
             # Fallback: Check for "Not yet reviewed"
-            not_reviewed_xpaths = [
+            not_reviewed_xpaths = self.config.get_xpath_list('not_yet_reviewed', self.file_name) or [
                 './/div/div[3]/a/div/span',
                 './/span[contains(text(), "Not yet reviewed")]',
                 './/span[@class="c-reviews order-2"][contains(text(), "Not yet reviewed")]'
@@ -1077,7 +1047,7 @@ class BestBuyDetailCrawler:
         """Specification dialog close (DrissionPage)"""
         try:
             print("  [INFO] Specification dialog close...")
-            selectors = [
+            selectors = self.config.get_xpath_list('dialog_close_btn', self.file_name) or [
                 'xpath://button[@data-testid="brix-sheet-closeButton"]',
                 'xpath://button[@aria-label="Close Sheet"]',
                 'xpath://div[@class="relative"]//button'
@@ -1109,23 +1079,41 @@ class BestBuyDetailCrawler:
             cons_list = []
 
             # Retailer_SKU_Name_similar extraction
-            name_elements = tree.xpath('//span[@class="clamp" and starts-with(@id, "compare-title-")]')
-            for elem in name_elements[:4]:  # 최대 4items
-                similar_names.append(elem.text_content().strip())
+            name_xpaths = self.config.get_xpath_list('similar_product_names', self.file_name) or [
+                '//span[@class="clamp" and starts-with(@id, "compare-title-")]'
+            ]
+            for xpath in name_xpaths:
+                name_elements = tree.xpath(xpath)
+                if name_elements:
+                    for elem in name_elements[:4]:  # 최대 4items
+                        similar_names.append(elem.text_content().strip())
+                    break
 
             # Pros extraction
-            pros_elements = tree.xpath('//tr[@class="flex"]//td[.//svg[@aria-label="Advantage Icon"]]//span[@class="text-3 min-w-0 flex flex-wrap"]')
-            for elem in pros_elements[:4]:  # 최대 4items
-                pros_list.append(elem.text_content().strip())
+            pros_xpaths = self.config.get_xpath_list('similar_product_pros', self.file_name) or [
+                '//tr[@class="flex"]//td[.//svg[@aria-label="Advantage Icon"]]//span[@class="text-3 min-w-0 flex flex-wrap"]'
+            ]
+            for xpath in pros_xpaths:
+                pros_elements = tree.xpath(xpath)
+                if pros_elements:
+                    for elem in pros_elements[:4]:  # 최대 4items
+                        pros_list.append(elem.text_content().strip())
+                    break
 
             # Cons extraction
-            cons_elements = tree.xpath('//tr[@class="flex"]//td[.//svg[@aria-label="Disadvantage Icon"]]//span[@class="text-3 min-w-0 flex flex-wrap"]')
-            for elem in cons_elements[:4]:  # 최대 4items
-                text = elem.text_content().strip()
-                if text and text != '—':
-                    cons_list.append(text)
-                else:
-                    cons_list.append(None)
+            cons_xpaths = self.config.get_xpath_list('similar_product_cons', self.file_name) or [
+                '//tr[@class="flex"]//td[.//svg[@aria-label="Disadvantage Icon"]]//span[@class="text-3 min-w-0 flex flex-wrap"]'
+            ]
+            for xpath in cons_xpaths:
+                cons_elements = tree.xpath(xpath)
+                if cons_elements:
+                    for elem in cons_elements[:4]:  # 최대 4items
+                        text = elem.text_content().strip()
+                        if text and text != '—':
+                            cons_list.append(text)
+                        else:
+                            cons_list.append(None)
+                    break
 
             # 부족한 경우 None으로 fill
             while len(similar_names) < 4:
@@ -1146,7 +1134,7 @@ class BestBuyDetailCrawler:
         예: <div class="overall-rating">4.5</div>
         """
         try:
-            selectors = [
+            selectors = self.config.get_xpath_list('star_rating_reviews_page', self.file_name) or [
                 'xpath://div[@class="overall-rating"]',
                 'xpath://*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[1]/div/div[1]',
                 'xpath://div[contains(@class, "overall-rating")]',
@@ -1179,8 +1167,9 @@ class BestBuyDetailCrawler:
         try:
             time.sleep(3)  # page 로딩 wait
             total_count = 0
-            # XPath 패턴 (5점부터 1점까지)
-            xpaths = [
+            # XPath 패턴 (5점부터 1점까지) - config에서 로드
+            star_config_keys = ['star_ratings_5', 'star_ratings_4', 'star_ratings_3', 'star_ratings_2', 'star_ratings_1']
+            default_xpaths = [
                 'xpath://*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[1]/div/label/span[5]',  # 5점
                 'xpath://*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[2]/div/label/span[5]',  # 4점
                 'xpath://*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[3]/div/label/span[5]',  # 3점
@@ -1189,15 +1178,18 @@ class BestBuyDetailCrawler:
             ]
 
             # 5점부터 1점까지 순서로 extraction
-            for idx, selector in enumerate(xpaths):
-                try:
-                    elem = self.page.ele(selector, timeout=2)
-                    if elem:
-                        count_text = elem.text.strip()
-                        count = int(count_text) if count_text.isdigit() else 0
-                        total_count += count
-                except Exception:
-                    pass  # 찾지 못하면 0으로 처리 (total_count에 더하지 않음)
+            for idx, config_key in enumerate(star_config_keys):
+                selectors = self.config.get_xpath_list(config_key, self.file_name) or [default_xpaths[idx]]
+                for selector in selectors:
+                    try:
+                        elem = self.page.ele(selector, timeout=2)
+                        if elem:
+                            count_text = elem.text.strip()
+                            count = int(count_text) if count_text.isdigit() else 0
+                            total_count += count
+                            break
+                    except Exception:
+                        continue
 
             return total_count if total_count > 0 else None
 
@@ -1209,12 +1201,9 @@ class BestBuyDetailCrawler:
         """Count_of_Reviews extraction (See All Customer Reviews page에서) - DrissionPage"""
         try:
             # Selector 패턴
-            selectors = [
-                # 제공된 HTML 패턴
+            selectors = self.config.get_xpath_list('count_reviews_page', self.file_name) or [
                 'xpath://span[@class="c-reviews order-2"]',
-                # ID 기반 패턴 (동적 ID이므로 contains 사용)
                 'xpath://div[contains(@id, "user-generated-content-ugc-stats")]//span[@class="c-reviews order-2"]',
-                # 더 범용적인 패턴
                 'xpath://span[contains(@class, "c-reviews")]'
             ]
 
@@ -1242,14 +1231,10 @@ class BestBuyDetailCrawler:
         """
         try:
             # Selector 패턴 - 제공된 HTML 구조 기반
-            selectors = [
-                # 제공된 XPath 기반 - ul 내 모든 li의 a 태그
+            selectors = self.config.get_xpath_list('top_mentions', self.file_name) or [
                 'xpath:/html/body/div[5]/div[8]/div[2]/aside/ul/li/a',
-                # class 기반 패턴 - list-unstyled ul 내 a 태그
                 'xpath://ul[@class="list-unstyled"]/li/a[contains(@class, "v-text-tech-black")]',
-                # 더 넓은 패턴
                 'xpath://ul[@class="list-unstyled"]/li/a',
-                # 기존 패턴 (fallback)
                 'xpath://div[contains(@class, "customer-review-pros-stats")]//span[@class="text-nowrap"]',
                 'xpath://div[contains(., "Highly rated by customers for")]//span[@class="text-nowrap"]'
             ]
@@ -1307,7 +1292,7 @@ class BestBuyDetailCrawler:
         """BestBuy SKU 번호 추출 (예: 6614066)"""
         try:
             # 방법 1: SKU div에서 추출
-            sku_selectors = [
+            sku_selectors = self.config.get_xpath_list('bestbuy_sku', self.file_name) or [
                 'xpath://div[contains(text(), "SKU:")]',
                 'xpath://div[@class="pr-150 inline-block"][contains(text(), "SKU")]',
             ]
@@ -1325,16 +1310,20 @@ class BestBuyDetailCrawler:
                     continue
 
             # 방법 2: data-testid 속성에서 추출
-            try:
-                elem = self.page.ele('xpath://div[contains(@data-testid, "mbo-entrypoint-")]', timeout=2)
-                if elem:
-                    testid = elem.attr('data-testid')
-                    # "mbo-entrypoint-6614066" -> "6614066"
-                    match = re.search(r'mbo-entrypoint-(\d+)', testid)
-                    if match:
-                        return match.group(1)
-            except:
-                pass
+            testid_selectors = self.config.get_xpath_list('bestbuy_sku_testid', self.file_name) or [
+                'xpath://div[contains(@data-testid, "mbo-entrypoint-")]'
+            ]
+            for testid_selector in testid_selectors:
+                try:
+                    elem = self.page.ele(testid_selector, timeout=2)
+                    if elem:
+                        testid = elem.attr('data-testid')
+                        # "mbo-entrypoint-6614066" -> "6614066"
+                        match = re.search(r'mbo-entrypoint-(\d+)', testid)
+                        if match:
+                            return match.group(1)
+                except:
+                    continue
 
             # 방법 3: 페이지 소스에서 직접 추출
             page_html = self.page.html
@@ -1431,7 +1420,7 @@ class BestBuyDetailCrawler:
             current_position = 0
             step = 400
 
-            selectors = [
+            selectors = self.config.get_xpath_list('see_all_reviews_btn', self.file_name) or [
                 'xpath://button[contains(., "See All Customer Reviews")]',
                 'xpath://button[contains(@class, "Op9coqeII1kYHR9Q")]',
                 'css:button.Op9coqeII1kYHR9Q'
@@ -1488,7 +1477,14 @@ class BestBuyDetailCrawler:
                 tree = html.fromstring(page_source)
 
                 # review extraction
-                review_elements = tree.xpath('//li[@class="review-item"]//div[@class="ugc-review-body"]//p[@class="pre-white-space"]')
+                review_xpaths = self.config.get_xpath_list('review_items', self.file_name) or [
+                    '//li[@class="review-item"]//div[@class="ugc-review-body"]//p[@class="pre-white-space"]'
+                ]
+                review_elements = []
+                for xpath in review_xpaths:
+                    review_elements = tree.xpath(xpath)
+                    if review_elements:
+                        break
 
                 for elem in review_elements:
                     if collected >= 20:
@@ -2283,7 +2279,7 @@ class BestBuyDetailCrawler:
                 None,  # number_of_ppl_purchased_yesterday (BestBuy doesn't have this)
                 None,  # number_of_ppl_added_to_carts (BestBuy doesn't have this)
                 None,  # number_of_units_purchased_past_month (BestBuy doesn't have this)
-                ' ||| '.join([p.get('product_name', '') for p in similar_products if p.get('product_name')]) if similar_products else None,  # retailer_sku_name_similar
+                (' ||| '.join([p.get('product_name', '') for p in similar_products if p.get('product_name')]) or None) if similar_products else None,  # retailer_sku_name_similar
                 electricity_use,
                 promotion_type,
                 model_year,

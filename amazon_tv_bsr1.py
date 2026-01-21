@@ -37,6 +37,7 @@ class AmazonBSRCrawler:
         self.sorry_page_max_retry = _config.get_retry('sorry_page_max', 'amazon_tv_bsr1', 20)
         self.throttling_max_retry = _config.get_retry('throttling_max', 'amazon_tv_bsr1', 2)
         self.throttling_wait_range = _config.get_timing_range('throttling_wait', 'amazon_tv_bsr1') or (15, 20)
+        self.excluded_items = set()  # Items with is_product=false in tv_item_mst
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -97,6 +98,39 @@ class AmazonBSRCrawler:
         except Exception as e:
             print(f"[ERROR] Failed to load BSR page URLs: {e}")
             return []
+
+    def load_excluded_items(self):
+        """Load items with is_product=false from tv_item_mst"""
+        try:
+            cursor = self.db_conn.cursor()
+            cursor.execute("""
+                SELECT item FROM tv_item_mst
+                WHERE is_product = FALSE AND item IS NOT NULL
+            """)
+
+            for row in cursor.fetchall():
+                self.excluded_items.add(row[0])
+
+            cursor.close()
+            print(f"[OK] Loaded {len(self.excluded_items)} excluded items (is_product=false)")
+            return True
+
+        except Exception as e:
+            print(f"[WARNING] Failed to load excluded items: {e}")
+            return False
+
+    def extract_asin(self, url):
+        """Extract ASIN from Amazon URL"""
+        if not url:
+            return None
+        try:
+            # Match /dp/ASIN/ or /dp/ASIN? pattern
+            match = re.search(r'/dp/([A-Z0-9]{10})', url)
+            if match:
+                return match.group(1)
+            return None
+        except:
+            return None
 
     def setup_driver(self):
         """Setup Chrome WebDriver"""
@@ -419,6 +453,12 @@ class AmazonBSRCrawler:
                         product_url = None
                         print(f"  [WARNING] Rank #{bsr_rank}: No URL found")
 
+                    # Check if this item is excluded (is_product=false in tv_item_mst)
+                    asin = self.extract_asin(product_url)
+                    if asin and asin in self.excluded_items:
+                        print(f"  [SKIP {idx}] Rank #{bsr_rank}: Excluded item (is_product=false) - ASIN: {asin}")
+                        continue
+
                     # Extract final_sku_price (disabled - will be collected in detail crawler)
                     final_sku_price = None
 
@@ -510,6 +550,9 @@ class AmazonBSRCrawler:
             if not page_urls:
                 print("[ERROR] No BSR page URLs found")
                 return
+
+            # Load excluded items (is_product=false)
+            self.load_excluded_items()
 
             # Setup WebDriver
             self.setup_driver()

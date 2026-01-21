@@ -275,6 +275,17 @@ def insert_configs():
             # 0개 리뷰
             ('xpath', 'zero_reviews_1', '//*[@id="acrCustomerReviewText"]', None, 1, '0개 리뷰 확인 XPath 1'),
             ('xpath', 'zero_reviews_2', '//span[@id="acrCustomerReviewText"]', None, 2, '0개 리뷰 확인 XPath 2'),
+
+            # AI 생성 리뷰 요약
+            ('xpath', 'summarized_review_1', '//div[@data-testid="overall-summary"]//span[contains(@class, "__SAR2l0zNyyuZ")]', None, 1, 'AI 리뷰 요약 XPath 1'),
+            ('xpath', 'summarized_review_2', '//*[@id="product-summary"]/p[1]/span', None, 2, 'AI 리뷰 요약 XPath 2'),
+            ('xpath', 'summarized_review_3', '//div[@data-testid="overall-summary"]//span', None, 3, 'AI 리뷰 요약 XPath 3'),
+
+            # 총 평점 개수 (count_of_star_ratings)
+            ('xpath', 'count_of_star_ratings_1', '//*[@id="cm_cr_dp_d_rating_histogram"]/div[3]', None, 1, '총 평점 개수 XPath 1'),
+            ('xpath', 'count_of_star_ratings_2', '//*[@id="acrCustomerReviewText"]', None, 2, '총 평점 개수 XPath 2'),
+            ('xpath', 'count_of_star_ratings_3', '//span[@id="acrCustomerReviewText"]', None, 3, '총 평점 개수 XPath 3'),
+            ('xpath', 'count_of_star_ratings_4', '//a[@id="acrCustomerReviewLink"]//span', None, 4, '총 평점 개수 XPath 4'),
         ]
 
         # Insert using INSERT ... ON CONFLICT to update existing values

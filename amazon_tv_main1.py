@@ -36,6 +36,7 @@ class AmazonTVCrawler:
         self.sorry_page_max_retry = _config.get_retry('sorry_page_max', 'amazon_tv_main1', 3)
         self.sequential_id = 1  # ID counter for 1-max_skus
         self.batch_id = None  # Batch ID for this crawling session
+        self.excluded_items = set()  # Items with is_product=false in tv_item_mst
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -91,6 +92,39 @@ class AmazonTVCrawler:
         except Exception as e:
             print(f"[ERROR] Failed to load page URLs: {e}")
             return []
+
+    def load_excluded_items(self):
+        """Load items with is_product=false from tv_item_mst"""
+        try:
+            cursor = self.db_conn.cursor()
+            cursor.execute("""
+                SELECT item FROM tv_item_mst
+                WHERE is_product = FALSE AND item IS NOT NULL
+            """)
+
+            for row in cursor.fetchall():
+                self.excluded_items.add(row[0])
+
+            cursor.close()
+            print(f"[OK] Loaded {len(self.excluded_items)} excluded items (is_product=false)")
+            return True
+
+        except Exception as e:
+            print(f"[WARNING] Failed to load excluded items: {e}")
+            return False
+
+    def extract_asin(self, url):
+        """Extract ASIN from Amazon URL"""
+        if not url:
+            return None
+        try:
+            # Match /dp/ASIN/ or /dp/ASIN? pattern
+            match = re.search(r'/dp/([A-Z0-9]{10})', url)
+            if match:
+                return match.group(1)
+            return None
+        except:
+            return None
 
     def setup_driver(self):
         """Setup Chrome WebDriver"""
@@ -392,6 +426,13 @@ class AmazonTVCrawler:
                     print(f"         Product: {product_name[:60]}...")
                     continue
 
+                # Check if this item is excluded (is_product=false in tv_item_mst)
+                asin = self.extract_asin(product_url)
+                if asin and asin in self.excluded_items:
+                    print(f"  [{idx}] SKIP: Excluded item (is_product=false) - ASIN: {asin}")
+                    print(f"         Product: {product_name[:60]}...")
+                    continue
+
                 # Extract price (disabled - will be collected in detail crawler)
                 final_price = None
 
@@ -560,6 +601,9 @@ class AmazonTVCrawler:
             if not page_urls:
                 print("[ERROR] No page URLs found")
                 return
+
+            # Load excluded items (is_product=false)
+            self.load_excluded_items()
 
             # Setup WebDriver
             self.setup_driver()

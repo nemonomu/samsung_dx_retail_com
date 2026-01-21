@@ -35,6 +35,7 @@ from data_validator import DataValidator
 # Import database configuration
 from config import DB_CONFIG
 from bby_config_loader import get_config
+from bby_utils import load_excluded_items, is_excluded_url
 
 class BestBuyPromotionCrawler:
     def __init__(self):
@@ -53,6 +54,9 @@ class BestBuyPromotionCrawler:
         # Data validator 초기화
         session_start_time = os.environ.get('SESSION_START_TIME', datetime.now().strftime('%Y%m%d%H%M'))
         self.validator = DataValidator(session_start_time)
+
+        # Load excluded items (is_product=false)
+        self.excluded_items = load_excluded_items()
 
     def connect_db(self):
         """DB 연결"""
@@ -412,6 +416,11 @@ class BestBuyPromotionCrawler:
                                     break
 
                             if product_name and product_url:
+                                # Skip is_product=false items
+                                if is_excluded_url(product_url, self.excluded_items):
+                                    print(f"  [SKIP S{section_idx}-{idx}] is_product=false - excluded")
+                                    continue
+
                                 # Validate data quality
                                 self.validator.validate_item(product_name, product_url, 'bby_tv_pmt1')
 

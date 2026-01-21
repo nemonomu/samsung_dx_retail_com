@@ -16,6 +16,7 @@ from lxml import html
 # Import database configuration
 from config import DB_CONFIG
 from bby_config_loader import get_config
+from bby_utils import load_excluded_items, is_excluded_url
 
 class BestBuyTrendCrawler:
     def __init__(self):
@@ -27,6 +28,9 @@ class BestBuyTrendCrawler:
         # Config loader 초기화
         self.config = get_config()
         self.file_name = 'bby_tv_trend_crawl'
+
+        # Load excluded items (is_product=false)
+        self.excluded_items = load_excluded_items()
 
     def connect_db(self):
         """DB 연결"""
@@ -245,6 +249,11 @@ class BestBuyTrendCrawler:
                             break
 
                     if product_name and product_url:
+                        # Skip is_product=false items
+                        if is_excluded_url(product_url, self.excluded_items):
+                            print(f"  [SKIP {rank}] is_product=false - excluded")
+                            continue
+
                         product = {
                             'page_type': page_type,
                             'rank': int(rank) if rank.isdigit() else idx,

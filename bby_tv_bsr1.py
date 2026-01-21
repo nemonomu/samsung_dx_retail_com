@@ -34,6 +34,7 @@ from data_validator import DataValidator
 # Import database configuration
 from config import DB_CONFIG
 from bby_config_loader import get_config
+from bby_utils import load_excluded_items, is_excluded_url
 
 class BestBuyBSRCrawler:
     def __init__(self):
@@ -57,6 +58,9 @@ class BestBuyBSRCrawler:
         self.validator = DataValidator(session_start_time)
         self.korea_tz = pytz.timezone('Asia/Seoul')
         self.batch_id = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
+
+        # Load excluded items (is_product=false)
+        self.excluded_items = load_excluded_items()
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -150,7 +154,6 @@ class BestBuyBSRCrawler:
 
             scroll_step = self.config.get_int('constant', 'scroll_step_px', self.file_name, 300)
             current_position = 0
-            last_height = self.page.run_js("return document.body.scrollHeight")
 
             scroll_wait = self.config.get_float('timing', 'scroll_wait', self.file_name, 1.0)
             page_end_wait = self.config.get_float('timing', 'page_end_check_wait', self.file_name, 2)
@@ -173,8 +176,6 @@ class BestBuyBSRCrawler:
                     if final_height == new_height:
                         print(f"[DEBUG] Reached bottom at {current_position}px")
                         break
-                    else:
-                        last_height = final_height
 
                 # 10번 스크롤마다 로그
                 if (current_position // scroll_step) % 10 == 0:
@@ -301,6 +302,11 @@ class BestBuyBSRCrawler:
                     # Skip Open Box products
                     if product_url and 'openbox' in product_url.lower():
                         print(f"  [SKIP {idx}] Open Box product - excluded")
+                        continue
+
+                    # Skip is_product=false items
+                    if product_url and is_excluded_url(product_url, self.excluded_items):
+                        print(f"  [SKIP {idx}] is_product=false - excluded")
                         continue
 
                     # Extract Offer (+ X offers) - 숫자만 저장

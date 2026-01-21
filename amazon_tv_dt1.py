@@ -609,8 +609,8 @@ class AmazonDetailCrawler:
     def extract_model_year(self, tree):
         """Extract model year from item details dialog or compare table (fallback)"""
         try:
-            # Find model year - priority order
-            xpaths = [
+            # Use DB XPaths if available, otherwise use hardcoded fallback
+            xpaths = self.xpaths.get('model_year') or [
                 # Highest priority: Technical Details - Model Year
                 '//tr[.//th[contains(text(), "Model Year")]]/td[@class="a-size-base prodDetAttrValue"]',
                 '//table[@id="productDetails_techSpec_section_1"]//tr[.//th[contains(text(), "Model Year")]]/td',
@@ -664,7 +664,8 @@ class AmazonDetailCrawler:
         Returns: SKU string or "no sku" if not found
         """
         try:
-            xpaths = [
+            # Use DB XPaths if available, otherwise use hardcoded fallback
+            xpaths = self.xpaths.get('model_number') or [
                 # Primary: Item details - Model Number
                 '//tr[.//th[contains(text(), "Model Number")]]/td[@class="a-size-base prodDetAttrValue"]',
                 '//table[@id="productDetails_techSpec_section_1"]//tr[.//th[contains(text(), "Model Number")]]/td',
@@ -805,8 +806,8 @@ class AmazonDetailCrawler:
         Returns: integer (e.g., 2449) or None
         """
         try:
-            # Primary: Get total count from "2,449 global ratings" in histogram section
-            xpaths = [
+            # Use DB XPaths if available, otherwise use hardcoded fallback
+            xpaths = self.xpaths.get('count_of_star_ratings') or [
                 '//*[@id="cm_cr_dp_d_rating_histogram"]/div[3]',
                 '//*[@id="acrCustomerReviewText"]',
                 '//span[@id="acrCustomerReviewText"]',
@@ -981,8 +982,18 @@ class AmazonDetailCrawler:
     def extract_summarized_review(self, tree):
         """Extract AI-generated review summary (may not exist on all pages)"""
         try:
-            summary = self.extract_text_safe(tree, '//*[@id="product-summary"]/p[1]/span')
-            return summary if summary else None
+            # Use DB XPaths if available, otherwise use hardcoded fallback
+            xpaths = self.xpaths.get('summarized_review') or [
+                '//div[@data-testid="overall-summary"]//span[contains(@class, "__SAR2l0zNyyuZ")]',
+                '//*[@id="product-summary"]/p[1]/span',
+                '//div[@data-testid="overall-summary"]//span'
+            ]
+
+            for xpath in xpaths:
+                summary = self.extract_text_safe(tree, xpath)
+                if summary:
+                    return summary
+            return None
         except Exception as e:
             return None
 
@@ -1368,22 +1379,23 @@ class AmazonDetailCrawler:
         try:
             shipping_parts = []
 
+            # Use DB XPaths if available, otherwise use hardcoded fallback
             # Location 1: Primary delivery message
-            xpath1 = '//*[@id="mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE"]/span'
+            xpath1 = (self.xpaths.get('delivery_primary') or ['//*[@id="mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE"]/span'])[0]
             text1 = self.extract_text_safe(tree, xpath1)
             text1 = self.clean_shipping_text(text1)
             if text1:
                 shipping_parts.append(text1)
 
             # Location 2: Secondary delivery message
-            xpath2 = '//*[@id="mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE"]/span'
+            xpath2 = (self.xpaths.get('delivery_secondary') or ['//*[@id="mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE"]/span'])[0]
             text2 = self.extract_text_safe(tree, xpath2)
             text2 = self.clean_shipping_text(text2)
             if text2:
                 shipping_parts.append(text2)
 
             # Location 3: Holiday delivery message
-            xpath3 = '//*[@id="mir-layout-DELIVERY_BLOCK-slot-HOLIDAY_DELIVERY_MESSAGE"]/b/font'
+            xpath3 = (self.xpaths.get('delivery_holiday') or ['//*[@id="mir-layout-DELIVERY_BLOCK-slot-HOLIDAY_DELIVERY_MESSAGE"]/b/font'])[0]
             text3 = self.extract_text_safe(tree, xpath3)
             text3 = self.clean_shipping_text(text3)
             if text3:
@@ -1404,7 +1416,8 @@ class AmazonDetailCrawler:
         - Otherwise: return None
         """
         try:
-            xpath = '//*[@id="availability"]/span'
+            # Use DB XPath if available, otherwise use hardcoded fallback
+            xpath = (self.xpaths.get('availability') or ['//*[@id="availability"]/span'])[0]
             text = self.extract_text_safe(tree, xpath)
             if text:
                 text = text.strip()
@@ -1425,7 +1438,8 @@ class AmazonDetailCrawler:
     def extract_discount_type(self, tree):
         """Extract discount type (e.g., 'Limited time deal')"""
         try:
-            xpath = '//*[@id="dealBadgeSupportingText"]'
+            # Use DB XPath if available, otherwise use hardcoded fallback
+            xpath = (self.xpaths.get('discount_type') or ['//*[@id="dealBadgeSupportingText"]'])[0]
             text = self.extract_text_safe(tree, xpath)
             if text:
                 return text.strip()

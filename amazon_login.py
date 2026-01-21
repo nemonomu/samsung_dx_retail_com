@@ -69,61 +69,69 @@ def login_to_amazon(driver, email, password):
         print("Amazon Login Process")
         print("=" * 80)
 
-        # Go to Amazon
-        print("\n[1] Accessing Amazon.com...")
-        driver.get("https://www.amazon.com")
-        time.sleep(3)
-
-        # Check if already logged in
-        print("\n[2] Checking if already logged in...")
-        try:
-            account_element = driver.find_element(By.ID, "nav-link-accountList")
-            account_text = account_element.text.lower()
-            if "hello" in account_text and "sign in" not in account_text:
-                print("    ✓ Already logged in!")
-                return True
-        except:
-            pass
-
-        # Click "Sign in" button
-        print("\n[3] Clicking 'Sign in' button...")
-        try:
-            # Try multiple selectors
-            sign_in_selectors = [
-                (By.ID, "nav-link-accountList"),
-                (By.CSS_SELECTOR, "a[data-nav-role='signin']"),
-                (By.XPATH, "//a[contains(@href, 'ap/signin')]")
-            ]
-
-            signed_in = False
-            for by, selector in sign_in_selectors:
-                try:
-                    sign_in = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((by, selector))
-                    )
-                    sign_in.click()
-                    signed_in = True
-                    print("    ✓ Clicked sign in button")
-                    break
-                except:
-                    continue
-
-            if not signed_in:
-                print("    [WARNING] Could not find sign-in button, might already be on sign-in page")
-
-            time.sleep(2)
-
-        except Exception as e:
-            print(f"    [WARNING] Error clicking sign-in: {e}")
-
-        # Check if redirected to account page (already logged in)
+        # Check if already on login page
         current_url = driver.current_url
-        if '/gp/css/homepage' in current_url or '/gp/yourstore' in current_url:
-            print("    ✓ Redirected to account page - already logged in!")
-            return True
+        already_on_login_page = '/ap/signin' in current_url
+
+        if already_on_login_page:
+            print("\n[1] Already on login page, proceeding with login...")
+        else:
+            # Go to Amazon
+            print("\n[1] Accessing Amazon.com...")
+            driver.get("https://www.amazon.com")
+            time.sleep(3)
+
+            # Check if already logged in
+            print("\n[2] Checking if already logged in...")
+            try:
+                account_element = driver.find_element(By.ID, "nav-link-accountList")
+                account_text = account_element.text.lower()
+                if "hello" in account_text and "sign in" not in account_text:
+                    print("    ✓ Already logged in!")
+                    return True
+            except:
+                pass
+
+            # Click "Sign in" button
+            print("\n[3] Clicking 'Sign in' button...")
+            try:
+                # Try multiple selectors
+                sign_in_selectors = [
+                    (By.ID, "nav-link-accountList"),
+                    (By.CSS_SELECTOR, "a[data-nav-role='signin']"),
+                    (By.XPATH, "//a[contains(@href, 'ap/signin')]")
+                ]
+
+                signed_in = False
+                for by, selector in sign_in_selectors:
+                    try:
+                        sign_in = WebDriverWait(driver, 5).until(
+                            EC.element_to_be_clickable((by, selector))
+                        )
+                        sign_in.click()
+                        signed_in = True
+                        print("    ✓ Clicked sign in button")
+                        break
+                    except:
+                        continue
+
+                if not signed_in:
+                    print("    [WARNING] Could not find sign-in button, might already be on sign-in page")
+
+                time.sleep(2)
+
+            except Exception as e:
+                print(f"    [WARNING] Error clicking sign-in: {e}")
+
+            # Check if redirected to account page (already logged in)
+            current_url = driver.current_url
+            if '/gp/css/homepage' in current_url or '/gp/yourstore' in current_url:
+                print("    ✓ Redirected to account page - already logged in!")
+                return True
 
         # Check for account selection screen first
-        print("\n[4] Checking for account selection screen...")
+        step_num = "[2]" if already_on_login_page else "[4]"
+        print(f"\n{step_num} Checking for account selection screen...")
         print(f"    Current URL: {driver.current_url}")
 
         # Save page source for debugging

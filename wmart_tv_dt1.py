@@ -9,11 +9,7 @@ import time
 import random
 import psycopg2
 from datetime import datetime, timedelta
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains
+from DrissionPage import ChromiumPage
 from lxml import html
 import re
 
@@ -25,8 +21,7 @@ from alert_monitor import monitor_and_alert
 
 class WalmartDetailCrawler:
     def __init__(self):
-        self.driver = None
-        self.wait = None
+        self.page = None
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
@@ -311,39 +306,16 @@ class WalmartDetailCrawler:
             return []
 
     def setup_driver(self):
-        """Setup Chrome WebDriver with undetected-chromedriver (bot detection bypass)"""
-        options = uc.ChromeOptions()
-
-        # Set page load strategy to 'none' - don't wait for full page load
-        options.page_load_strategy = 'none'
-
-        # Bot detection bypass options
-        options.add_argument('--disable-blink-features=AutomationControlled')
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-setuid-sandbox')
-        options.add_argument('--start-maximized')
-        options.add_argument('--disable-infobars')
-        options.add_argument('--disable-gpu')
-        window_size = self.config.get_browser('window_size', default='1920,1080')
-        options.add_argument(f'--window-size={window_size}')
-        options.add_argument('--lang=en-US,en;q=0.9')
-
-        # Preferences
-        prefs = {
-            "profile.default_content_setting_values.notifications": 2,
-            "credentials_enable_service": False,
-            "profile.password_manager_enabled": False,
-        }
-        options.add_experimental_option("prefs", prefs)
-
-        # Use undetected_chromedriver with subprocess for better bot detection bypass
-        self.driver = uc.Chrome(options=options, use_subprocess=True)
-        self.driver.set_page_load_timeout(120)  # Increased to 120 seconds as backup
-        webdriver_wait = self.config.get_browser_int('webdriver_wait', default=20)
-        self.wait = WebDriverWait(self.driver, webdriver_wait)
-
-        print("[OK] WebDriver setup complete (bot detection bypass enabled)")
+        """Setup DrissionPage browser"""
+        try:
+            self.page = ChromiumPage()
+            print("[OK] Browser setup complete (DrissionPage)")
+            return True
+        except Exception as e:
+            print(f"[ERROR] Browser setup failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def check_robot_page(self, page_source):
         """Check if page is showing 'Robot or human?' challenge"""
@@ -357,7 +329,7 @@ class WalmartDetailCrawler:
         """Handle 'PRESS & HOLD' CAPTCHA if present"""
         try:
             print("[INFO] Checking for CAPTCHA...")
-            page_content = self.driver.page_source.lower()
+            page_content = self.page.html.lower()
             captcha_keywords = self.config.get_captcha_keywords()
             if any(keyword in page_content for keyword in captcha_keywords):
                 print("[WARNING] CAPTCHA keywords found in page")
@@ -387,35 +359,35 @@ class WalmartDetailCrawler:
             recovery_scroll_range = self.config.get_scroll_range('recovery_amount') or (200, 500)
             homepage_url = self.config.get_url('homepage') or "https://www.walmart.com"
 
-            self.driver.get(homepage_url)
+            self.page.get(homepage_url)
             time.sleep(random.uniform(*homepage_wait))
 
             # Check for robot detection
-            if self.check_robot_page(self.driver.page_source):
+            if self.check_robot_page(self.page.html):
                 print("[WARNING] Robot detection on homepage. Handling CAPTCHA...")
                 self.handle_captcha()
                 captcha_after_wait = self.config.get_timing_range('captcha_after_wait') or (3, 5)
                 time.sleep(random.uniform(*captcha_after_wait))
 
-                if self.check_robot_page(self.driver.page_source):
+                if self.check_robot_page(self.page.html):
                     print("[WARNING] Still showing robot detection, trying recovery...")
                     # Slow scroll down
                     scroll_between_wait = self.config.get_timing_range('scroll_between_wait') or (1.5, 2.5)
                     for i in range(5):
                         scroll_amount = random.randint(*random_scroll_range)
-                        self.driver.execute_script(f"window.scrollBy(0, {scroll_amount})")
+                        self.page.run_js(f"window.scrollBy(0, {scroll_amount})")
                         time.sleep(random.uniform(*scroll_between_wait))
-                    self.driver.execute_script("window.scrollBy(0, -200)")
+                    self.page.run_js("window.scrollBy(0, -200)")
                     time.sleep(random.uniform(*scroll_wait_range))
 
                 print(f"[INFO] Waiting {int(robot_recovery_wait)} seconds...")
                 time.sleep(robot_recovery_wait)
 
                 print("[INFO] Reloading page...")
-                self.driver.refresh()
+                self.page.refresh()
                 time.sleep(random.uniform(*browse_wait))
 
-                if self.check_robot_page(self.driver.page_source):
+                if self.check_robot_page(self.page.html):
                     print("[ERROR] Still getting robot detection after recovery")
                     print("[INFO] Attempting to continue anyway...")
 
@@ -426,11 +398,11 @@ class WalmartDetailCrawler:
             # Random scrolling
             for _ in range(random.randint(2, 4)):
                 scroll_amount = random.randint(*recovery_scroll_range)
-                self.driver.execute_script(f"window.scrollBy(0, {scroll_amount})")
+                self.page.run_js(f"window.scrollBy(0, {scroll_amount})")
                 time.sleep(random.uniform(*scroll_wait_range))
 
             # Scroll back to top
-            self.driver.execute_script("window.scrollTo(0, 0)")
+            self.page.run_js("window.scrollTo(0, 0)")
             time.sleep(random.uniform(*scroll_wait_range) + 1)
 
             print("[OK] Session initialized")
@@ -1426,7 +1398,7 @@ class WalmartDetailCrawler:
         XPath: //tr[th/dt[text()='Model']]/td/dd
         """
         try:
-            page_source = self.driver.page_source
+            page_source = self.page.html
             tree = html.fromstring(page_source)
 
             # Try multiple XPaths for Model field
@@ -1477,7 +1449,7 @@ class WalmartDetailCrawler:
     def extract_sku_from_lg_xpath(self):
         """Extract SKU using LG-specific XPath (from main page)"""
         try:
-            page_source = self.driver.page_source
+            page_source = self.page.html
             tree = html.fromstring(page_source)
 
             # Try multiple LG-specific XPaths
@@ -1536,7 +1508,7 @@ class WalmartDetailCrawler:
             print(f"  [INFO] Extracting item from product URL...")
 
             # Get current URL
-            current_url = self.driver.current_url
+            current_url = self.page.url
 
             # Extract last segment after final "/"
             item = current_url.rstrip('/').split('/')[-1]
@@ -1558,7 +1530,7 @@ class WalmartDetailCrawler:
         """Click 'View all reviews' and extract up to 20 reviews"""
         try:
             # 상품 페이지 URL 저장 (재시도용)
-            product_url = self.driver.current_url
+            product_url = self.page.url
 
             # 기본 2페이지, count_of_reviews >= 20이면 3페이지까지 수집 가능
             cor_int = int(str(count_of_reviews).replace(',', '')) if count_of_reviews else 0
@@ -1569,16 +1541,16 @@ class WalmartDetailCrawler:
                 if attempt > 0:
                     print(f"  [INFO] Retrying review extraction (attempt {attempt + 1}/2)...")
                     # 크롬 종료 후 재시작
-                    self.driver.quit()
+                    self.page.quit()
                     self.setup_driver()
-                    self.driver.get(product_url)
+                    self.page.get(product_url)
                     scroll_step_wait = self.config.get_timing_range('scroll_step_wait', 'wmart_tv_dt1') or (3, 4)
                     time.sleep(random.uniform(*scroll_step_wait))
 
                 # Find and click "View all reviews" button
                 try:
                     # Scroll to reviews section first
-                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    self.page.run_js("window.scrollTo(0, document.body.scrollHeight);")
                     time.sleep(2)
 
                     # Try multiple XPaths to find the button (there might be 2 on the page)
@@ -1600,7 +1572,7 @@ class WalmartDetailCrawler:
                     for xpath in view_all_xpaths:
                         if xpath:
                             try:
-                                buttons = self.driver.find_elements(By.XPATH, xpath)
+                                buttons = self.page.eles(f'xpath:{xpath}')
                                 # If multiple buttons found, prefer the one with number in parentheses
                                 for btn in buttons:
                                     if '(' in btn.text and ')' in btn.text:
@@ -1621,7 +1593,7 @@ class WalmartDetailCrawler:
                         return None
 
                     # Scroll to button with offset to avoid header
-                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", view_all_btn)
+                    view_all_btn.scroll.to_see()
                     time.sleep(1)
 
                     # Log button info before click
@@ -1629,15 +1601,15 @@ class WalmartDetailCrawler:
                     print(f"  [DEBUG] Found View all reviews button: '{btn_text[:50]}...' ")
 
                     # Get URL before click
-                    url_before = self.driver.current_url
+                    url_before = self.page.url
 
-                    # Use JavaScript click to avoid interception
-                    self.driver.execute_script("arguments[0].click();", view_all_btn)
+                    # Click button
+                    view_all_btn.click()
                     scroll_step_wait = self.config.get_timing_range('scroll_step_wait', 'wmart_tv_dt1') or (3, 4)
                     time.sleep(random.uniform(*scroll_step_wait))
 
                     # Check if URL changed (page navigated)
-                    url_after = self.driver.current_url
+                    url_after = self.page.url
                     if url_before == url_after:
                         print(f"  [WARNING] URL did not change after clicking View all reviews button")
                         print(f"  [DEBUG] URL: {url_after[:80]}...")
@@ -1656,7 +1628,7 @@ class WalmartDetailCrawler:
 
                 while len(reviews) < 20 and page_num <= max_pages:
                     # Get current page HTML
-                    page_source = self.driver.page_source
+                    page_source = self.page.html
                     tree = html.fromstring(page_source)
 
                     # Get review containers - try multiple XPaths
@@ -1703,7 +1675,7 @@ class WalmartDetailCrawler:
                             next_page_btn = None
                             for xpath in next_page_xpaths:
                                 try:
-                                    next_page_btn = self.driver.find_element(By.XPATH, xpath)
+                                    next_page_btn = self.page.ele(f'xpath:{xpath}', timeout=2)
                                     if next_page_btn:
                                         break
                                 except:
@@ -1714,11 +1686,11 @@ class WalmartDetailCrawler:
                                 break
 
                             # Scroll to button
-                            self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_page_btn)
+                            next_page_btn.scroll.to_see()
                             time.sleep(1)
 
                             # Click Next Page
-                            self.driver.execute_script("arguments[0].click();", next_page_btn)
+                            next_page_btn.click()
 
                             # Wait for next page to load
                             scroll_step_wait = self.config.get_timing_range('scroll_step_wait', 'wmart_tv_dt1') or (3, 4)
@@ -1775,24 +1747,24 @@ class WalmartDetailCrawler:
 
             # Check if window is still alive, restart if crashed
             try:
-                _ = self.driver.current_url
+                _ = self.page.url
             except Exception as e:
                 print(f"  [WARNING] Browser window crashed, restarting driver...")
                 try:
-                    self.driver.quit()
+                    self.page.quit()
                 except:
                     pass
                 self.setup_driver()
                 print(f"  [OK] Driver restarted successfully")
 
             print(f"  [INFO] Loading page...")
-            self.driver.get(url)
+            self.page.get(url)
             detail_page_load_wait = self.config.get_timing_range('detail_page_load_wait', 'wmart_tv_dt1') or (6, 10)
             time.sleep(random.uniform(*detail_page_load_wait))
 
             print(f"  [INFO] Page loaded, extracting data...")
 
-            page_source = self.driver.page_source
+            page_source = self.page.html
             tree = html.fromstring(page_source)
 
             # Extract basic data using XPaths (from initial page load)
@@ -1858,10 +1830,10 @@ class WalmartDetailCrawler:
 
             # Scroll to review section for lazy loading content
             try:
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight * 0.5);")
+                self.page.run_js("window.scrollTo(0, document.body.scrollHeight * 0.5);")
                 time.sleep(2)
                 # Update page_source and tree after scroll
-                page_source = self.driver.page_source
+                page_source = self.page.html
                 tree = html.fromstring(page_source)
             except:
                 pass
@@ -1876,11 +1848,10 @@ class WalmartDetailCrawler:
             max_cor_retries = 3
             for cor_retry in range(max_cor_retries):
                 try:
-                    WebDriverWait(self.driver, 5).until(
-                        EC.presence_of_element_located((By.XPATH, "//*[@id='item-review-section']/div[7]/h3 | //button[contains(text(), 'View all reviews')] | //span[contains(text(), 'No ratings yet')]"))
-                    )
+                    # Wait for review section element with DrissionPage
+                    review_elem = self.page.ele("xpath://*[@id='item-review-section']/div[7]/h3 | //button[contains(text(), 'View all reviews')] | //span[contains(text(), 'No ratings yet')]", timeout=5)
                     # Element loaded - re-parse and extract
-                    page_source = self.driver.page_source
+                    page_source = self.page.html
                     tree = html.fromstring(page_source)
                     count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source, count_of_star_ratings)
                 except:
@@ -1891,10 +1862,10 @@ class WalmartDetailCrawler:
                     break
                 elif cor_retry < max_cor_retries - 1:
                     print(f"  [RETRY {cor_retry + 1}/{max_cor_retries}] count_of_reviews is None, refreshing page...")
-                    self.driver.refresh()
+                    self.page.refresh()
                     captcha_after_wait = self.config.get_timing_range('captcha_after_wait') or (3, 5)
                     time.sleep(random.uniform(*captcha_after_wait))
-                    page_source = self.driver.page_source
+                    page_source = self.page.html
                     tree = html.fromstring(page_source)
 
             # Click Specifications and get Model (after static content extraction)
@@ -1932,7 +1903,7 @@ class WalmartDetailCrawler:
                 for drv_retry in range(max_drv_retries):
                     print(f"  [RETRY {drv_retry + 1}/{max_drv_retries}] count_of_reviews={cor_int_check} but detailed_review_content is empty, retrying...")
                     # Navigate back to product page and retry
-                    self.driver.get(url)
+                    self.page.get(url)
                     captcha_after_wait = self.config.get_timing_range('captcha_after_wait') or (3, 5)
                     time.sleep(random.uniform(*captcha_after_wait))
                     detailed_review_content = self.extract_detailed_reviews(count_of_reviews)
@@ -2263,7 +2234,7 @@ class WalmartDetailCrawler:
 
             print(f"[INFO] Loaded {len(product_urls)} product URLs to process")
 
-            # Setup WebDriver
+            # Setup DrissionPage browser
             self.setup_driver()
 
             # Initialize session (visit Walmart homepage first to avoid bot detection)
@@ -2352,8 +2323,8 @@ class WalmartDetailCrawler:
             traceback.print_exc()
 
         finally:
-            if self.driver:
-                self.driver.quit()
+            if self.page:
+                self.page.quit()
             if self.db_conn:
                 self.db_conn.close()
             print("\n[INFO] Crawler terminated")

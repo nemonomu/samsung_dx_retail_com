@@ -1100,7 +1100,21 @@ class AmazonDetailCrawler:
                 time.sleep(random.uniform(3, 4))
                 print(f"  [DEBUG] Actual URL after navigation: {self.driver.current_url}")
 
-                # Wait for count_of_reviews element to load, with sorry page retry (max 10 times)
+                # 로그인 페이지 감지 - 크롬 껐다 키고 쿠키 재로드 후 재시도 (최대 2회)
+                login_page_retry = 0
+                while '/ap/signin' in self.driver.current_url and login_page_retry < 2:
+                    login_page_retry += 1
+                    print(f"  [WARNING] Login page detected, restarting browser and reloading cookies ({login_page_retry}/2)...")
+                    self.driver.quit()
+                    self.setup_driver()
+                    self.load_cookies()
+                    self.driver.get(product_url)
+                    time.sleep(random.uniform(4, 5))
+                    self.driver.get(review_url)
+                    time.sleep(random.uniform(3, 4))
+                    print(f"  [DEBUG] URL after retry: {self.driver.current_url}")
+
+                # Wait for count_of_reviews element to load, with sorry page retry (max 5 times)
                 count_of_reviews = None
                 count_xpaths = [
                     '//*[@id="filter-info-section"]/div',
@@ -1109,12 +1123,17 @@ class AmazonDetailCrawler:
                     '//*[@id="filter-info-section"]'
                 ]
 
-                for refresh_attempt in range(10):
+                for refresh_attempt in range(5):
                     try:
+                        # 로그인 페이지로 리다이렉트된 경우 루프 종료
+                        if '/ap/signin' in self.driver.current_url:
+                            print(f"  [WARNING] Redirected to login page, skipping sorry page retry")
+                            break
+
                         # Sorry page 감지
                         page_source_lower = self.driver.page_source.lower()
                         if ('sorry' in page_source_lower and 'review' not in page_source_lower) or 'something went wrong' in page_source_lower:
-                            print(f"  [WARNING] Sorry page detected on review page, refreshing ({refresh_attempt + 1}/10)...")
+                            print(f"  [WARNING] Sorry page detected on review page, refreshing ({refresh_attempt + 1}/5)...")
                             self.driver.refresh()
                             time.sleep(5)
                             continue
@@ -1155,12 +1174,12 @@ class AmazonDetailCrawler:
                             break
 
                         # 텍스트 없으면 새로고침 후 재시도
-                        print(f"  [WARNING] count_of_reviews text not found, refreshing ({refresh_attempt + 1}/10)...")
+                        print(f"  [WARNING] count_of_reviews text not found, refreshing ({refresh_attempt + 1}/5)...")
                         self.driver.refresh()
                         time.sleep(5)
 
                     except Exception as e:
-                        print(f"  [WARNING] count_of_reviews element not loaded ({refresh_attempt + 1}/10) - {str(e)[:50]}")
+                        print(f"  [WARNING] count_of_reviews element not loaded ({refresh_attempt + 1}/5) - {str(e)[:50]}")
                         self.driver.refresh()
                         time.sleep(5)
 

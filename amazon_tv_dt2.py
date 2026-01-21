@@ -1580,11 +1580,11 @@ class AmazonDetailCrawler:
             star_rating = self.extract_star_rating(tree)
 
             # SKU_Popularity - only collect if "Amazon's Choice"
-            sku_popularity_raw = self.extract_text_safe(tree, self.xpaths.get('sku_popularity'))
+            sku_popularity_raw = self.extract_with_xpaths(tree, 'sku_popularity')
             sku_popularity = sku_popularity_raw if sku_popularity_raw and "Amazon's" in sku_popularity_raw and "Choice" in sku_popularity_raw else None
 
             # Retailer_Membership_Discounts - clean Prime text
-            membership_discount_raw = self.extract_text_safe(tree, self.xpaths.get('membership_discount'))
+            membership_discount_raw = self.extract_with_xpaths(tree, 'membership_discount')
             membership_discount = self.clean_membership_discount(membership_discount_raw)
 
             # Item - Extract ASIN from final URL (after redirect)
@@ -1598,29 +1598,19 @@ class AmazonDetailCrawler:
                 print(f"  [WARNING] Could not extract valid ASIN from URL: {final_url}")
                 item = None
 
-            # Ranks - try multiple approaches
-            rank_1_raw = self.extract_text_safe(tree, self.xpaths.get('rank_1'))
-            if not rank_1_raw:
-                # Find by th text "Best Sellers Rank" - first rank
-                rank_1_raw = self.extract_text_safe(tree, '//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[1]//span[@class="a-list-item"]/span')
-            if not rank_1_raw:
-                # Alternative: look in Item details section
-                rank_1_raw = self.extract_text_safe(tree, '//*[@id="productDetails_expanderTables_depthRightSections"]//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[1]')
-            if not rank_1_raw:
-                # Old fallback XPath for different page structure
-                rank_1_raw = self.extract_text_safe(tree, '//*[@id="detailBullets_feature_div"]/ul/li[7]/span/text()[1]')
+            # Ranks - try multiple approaches using extract_with_xpaths
+            rank_1_raw = self.extract_with_xpaths(tree, 'rank_1', [
+                '//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[1]//span[@class="a-list-item"]/span',
+                '//*[@id="productDetails_expanderTables_depthRightSections"]//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[1]',
+                '//*[@id="detailBullets_feature_div"]/ul/li[7]/span/text()[1]'
+            ])
             rank_1 = self.clean_rank(rank_1_raw)
 
-            rank_2_raw = self.extract_text_safe(tree, self.xpaths.get('rank_2'))
-            if not rank_2_raw:
-                # Find by th text "Best Sellers Rank" - second rank
-                rank_2_raw = self.extract_text_safe(tree, '//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[2]//span[@class="a-list-item"]/span')
-            if not rank_2_raw:
-                # Alternative: look in Item details section
-                rank_2_raw = self.extract_text_safe(tree, '//*[@id="productDetails_expanderTables_depthRightSections"]//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[2]')
-            if not rank_2_raw:
-                # Old fallback XPath for different page structure
-                rank_2_raw = self.extract_text_safe(tree, '//*[@id="detailBullets_feature_div"]/ul/li[7]/span/ul')
+            rank_2_raw = self.extract_with_xpaths(tree, 'rank_2', [
+                '//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[2]//span[@class="a-list-item"]/span',
+                '//*[@id="productDetails_expanderTables_depthRightSections"]//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[2]',
+                '//*[@id="detailBullets_feature_div"]/ul/li[7]/span/ul'
+            ])
             rank_2 = self.clean_rank(rank_2_raw)
 
             # Extract screen_size with tv_item_mst fallback

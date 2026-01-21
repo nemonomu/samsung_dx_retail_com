@@ -151,13 +151,13 @@ def add_xpath_configs():
         ('summarized_review', '/html/body/div[5]/div[8]/div[2]/div/div[1]/div/p', 5),
 
         # === extract_summarized_review_content_from_reviews_page() ===
-        ('summarized_review_reviews_page', 'xpath://*[@id="reviews-accordion"]/div[1]/div/p[1]', 1),
-        ('summarized_review_reviews_page', 'xpath://p[@class="mb-200 mt-none"]', 2),
-        ('summarized_review_reviews_page', 'xpath://div[@id="reviews-accordion"]//p[contains(@class, "mb-200")]', 3),
+        ('summarized_review_reviews_page', '//*[@id="reviews-accordion"]/div[1]/div/p[1]', 1),
+        ('summarized_review_reviews_page', '//p[@class="mb-200 mt-none"]', 2),
+        ('summarized_review_reviews_page', '//div[@id="reviews-accordion"]//p[contains(@class, "mb-200")]', 3),
 
         # === extract_recommendation_intent_from_reviews_page() ===
-        ('recommendation_intent', 'xpath://div[contains(@class, "recommendation-card-no-donut")]//span[@class="recommendation-percent v-fw-medium"]', 1),
-        ('recommendation_intent', 'xpath://span[contains(@class, "recommendation-percent")]', 2),
+        ('recommendation_intent', '//div[contains(@class, "recommendation-card-no-donut")]//span[@class="recommendation-percent v-fw-medium"]', 1),
+        ('recommendation_intent', '//span[contains(@class, "recommendation-percent")]', 2),
 
         # === extract_similar_products() ===
         ('similar_product_names', '//span[@class="clamp" and starts-with(@id, "compare-title-")]', 1),

@@ -1919,14 +1919,8 @@ class BestBuyDetailCrawler:
             else:
                 print(f"  [✓] Count_of_Reviews: {count_of_reviews}")
 
-            # 2-3. Summarized Review Content extraction (AI 요약 리뷰)
-            # 외부 리뷰인 경우 수집하지 않음
-            if is_external_reviews:
-                summarized_review_content = None
-                print(f"  [✓] Summarized_Review_Content: None (외부 리뷰 - 수집 안함)")
-            else:
-                summarized_review_content = self.extract_summarized_review_content(tree)
-                print(f"  [✓] Summarized_Review_Content: {summarized_review_content[:50] if summarized_review_content else 'None'}...")
+            # 2-3. Summarized Review Content - 리뷰 페이지에서만 수집 (아래에서 처리)
+            summarized_review_content = None
 
             # 3. Compare similar products extraction (실패 시 새로고침 후 재시도)
             similar_products = self.extract_compare_similar_products(product_url)
@@ -2059,11 +2053,9 @@ class BestBuyDetailCrawler:
                 detailed_reviews = self.extract_reviews()
                 print(f"  [✓] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
 
-                # 9-5. Summarized_Review_Content fallback (상세페이지에서 못 찾았으면 리뷰페이지에서)
-                if not summarized_review_content:
-                    summarized_review_content = self.extract_summarized_review_content_from_reviews_page(reviews_tree)
-                    if summarized_review_content:
-                        print(f"  [✓] Summarized_Review_Content (from reviews page): {summarized_review_content[:50]}...")
+                # 9-5. Summarized_Review_Content (리뷰 페이지에서만 수집)
+                summarized_review_content = self.extract_summarized_review_content_from_reviews_page(reviews_tree)
+                print(f"  [✓] Summarized_Review_Content: {summarized_review_content[:50] if summarized_review_content else 'None'}...")
 
             # 9-4-1. detailed_reviews NULL 로그 기록 (count_of_reviews > 0인데 NULL인 경우)
             try:

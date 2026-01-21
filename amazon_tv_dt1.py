@@ -23,9 +23,13 @@ if sys.stdout.encoding != 'utf-8':
 
 # Import database and account configuration
 from config import DB_CONFIG, AMAZON_ACCOUNTS
+from amazon_login import login_to_amazon, save_cookies
 
-# Cookie file path (uses unsandev0004 for amazon_tv_crawl.py)
-COOKIE_FILE = AMAZON_ACCOUNTS['unsandev0004']['cookie_file']
+# Account configuration (uses unsandev0004 for amazon_tv_crawl.py)
+ACCOUNT_NAME = 'unsandev0004'
+COOKIE_FILE = AMAZON_ACCOUNTS[ACCOUNT_NAME]['cookie_file']
+AMAZON_EMAIL = AMAZON_ACCOUNTS[ACCOUNT_NAME]['email']
+AMAZON_PASSWORD = AMAZON_ACCOUNTS[ACCOUNT_NAME]['password']
 import pandas as pd
 from alert_monitor import monitor_and_alert
 
@@ -1068,24 +1072,22 @@ class AmazonDetailCrawler:
                 time.sleep(random.uniform(3, 4))
                 print(f"  [DEBUG] Actual URL after navigation: {self.driver.current_url}")
 
-                # 로그인 페이지 감지 - 크롬 껐다 키고 쿠키 재로드 후 재시도 (최대 2회)
-                login_page_retry = 0
-                while '/ap/signin' in self.driver.current_url and login_page_retry < 2:
-                    login_page_retry += 1
-                    print(f"  [WARNING] Login page detected, restarting browser and reloading cookies ({login_page_retry}/2)...")
-                    self.driver.quit()
-                    self.setup_driver()
-                    self.load_cookies()
-                    self.driver.get(product_url)
-                    time.sleep(random.uniform(4, 5))
-                    # 상품 페이지 로드 확인 후 리뷰 페이지 재접속
-                    self.driver.get(review_url)
-                    time.sleep(random.uniform(3, 4))
-                    print(f"  [DEBUG] URL after retry: {self.driver.current_url}")
+                # 로그인 페이지 감지 - 실제 로그인 수행 후 재시도
+                if '/ap/signin' in self.driver.current_url:
+                    print(f"  [WARNING] Login page detected, performing actual login...")
+                    if login_to_amazon(self.driver, AMAZON_EMAIL, AMAZON_PASSWORD):
+                        print(f"  [OK] Login successful, saving cookies...")
+                        save_cookies(self.driver, COOKIE_FILE)
+                        # 로그인 후 리뷰 페이지 재접속
+                        self.driver.get(review_url)
+                        time.sleep(random.uniform(3, 4))
+                        print(f"  [DEBUG] URL after login: {self.driver.current_url}")
+                    else:
+                        print(f"  [ERROR] Login failed")
 
                 # 여전히 로그인 페이지면 리뷰 페이지 수집 포기
                 if '/ap/signin' in self.driver.current_url:
-                    print(f"  [WARNING] Still on login page after retries, falling back to detail page reviews")
+                    print(f"  [WARNING] Still on login page after login attempt, falling back to detail page reviews")
                     count_of_reviews = None
                 else:
                     # Wait for count_of_reviews element to load, with sorry page retry (max 5 times)

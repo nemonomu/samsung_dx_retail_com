@@ -23,10 +23,17 @@ if sys.stdout.encoding != 'utf-8':
 
 # Import database and account configuration
 from config import DB_CONFIG, AMAZON_ACCOUNTS
+from amazon_login import login_to_amazon, save_cookies
 
-# Cookie files for account switching (crawl1 uses unsandev0002 -> unsandev0003)
-COOKIE_FILE_1 = AMAZON_ACCOUNTS['unsandev0002']['cookie_file']  # First 100 products
-COOKIE_FILE_2 = AMAZON_ACCOUNTS['unsandev0003']['cookie_file']  # Remaining products
+# Account configuration for switching (crawl1 uses unsandev0002 -> unsandev0003)
+ACCOUNT_1 = 'unsandev0002'
+ACCOUNT_2 = 'unsandev0003'
+COOKIE_FILE_1 = AMAZON_ACCOUNTS[ACCOUNT_1]['cookie_file']  # First 100 products
+COOKIE_FILE_2 = AMAZON_ACCOUNTS[ACCOUNT_2]['cookie_file']  # Remaining products
+AMAZON_EMAIL_1 = AMAZON_ACCOUNTS[ACCOUNT_1]['email']
+AMAZON_PASSWORD_1 = AMAZON_ACCOUNTS[ACCOUNT_1]['password']
+AMAZON_EMAIL_2 = AMAZON_ACCOUNTS[ACCOUNT_2]['email']
+AMAZON_PASSWORD_2 = AMAZON_ACCOUNTS[ACCOUNT_2]['password']
 ACCOUNT_SWITCH_AT = 100  # Switch account after this many products
 import pandas as pd
 from alert_monitor import monitor_and_alert
@@ -1100,19 +1107,31 @@ class AmazonDetailCrawler:
                 time.sleep(random.uniform(3, 4))
                 print(f"  [DEBUG] Actual URL after navigation: {self.driver.current_url}")
 
-                # 로그인 페이지 감지 - 크롬 껐다 키고 쿠키 재로드 후 재시도 (최대 2회)
-                login_page_retry = 0
-                while '/ap/signin' in self.driver.current_url and login_page_retry < 2:
-                    login_page_retry += 1
-                    print(f"  [WARNING] Login page detected, restarting browser and reloading cookies ({login_page_retry}/2)...")
-                    self.driver.quit()
-                    self.setup_driver()
-                    self.load_cookies()
-                    self.driver.get(product_url)
-                    time.sleep(random.uniform(4, 5))
-                    self.driver.get(review_url)
-                    time.sleep(random.uniform(3, 4))
-                    print(f"  [DEBUG] URL after retry: {self.driver.current_url}")
+                # 로그인 페이지 감지 - 실제 로그인 수행 후 재시도
+                if '/ap/signin' in self.driver.current_url:
+                    print(f"  [WARNING] Login page detected, performing actual login...")
+                    # 현재 계정에 따라 이메일/비밀번호 선택
+                    if self.current_cookie_file == COOKIE_FILE_1:
+                        email, password, cookie_file = AMAZON_EMAIL_1, AMAZON_PASSWORD_1, COOKIE_FILE_1
+                    else:
+                        email, password, cookie_file = AMAZON_EMAIL_2, AMAZON_PASSWORD_2, COOKIE_FILE_2
+
+                    if login_to_amazon(self.driver, email, password):
+                        print(f"  [OK] Login successful, saving cookies...")
+                        save_cookies(self.driver, cookie_file)
+                        # 로그인 후 리뷰 페이지 재접속
+                        self.driver.get(review_url)
+                        time.sleep(random.uniform(3, 4))
+                        print(f"  [DEBUG] URL after login: {self.driver.current_url}")
+                    else:
+                        print(f"  [ERROR] Login failed")
+
+                # 여전히 로그인 페이지면 리뷰 페이지 수집 건너뜀
+                if '/ap/signin' in self.driver.current_url:
+                    print(f"  [WARNING] Still on login page after login attempt, skipping review page")
+                    count_of_reviews = None
+                    all_reviews = []
+                    return '|||'.join(all_reviews) if all_reviews else None, count_of_reviews
 
                 # Wait for count_of_reviews element to load, with sorry page retry (max 5 times)
                 count_of_reviews = None

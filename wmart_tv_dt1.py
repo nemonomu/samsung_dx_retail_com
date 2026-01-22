@@ -1673,12 +1673,14 @@ class WalmartDetailCrawler:
                     # If we need more reviews and haven't reached max pages, click Next Page
                     if len(reviews) < 20 and page_num < max_pages:
                         try:
-                            # Try multiple XPaths to find Next Page button
+                            # Try multiple XPaths to find Next Page button (from DB)
                             next_page_xpaths = [
-                                '//*[@id="maincontent"]/main/nav/ul/li[4]/a',  # Specific XPath
-                                "//a[@data-testid='NextPage']",                 # data-testid based
-                                "//a[@aria-label='Next Page']",                 # aria-label based
+                                self.xpaths.get('review_next_page_1'),
+                                self.xpaths.get('review_next_page_2'),
+                                self.xpaths.get('review_next_page_3'),
                             ]
+                            # Filter out None values
+                            next_page_xpaths = [x for x in next_page_xpaths if x]
 
                             next_page_btn = None
                             for xpath in next_page_xpaths:

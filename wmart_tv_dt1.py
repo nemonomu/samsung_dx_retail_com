@@ -1597,42 +1597,73 @@ class WalmartDetailCrawler:
                 page_num = 1
 
                 while len(reviews) < 20 and page_num <= max_pages:
-                    # Get current page HTML
-                    page_source = self.page.html
-                    tree = html.fromstring(page_source)
+                    # Wait for review content to load (dynamic rendering)
+                    time.sleep(2)
 
-                    # Get review containers - try multiple XPaths (from DB)
-                    review_content_xpaths = [
-                        self.xpaths.get('review_content_1'),
-                        self.xpaths.get('review_content_2'),
-                        self.xpaths.get('review_content_3'),
-                        self.xpaths.get('review_content_4'),
+                    # Get xpaths from DB (multiple options with priority)
+                    review_text_xpaths = [
+                        self.xpaths.get('review_text_1'),
+                        self.xpaths.get('review_text_2'),
+                        self.xpaths.get('review_text_3'),
                     ]
-                    review_content_xpaths = [x for x in review_content_xpaths if x]
+                    review_text_xpaths = [x for x in review_text_xpaths if x]
+                    review_content_wait_xpath = self.xpaths.get('review_content_wait')
 
-                    review_content_divs = None
-                    for rc_xpath in review_content_xpaths:
-                        review_content_divs = tree.xpath(rc_xpath)
-                        if review_content_divs:
-                            break
-
-                    if not review_content_divs:
-                        print(f"  [WARNING] No review content divs found on page {page_num}")
+                    if not review_text_xpaths:
+                        print(f"  [WARNING] No review_text xpaths found in DB")
                         break
 
-                    # Extract reviews from current page
-                    for idx, content_div in enumerate(review_content_divs):
-                        if len(reviews) >= 20:
+                    # Method 1: Use DrissionPage eles() to find review spans directly (most reliable for dynamic content)
+                    try:
+                        # Wait for review content element to appear (if xpath exists in DB)
+                        if review_content_wait_xpath:
+                            self.page.ele(f'xpath:{review_content_wait_xpath}', timeout=5)
+
+                        # Try each review_text xpath in priority order
+                        review_spans = None
+                        used_xpath = None
+                        for xpath in review_text_xpaths:
+                            review_spans = self.page.eles(f'xpath:{xpath}')
+                            if review_spans:
+                                used_xpath = xpath
+                                break
+
+                        if review_spans:
+                            print(f"  [DEBUG] Found {len(review_spans)} review spans on page {page_num} using: {used_xpath[:50]}...")
+                            for span in review_spans:
+                                if len(reviews) >= 20:
+                                    break
+                                review_text = span.text.strip() if span.text else ''
+                                if review_text and len(review_text) > 5:  # Skip very short texts
+                                    reviews.append(review_text)
+                        else:
+                            print(f"  [WARNING] No review content found on page {page_num}")
                             break
+                    except Exception as e:
+                        print(f"  [WARNING] DrissionPage method failed: {e}")
+                        # Fallback: Try lxml parsing with priority xpaths
+                        page_source = self.page.html
+                        tree = html.fromstring(page_source)
 
-                        # Extract review text (from DB)
-                        review_xpath = self.xpaths.get('review_section_wait') or './/p/span[@class="tl-m db-m"]'
-                        review_elem = content_div.xpath(review_xpath)
+                        review_spans_lxml = None
+                        used_xpath_lxml = None
+                        for xpath in review_text_xpaths:
+                            review_spans_lxml = tree.xpath(xpath)
+                            if review_spans_lxml:
+                                used_xpath_lxml = xpath
+                                break
 
-                        if review_elem:
-                            review_text = review_elem[0].text_content().strip() if hasattr(review_elem[0], 'text_content') else str(review_elem[0]).strip()
-                            if review_text and len(review_text) > 0:
-                                reviews.append(review_text)
+                        if review_spans_lxml:
+                            print(f"  [DEBUG] Found {len(review_spans_lxml)} review spans via lxml on page {page_num} using: {used_xpath_lxml[:50]}...")
+                            for span in review_spans_lxml:
+                                if len(reviews) >= 20:
+                                    break
+                                review_text = span.text_content().strip() if hasattr(span, 'text_content') else str(span).strip()
+                                if review_text and len(review_text) > 5:
+                                    reviews.append(review_text)
+                        else:
+                            print(f"  [WARNING] No review content found on page {page_num} (lxml fallback)")
+                            break
 
                     # If we need more reviews and haven't reached max pages, click Next Page
                     if len(reviews) < 20 and page_num < max_pages:

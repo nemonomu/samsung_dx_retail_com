@@ -1800,6 +1800,12 @@ class WalmartDetailCrawler:
 
             print(f"  [INFO] Page loaded, extracting data...")
 
+            # Stop and remove all videos to save bandwidth
+            try:
+                self.page.run_js("document.querySelectorAll('video').forEach(v => { v.pause(); v.removeAttribute('src'); v.load(); });")
+            except:
+                pass
+
             page_source = self.page.html
             tree = html.fromstring(page_source)
 

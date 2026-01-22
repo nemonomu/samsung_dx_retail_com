@@ -9,7 +9,7 @@ import time
 import random
 import psycopg2
 from datetime import datetime, timedelta
-from DrissionPage import ChromiumPage
+from DrissionPage import ChromiumPage, ChromiumOptions
 from lxml import html
 import re
 
@@ -306,10 +306,12 @@ class WalmartDetailCrawler:
             return []
 
     def setup_driver(self):
-        """Setup DrissionPage browser"""
+        """Setup DrissionPage browser with image loading disabled"""
         try:
-            self.page = ChromiumPage()
-            print("[OK] Browser setup complete (DrissionPage)")
+            co = ChromiumOptions()
+            co.no_imgs(True)  # Disable image loading for faster page load
+            self.page = ChromiumPage(co)
+            print("[OK] Browser setup complete (DrissionPage, images disabled)")
             return True
         except Exception as e:
             print(f"[ERROR] Browser setup failed: {e}")
@@ -1731,8 +1733,22 @@ class WalmartDetailCrawler:
 
             print(f"  [INFO] Loading page...")
             self.page.get(url)
-            detail_page_load_wait = self.config.get_timing_range('detail_page_load_wait', 'wmart_tv_dt1') or (6, 10)
-            time.sleep(random.uniform(*detail_page_load_wait))
+
+            # Wait for product_name element instead of fixed time (DOM optimization)
+            try:
+                product_name_xpath = self.xpaths.get('product_name')
+                if product_name_xpath:
+                    self.page.ele(f'xpath:{product_name_xpath}', timeout=10)
+                    print(f"  [OK] Product name element loaded")
+                else:
+                    # Fallback: wait for any h1 element
+                    self.page.ele('xpath://h1', timeout=10)
+                    print(f"  [OK] Page title element loaded")
+            except:
+                print(f"  [WARNING] Element wait timeout, continuing anyway...")
+
+            # Minimum wait for page stability (CAPTCHA prevention)
+            time.sleep(random.uniform(2, 3))
 
             print(f"  [INFO] Page loaded, extracting data...")
 

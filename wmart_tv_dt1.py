@@ -614,7 +614,7 @@ class WalmartDetailCrawler:
             return None
 
     def extract_original_price(self, tree, savings):
-        """Extract original/strike-through price from detail page (hardcoded XPath)
+        """Extract original/strike-through price from detail page using DB xpath
         Only extract if savings exists (to avoid picking prices from other sections)
 
         Args:
@@ -628,8 +628,12 @@ class WalmartDetailCrawler:
             if not savings:
                 return None
 
-            # Hardcoded XPath for original_sku_price (strike-through price)
-            xpath = '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/section[1]/div/div[1]/span[2]'
+            # Use DB xpath for original_price (strike-through price)
+            xpath = self.xpaths.get('original_price')
+            if not xpath:
+                print(f"       Original Price: xpath not found in DB")
+                return None
+
             text = self.extract_text_safe(tree, xpath)
 
             if text:
@@ -1029,8 +1033,12 @@ class WalmartDetailCrawler:
         Only extracts if 'free offer' text is found, returns the number only
         """
         try:
-            # Hardcoded XPath for offer (section[2], not section[1])
-            xpath = '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/section[2]/div/div'
+            # Use DB xpath for offer
+            xpath = self.xpaths.get('offer')
+            if not xpath:
+                print(f"  [DEBUG] extract_offer - xpath not found in DB")
+                return None
+
             text = self.extract_text_safe(tree, xpath)
             print(f"  [DEBUG] extract_offer - raw text: {repr(text)}")
             if text and 'free offer' in text.lower():
@@ -1771,12 +1779,9 @@ class WalmartDetailCrawler:
             retailer_sku_name = self.extract_text_safe(tree, self.xpaths.get('product_name'))
             star_rating = self.extract_star_rating(tree, page_source)
 
-            # Hardcoded XPaths for discount_type and savings
-            discount_type_xpath = '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/div[1]/span[1]'
-            savings_xpath = '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/section[1]/div/div[2]/span[2]'
-
-            discount_type = self.extract_text_safe(tree, discount_type_xpath)
-            savings = self.extract_text_safe(tree, savings_xpath)
+            # Extract discount_type and savings using DB xpaths
+            discount_type = self.extract_text_safe(tree, self.xpaths.get('discount_type'))
+            savings = self.extract_text_safe(tree, self.xpaths.get('savings'))
 
             # Extract prices from detail page (original_price only if savings exists)
             final_sku_price = self.extract_final_price(tree)

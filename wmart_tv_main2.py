@@ -361,9 +361,8 @@ class WalmartTVCrawler:
                 final_price = None
                 original_price = None
 
-                # Extract Offer (numbers only: "4 free offers from Apple" -> "4")
-                offer_raw = self.extract_text_safe(product, self.xpaths['offer']['xpath'])
-                offer = self.extract_number_only(offer_raw) if offer_raw else None
+                # Offer is collected by dt1 (detail page), not main page
+                offer = None
 
                 # Extract Pick-Up_Availability
                 pickup_raw = self.extract_text_safe(product, self.xpaths['pickup_availability']['xpath'])

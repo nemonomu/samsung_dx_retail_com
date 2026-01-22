@@ -1,17 +1,17 @@
 """
-Amazon TV Detail Crawler - Resume from specific index
-Usage: python amazon_tv_dt1_resume.py [start_index] [batch_id]
-Example: python amazon_tv_dt1_resume.py 148 20250122_143052
+Walmart TV Detail Crawler - Resume from specific index
+Usage: python wmart_tv_dt1_resume.py [start_index] [batch_id]
+Example: python wmart_tv_dt1_resume.py 148 20250122_143052
 """
 import sys
-from amazon_tv_dt1 import AmazonDetailCrawler
+from wmart_tv_dt1 import WalmartDetailCrawler
 import random
 import time
 
 
 def run_from_index(start_idx=1, batch_id=None):
     """Run crawler starting from specific index with optional batch_id"""
-    crawler = AmazonDetailCrawler()
+    crawler = WalmartDetailCrawler()
 
     # Override batch_id if provided
     if batch_id:
@@ -20,7 +20,7 @@ def run_from_index(start_idx=1, batch_id=None):
 
     try:
         print("="*80)
-        print(f"Amazon TV Detail1 Crawler - RESUME from index {start_idx}")
+        print(f"Walmart TV Detail Crawler - RESUME from index {start_idx}")
         print("="*80)
 
         # Step 1: Connect to database
@@ -92,14 +92,14 @@ def run_from_index(start_idx=1, batch_id=None):
 
 
 if __name__ == '__main__':
-    start_index = 148  # Default: resume from 148
+    start_index = 1  # Default
     batch_id = None
 
     if len(sys.argv) > 1:
         try:
             start_index = int(sys.argv[1])
         except ValueError:
-            print(f"Invalid index: {sys.argv[1]}, using default: 148")
+            print(f"Invalid index: {sys.argv[1]}, using default: 1")
 
     if len(sys.argv) > 2:
         batch_id = sys.argv[2]
@@ -109,7 +109,7 @@ if __name__ == '__main__':
         print(f"Using batch_id: {batch_id}")
     else:
         print("[WARNING] No batch_id provided - will create new batch_id!")
-        print("Usage: python amazon_tv_dt1_resume.py [start_index] [batch_id]")
+        print("Usage: python wmart_tv_dt1_resume.py [start_index] [batch_id]")
         confirm = input("Continue without batch_id? (y/n): ")
         if confirm.lower() != 'y':
             print("Aborted.")

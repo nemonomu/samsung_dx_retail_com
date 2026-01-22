@@ -306,14 +306,12 @@ class WalmartDetailCrawler:
             return []
 
     def setup_driver(self):
-        """Setup DrissionPage browser with image loading disabled and video autoplay blocked"""
+        """Setup DrissionPage browser with image loading disabled"""
         try:
             co = ChromiumOptions()
             co.no_imgs(True)  # Disable image loading for faster page load
-            co.set_argument('--autoplay-policy=user-gesture-required')  # Block video autoplay
-            co.set_argument('--mute-audio')  # Mute audio
             self.page = ChromiumPage(co)
-            print("[OK] Browser setup complete (DrissionPage, images disabled, autoplay blocked)")
+            print("[OK] Browser setup complete (DrissionPage, images disabled)")
             return True
         except Exception as e:
             print(f"[ERROR] Browser setup failed: {e}")
@@ -1799,12 +1797,6 @@ class WalmartDetailCrawler:
             time.sleep(random.uniform(2, 3))
 
             print(f"  [INFO] Page loaded, extracting data...")
-
-            # Stop and remove all videos to save bandwidth
-            try:
-                self.page.run_js("document.querySelectorAll('video').forEach(v => { v.pause(); v.removeAttribute('src'); v.load(); });")
-            except:
-                pass
 
             page_source = self.page.html
             tree = html.fromstring(page_source)

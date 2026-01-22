@@ -464,15 +464,15 @@ class WalmartDetailCrawler:
                 if match:
                     return match.group(1)
 
-            # If no rating found, check for "No ratings yet" at specific location
+            # If no rating found, check for "No ratings yet" at specific location (from DB)
             no_ratings_xpaths = [
-                "//*[@id='maincontent']/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[2]/div/div/span",
-                "//span[@class='gray f7 ph1 pt1'][contains(text(), 'No ratings yet')]",
-                "//span[contains(text(), 'No ratings yet')]",
-                "//*[@id='item-review-section']//span[contains(text(), 'No ratings yet')]"
+                self.xpaths.get('no_ratings_yet_1'),
+                self.xpaths.get('no_ratings_yet_2'),
+                self.xpaths.get('no_ratings_yet_3'),
+                self.xpaths.get('no_ratings_yet_4'),
             ]
 
-            for xpath in no_ratings_xpaths:
+            for xpath in [x for x in no_ratings_xpaths if x]:
                 result = tree.xpath(xpath)
                 if result:
                     text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
@@ -488,17 +488,16 @@ class WalmartDetailCrawler:
         Returns: price container element or None
         """
         try:
-            # Try to find the main product price container
-            # Common containers: product details section, hero section, main content
+            # Try to find the main product price container (from DB)
             container_xpaths = [
-                '//div[@data-testid="price-wrap"]',
-                '//div[contains(@class, "prod-PriceSection")]',
-                '//div[contains(@class, "price-section")]',
-                '//section[contains(@class, "product-price")]',
-                '//div[@id="product-details"]//div[contains(@class, "price")]'
+                self.xpaths.get('price_container_1'),
+                self.xpaths.get('price_container_2'),
+                self.xpaths.get('price_container_3'),
+                self.xpaths.get('price_container_4'),
+                self.xpaths.get('price_container_5'),
             ]
 
-            for xpath in container_xpaths:
+            for xpath in [x for x in container_xpaths if x]:
                 containers = tree.xpath(xpath)
                 if containers:
                     return containers[0]
@@ -519,16 +518,15 @@ class WalmartDetailCrawler:
             price_container = self.get_price_container(tree)
             search_context = price_container if price_container is not None else tree
 
-            # Try multiple XPath strategies (relative to container if available)
-            # NOTE: "Starting from" is checked in Fallback 2 as LAST RESORT
+            # Try multiple XPath strategies (relative to container if available) - from DB
             xpaths = [
-                './/span[@itemprop="price"][@data-seo-id="hero-price"]',
-                './/span[@itemprop="price"]',
-                './/span[@data-seo-id="hero-price"]',
-                './/span[contains(@class, "price-wrap")]//span[contains(text(), "$")]'
+                self.xpaths.get('final_price_1'),
+                self.xpaths.get('final_price_2'),
+                self.xpaths.get('final_price_3'),
+                self.xpaths.get('final_price_4'),
             ]
 
-            for xpath in xpaths:
+            for xpath in [x for x in xpaths if x]:
                 try:
                     elements = search_context.xpath(xpath)
                     if elements:
@@ -552,15 +550,15 @@ class WalmartDetailCrawler:
                 except:
                     continue
 
-            # Fallback 1: Look for "See price in cart" at specific locations
+            # Fallback 1: Look for "See price in cart" at specific locations (from DB)
             see_price_xpaths = [
-                '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/div[1]/span[2]/span[2]/span',
-                '//span[@itemprop="price"][@data-seo-id="hero-price"][contains(text(), "See price in cart")]',
-                '//span[@data-seo-id="hero-price"][contains(text(), "See price in cart")]',
-                '//span[contains(text(), "See price in cart")]'
+                self.xpaths.get('see_price_in_cart_1'),
+                self.xpaths.get('see_price_in_cart_2'),
+                self.xpaths.get('see_price_in_cart_3'),
+                self.xpaths.get('see_price_in_cart_4'),
             ]
 
-            for xpath in see_price_xpaths:
+            for xpath in [x for x in see_price_xpaths if x]:
                 try:
                     elements = tree.xpath(xpath)
                     if elements:
@@ -571,14 +569,14 @@ class WalmartDetailCrawler:
                 except:
                     continue
 
-            # Fallback 2: Look for "Starting from $X" at specific locations
+            # Fallback 2: Look for "Starting from $X" at specific locations (from DB)
             starting_from_xpaths = [
-                '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[2]/div/div/div[1]/section/div/div/div/div/div[1]/span[1]',
-                '//span[contains(text(), "Starting from")]',
-                '//div[contains(@class, "flex")]//span[contains(text(), "Starting from")]'
+                self.xpaths.get('starting_from_1'),
+                self.xpaths.get('starting_from_2'),
+                self.xpaths.get('starting_from_3'),
             ]
 
-            for xpath in starting_from_xpaths:
+            for xpath in [x for x in starting_from_xpaths if x]:
                 try:
                     elements = tree.xpath(xpath)
                     if elements:
@@ -591,14 +589,14 @@ class WalmartDetailCrawler:
                 except:
                     continue
 
-            # Fallback 3: Look for "Not Available" at specific locations
+            # Fallback 3: Look for "Not Available" at specific locations (from DB)
             not_available_xpaths = [
-                '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/section[1]/div/div/div/div/div/div[2]/div/div',
-                '//div[contains(@class, "gray") and contains(text(), "Not Available")]',
-                '//div[contains(text(), "Not Available")]'
+                self.xpaths.get('not_available_1'),
+                self.xpaths.get('not_available_2'),
+                self.xpaths.get('not_available_3'),
             ]
 
-            for xpath in not_available_xpaths:
+            for xpath in [x for x in not_available_xpaths if x]:
                 try:
                     elements = tree.xpath(xpath)
                     if elements:
@@ -681,53 +679,30 @@ class WalmartDetailCrawler:
         Returns: integer (e.g., 50630) or None
         """
         try:
-            # ===== NEW METHOD: Extract from w_iUH7 span =====
+            # ===== NEW METHOD: Extract from w_iUH7 span (from DB) =====
             # <span class="w_iUH7">4.4 stars out of 50630 reviews</span>
-
-            # Method 1: class attribute
-            new_xpath_1 = "//span[@class='w_iUH7']"
-            elements = tree.xpath(new_xpath_1)
-            if elements:
-                text = elements[0].text_content().strip()
-                match = re.search(r'out of\s*([\d,]+)\s*reviews?', text)
-                if match:
-                    return int(match.group(1).replace(',', ''))
-
-            # Method 2: contains class (for partial match)
-            new_xpath_2 = "//span[contains(@class, 'w_iUH7')]"
-            elements = tree.xpath(new_xpath_2)
-            if elements:
-                text = elements[0].text_content().strip()
-                match = re.search(r'out of\s*([\d,]+)\s*reviews?', text)
-                if match:
-                    return int(match.group(1).replace(',', ''))
-
-            # Method 3: text pattern search
-            new_xpath_3 = "//span[contains(text(), 'stars out of')]"
-            elements = tree.xpath(new_xpath_3)
-            if elements:
-                text = elements[0].text_content().strip()
-                match = re.search(r'out of\s*([\d,]+)\s*reviews?', text)
-                if match:
-                    return int(match.group(1).replace(',', ''))
-
-            # Method 4: absolute xpath
-            new_xpath_4 = "//*[@id='maincontent']/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[2]/div/div/span"
-            elements = tree.xpath(new_xpath_4)
-            if elements:
-                text = elements[0].text_content().strip()
-                match = re.search(r'out of\s*([\d,]+)\s*reviews?', text)
-                if match:
-                    return int(match.group(1).replace(',', ''))
-
-            # ===== NEW: Extract from "X ratings" link/span =====
-            # Method 5: reviewsLink with itemprop="ratingCount" - "9,085 ratings"
-            ratings_link_xpaths = [
-                "//*[@id='maincontent']/section/main/div[2]/div[2]/div/div[2]/div/div[2]/div/div/div[2]/div/div/a",
-                "//a[@link-identifier='reviewsLink' and @itemprop='ratingCount']",
-                "//a[@data-testid='item-review-section-link']"
+            count_star_xpaths = [
+                self.xpaths.get('count_star_ratings_1'),
+                self.xpaths.get('count_star_ratings_2'),
+                self.xpaths.get('count_star_ratings_3'),
+                self.xpaths.get('count_star_ratings_4'),
             ]
-            for xpath in ratings_link_xpaths:
+
+            for xpath in [x for x in count_star_xpaths if x]:
+                elements = tree.xpath(xpath)
+                if elements:
+                    text = elements[0].text_content().strip()
+                    match = re.search(r'out of\s*([\d,]+)\s*reviews?', text)
+                    if match:
+                        return int(match.group(1).replace(',', ''))
+
+            # ===== NEW: Extract from "X ratings" link/span (from DB) =====
+            ratings_link_xpaths = [
+                self.xpaths.get('reviews_link_1'),
+                self.xpaths.get('reviews_link_2'),
+                self.xpaths.get('reviews_link_3'),
+            ]
+            for xpath in [x for x in ratings_link_xpaths if x]:
                 elements = tree.xpath(xpath)
                 if elements:
                     text = elements[0].text_content().strip()
@@ -737,12 +712,12 @@ class WalmartDetailCrawler:
                         print(f"  [INFO] Extracted count_of_star_ratings from ratings link: {count}")
                         return count
 
-            # Method 6: span with "X ratings" in item-review-section
+            # Method 6: span with "X ratings" in item-review-section (from DB)
             ratings_span_xpaths = [
-                "//*[@id='item-review-section']/div[2]/div[1]/div[1]/div/span[2]",
-                "//span[contains(@class, 'ml2') and contains(text(), 'ratings')]"
+                self.xpaths.get('total_ratings_1'),
+                self.xpaths.get('total_ratings_2'),
             ]
-            for xpath in ratings_span_xpaths:
+            for xpath in [x for x in ratings_span_xpaths if x]:
                 elements = tree.xpath(xpath)
                 if elements:
                     text = elements[0].text_content().strip()
@@ -827,14 +802,14 @@ class WalmartDetailCrawler:
             return None
 
     def extract_shipping_info(self, tree):
-        """Combine two shipping info parts (hardcoded XPaths)"""
+        """Combine two shipping info parts (from DB XPaths)"""
         try:
-            # Hardcoded XPaths for shipping info
-            xpath_part1 = '//*[@id="fulfillment-Shipping-content"]/div[3]'  # e.g., "Arrives Dec 23"
-            xpath_part2 = '//*[@id="fulfillment-Shipping-content"]/div[4]/div'  # e.g., "Free"
+            # XPaths from DB
+            xpath_part1 = self.xpaths.get('shipping_part1')  # e.g., "Arrives Dec 23"
+            xpath_part2 = self.xpaths.get('shipping_part2')  # e.g., "Free"
 
-            part1 = self.extract_text_safe(tree, xpath_part1)
-            part2 = self.extract_text_safe(tree, xpath_part2)
+            part1 = self.extract_text_safe(tree, xpath_part1) if xpath_part1 else None
+            part2 = self.extract_text_safe(tree, xpath_part2) if xpath_part2 else None
 
             parts = []
             if part1:
@@ -858,16 +833,14 @@ class WalmartDetailCrawler:
         try:
             # Find all badge elements - ONLY from main product info section
             # Restrict to the top product info area to avoid similar products section
+            # XPaths from DB
             badge_xpaths = [
-                # Main product badges section (most reliable)
-                '//main//div[@data-testid="module-2-badges"]//span[@data-testid="badgeTagComponent"]//span',
-                # Fallback 1: Restrict to main product div (before similar products)
-                '//main/div[1]//div[@data-testid="badgeTagComponent"]//span',
-                # Fallback 2: Only badges in the product title/info area (not in similar items grid)
-                '//section[@data-testid="product-info-section"]//span[@data-testid="badgeTagComponent"]//span',
-                # Fallback 3: Exclude similar items by using ancestor check
-                '//main/section[1]//div[@data-testid="badgeTagComponent"]//span'
+                self.xpaths.get('badges_1'),
+                self.xpaths.get('badges_2'),
+                self.xpaths.get('badges_3'),
+                self.xpaths.get('badges_4'),
             ]
+            badge_xpaths = [x for x in badge_xpaths if x]  # Filter out None values
 
             all_badges = []
             for xpath in badge_xpaths:
@@ -979,25 +952,18 @@ class WalmartDetailCrawler:
                     print(f"  [INFO] Screen size extracted from product name: {size_number} inches")
                     return f"{size_number} inches"
 
-            # Method 2 (Fallback): Try XPath from Specifications at a glance
+            # Method 2 (Fallback): Try XPath from Specifications at a glance (from DB)
             xpaths = [
-                # Method 1: Definition list structure - <dl><dt>Screen size</dt><dd>75 in</dd></dl> (main page)
-                "//dl[.//dt[contains(., 'Screen size')]]//dd",
-                # Method 2: Definition list - direct sibling (main page)
-                "//dt[contains(., 'Screen size')]/following-sibling::dd",
-                # Method 3: Table structure - <tr><th><dt>Screen size</dt></th><td><dd>75 in</dd></td></tr>
-                "//tr[.//dt[contains(text(), 'Screen size')]]//dd",
-                # Method 4: Alternative table structure
-                "//dt[contains(text(), 'Screen size')]/ancestor::tr//dd",
-                # Method 5: Use aria-label (most reliable for div structure)
-                "//div[@aria-label[contains(., 'Screen size:')]]/@aria-label",
-                # Method 6: Find "Screen size" text and get the next sibling div
-                "//div[contains(@class, 'b') and contains(., 'Screen size')]/following-sibling::div//span",
-                # Method 7: Direct XPath provided by user (old structure)
-                "//*[@id='ip-prod-desc-atf-div-1']/section/section[2]/div/div/div[1]/div[1]/div/div/div[2]/span",
-                # Method 8: Find within "Specifications at a glance" container
-                "//h3[contains(text(), 'Specifications at a glance')]/parent::div//div[@aria-label[contains(., 'Screen size')]]/@aria-label"
+                self.xpaths.get('screen_size_5'),  # Definition list structure
+                self.xpaths.get('screen_size_6'),  # Definition list - direct sibling
+                self.xpaths.get('screen_size_7'),  # Table structure
+                self.xpaths.get('screen_size_8'),  # Alternative table structure
+                self.xpaths.get('screen_size_1'),  # aria-label
+                self.xpaths.get('screen_size_2'),  # Screen size text sibling div
+                self.xpaths.get('screen_size_3'),  # Direct XPath
+                self.xpaths.get('screen_size_4'),  # Specifications at a glance container
             ]
+            xpaths = [x for x in xpaths if x]  # Filter out None values
 
             screen_size_text = None
             for xpath in xpaths:
@@ -1084,28 +1050,28 @@ class WalmartDetailCrawler:
                 print(f"  [INFO] Star rating is 'No ratings yet', setting count_of_reviews to 0")
                 return 0
 
-            # Check 2: Look for "No ratings yet" in page source
+            # Check 2: Look for "No ratings yet" in page source (from DB)
             if page_source and "No ratings yet" in page_source:
                 no_ratings_xpaths = [
-                    "//span[contains(text(), 'No ratings yet')]",
-                    "//*[@id='item-review-section']//span[contains(text(), 'No ratings yet')]"
+                    self.xpaths.get('no_ratings_yet_3'),
+                    self.xpaths.get('no_ratings_yet_4'),
                 ]
+                no_ratings_xpaths = [x for x in no_ratings_xpaths if x]
                 for xpath in no_ratings_xpaths:
                     result = tree.xpath(xpath)
                     if result:
                         print(f"  [INFO] Found 'No ratings yet' on page, setting count_of_reviews to 0")
                         return 0
 
-            # Priority 1: Extract from "Showing 1-3 of 18,552 reviews" pattern (most accurate)
-            # Actual HTML uses h3 tag: <h3 class="w_kV33...">Showing 1-3 of 23,960 reviews</h3>
+            # Priority 1: Extract from "Showing 1-3 of 18,552 reviews" pattern (most accurate, from DB)
             showing_xpaths = [
-                '//*[@id="item-review-section"]/div[7]/h3',
-                '//*[@id="item-review-section"]//h3[contains(text(), "Showing")]',
-                '//h3[contains(text(), "Showing") and contains(text(), "reviews")]',
-                '//*[@id="item-review-section"]/div[7]/div[1]',
-                '//*[@id="item-review-section"]//div[@role="heading" and contains(text(), "Showing")]',
-                '//div[@role="heading" and contains(text(), "Showing") and contains(text(), "reviews")]'
+                self.xpaths.get('showing_reviews_1'),
+                self.xpaths.get('showing_reviews_2'),
+                self.xpaths.get('showing_reviews_3'),
+                self.xpaths.get('showing_reviews_4'),
+                self.xpaths.get('showing_reviews_5'),
             ]
+            showing_xpaths = [x for x in showing_xpaths if x]
             for xpath in showing_xpaths:
                 result = tree.xpath(xpath)
                 if result:
@@ -1119,18 +1085,15 @@ class WalmartDetailCrawler:
                             print(f"  [INFO] Extracted count from 'Showing X of Y reviews': {count}")
                             return count
 
-            # Priority 2: Extract from "View all reviews (4,686)" button
-            # Note: Button with count has class "tc", button without count has class "tl mr2"
+            # Priority 2: Extract from "View all reviews (4,686)" button (from DB)
             view_all_xpaths = [
-                # Buttons with data-dca-intent="select" and class containing "tc" (has count)
-                "//button[contains(text(), 'View all reviews') and @data-dca-intent='select' and contains(@class, 'tc')]",
-                # Specific XPaths (div index varies by page)
-                '//*[@id="item-review-section"]/div[6]/button',
-                '//*[@id="item-review-section"]/div[8]/button',
-                # Generic button with data-dca-intent
-                "//button[contains(text(), 'View all reviews') and @data-dca-intent='select']",
-                '//button[contains(text(), "View all reviews")]'
+                self.xpaths.get('view_all_reviews_count_1'),
+                self.xpaths.get('view_all_reviews_count_2'),
+                self.xpaths.get('view_all_reviews_count_3'),
+                self.xpaths.get('view_all_reviews_count_4'),
+                self.xpaths.get('view_all_reviews_count_5'),
             ]
+            view_all_xpaths = [x for x in view_all_xpaths if x]
             for xpath in view_all_xpaths:
                 result = tree.xpath(xpath)
                 if result:
@@ -1144,11 +1107,12 @@ class WalmartDetailCrawler:
                             print(f"  [INFO] Extracted count from 'View all reviews' button: {count}")
                             return count
 
-            # Fallback: Check for "No ratings yet" -> return 0
+            # Fallback: Check for "No ratings yet" -> return 0 (from DB)
             no_ratings_xpaths = [
-                "//span[contains(text(), 'No ratings yet')]",
-                "//*[@id='item-review-section']//span[contains(text(), 'No ratings yet')]"
+                self.xpaths.get('no_ratings_yet_3'),
+                self.xpaths.get('no_ratings_yet_4'),
             ]
+            no_ratings_xpaths = [x for x in no_ratings_xpaths if x]
             for xpath in no_ratings_xpaths:
                 result = tree.xpath(xpath)
                 if result:
@@ -1402,20 +1366,19 @@ class WalmartDetailCrawler:
             return None
 
     def extract_sku_from_specifications(self):
-        """Extract SKU from Specifications dialog - Model field
-        XPath: //tr[th/dt[text()='Model']]/td/dd
-        """
+        """Extract SKU from Specifications dialog - Model field (from DB)"""
         try:
             page_source = self.page.html
             tree = html.fromstring(page_source)
 
-            # Try multiple XPaths for Model field
+            # Try multiple XPaths for Model field (from DB)
             model_xpaths = [
-                "//tr[th/dt[text()='Model']]/td/dd",
-                "//tr[contains(., 'Model')]/td/dd",
-                "//th[dt[text()='Model']]/following-sibling::td/dd",
-                "//dt[text()='Model']/ancestor::th/following-sibling::td/dd"
+                self.xpaths.get('specifications_model_1'),
+                self.xpaths.get('specifications_model_2'),
+                self.xpaths.get('specifications_model_3'),
+                self.xpaths.get('specifications_model_4'),
             ]
+            model_xpaths = [x for x in model_xpaths if x]
 
             for xpath in model_xpaths:
                 result = tree.xpath(xpath)
@@ -1455,17 +1418,18 @@ class WalmartDetailCrawler:
         return "no sku"
 
     def extract_sku_from_lg_xpath(self):
-        """Extract SKU using LG-specific XPath (from main page)"""
+        """Extract SKU using LG-specific XPath (from main page, from DB)"""
         try:
             page_source = self.page.html
             tree = html.fromstring(page_source)
 
-            # Try multiple LG-specific XPaths
+            # Try multiple LG-specific XPaths (from DB)
             lg_xpaths = [
-                '//div[@class="flix-model-name"]',  # New: flix-model-name class
-                '//*[@id="inpage_container"]/div[2]/div/div/div/div[1]',  # Original
-                '//div[contains(@class, "flix-model-name")]'  # Flexible
+                self.xpaths.get('model_name_1'),
+                self.xpaths.get('model_name_2'),
+                self.xpaths.get('model_name_3'),
             ]
+            lg_xpaths = [x for x in lg_xpaths if x]
 
             for xpath in lg_xpaths:
                 sku = self.extract_text_safe(tree, xpath)
@@ -1561,20 +1525,16 @@ class WalmartDetailCrawler:
                     self.page.run_js("window.scrollTo(0, document.body.scrollHeight);")
                     time.sleep(2)
 
-                    # Try multiple XPaths to find the button (there might be 2 on the page)
+                    # Try multiple XPaths to find the button (from DB)
                     view_all_xpaths = [
-                        # Priority 1: Button with data-dca-intent="select" (most reliable)
-                        "//button[contains(text(), 'View all reviews') and @data-dca-intent='select']",
-                        # Priority 2: Specific XPaths (div index varies by page)
-                        '//*[@id="item-review-section"]/div[6]/button',
-                        '//*[@id="item-review-section"]/div[8]/button',
-                        # Priority 3: Specific XPath without review count
-                        '//*[@id="item-review-section"]/div[2]/div[1]/div[3]/button',
-                        # Priority 4: Any button with "View all reviews" text
-                        "//button[contains(text(), 'View all reviews')]",
-                        # Priority 5: Database XPath as fallback
-                        self.xpaths.get('view_all_reviews_button')
+                        self.xpaths.get('detail_view_all_1'),
+                        self.xpaths.get('detail_view_all_2'),
+                        self.xpaths.get('detail_view_all_3'),
+                        self.xpaths.get('detail_view_all_4'),
+                        self.xpaths.get('detail_view_all_5'),
+                        self.xpaths.get('view_all_reviews_button'),
                     ]
+                    view_all_xpaths = [x for x in view_all_xpaths if x]
 
                     view_all_btn = None
                     for xpath in view_all_xpaths:
@@ -1639,18 +1599,20 @@ class WalmartDetailCrawler:
                     page_source = self.page.html
                     tree = html.fromstring(page_source)
 
-                    # Get review containers - try multiple XPaths
-                    # Find all review containers using data-testid attribute
-                    review_content_divs = tree.xpath('//div[@data-testid="enhanced-review-content"]')
+                    # Get review containers - try multiple XPaths (from DB)
+                    review_content_xpaths = [
+                        self.xpaths.get('review_content_1'),
+                        self.xpaths.get('review_content_2'),
+                        self.xpaths.get('review_content_3'),
+                        self.xpaths.get('review_content_4'),
+                    ]
+                    review_content_xpaths = [x for x in review_content_xpaths if x]
 
-                    # If not found, try alternative XPaths
-                    if not review_content_divs:
-                        review_content_divs = tree.xpath('//div[contains(@class, "review-content")]')
-                    if not review_content_divs:
-                        review_content_divs = tree.xpath('//div[@data-testid="review-card"]')
-                    if not review_content_divs:
-                        # Try to find any review-like containers
-                        review_content_divs = tree.xpath('//div[contains(@class, "CustomerReview")]')
+                    review_content_divs = None
+                    for rc_xpath in review_content_xpaths:
+                        review_content_divs = tree.xpath(rc_xpath)
+                        if review_content_divs:
+                            break
 
                     if not review_content_divs:
                         print(f"  [WARNING] No review content divs found on page {page_num}")
@@ -1661,8 +1623,8 @@ class WalmartDetailCrawler:
                         if len(reviews) >= 20:
                             break
 
-                        # Extract review text
-                        review_xpath = './/p/span[@class="tl-m db-m"]'
+                        # Extract review text (from DB)
+                        review_xpath = self.xpaths.get('review_section_wait') or './/p/span[@class="tl-m db-m"]'
                         review_elem = content_div.xpath(review_xpath)
 
                         if review_elem:

@@ -1052,7 +1052,22 @@ class WalmartDetailCrawler:
                 print(f"  [INFO] Star rating is 'No ratings yet', setting count_of_reviews to 0")
                 return 0
 
-            # Check 2: Look for "No ratings yet" in page source (from DB)
+            # Check 2: Look for "0 reviews" in page source -> return 0 (from DB)
+            if page_source and "0 reviews" in page_source:
+                zero_reviews_xpaths = [
+                    self.xpaths.get('zero_reviews_1'),
+                    self.xpaths.get('zero_reviews_2'),
+                ]
+                zero_reviews_xpaths = [x for x in zero_reviews_xpaths if x]
+                for xpath in zero_reviews_xpaths:
+                    result = tree.xpath(xpath)
+                    if result:
+                        text = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
+                        if "0 reviews" in text:
+                            print(f"  [INFO] Found '0 reviews' on page, setting count_of_reviews to 0")
+                            return 0
+
+            # Check 3: Look for "No ratings yet" in page source (from DB)
             if page_source and "No ratings yet" in page_source:
                 no_ratings_xpaths = [
                     self.xpaths.get('no_ratings_yet_3'),

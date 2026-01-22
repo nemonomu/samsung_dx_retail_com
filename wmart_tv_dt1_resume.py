@@ -1,7 +1,9 @@
 """
 Walmart TV Detail Crawler - Resume from specific index
-Usage: python wmart_tv_dt1_resume.py [start_index] [batch_id]
-Example: python wmart_tv_dt1_resume.py 148 20250122_143052
+Usage: python wmart_tv_dt1_resume.py [start_index]
+Example: python wmart_tv_dt1_resume.py 148
+
+Note: Walmart crawler does not use batch_id for detail_crawled table.
 """
 import sys
 from wmart_tv_dt1 import WalmartDetailCrawler
@@ -9,14 +11,9 @@ import random
 import time
 
 
-def run_from_index(start_idx=1, batch_id=None):
-    """Run crawler starting from specific index with optional batch_id"""
+def run_from_index(start_idx=1):
+    """Run crawler starting from specific index"""
     crawler = WalmartDetailCrawler()
-
-    # Override batch_id if provided
-    if batch_id:
-        crawler.batch_id = batch_id
-        print(f"[INFO] Using existing batch_id: {batch_id}")
 
     try:
         print("="*80)
@@ -92,8 +89,7 @@ def run_from_index(start_idx=1, batch_id=None):
 
 
 if __name__ == '__main__':
-    start_index = 1  # Default
-    batch_id = None
+    start_index = 1
 
     if len(sys.argv) > 1:
         try:
@@ -101,18 +97,5 @@ if __name__ == '__main__':
         except ValueError:
             print(f"Invalid index: {sys.argv[1]}, using default: 1")
 
-    if len(sys.argv) > 2:
-        batch_id = sys.argv[2]
-
     print(f"Starting from index: {start_index}")
-    if batch_id:
-        print(f"Using batch_id: {batch_id}")
-    else:
-        print("[WARNING] No batch_id provided - will create new batch_id!")
-        print("Usage: python wmart_tv_dt1_resume.py [start_index] [batch_id]")
-        confirm = input("Continue without batch_id? (y/n): ")
-        if confirm.lower() != 'y':
-            print("Aborted.")
-            sys.exit(0)
-
-    run_from_index(start_index, batch_id)
+    run_from_index(start_index)

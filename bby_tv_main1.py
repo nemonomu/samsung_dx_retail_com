@@ -73,12 +73,14 @@ class BestBuyTVCrawler:
             return False
 
     def setup_browser(self):
-        """Setup DrissionPage ChromiumPage - 최소 설정"""
+        """Setup DrissionPage ChromiumPage - 이미지 비활성화로 속도 향상"""
         try:
             print("[INFO] Setting up DrissionPage browser...")
 
-            # 가장 기본적인 설정만 사용
-            self.page = ChromiumPage()
+            # 이미지 로드 비활성화로 속도 향상
+            co = ChromiumOptions()
+            co.no_imgs(True)
+            self.page = ChromiumPage(co)
 
             print("[OK] DrissionPage browser setup complete")
         except Exception as e:
@@ -180,19 +182,6 @@ class BestBuyTVCrawler:
                 # 10번 스크롤마다 로그
                 if (current_position // scroll_step) % 10 == 0:
                     print(f"[DEBUG] Scrolled to {current_position}px, page height: {new_height}px")
-
-            # 다시 천천히 위로 스크롤 (이미지 로드 확인)
-            print("[INFO] Scrolling back up slowly...")
-            while current_position > 0:
-                current_position -= scroll_step * 2  # 올라갈 땐 좀 더 빠르게
-                if current_position < 0:
-                    current_position = 0
-                self.page.run_js(f"window.scrollTo(0, {current_position})")
-                time.sleep(scroll_up_wait)
-
-            # 맨 위로
-            self.page.scroll.to_top()
-            time.sleep(top_scroll_wait)
 
             # 제품 링크 개수 확인 - 부족하면 추가 대기
             css_product_link = 'css:' + self.config.get('css', 'product_link', self.file_name, '.product-list-item-link')

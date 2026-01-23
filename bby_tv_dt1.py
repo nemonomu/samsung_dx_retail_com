@@ -111,10 +111,12 @@ class BestBuyDetailCrawler:
             return None
 
     def setup_browser(self):
-        """Setup DrissionPage ChromiumPage - 최소 설정"""
+        """Setup DrissionPage ChromiumPage - 이미지 비활성화로 속도 향상"""
         try:
             print("[INFO] Setting up DrissionPage browser...")
-            self.page = ChromiumPage()
+            co = ChromiumOptions()
+            co.no_imgs(True)
+            self.page = ChromiumPage(co)
             print("[OK] DrissionPage browser setup complete")
             return True
         except Exception as e:

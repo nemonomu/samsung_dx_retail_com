@@ -1875,9 +1875,8 @@ class BestBuyDetailCrawler:
             extracted_screen_size = self.extract_screen_size(tree)
             print(f"  [✓] Screen Size (extracted): {extracted_screen_size}")
 
-            # 2-0. Model Year extraction (specifications - general dialog에서)
-            model_year = self.extract_model_year(tree)
-            print(f"  [✓] Model Year: {model_year}")
+            # 2-0. Model Year - dialog에서 추출 (아래에서 처리)
+            model_year = None
 
             # 2-1. Price 정보 extraction (메인 page에서 직접 collected)
             # 가격 컨테이너 로딩 대기 (최대 10초) - DrissionPage
@@ -1958,6 +1957,10 @@ class BestBuyDetailCrawler:
 
                 # Extract SKU (Model Number) from dialog
                 sku = self.extract_sku(dialog_tree)
+
+                # Extract Model Year from dialog
+                model_year = self.extract_model_year(dialog_tree)
+                print(f"  [✓] Model Year: {model_year}")
 
                 # dialog close
                 self.close_specifications_dialog()

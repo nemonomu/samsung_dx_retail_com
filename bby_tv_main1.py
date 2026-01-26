@@ -241,7 +241,7 @@ class BestBuyTVCrawler:
             xpath_product_title_list = self.config.get_xpath_list('product_title', self.file_name) or ['.//h2[contains(@class, "product-title")]']
             xpath_product_url = self.config.get('xpath', 'product_url', self.file_name, './/a[@class="product-list-item-link"]/@href')
             xpath_offer = self.config.get('xpath', 'offer', self.file_name, './/div[@data-testid="plus-x-offers"]//span[@class="font-sans text-default text-style-body-md-400"]')
-            xpath_pickup = self.config.get('xpath', 'pickup_availability', self.file_name, './/div[@class="fulfillment"]//p[contains(., "Pick up")]')
+            xpath_pickup = self.config.get('xpath', 'pickup_availability', self.file_name)
             xpath_shipping = self.config.get('xpath', 'shipping_availability', self.file_name, './/div[@class="fulfillment"]//p[contains(., "Get it") or contains(., "FREE")]')
             xpath_delivery = self.config.get('xpath', 'delivery_availability', self.file_name, './/div[@class="fulfillment"]//p[contains(., "Delivery")]')
             xpath_sponsored = self.config.get('xpath', 'sponsored', self.file_name, './/div[@class="sponsored"]')
@@ -308,8 +308,10 @@ class BestBuyTVCrawler:
                             offer = match.group(1)
 
                     # Extract Pick-Up Availability
-                    pickup_elem = container.xpath(xpath_pickup)
-                    pickup = pickup_elem[0].text_content().strip() if pickup_elem else None
+                    pickup = None
+                    if xpath_pickup:
+                        pickup_elem = container.xpath(xpath_pickup)
+                        pickup = pickup_elem[0].text_content().strip() if pickup_elem else None
 
                     # Extract Shipping Availability
                     shipping_elem = container.xpath(xpath_shipping)

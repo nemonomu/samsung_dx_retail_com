@@ -1451,6 +1451,28 @@ class AmazonDetailCrawler:
             print(f"  [WARNING] Failed to extract available quantity: {e}")
             return None
 
+    def extract_number_of_units_purchased_past_month(self, tree):
+        """Extract number of units purchased past month from detail page
+        - '300+ bought' -> '300'
+        - '10K+ bought' -> '10K'
+        - '1.5K+ bought' -> '1.5K'
+        """
+        try:
+            # Use DB XPath if available, otherwise use hardcoded fallback
+            xpath = (self.xpaths.get('number_of_units_purchased_past_month') or ['//*[@id="social-proofing-faceout-title-tk_bought"]/span[1]'])[0]
+            text = self.extract_text_safe(tree, xpath)
+            if text:
+                text = text.strip()
+                # Extract number part with optional K (e.g., "300" or "10K" or "1.5K")
+                match = re.search(r'([\d.]+K?)\s*\+?\s*bought', text, re.IGNORECASE)
+                if match:
+                    return match.group(1)
+            return None
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract number_of_units_purchased_past_month: {e}")
+            return None
+
     def extract_discount_type(self, tree):
         """Extract discount type (e.g., 'Limited time deal')"""
         try:
@@ -1552,19 +1574,11 @@ class AmazonDetailCrawler:
                 print(f"  [WARNING] Could not extract valid ASIN from URL: {final_url}")
                 item = None
 
-            # Ranks - try multiple approaches using extract_with_xpaths
-            rank_1_raw = self.extract_with_xpaths(tree, 'rank_1', [
-                '//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[1]//span[@class="a-list-item"]/span',
-                '//*[@id="productDetails_expanderTables_depthRightSections"]//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[1]',
-                '//*[@id="detailBullets_feature_div"]/ul/li[7]/span/text()[1]'
-            ])
+            # Ranks - extract using DB xpaths
+            rank_1_raw = self.extract_with_xpaths(tree, 'rank1')
             rank_1 = self.clean_rank(rank_1_raw)
 
-            rank_2_raw = self.extract_with_xpaths(tree, 'rank_2', [
-                '//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[2]//span[@class="a-list-item"]/span',
-                '//*[@id="productDetails_expanderTables_depthRightSections"]//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[2]',
-                '//*[@id="detailBullets_feature_div"]/ul/li[7]/span/ul'
-            ])
+            rank_2_raw = self.extract_with_xpaths(tree, 'rank2')
             rank_2 = self.clean_rank(rank_2_raw)
 
             # Extract screen_size with tv_item_mst fallback
@@ -1651,6 +1665,7 @@ class AmazonDetailCrawler:
             shipping_info = self.extract_shipping_info(tree)
             available_quantity = self.extract_available_quantity_for_purchase(tree)
             discount_type = self.extract_discount_type(tree)
+            number_of_units_purchased = self.extract_number_of_units_purchased_past_month(tree)
 
             # Extract detailed review content and count_of_reviews from review page (up to 20 reviews)
             # Skip review page navigation if star_rating == "No customer reviews"
@@ -1699,7 +1714,7 @@ class AmazonDetailCrawler:
                 'Detailed_Review_Content': detailed_review_content,
                 'main_rank': url_data.get('main_rank'),
                 'bsr_rank': url_data.get('bsr_rank'),
-                'number_of_units_purchased_past_month': url_data.get('number_of_units_purchased_past_month'),  # From main_crawled
+                'number_of_units_purchased_past_month': number_of_units_purchased,  # Extracted from detail page
                 'final_sku_price': final_sku_price,  # Extracted from detail page
                 'original_sku_price': original_sku_price,  # Extracted from detail page
                 'savings': savings,  # Calculated from prices

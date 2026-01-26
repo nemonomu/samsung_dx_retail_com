@@ -242,8 +242,8 @@ class BestBuyTVCrawler:
             xpath_product_url = self.config.get('xpath', 'product_url', self.file_name, './/a[@class="product-list-item-link"]/@href')
             xpath_offer = self.config.get('xpath', 'offer', self.file_name, './/div[@data-testid="plus-x-offers"]//span[@class="font-sans text-default text-style-body-md-400"]')
             xpath_pickup = self.config.get('xpath', 'pickup_availability', self.file_name)
-            xpath_shipping = self.config.get('xpath', 'shipping_availability', self.file_name, './/div[@class="fulfillment"]//p[contains(., "Get it") or contains(., "FREE")]')
-            xpath_delivery = self.config.get('xpath', 'delivery_availability', self.file_name, './/div[@class="fulfillment"]//p[contains(., "Delivery")]')
+            xpath_shipping = self.config.get('xpath', 'shipping_availability', self.file_name)
+            xpath_delivery = self.config.get('xpath', 'delivery_availability', self.file_name)
             xpath_sponsored = self.config.get('xpath', 'sponsored', self.file_name, './/div[@class="sponsored"]')
             offer_regex = self.config.get_constant('offer_regex', None, r'(\d+)')
             base_url = self.config.get_url('base_url') or 'https://www.bestbuy.com'
@@ -314,19 +314,19 @@ class BestBuyTVCrawler:
                         pickup = pickup_elem[0].text_content().strip() if pickup_elem else None
 
                     # Extract Shipping Availability
-                    shipping_elem = container.xpath(xpath_shipping)
-                    shipping = shipping_elem[0].text_content().strip() if shipping_elem else None
+                    shipping = None
+                    if xpath_shipping:
+                        shipping_elem = container.xpath(xpath_shipping)
+                        shipping = shipping_elem[0].text_content().strip() if shipping_elem else None
 
                     # Extract Delivery Availability (Delivery only, ignore Installation)
-                    delivery_elem = container.xpath(xpath_delivery)
-                    if delivery_elem:
-                        delivery_text = delivery_elem[0].text_content().strip()
-                        if "Delivery" in delivery_text:
-                            delivery = delivery_text
-                        else:
-                            delivery = None
-                    else:
-                        delivery = None
+                    delivery = None
+                    if xpath_delivery:
+                        delivery_elem = container.xpath(xpath_delivery)
+                        if delivery_elem:
+                            delivery_text = delivery_elem[0].text_content().strip()
+                            if "Delivery" in delivery_text.lower():
+                                delivery = delivery_text
 
                     # Extract SKU_Status (Sponsored만 수집, Regular는 공란)
                     status_elem = container.xpath(xpath_sponsored)

@@ -647,14 +647,13 @@ class BestBuyDetailCrawler:
             return None
 
     def extract_model_year(self, tree):
-        """Extract model year from specifications - general dialog"""
+        """Extract model year from specifications - general dialog (DB에서 xpath 로드)"""
         try:
-            # Find div with "Model Year" text and get the next sibling div
-            xpaths = self.config.get_xpath_list('model_year', self.file_name) or [
-                '//div[contains(text(), "Model Year")]/following-sibling::div',
-                '//div[text()="Model Year"]/../div[contains(@class, "grow basis-none")]',
-                '//div[contains(@class, "font-weight-medium") and contains(text(), "Model Year")]/../div[contains(@class, "grow basis-none pl-300")]'
-            ]
+            xpaths = self.config.get_xpath_list('model_year', self.file_name)
+
+            if not xpaths:
+                print(f"  [WARNING] No model_year xpath found in DB for {self.file_name}")
+                return None
 
             for xpath in xpaths:
                 elem = tree.xpath(xpath)

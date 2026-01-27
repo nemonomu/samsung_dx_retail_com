@@ -944,104 +944,66 @@ class BestBuyDetailCrawler:
             return None
 
     def extract_count_of_reviews_from_detail(self, tree):
-        """Count of Reviews extraction (메인 detail page에서)
+        """Count of Reviews extraction (메인 detail page에서) - DB에서 xpath 로드
+
         Example: '(79 reviews)' -> '79', 'Not yet reviewed' -> 0
         Note: '(45 reviews from Skyworth USA)' 같은 외부 리뷰는 'EXTERNAL_REVIEWS' 반환
+
+        중요: Sponsored/Related Item 섹션(spotlight-ad)의 리뷰 수가 아닌
+              현재 제품의 리뷰 수만 추출해야 함
         """
         try:
-            # Step 1: 먼저 visible 요소에서 외부 리뷰 여부 확인
-            # visually-hidden에는 외부 리뷰 정보가 없을 수 있으므로 visible 요소를 먼저 체크
-            container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
-                '/html/body/div[5]/div[4]/div[1]',
-                '//div[@class="order-2 t3V0AOwowrTfUzPn "]',
-                '//div[contains(@class, "order-2")]'
-            ]
-
-            price_container = None
-            for xpath in container_xpaths:
-                containers = tree.xpath(xpath)
-                if containers:
-                    price_container = containers[0]
-                    break
-
-            # visible 요소에서 외부 리뷰 감지 (먼저 체크)
-            if price_container is not None:
-                external_review_xpaths = self.config.get_xpath_list('external_reviews', self.file_name) or [
-                    './/div/div[3]/a/div/span',
-                    './/span[contains(@class, "c-ratings-reviews")]',
-                    './/span[contains(@class, "c-reviews")]'
-                ]
-
-                for xpath in external_review_xpaths:
-                    elem = price_container.xpath(xpath)
+            # Step 1: "Not yet reviewed" 우선 감지 (Sponsored 섹션 제외)
+            # 리뷰가 없는 제품을 먼저 처리하여 다른 섹션의 값이 잘못 추출되는 것을 방지
+            not_reviewed_xpaths = self.config.get_xpath_list('not_yet_reviewed', self.file_name)
+            if not not_reviewed_xpaths:
+                print(f"  [WARNING] No not_yet_reviewed xpath in DB for {self.file_name}")
+            else:
+                for xpath in not_reviewed_xpaths:
+                    elem = tree.xpath(xpath)
                     if elem:
                         text = elem[0].text_content().strip()
-                        # 외부 리뷰 감지: "(45 reviews from Skyworth USA)" 같은 패턴
+                        if "Not yet reviewed" in text:
+                            return 0
+
+            # Step 2: visually-hidden에서 리뷰 수 추출 (Sponsored 섹션 제외)
+            hidden_xpaths = self.config.get_xpath_list('count_of_reviews_hidden', self.file_name)
+            if not hidden_xpaths:
+                print(f"  [WARNING] No count_of_reviews_hidden xpath in DB for {self.file_name}")
+            else:
+                for xpath in hidden_xpaths:
+                    elem = tree.xpath(xpath)
+                    if elem:
+                        text = elem[0].text_content().strip()
+                        # 외부 리뷰 감지: "(45 reviews from Skyworth USA)" 패턴
+                        if re.search(r'reviews?\s+from\s+', text, re.IGNORECASE):
+                            print(f"  [INFO] External reviews detected (hidden): {text}")
+                            return 'EXTERNAL_REVIEWS'
+                        # "Rating X.X out of 5 stars with N reviews" 패턴
+                        match = re.search(r'with\s+([\d,]+)\s+reviews', text)
+                        if match:
+                            return match.group(1).replace(',', '')
+
+            # Step 3: visible span에서 리뷰 수 추출 (Sponsored 섹션 제외)
+            visible_xpaths = self.config.get_xpath_list('count_of_reviews_visible', self.file_name)
+            if not visible_xpaths:
+                print(f"  [WARNING] No count_of_reviews_visible xpath in DB for {self.file_name}")
+            else:
+                for xpath in visible_xpaths:
+                    elem = tree.xpath(xpath)
+                    if elem:
+                        text = elem[0].text_content().strip()
+                        # "Not yet reviewed" 재확인
+                        if "Not yet reviewed" in text:
+                            return 0
+                        # 외부 리뷰 감지
                         if re.search(r'reviews?\s+from\s+', text, re.IGNORECASE):
                             print(f"  [INFO] External reviews detected (visible): {text}")
                             return 'EXTERNAL_REVIEWS'
-
-            # Step 2: 외부 리뷰가 아닌 경우 visually-hidden에서 리뷰 수 추출
-            hidden_xpaths = self.config.get_xpath_list('star_rating_hidden', self.file_name) or [
-                '//p[@class="visually-hidden"][contains(text(), "reviews")]',
-                '//p[contains(@class, "visually-hidden")][contains(text(), "out of 5 stars")]'
-            ]
-            for xpath in hidden_xpaths:
-                elem = tree.xpath(xpath)
-                if elem:
-                    text = elem[0].text_content().strip()
-                    # visually-hidden에서도 외부 리뷰 체크 (혹시 있을 경우)
-                    if re.search(r'reviews?\s+from\s+', text, re.IGNORECASE):
-                        print(f"  [INFO] External reviews detected (visually-hidden): {text}")
-                        return 'EXTERNAL_REVIEWS'
-                    match = re.search(r'with\s+([\d,]+)\s+reviews', text)
-                    if match:
-                        return match.group(1).replace(',', '')
-
-            # Step 3: 컨테이너 기반 extraction (fallback)
-            if price_container is None or len(price_container) == 0:
-                return None
-
-            reviews_xpaths = self.config.get_xpath_list('reviews_count_inner', self.file_name) or [
-                './/div/div[3]/a/div/span[2]',
-                './/span[@class="c-reviews order-2"]',
-                './/span[contains(@class, "c-reviews")]',
-                './/span[@aria-hidden="true"][contains(@class, "order-2")]',
-                './/div/div[3]/a/div/span',
-                './/span[contains(@class, "c-ratings-reviews")]'
-            ]
-
-            for xpath in reviews_xpaths:
-                elem = price_container.xpath(xpath)
-                if elem:
-                    text = elem[0].text_content().strip()
-
-                    if "Not yet reviewed" in text:
-                        return 0
-
-                    # 외부 리뷰 감지 (이미 위에서 체크했지만 안전하게 한번 더)
-                    if re.search(r'reviews?\s+from\s+', text, re.IGNORECASE):
-                        print(f"  [INFO] External reviews detected: {text}")
-                        return 'EXTERNAL_REVIEWS'
-
-                    match = re.search(r'\(([\d,]+)\s*reviews?[^)]*\)', text, re.IGNORECASE)
-                    if match:
-                        count = match.group(1).replace(',', '')
-                        return count
-
-            # Fallback: Check for "Not yet reviewed"
-            not_reviewed_xpaths = self.config.get_xpath_list('not_yet_reviewed', self.file_name) or [
-                './/div/div[3]/a/div/span',
-                './/span[contains(text(), "Not yet reviewed")]',
-                './/span[@class="c-reviews order-2"][contains(text(), "Not yet reviewed")]'
-            ]
-
-            for xpath in not_reviewed_xpaths:
-                elem = price_container.xpath(xpath)
-                if elem:
-                    text = elem[0].text_content().strip()
-                    if "Not yet reviewed" in text:
-                        return 0
+                        # "(N reviews)" 패턴
+                        match = re.search(r'\(([\d,]+)\s*reviews?[^)]*\)', text, re.IGNORECASE)
+                        if match:
+                            return match.group(1).replace(',', '')
 
             return None
         except Exception as e:

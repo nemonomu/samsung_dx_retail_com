@@ -325,7 +325,7 @@ class BestBuyTVCrawler:
                         delivery_elem = container.xpath(xpath_delivery)
                         if delivery_elem:
                             delivery_text = delivery_elem[0].text_content().strip()
-                            if "Delivery" in delivery_text.lower():
+                            if "delivery" in delivery_text.lower():
                                 delivery = delivery_text
 
                     # Extract SKU_Status (Sponsored만 수집, Regular는 공란)

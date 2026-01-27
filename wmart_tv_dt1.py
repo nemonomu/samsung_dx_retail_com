@@ -933,6 +933,52 @@ class WalmartDetailCrawler:
             print(f"  [WARNING] Failed to extract similar products: {e}")
             return None
 
+    def extract_model_year(self, retailer_sku_name):
+        """Extract model year from product name
+
+        Patterns:
+        - (2025) or (2025 Model) - year in parentheses
+        - 2025 Model - year followed by Model
+        - Smart TV 2025 - year at end of product name
+
+        Examples:
+        - 'Samsung 65" The Frame Pro ... Smart TV (2025)' -> 2025
+        - 'Hisense 55" Class U7 Series... (55U75QG, 2025 Model)' -> 2025
+        - 'SAMSUNG 85" Class QN90D Neo QLED 4K Smart TV 2024' -> 2024
+        """
+        if not retailer_sku_name:
+            return None
+
+        try:
+            # Pattern 1: (2025) or (2025 Model)
+            match = re.search(r'\((\d{4})(?:\s*Model)?\)', retailer_sku_name)
+            if match:
+                year = int(match.group(1))
+                if 2015 <= year <= 2030:
+                    print(f"  [INFO] Model year extracted (pattern 1): {year}")
+                    return year
+
+            # Pattern 2: 2025 Model (without parentheses)
+            match = re.search(r'(\d{4})\s*Model', retailer_sku_name)
+            if match:
+                year = int(match.group(1))
+                if 2015 <= year <= 2030:
+                    print(f"  [INFO] Model year extracted (pattern 2): {year}")
+                    return year
+
+            # Pattern 3: year at end of product name (Smart TV 2025, 4K 2024, etc.)
+            match = re.search(r'\b(20[12]\d)\s*$', retailer_sku_name.strip())
+            if match:
+                year = int(match.group(1))
+                print(f"  [INFO] Model year extracted (pattern 3): {year}")
+                return year
+
+            return None
+
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract model year: {e}")
+            return None
+
     def extract_screen_size(self, tree, retailer_sku_name=None):
         """Extract screen size from product name or 'Specifications at a glance' section
         Example: 'SAMSUNG 77" Class...' -> '77 inches', '65 in' -> '65 inches'
@@ -2178,7 +2224,7 @@ class WalmartDetailCrawler:
                 data['Retailer_SKU_Name_similar'],
                 None,  # estimated_annual_electricity_use (Walmart doesn't have this)
                 None,  # promotion_type (Walmart doesn't have this)
-                None,  # model_year (Walmart doesn't have this)
+                self.extract_model_year(data['Retailer_SKU_Name']),  # model_year from product name
                 calendar_week,
                 crawl_datetime
             ))

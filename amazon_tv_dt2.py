@@ -252,6 +252,7 @@ class AmazonDetailCrawler:
 
                     if asin not in url_data_map:
                         url_data_map[asin] = {
+                            'asin': asin,  # Store ASIN for duplicate check
                             'page_type': 'main',
                             'url': url,  # Store full URL
                             'main_rank': main_rank,
@@ -282,6 +283,7 @@ class AmazonDetailCrawler:
                     else:
                         # New ASIN from bsr
                         url_data_map[asin] = {
+                            'asin': asin,  # Store ASIN for duplicate check
                             'page_type': 'bsr',
                             'url': url,  # Store full URL
                             'main_rank': None,
@@ -316,8 +318,9 @@ class AmazonDetailCrawler:
 
             print(f"[OK] Total unique URLs from main/bsr: {len(all_urls)}")
 
-            # Filter out already processed URLs from current session (based on main batch start time)
-            print("[INFO] Checking for already processed URLs (current session)...")
+            # Filter out already processed items from current session (based on ASIN/item)
+            # Using ASIN instead of URL to handle redirects (original URL vs final URL mismatch)
+            print("[INFO] Checking for already processed items (current session, ASIN-based)...")
             cursor = self.db_conn.cursor()
 
             # Use main batch_id as session start time
@@ -327,25 +330,26 @@ class AmazonDetailCrawler:
 
                 print(f"[INFO] Session start time (from main batch): {session_start_str}")
 
-                # Get all distinct processed URLs from current session in amazon_tv_detail_crawled
+                # Get all distinct processed ASINs (item) from current session in amazon_tv_detail_crawled
+                # item column stores ASIN extracted from final URL after redirect
                 cursor.execute("""
-                    SELECT DISTINCT product_url
+                    SELECT DISTINCT item
                     FROM amazon_tv_detail_crawled
-                    WHERE product_url IS NOT NULL
+                    WHERE item IS NOT NULL
                       AND crawl_datetime >= %s
                 """, (session_start_str,))
 
-                already_processed_urls = {row[0] for row in cursor.fetchall()}
-                print(f"[INFO] Found {len(already_processed_urls)} already processed URLs in current session")
+                already_processed_asins = {row[0] for row in cursor.fetchall()}
+                print(f"[INFO] Found {len(already_processed_asins)} already processed ASINs in current session")
             else:
-                already_processed_urls = set()
+                already_processed_asins = set()
                 print(f"[WARNING] No main batch_id found, skipping duplicate check")
 
             cursor.close()
 
-            # Filter out already processed URLs
+            # Filter out already processed items (ASIN-based)
             new_urls = [url_data for url_data in all_urls
-                        if url_data['url'] not in already_processed_urls]
+                        if url_data['asin'] not in already_processed_asins]
 
             # Summary
             already_processed_count = len(all_urls) - len(new_urls)

@@ -982,6 +982,16 @@ class BestBuyDetailCrawler:
                         # "Rating X.X out of 5 stars with N reviews" 패턴
                         match = re.search(r'with\s+([\d,]+)\s+reviews', text)
                         if match:
+                            # hidden에서 숫자 추출 성공 → return 전에 visible에서 외부 리뷰 여부 확인
+                            visible_xpaths_check = self.config.get_xpath_list('count_of_reviews_visible', self.file_name)
+                            if visible_xpaths_check:
+                                for vxpath in visible_xpaths_check:
+                                    velem = tree.xpath(vxpath)
+                                    if velem:
+                                        vtext = velem[0].text_content().strip()
+                                        if re.search(r'reviews?\s+from\s+', vtext, re.IGNORECASE):
+                                            print(f"  [INFO] External reviews detected (visible cross-check): {vtext}")
+                                            return 'EXTERNAL_REVIEWS'
                             return match.group(1).replace(',', '')
 
             # Step 3: visible span에서 리뷰 수 추출 (Sponsored 섹션 제외)

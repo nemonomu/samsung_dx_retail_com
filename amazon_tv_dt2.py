@@ -1050,19 +1050,24 @@ class AmazonDetailCrawler:
             # Get current page HTML
             tree = html.fromstring(self.driver.page_source)
 
-            # Extract reviews from detail page review section
+            # Extract reviews from detail page review section using container-based approach
             # Container: <ul id="cm-cr-dp-review-list" data-hook="top-customer-reviews-widget">
             # Each review: <li data-hook="review">
-            # Review body: <span data-hook="review-body"> inner <span>
-            review_xpath = '//ul[@id="cm-cr-dp-review-list"]//li[@data-hook="review"]//span[@data-hook="review-body"]//span'
-            review_elements = tree.xpath(review_xpath)
+            review_container_xpath = '//ul[@id="cm-cr-dp-review-list"]//li[@data-hook="review"]'
+            review_containers = tree.xpath(review_container_xpath)
 
             all_reviews = []
-            if review_elements:
-                for elem in review_elements:
-                    review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
-                    if review_text:
-                        all_reviews.append(review_text)
+            collected_reviews = set()  # 중복 방지
+            if review_containers:
+                for container in review_containers:
+                    body_elem = container.xpath('.//span[@data-hook="review-body"]')
+                    if body_elem:
+                        review_text = body_elem[0].text_content().strip()
+                        # Remove "Read more" text
+                        review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
+                        if review_text and review_text not in collected_reviews:
+                            all_reviews.append(review_text)
+                            collected_reviews.add(review_text)
 
             # Format as "1-review, 2-review, ..."
             if all_reviews:
@@ -1266,15 +1271,19 @@ class AmazonDetailCrawler:
 
                 tree = html.fromstring(self.driver.page_source)
 
-                # Extract reviews from first page
-                review_xpath = '//span[@data-hook="review-body"]/span'
-                review_elements = tree.xpath(review_xpath)
+                # Extract reviews from first page using container-based approach
+                review_container_xpath = '//div[@data-hook="review"]'
+                review_containers = tree.xpath(review_container_xpath)
 
-                if review_elements:
-                    for elem in review_elements[:10]:  # Max 10 from first page
-                        review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
-                        if review_text:
-                            all_reviews.append(review_text)
+                if review_containers:
+                    for container in review_containers[:10]:  # Max 10 from first page
+                        body_elem = container.xpath('.//span[@data-hook="review-body"]')
+                        if body_elem:
+                            review_text = body_elem[0].text_content().strip()
+                            # Remove "Read more" text
+                            review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
+                            if review_text:
+                                all_reviews.append(review_text)
 
                 print(f"  [INFO] Review page 1: collected {len(all_reviews)} reviews")
 
@@ -1315,28 +1324,32 @@ class AmazonDetailCrawler:
                         else:
                             print(f"  [DEBUG] Confirmed on page {current_page}: {current_url[:80]}...")
 
-                        # Extract reviews from current page
+                        # Extract reviews from current page using container-based approach
                         tree = html.fromstring(self.driver.page_source)
-                        review_elements = tree.xpath(review_xpath)
+                        review_containers = tree.xpath(review_container_xpath)
 
-                        print(f"  [DEBUG] Review page {current_page}: found {len(review_elements)} review elements")
+                        print(f"  [DEBUG] Review page {current_page}: found {len(review_containers)} review containers")
 
                         # Collect reviews with duplicate check
                         page_count = 0
                         duplicates = 0
-                        if review_elements:
-                            for elem in review_elements[:10]:  # Max 10 per page
+                        if review_containers:
+                            for container in review_containers[:10]:  # Max 10 per page
                                 if len(all_reviews) >= self.target_reviews:
                                     break
-                                review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
-                                if review_text:
-                                    # Skip if duplicate
-                                    if review_text in collected_reviews:
-                                        duplicates += 1
-                                        continue
-                                    all_reviews.append(review_text)
-                                    collected_reviews.add(review_text)
-                                    page_count += 1
+                                body_elem = container.xpath('.//span[@data-hook="review-body"]')
+                                if body_elem:
+                                    review_text = body_elem[0].text_content().strip()
+                                    # Remove "Read more" text
+                                    review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
+                                    if review_text:
+                                        # Skip if duplicate
+                                        if review_text in collected_reviews:
+                                            duplicates += 1
+                                            continue
+                                        all_reviews.append(review_text)
+                                        collected_reviews.add(review_text)
+                                        page_count += 1
 
                         if duplicates > 0:
                             print(f"  [WARNING] Found {duplicates} duplicate reviews on page {current_page}")
@@ -1352,19 +1365,22 @@ class AmazonDetailCrawler:
                                     print(f"  [WARNING] Sorry page detected on page {current_page}, refreshing ({refresh_attempt + 1}/10)...")
                                     self.driver.refresh()
                                     time.sleep(5)
-                                    # 새로고침 후 리뷰 다시 추출 시도
+                                    # 새로고침 후 리뷰 다시 추출 시도 (container-based)
                                     tree = html.fromstring(self.driver.page_source)
-                                    review_elements = tree.xpath(review_xpath)
-                                    if review_elements:
+                                    review_containers = tree.xpath(review_container_xpath)
+                                    if review_containers:
                                         print(f"  [INFO] Reviews found after refresh, continuing...")
-                                        for elem in review_elements[:10]:
+                                        for container in review_containers[:10]:
                                             if len(all_reviews) >= self.target_reviews:
                                                 break
-                                            review_text = elem.text_content().strip() if hasattr(elem, 'text_content') else str(elem).strip()
-                                            if review_text and review_text not in collected_reviews:
-                                                all_reviews.append(review_text)
-                                                collected_reviews.add(review_text)
-                                                page_count += 1
+                                            body_elem = container.xpath('.//span[@data-hook="review-body"]')
+                                            if body_elem:
+                                                review_text = body_elem[0].text_content().strip()
+                                                review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
+                                                if review_text and review_text not in collected_reviews:
+                                                    all_reviews.append(review_text)
+                                                    collected_reviews.add(review_text)
+                                                    page_count += 1
                                         break
                                 else:
                                     break

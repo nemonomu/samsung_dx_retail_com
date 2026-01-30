@@ -1272,8 +1272,18 @@ class AmazonDetailCrawler:
                 tree = html.fromstring(self.driver.page_source)
 
                 # Extract reviews from first page using container-based approach
-                review_container_xpath = '//div[@data-hook="review"]'
-                review_containers = tree.xpath(review_container_xpath)
+                # Use DB XPaths if available, otherwise use hardcoded fallback
+                review_container_xpaths = self.xpaths.get('review_container') or [
+                    '//div[starts-with(@id, "customer_review-")]',  # New structure (2025~)
+                    '//div[@data-hook="review"]',  # Legacy structure
+                ]
+                review_containers = []
+                review_container_xpath = None  # Store working xpath for reuse in pagination
+                for xpath in review_container_xpaths:
+                    review_containers = tree.xpath(xpath)
+                    if review_containers:
+                        review_container_xpath = xpath
+                        break
 
                 if review_containers:
                     for container in review_containers[:10]:  # Max 10 from first page
@@ -1326,7 +1336,16 @@ class AmazonDetailCrawler:
 
                         # Extract reviews from current page using container-based approach
                         tree = html.fromstring(self.driver.page_source)
-                        review_containers = tree.xpath(review_container_xpath)
+                        review_containers = []
+                        if review_container_xpath:
+                            review_containers = tree.xpath(review_container_xpath)
+                        if not review_containers:
+                            # Retry with all xpaths
+                            for xpath in review_container_xpaths:
+                                review_containers = tree.xpath(xpath)
+                                if review_containers:
+                                    review_container_xpath = xpath
+                                    break
 
                         print(f"  [DEBUG] Review page {current_page}: found {len(review_containers)} review containers")
 
@@ -1367,7 +1386,12 @@ class AmazonDetailCrawler:
                                     time.sleep(5)
                                     # 새로고침 후 리뷰 다시 추출 시도 (container-based)
                                     tree = html.fromstring(self.driver.page_source)
-                                    review_containers = tree.xpath(review_container_xpath)
+                                    review_containers = []
+                                    for xpath in review_container_xpaths:
+                                        review_containers = tree.xpath(xpath)
+                                        if review_containers:
+                                            review_container_xpath = xpath
+                                            break
                                     if review_containers:
                                         print(f"  [INFO] Reviews found after refresh, continuing...")
                                         for container in review_containers[:10]:

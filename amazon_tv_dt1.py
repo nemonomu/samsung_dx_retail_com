@@ -1486,9 +1486,10 @@ class AmazonDetailCrawler:
 
     def extract_number_of_units_purchased_past_month(self, tree):
         """Extract number of units purchased past month from detail page
-        - '300+ bought' -> '300'
-        - '10K+ bought' -> '10K'
-        - '1.5K+ bought' -> '1.5K'
+        - '300+ bought' -> 300
+        - '10K+ bought' -> 10000
+        - '1.5K+ bought' -> 1500
+        Returns integer value for DB storage
         """
         try:
             # Use DB XPath if available, otherwise use hardcoded fallback
@@ -1497,9 +1498,19 @@ class AmazonDetailCrawler:
             if text:
                 text = text.strip()
                 # Extract number part with optional K (e.g., "300" or "10K" or "1.5K")
-                match = re.search(r'([\d.]+K?)\s*\+?\s*bought', text, re.IGNORECASE)
+                match = re.search(r'([\d.]+)(K?)\s*\+?\s*bought', text, re.IGNORECASE)
                 if match:
-                    return match.group(1)
+                    num_str = match.group(1)
+                    suffix = match.group(2).upper()
+                    try:
+                        num = float(num_str)
+                        if suffix == 'K':
+                            num = int(num * 1000)
+                        else:
+                            num = int(num)
+                        return num
+                    except ValueError:
+                        return None
             return None
 
         except Exception as e:

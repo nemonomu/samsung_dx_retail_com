@@ -58,6 +58,7 @@ class AmazonDetailCrawler:
         self.cosr_null_records = []  # count_of_star_ratings is null but star_rating exists
         self.screen_size_mismatch_records = []  # screen_size mismatch between extracted and tv_item_mst
         self.current_account = _config.get_account('primary', 'amazon_tv_dt1') or 'unsandev0004'
+        self.processed_asins = set()  # Real-time duplicate check for ASINs (after redirect)
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -1614,6 +1615,11 @@ class AmazonDetailCrawler:
 
             if item and len(item) == 10:
                 print(f"  [OK] Extracted item from URL (ASIN): {item}")
+                # Real-time duplicate check (for sspa/click redirects)
+                if item in self.processed_asins:
+                    print(f"  [SKIP] Already processed ASIN in this session: {item}")
+                    return False
+                self.processed_asins.add(item)
             else:
                 print(f"  [WARNING] Could not extract valid ASIN from URL: {final_url}")
                 item = None

@@ -1940,7 +1940,7 @@ class AmazonDetailCrawler:
                     # Error conditions
                     has_sr_null = sr_is_null  # star_rating is null
                     has_cor_null = cor_is_null  # count_of_reviews is null
-                    has_cosr_null = cosr_is_null  # count_of_star_ratings is null
+                    has_cosr_null = cosr_is_null and not sr_is_no_reviews  # count_of_star_ratings is null (but ok if no reviews)
                     has_fsp_null = fsp_is_null  # final_sku_price is null
                     has_rv_detail_null = cor_int > 0 and drc_is_null  # reviews > 0 but content null
                     has_src_null = cor_int > 0 and src_is_null  # reviews > 0 but summarized review null
@@ -2053,9 +2053,8 @@ class AmazonDetailCrawler:
                             self.driver.refresh()
                             time.sleep(3)
                         elif retry_num == 2:
-                            # 2nd retry: Reload cookies and re-access URL
-                            print(f"  [RETRY 2/3] Reloading cookies and re-accessing URL...")
-                            self.load_cookies()
+                            # 2nd retry: Re-access URL
+                            print(f"  [RETRY 2/3] Re-accessing URL...")
                             self.driver.get(url)
                             time.sleep(random.uniform(3, 5))
                         else:

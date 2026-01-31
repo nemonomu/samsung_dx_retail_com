@@ -1061,7 +1061,7 @@ class AmazonDetailCrawler:
             collected_reviews = set()  # 중복 방지
             if review_containers:
                 for container in review_containers:
-                    body_elem = container.xpath('.//span[@data-hook="review-body"]')
+                    body_elem = container.xpath('.//span[@data-hook="review-body"]/span')
                     if body_elem:
                         review_text = body_elem[0].text_content().strip()
                         # Remove "Read more" text
@@ -1288,7 +1288,7 @@ class AmazonDetailCrawler:
 
                 if review_containers:
                     for container in review_containers[:10]:  # Max 10 from first page
-                        body_elem = container.xpath('.//span[@data-hook="review-body"]')
+                        body_elem = container.xpath('.//span[@data-hook="review-body"]/span')
                         if body_elem:
                             review_text = body_elem[0].text_content().strip()
                             # Remove "Read more" text
@@ -1357,7 +1357,7 @@ class AmazonDetailCrawler:
                             for container in review_containers[:10]:  # Max 10 per page
                                 if len(all_reviews) >= self.target_reviews:
                                     break
-                                body_elem = container.xpath('.//span[@data-hook="review-body"]')
+                                body_elem = container.xpath('.//span[@data-hook="review-body"]/span')
                                 if body_elem:
                                     review_text = body_elem[0].text_content().strip()
                                     # Remove "Read more" text
@@ -1398,7 +1398,7 @@ class AmazonDetailCrawler:
                                         for container in review_containers[:10]:
                                             if len(all_reviews) >= self.target_reviews:
                                                 break
-                                            body_elem = container.xpath('.//span[@data-hook="review-body"]')
+                                            body_elem = container.xpath('.//span[@data-hook="review-body"]/span')
                                             if body_elem:
                                                 review_text = body_elem[0].text_content().strip()
                                                 review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)

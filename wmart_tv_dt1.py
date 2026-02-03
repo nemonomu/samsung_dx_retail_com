@@ -7,11 +7,31 @@ Collects detailed product information from URLs stored in:
 """
 import time
 import random
+import sys
 import psycopg2
 from datetime import datetime, timedelta
 from DrissionPage import ChromiumPage, ChromiumOptions
 from lxml import html
 import re
+
+
+class Tee:
+    """stdout을 콘솔과 파일 둘 다에 출력"""
+    def __init__(self, filename):
+        self.terminal = sys.stdout
+        self.log = open(filename, 'w', encoding='utf-8')
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+        self.log.flush()
+
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
+
+    def close(self):
+        self.log.close()
 
 # Import database configuration
 from config import DB_CONFIG
@@ -2408,6 +2428,11 @@ class WalmartDetailCrawler:
 
 
 if __name__ == "__main__":
+    # 로그 파일 설정 (실행 시작 일시)
+    log_filename = "C:\\samsung_dx_retail_com\\log\\" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".txt"
+    tee = Tee(log_filename)
+    sys.stdout = tee
+
     try:
         crawler = WalmartDetailCrawler()
         crawler.run()
@@ -2417,3 +2442,8 @@ if __name__ == "__main__":
         traceback.print_exc()
 
     print("\n[INFO] Crawler terminated. Exiting...")
+    print(f"[INFO] Log saved to: {log_filename}")
+
+    # 로그 파일 닫기
+    sys.stdout = tee.terminal
+    tee.close()

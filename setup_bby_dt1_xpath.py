@@ -109,15 +109,24 @@ def add_xpath_configs():
         ('not_yet_reviewed', './/span[contains(text(), "Not yet reviewed")]', 2),
         ('not_yet_reviewed', './/span[@class="c-reviews order-2"][contains(text(), "Not yet reviewed")]', 3),
 
+        # === extract_count_of_reviews_from_detail() - count_of_reviews_hidden ===
+        ('count_of_reviews_hidden', '//p[@class="visually-hidden"][contains(text(), "Rating")]', 1),
+        ('count_of_reviews_hidden', '//p[contains(@class, "visually-hidden")][contains(text(), "out of 5 stars")]', 2),
+
+        # === extract_count_of_reviews_from_detail() - count_of_reviews_visible (외부 리뷰 감지용) ===
+        ('count_of_reviews_visible', '//span[contains(@class, "c-ratings-reviews-mini")]', 1),
+        ('count_of_reviews_visible', '//span[contains(@class, "c-ratings-reviews")]', 2),
+        ('count_of_reviews_visible', '//span[contains(@class, "c-reviews")]', 3),
+
         # === close_specifications_dialog() ===
         ('dialog_close_btn', 'xpath://button[@data-testid="brix-sheet-closeButton"]', 1),
         ('dialog_close_btn', 'xpath://button[@aria-label="Close Sheet"]', 2),
         ('dialog_close_btn', 'xpath://div[@class="relative"]//button', 3),
 
-        # === extract_star_rating_from_reviews_page() ===
-        ('star_rating_reviews_page', 'xpath://div[@class="overall-rating"]', 1),
-        ('star_rating_reviews_page', 'xpath://*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[1]/div/div[1]', 2),
-        ('star_rating_reviews_page', 'xpath://div[contains(@class, "overall-rating")]', 3),
+        # === extract_star_rating_from_reviews_page() - tree.xpath() 사용
+        ('star_rating_reviews_page', '//div[@class="overall-rating"]', 1),
+        ('star_rating_reviews_page', '//*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[1]/div/div[1]', 2),
+        ('star_rating_reviews_page', '//div[contains(@class, "overall-rating")]', 3),
 
         # === extract_star_ratings_from_reviews_page() - 별점별 개수 ===
         ('star_ratings_5', 'xpath://*[@id="reviews-accordion"]/section/div[1]/div[1]/div/div/div[2]/div/fieldset/div[1]/div/label/span[5]', 1),
@@ -131,12 +140,20 @@ def add_xpath_configs():
         ('count_reviews_page', 'xpath://div[contains(@id, "user-generated-content-ugc-stats")]//span[@class="c-reviews order-2"]', 2),
         ('count_reviews_page', 'xpath://span[contains(@class, "c-reviews")]', 3),
 
+        # === extract_top_mentions_from_reviews_page() - tree.xpath() 사용
+        ('top_mentions', '/html/body/div[5]/div[8]/div[2]/aside/ul/li/a', 1),
+        ('top_mentions', '//ul[@class="list-unstyled"]/li/a[contains(@class, "v-text-tech-black")]', 2),
+        ('top_mentions', '//ul[@class="list-unstyled"]/li/a', 3),
+        ('top_mentions', '//div[contains(@class, "customer-review-pros-stats")]//span[@class="text-nowrap"]', 4),
+        ('top_mentions', '//div[contains(., "Highly rated by customers for")]//span[@class="text-nowrap"]', 5),
+
         # === extract_bestbuy_sku_number() ===
         ('bestbuy_sku', 'xpath://div[contains(text(), "SKU:")]', 1),
         ('bestbuy_sku', 'xpath://div[@class="pr-150 inline-block"][contains(text(), "SKU")]', 2),
         ('bestbuy_sku_testid', 'xpath://div[contains(@data-testid, "mbo-entrypoint-")]', 1),
 
-        # === click_see_all_reviews() - 이미 있지만 추가 selector ===
+        # === click_see_all_reviews() - page.ele() 사용
+        ('see_all_reviews_btn', 'xpath://button[contains(., "See All Customer Reviews")]', 1),
         ('see_all_reviews_btn', 'xpath://button[contains(@class, "Op9coqeII1kYHR9Q")]', 2),
         ('see_all_reviews_btn', 'css:button.Op9coqeII1kYHR9Q', 3),
 
@@ -172,20 +189,30 @@ def add_xpath_configs():
     skipped_count = 0
 
     for config_key, config_value, priority in xpath_configs:
-        # 중복 체크
+        # 중복 체크 (priority 포함)
         cursor.execute('''
-            SELECT id FROM bby_tv_config
+            SELECT id, config_value FROM bby_tv_config
             WHERE category = 'xpath'
               AND config_key = %s
-              AND config_value = %s
               AND file_name = %s
-        ''', (config_key, config_value, file_name))
+              AND priority = %s
+        ''', (config_key, file_name, priority))
 
-        if cursor.fetchone():
-            skipped_count += 1
+        existing = cursor.fetchone()
+        if existing:
+            if existing[1] == config_value:
+                skipped_count += 1
+                continue
+            # 값이 다르면 업데이트
+            cursor.execute('''
+                UPDATE bby_tv_config
+                SET config_value = %s, description = %s
+                WHERE id = %s
+            ''', (config_value, f'Updated for {config_key}', existing[0]))
+            added_count += 1
             continue
 
-        # 삽입
+        # 신규 삽입
         cursor.execute('''
             INSERT INTO bby_tv_config (category, config_key, config_value, file_name, priority, is_active, description)
             VALUES ('xpath', %s, %s, %s, %s, TRUE, %s)

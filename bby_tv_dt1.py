@@ -40,6 +40,7 @@ import time
 import random
 import re
 import os
+import sys
 import psycopg2
 from datetime import datetime, timedelta
 import pytz
@@ -53,6 +54,28 @@ from config import DB_CONFIG
 from bby_config_loader import get_config
 import pandas as pd
 from alert_monitor import monitor_and_alert
+
+
+class Tee:
+    """stdout을 콘솔과 파일 모두에 출력하는 클래스"""
+    def __init__(self, file_path):
+        self.file = open(file_path, 'w', encoding='utf-8')
+        self.stdout = sys.stdout
+        sys.stdout = self
+
+    def write(self, data):
+        self.stdout.write(data)
+        self.file.write(data)
+        self.file.flush()
+
+    def flush(self):
+        self.stdout.flush()
+        self.file.flush()
+
+    def close(self):
+        sys.stdout = self.stdout
+        self.file.close()
+
 
 class BestBuyDetailCrawler:
     def __init__(self):
@@ -79,6 +102,9 @@ class BestBuyDetailCrawler:
         # Data validator 초기화
         session_start_time = os.environ.get('SESSION_START_TIME', datetime.now().strftime('%Y%m%d%H%M'))
         self.validator = DataValidator(session_start_time)
+
+        # 콘솔 로그 저장용
+        self.tee = None
 
     def connect_db(self):
         """DB connection"""
@@ -2288,8 +2314,35 @@ class BestBuyDetailCrawler:
                 traceback.print_exc()
             return False
 
+    def cleanup_old_logs(self, log_dir, days=30):
+        """30일 지난 로그 파일 삭제"""
+        try:
+            if not os.path.exists(log_dir):
+                return
+            cutoff_time = time.time() - (days * 24 * 60 * 60)
+            deleted_count = 0
+            for filename in os.listdir(log_dir):
+                if filename.startswith('bby_tv_dt1_') and filename.endswith('.txt'):
+                    file_path = os.path.join(log_dir, filename)
+                    if os.path.getmtime(file_path) < cutoff_time:
+                        os.remove(file_path)
+                        deleted_count += 1
+            if deleted_count > 0:
+                print(f"[INFO] Deleted {deleted_count} old log files (older than {days} days)")
+        except Exception as e:
+            print(f"[WARNING] Failed to cleanup old logs: {e}")
+
     def run(self):
         """메인 execution"""
+        # 콘솔 출력을 파일로도 저장
+        log_dir = r"C:\samsung_dx_retail_com\log"
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        self.cleanup_old_logs(log_dir)
+        log_filename = f"bby_tv_dt1_{self.batch_id}.txt"
+        log_path = os.path.join(log_dir, log_filename)
+        self.tee = Tee(log_path)
+
         try:
             print("="*80)
             print(f"Best Buy TV Detail Page Crawler (DrissionPage) (Batch ID: {self.batch_id})")
@@ -2421,6 +2474,10 @@ class BestBuyDetailCrawler:
             if self.db_conn:
                 self.db_conn.close()
                 print("[INFO] DB connection closed")
+            if self.tee:
+                log_path = self.tee.file.name
+                print(f"\n[INFO] Console log saved: {log_path}")
+                self.tee.close()
 
 def main():
     crawler = BestBuyDetailCrawler()

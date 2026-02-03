@@ -8,6 +8,7 @@ Collects detailed product information from URLs stored in:
 import time
 import random
 import sys
+import os
 import psycopg2
 from datetime import datetime, timedelta
 from DrissionPage import ChromiumPage, ChromiumOptions
@@ -2428,6 +2429,19 @@ class WalmartDetailCrawler:
 
 
 if __name__ == "__main__":
+    # 30일 지난 로그 파일 삭제
+    log_dir = "C:\\samsung_dx_retail_com\\log"
+    if os.path.exists(log_dir):
+        for filename in os.listdir(log_dir):
+            if filename.endswith(".txt"):
+                try:
+                    file_date = datetime.strptime(filename[:8], "%Y%m%d")
+                    if (datetime.now() - file_date).days > 30:
+                        os.remove(os.path.join(log_dir, filename))
+                        print(f"[INFO] Deleted old log: {filename}")
+                except:
+                    pass
+
     # 로그 파일 설정 (실행 시작 일시)
     log_filename = "C:\\samsung_dx_retail_com\\log\\" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".txt"
     tee = Tee(log_filename)

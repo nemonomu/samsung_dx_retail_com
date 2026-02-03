@@ -1294,7 +1294,7 @@ class AmazonDetailCrawler:
                 # Extract reviews from first page using container-based approach
                 # Use DB XPaths if available, otherwise use hardcoded fallback
                 review_container_xpaths = self.xpaths.get('review_container') or [
-                    '//div[starts-with(@id, "customer_review-")]',  # New structure (2025~)
+                    '//div[starts-with(@id, "customer_review-") or starts-with(@id, "customer_review_foreign-")]',  # New structure (2025~) including foreign reviews
                     '//div[@data-hook="review"]',  # Legacy structure
                 ]
                 review_containers = []

@@ -209,6 +209,10 @@ def insert_configs():
             ('xpath', 'review_body', '//span[@data-hook="review-body"]/span', None, 1, '리뷰 본문 XPath'),
             ('xpath', 'review_body_list', '//ul[@id="cm-cr-dp-review-list"]//li[@data-hook="review"]//span[@data-hook="review-body"]//span', None, 1, '리뷰 본문 목록 XPath'),
 
+            # 리뷰 컨테이너
+            ('xpath', 'review_container_1', '//div[starts-with(@id, "customer_review-") or starts-with(@id, "customer_review_foreign-")]', None, 1, '리뷰 컨테이너 XPath 1 - customer_review ID (일반+외국어)'),
+            ('xpath', 'review_container_2', '//div[@data-hook="review"]', None, 2, '리뷰 컨테이너 XPath 2 - data-hook=review (Legacy)'),
+
             # 배송 정보
             ('xpath', 'delivery_primary', '//*[@id="mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE"]/span', None, 1, '기본 배송 메시지 XPath'),
             ('xpath', 'delivery_secondary', '//*[@id="mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE"]/span', None, 2, '보조 배송 메시지 XPath'),
@@ -318,6 +322,42 @@ def insert_configs():
             ('xpath', 'count_of_star_ratings_2', '//*[@id="acrCustomerReviewText"]', None, 2, '총 평점 개수 XPath 2'),
             ('xpath', 'count_of_star_ratings_3', '//span[@id="acrCustomerReviewText"]', None, 3, '총 평점 개수 XPath 3'),
             ('xpath', 'count_of_star_ratings_4', '//a[@id="acrCustomerReviewLink"]//span', None, 4, '총 평점 개수 XPath 4'),
+
+            # =====================================================
+            # Best Sellers Rank (rank_1, rank_2)
+            # =====================================================
+            # rank_1 (Best Sellers Rank 첫 번째 항목 - 예: "#8,565 in Electronics")
+            ('xpath', 'rank_1_1', '//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[1]//span[@class="a-list-item"]/span', None, 1, 'BSR Rank 1 XPath 1 - li[1] span'),
+            ('xpath', 'rank_1_2', '//*[@id="productDetails_expanderTables_depthRightSections"]//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[1]', None, 2, 'BSR Rank 1 XPath 2 - expanderTables'),
+            ('xpath', 'rank_1_3', '//*[@id="detailBullets_feature_div"]/ul/li[7]/span/text()[1]', None, 3, 'BSR Rank 1 XPath 3 - detailBullets'),
+            ('xpath', 'rank_1_4', '//*[@id="productDetails_detailBullets_sections1"]/tbody/tr[3]/td/span/ul/li[1]/span/span', None, 4, 'BSR Rank 1 XPath 4 - detailBullets_sections1'),
+
+            # rank_2 (Best Sellers Rank 두 번째 항목 - 예: "#42 in TVs")
+            ('xpath', 'rank_2_1', '//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[2]//span[@class="a-list-item"]/span', None, 1, 'BSR Rank 2 XPath 1 - li[2] span'),
+            ('xpath', 'rank_2_2', '//*[@id="productDetails_expanderTables_depthRightSections"]//th[contains(text(), "Best Sellers Rank")]/following-sibling::td//li[2]', None, 2, 'BSR Rank 2 XPath 2 - expanderTables'),
+            ('xpath', 'rank_2_3', '//*[@id="detailBullets_feature_div"]/ul/li[7]/span/ul', None, 3, 'BSR Rank 2 XPath 3 - detailBullets ul'),
+            ('xpath', 'rank_2_4', '//*[@id="productDetails_detailBullets_sections1"]/tbody/tr[3]/td/span/ul/li[2]/span/span', None, 4, 'BSR Rank 2 XPath 4 - detailBullets_sections1'),
+
+            # =====================================================
+            # SKU Popularity (Amazon's Choice 배지)
+            # =====================================================
+            ('xpath', 'sku_popularity_1', '//*[@id="acBadge_feature_div"]//span[contains(@class, "mvt-ac-badge-rectangle")]/span[@class="a-size-small"]', None, 1, 'Amazon Choice 배지 XPath 1'),
+            ('xpath', 'sku_popularity_2', '//*[@id="acBadge_feature_div"]//span[@class="ac-badge-text-primary"]', None, 2, 'Amazon Choice 배지 XPath 2'),
+            ('xpath', 'sku_popularity_3', '//div[@id="acBadge_feature_div"]//span[contains(text(), "Amazon")]', None, 3, 'Amazon Choice 배지 XPath 3'),
+
+            # =====================================================
+            # Membership Discount (Prime 멤버십 할인)
+            # =====================================================
+            ('xpath', 'membership_discount_1', '//*[@id="mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE"]/span', None, 1, 'Prime 멤버십 할인 XPath 1'),
+            ('xpath', 'membership_discount_2', '//*[@id="mir-layout-DELIVERY_BLOCK"]//span[contains(text(), "Prime members")]', None, 2, 'Prime 멤버십 할인 XPath 2'),
+            ('xpath', 'membership_discount_3', '//div[contains(@id, "DELIVERY_BLOCK")]//span[contains(text(), "FREE delivery")]', None, 3, 'Prime 멤버십 할인 XPath 3'),
+
+            # =====================================================
+            # Product Name (제품명)
+            # =====================================================
+            ('xpath', 'product_name_1', '//*[@id="productTitle"]', None, 1, '제품명 XPath 1 - productTitle'),
+            ('xpath', 'product_name_2', '//span[@id="productTitle"]', None, 2, '제품명 XPath 2 - span productTitle'),
+            ('xpath', 'product_name_3', '//h1[@id="title"]/span', None, 3, '제품명 XPath 3 - h1 title span'),
         ]
 
         # Insert using INSERT ... ON CONFLICT to update existing values

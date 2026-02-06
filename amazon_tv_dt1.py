@@ -2348,8 +2348,19 @@ class AmazonDetailCrawler:
 
             # Step 4: Setup WebDriver
             print("\n[STEP 4/5] Setting up WebDriver...")
-            self.setup_driver()
-            print("[OK] WebDriver ready")
+            max_setup_retries = 3
+            for setup_attempt in range(max_setup_retries):
+                try:
+                    self.setup_driver()
+                    print("[OK] WebDriver ready")
+                    break
+                except Exception as e:
+                    if setup_attempt < max_setup_retries - 1:
+                        print(f"[WARNING] WebDriver setup failed (attempt {setup_attempt + 1}/{max_setup_retries}), retrying in 10 seconds...")
+                        time.sleep(10)
+                    else:
+                        print(f"[ERROR] WebDriver setup failed after {max_setup_retries} attempts")
+                        raise
 
             # Step 5: Scrape each detail page
             print("\n[STEP 5/5] Starting to scrape detail pages...")

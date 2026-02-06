@@ -50,8 +50,8 @@ _config = get_amazon_config()
 
 # Account configuration for switching (uses config or fallback)
 # dt2는 100개 SKU 이후 ACCOUNT_1 → ACCOUNT_2로 전환
-ACCOUNT_1 = _config.get_account('primary', 'amazon_tv_dt2') or 'unsandev0002'
-ACCOUNT_2 = _config.get_account('secondary', 'amazon_tv_dt2') or 'unsandev0003'
+ACCOUNT_1 = _config.get_account('primary', 'amazon_tv_dt2') or 'unsan2026'
+ACCOUNT_2 = _config.get_account('secondary', 'amazon_tv_dt2') or 'unsandev0002'
 COOKIE_FILE_1 = AMAZON_ACCOUNTS[ACCOUNT_1]['cookie_file']  # First N products
 COOKIE_FILE_2 = AMAZON_ACCOUNTS[ACCOUNT_2]['cookie_file']  # Remaining products
 AMAZON_EMAIL_1 = AMAZON_ACCOUNTS[ACCOUNT_1]['email']

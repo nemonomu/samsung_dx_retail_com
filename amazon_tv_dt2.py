@@ -1971,8 +1971,8 @@ class AmazonDetailCrawler:
                     }
 
                 def has_any_error(errors):
-                    """Check if any error condition exists"""
-                    return (errors['has_sr_null'] or errors['has_cor_null'] or
+                    """Check if any error condition exists (count_of_reviews 제외 - XPath 변경으로 수집 불가해도 진행)"""
+                    return (errors['has_sr_null'] or
                             errors['has_cosr_null'] or errors['has_fsp_null'] or
                             errors['has_rv_detail_null'] or errors['has_rv_insufficient'] or
                             errors['has_src_null'])

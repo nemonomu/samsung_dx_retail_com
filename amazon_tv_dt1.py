@@ -1171,23 +1171,7 @@ class AmazonDetailCrawler:
                                 print(f"  [WARNING] Redirected to login page, stopping retry")
                                 break
 
-                            # 먼저 리뷰 요소 찾기 시도 (짧은 timeout)
-                            try:
-                                WebDriverWait(self.driver, 5).until(
-                                    EC.presence_of_element_located((By.XPATH, '//*[@id="filter-info-section"] | //div[@data-hook="cr-filter-info-review-rating-count"]'))
-                                )
-                            except:
-                                # 요소 못 찾으면 sorry page인지 확인
-                                page_source_lower = self.driver.page_source.lower()
-                                if 'sorry' in page_source_lower or 'something went wrong' in page_source_lower:
-                                    print(f"  [WARNING] Sorry page detected, refreshing ({refresh_attempt + 1}/{self.sorry_page_max_retry})...")
-                                else:
-                                    print(f"  [WARNING] Review elements not found, refreshing ({refresh_attempt + 1}/{self.sorry_page_max_retry})...")
-                                self.driver.refresh()
-                                time.sleep(5)
-                                continue
-
-                            # 텍스트가 있을 때까지 추출 시도
+                            # 바로 수집 시도 (sorry page 체크 없이)
                             tree = html.fromstring(self.driver.page_source)
                             for xpath in count_xpaths:
                                 count_elements = tree.xpath(xpath)
@@ -1217,8 +1201,8 @@ class AmazonDetailCrawler:
                             if count_of_reviews:
                                 break
 
-                            # 텍스트 없으면 새로고침 후 재시도
-                            print(f"  [WARNING] count_of_reviews text not found, refreshing ({refresh_attempt + 1}/{self.sorry_page_max_retry})...")
+                            # 수집 실패한 경우에만 새로고침
+                            print(f"  [WARNING] count_of_reviews not found, refreshing ({refresh_attempt + 1}/{self.sorry_page_max_retry})...")
                             self.driver.refresh()
                             time.sleep(5)
 
@@ -1348,45 +1332,39 @@ class AmazonDetailCrawler:
                             print(f"  [WARNING] Found {duplicates} duplicate reviews on page {current_page}")
                         print(f"  [INFO] Review page {current_page}: added {page_count} reviews, total {len(all_reviews)} reviews")
 
-                        # 리뷰가 0개일 때만 Sorry page 감지 및 새로고침 (최대 10회, 5초 간격)
+                        # 리뷰가 0개일 때만 새로고침 시도 (최대 5회, 5초 간격)
                         if page_count == 0:
-                            sorry_page_detected = False
-                            for refresh_attempt in range(10):
-                                page_source_lower = self.driver.page_source.lower()
-                                # Sorry page 패턴 확인 (리뷰 텍스트가 아닌 페이지 구조로 판단)
-                                if ('sorry' in page_source_lower and 'review' not in page_source_lower) or 'something went wrong' in page_source_lower:
-                                    print(f"  [WARNING] Sorry page detected on page {current_page}, refreshing ({refresh_attempt + 1}/10)...")
-                                    self.driver.refresh()
-                                    time.sleep(5)
-                                    # 새로고침 후 리뷰 다시 추출 시도 (container-based)
-                                    tree = html.fromstring(self.driver.page_source)
-                                    review_containers = []
-                                    for xpath in review_container_xpaths:
-                                        review_containers = tree.xpath(xpath)
-                                        if review_containers:
-                                            review_container_xpath = xpath
-                                            break
+                            for refresh_attempt in range(5):
+                                print(f"  [WARNING] No reviews found on page {current_page}, refreshing ({refresh_attempt + 1}/5)...")
+                                self.driver.refresh()
+                                time.sleep(5)
+                                # 새로고침 후 리뷰 다시 추출 시도 (container-based)
+                                tree = html.fromstring(self.driver.page_source)
+                                review_containers = []
+                                for xpath in review_container_xpaths:
+                                    review_containers = tree.xpath(xpath)
                                     if review_containers:
-                                        print(f"  [INFO] Reviews found after refresh, continuing...")
-                                        for container in review_containers[:10]:
-                                            if len(all_reviews) >= self.target_reviews:
-                                                break
-                                            body_elem = container.xpath('.//span[@data-hook="review-body"]/span')
-                                            if body_elem:
-                                                review_text = body_elem[0].text_content().strip()
-                                                review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
-                                                if review_text and review_text not in collected_reviews:
-                                                    all_reviews.append(review_text)
-                                                    collected_reviews.add(review_text)
-                                                    page_count += 1
+                                        review_container_xpath = xpath
                                         break
-                                else:
-                                    break
+                                if review_containers:
+                                    print(f"  [INFO] Reviews found after refresh, extracting...")
+                                    for container in review_containers[:10]:
+                                        if len(all_reviews) >= self.target_reviews:
+                                            break
+                                        body_elem = container.xpath('.//span[@data-hook="review-body"]/span')
+                                        if body_elem:
+                                            review_text = body_elem[0].text_content().strip()
+                                            review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
+                                            if review_text and review_text not in collected_reviews:
+                                                all_reviews.append(review_text)
+                                                collected_reviews.add(review_text)
+                                                page_count += 1
+                                    if page_count > 0:
+                                        break
                             else:
-                                print(f"  [ERROR] Sorry page persists after 10 refreshes on page {current_page}")
-                                sorry_page_detected = True
+                                print(f"  [WARNING] No reviews found after 5 refreshes on page {current_page}")
 
-                            if sorry_page_detected or page_count == 0:
+                            if page_count == 0:
                                 print(f"  [INFO] No new reviews on page {current_page}, stopping pagination")
                                 break
 

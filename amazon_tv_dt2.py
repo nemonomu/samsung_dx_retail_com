@@ -1200,7 +1200,7 @@ class AmazonDetailCrawler:
                     all_reviews = []
                     return '|||'.join(all_reviews) if all_reviews else None, count_of_reviews
 
-                # Wait for count_of_reviews element to load, with sorry page retry (max 5 times)
+                # count_of_reviews 추출 시도 (1회만, 실패해도 리뷰 본문 수집은 진행)
                 count_of_reviews = None
                 count_xpaths = [
                     '//*[@id="filter-info-section"]/div',
@@ -1209,15 +1209,13 @@ class AmazonDetailCrawler:
                     '//*[@id="filter-info-section"]'
                 ]
 
-                for refresh_attempt in range(self.sorry_page_max_retry):
-                    try:
-                        # 로그인 페이지 체크
-                        current_url = self.driver.current_url
-                        if '/ap/signin' in current_url:
-                            print(f"  [WARNING] Redirected to login page, stopping retry")
-                            break
-
-                        # 바로 수집 시도 (sorry page 체크 없이)
+                try:
+                    # 로그인 페이지 체크
+                    current_url = self.driver.current_url
+                    if '/ap/signin' in current_url:
+                        print(f"  [WARNING] Redirected to login page")
+                    else:
+                        # 바로 수집 시도
                         tree = html.fromstring(self.driver.page_source)
                         for xpath in count_xpaths:
                             count_elements = tree.xpath(xpath)
@@ -1243,28 +1241,38 @@ class AmazonDetailCrawler:
                                         print(f"  [OK] Extracted count_of_reviews from review page: {count_of_reviews}")
                                         break
 
-                        # 추출 성공하면 루프 종료
-                        if count_of_reviews:
-                            break
+                        # 추출 실패 시 1회 새로고침 후 재시도
+                        if not count_of_reviews:
+                            print(f"  [WARNING] count_of_reviews not found, refreshing once...")
+                            self.driver.refresh()
+                            time.sleep(5)
+                            tree = html.fromstring(self.driver.page_source)
+                            for xpath in count_xpaths:
+                                count_elements = tree.xpath(xpath)
+                                if count_elements:
+                                    count_text = count_elements[0].text_content().strip() if hasattr(count_elements[0], 'text_content') else str(count_elements[0]).strip()
+                                    if count_text:
+                                        match = re.search(r'([\d,]+)\s*customer\s*reviews?', count_text, re.IGNORECASE)
+                                        if not match:
+                                            match = re.search(r'([\d,]+)\s*with\s*reviews?', count_text, re.IGNORECASE)
+                                        if not match:
+                                            match = re.search(r'([\d,]+)\s*reviews?', count_text, re.IGNORECASE)
+                                        if not match:
+                                            match = re.search(r'([\d,]+)\s*total\s*ratings?,\s*([\d,]+)', count_text, re.IGNORECASE)
+                                            if match:
+                                                count_of_reviews = match.group(2)
+                                                print(f"  [OK] Extracted count_of_reviews after refresh (fallback): {count_of_reviews}")
+                                                break
+                                        if match:
+                                            count_of_reviews = match.group(1)
+                                            print(f"  [OK] Extracted count_of_reviews after refresh: {count_of_reviews}")
+                                            break
 
-                        # 수집 실패한 경우에만 새로고침
-                        print(f"  [WARNING] count_of_reviews not found, refreshing ({refresh_attempt + 1}/{self.sorry_page_max_retry})...")
-                        self.driver.refresh()
-                        time.sleep(5)
+                        if not count_of_reviews:
+                            print(f"  [WARNING] count_of_reviews not found, will try pagination anyway")
 
-                    except Exception as e:
-                        print(f"  [WARNING] Error during review extraction ({refresh_attempt + 1}/{self.sorry_page_max_retry}) - {str(e)[:50]}")
-                        self.driver.refresh()
-                        time.sleep(5)
-
-                # sorry_page_max_retry회 시도 후에도 실패하면 브라우저 재시작 후 재시도
-                if not count_of_reviews:
-                    print(f"  [WARNING] Failed after {self.sorry_page_max_retry} attempts, restarting browser...")
-                    self.driver.quit()
-                    self.setup_driver()
-                    self.load_cookies()
-                    self.driver.get(review_url)
-                    time.sleep(random.uniform(4, 5))
+                except Exception as e:
+                    print(f"  [WARNING] Error during count_of_reviews extraction: {str(e)[:50]}")
 
                 # Collect reviews from first page (max 10 reviews per page)
                 all_reviews = []
@@ -1301,7 +1309,7 @@ class AmazonDetailCrawler:
 
                 print(f"  [INFO] Review page 1: collected {len(all_reviews)} reviews")
 
-                # Check if we need to go to next page (count_of_reviews > 10)
+                # count_of_reviews를 숫자로 변환 (참고용, 페이지네이션 조건에 사용하지 않음)
                 count_int = 0
                 if count_of_reviews:
                     try:
@@ -1312,12 +1320,11 @@ class AmazonDetailCrawler:
                 # Store collected reviews for duplicate check
                 collected_reviews = set(all_reviews)
 
-                # If more reviews exist than collected, go to next pages
-                # Changed from count_int >= target to count_int > len(all_reviews) to handle cases like 11 reviews with only 10 collected
+                # 페이지네이션: count_of_reviews 없어도 Next 버튼 있으면 계속 진행
                 current_page = 1
                 max_pages = self.max_review_pages
 
-                while len(all_reviews) < self.target_reviews and current_page < max_pages and count_int > len(all_reviews):
+                while len(all_reviews) < self.target_reviews and current_page < max_pages:
                     try:
                         # Scroll to bottom of page to ensure Next button is visible
                         self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")

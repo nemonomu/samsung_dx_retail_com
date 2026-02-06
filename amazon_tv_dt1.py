@@ -49,7 +49,7 @@ from amazon_config_loader import get_amazon_config
 _config = get_amazon_config()
 
 # Account configuration (uses unsandev0004 for amazon_tv_crawl.py)
-ACCOUNT_NAME = _config.get_account('primary', 'amazon_tv_dt1') or 'unsandev0007'
+ACCOUNT_NAME = _config.get_account('primary', 'amazon_tv_dt1') or 'ltyinvestmentl'
 COOKIE_FILE = AMAZON_ACCOUNTS[ACCOUNT_NAME]['cookie_file']
 AMAZON_EMAIL = AMAZON_ACCOUNTS[ACCOUNT_NAME]['email']
 AMAZON_PASSWORD = AMAZON_ACCOUNTS[ACCOUNT_NAME]['password']

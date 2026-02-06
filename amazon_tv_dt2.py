@@ -2412,7 +2412,15 @@ class AmazonDetailCrawler:
                 # Check if we need to switch account (after ACCOUNT_SWITCH_AT products)
                 if self.total_collected >= ACCOUNT_SWITCH_AT and not self.account_switched:
                     if not self.switch_account():
-                        print("[WARNING] Account switch failed, continuing with current account...")
+                        print("[WARNING] Account switch failed, restarting browser and retrying...")
+                        try:
+                            self.driver.quit()
+                        except:
+                            pass
+                        time.sleep(3)
+                        self.setup_driver()
+                        if not self.switch_account():
+                            print("[ERROR] Account switch failed after browser restart, continuing with current account...")
 
                 print(f"\n{'='*80}")
                 print(f"Processing {idx}/{len(product_urls)} (Total collected: {self.total_collected})")

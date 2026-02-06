@@ -1151,8 +1151,8 @@ class AmazonDetailCrawler:
                         print(f"  [DEBUG] XPath #{idx} not found")
 
                 if not review_link:
-                    print("  [WARNING] Could not find review page link, falling back to detail page reviews")
-                    return self.extract_detailed_reviews(product_url), None
+                    print("  [WARNING] Could not find review page link")
+                    return None, None
 
                 # Extract ASIN from review link
                 asin_match = re.search(r'/product-reviews/([A-Z0-9]{10})', review_link)
@@ -1444,17 +1444,17 @@ class AmazonDetailCrawler:
                     print(f"  [OK] Collected {len(reviews)} detailed reviews from review page")
                     return ", ".join(formatted_reviews), count_of_reviews
                 else:
-                    print("  [WARNING] No reviews found on review page, falling back to detail page reviews")
-                    return self.extract_detailed_reviews(product_url), count_of_reviews
+                    print("  [WARNING] No reviews found on review page")
+                    return None, count_of_reviews
 
             except Exception as e:
                 print(f"  [WARNING] Failed to extract detailed reviews from review page: {e}")
                 if attempt == 0:
                     continue
-                return self.extract_detailed_reviews(product_url), None
+                return None, None
 
         print(f"  [WARNING] No reviews extracted after retries")
-        return self.extract_detailed_reviews(product_url), None
+        return None, None
 
     def clean_shipping_text(self, text):
         """Clean shipping text by removing JavaScript and stopping at 'Join Prime'"""
@@ -2046,45 +2046,23 @@ class AmazonDetailCrawler:
                 # Initial error check
                 errors = check_error_conditions(data)
 
-                # Retry up to 3 times if any error detected
+                # Retry once if any error detected (1회만 재시도)
                 if has_any_error(errors):
-                    for retry_num in range(1, 4):
-                        print(f"  [RETRY {retry_num}/3] Errors: sr={errors['has_sr_null']}, cor={errors['has_cor_null']}, cosr={errors['has_cosr_null']}, fsp={errors['has_fsp_null']}, rv={errors['has_rv_detail_null']}, rv_insuf={errors['has_rv_insufficient']}, src={errors['has_src_null']}")
+                    print(f"  [RETRY 1/1] Errors: sr={errors['has_sr_null']}, cor={errors['has_cor_null']}, cosr={errors['has_cosr_null']}, fsp={errors['has_fsp_null']}, rv={errors['has_rv_detail_null']}, rv_insuf={errors['has_rv_insufficient']}, src={errors['has_src_null']}")
+                    print(f"  [RETRY 1/1] Refreshing page...")
+                    self.driver.refresh()
+                    time.sleep(3)
 
-                        if retry_num == 1:
-                            # 1st retry: Refresh page
-                            print(f"  [RETRY 1/3] Refreshing page...")
-                            self.driver.refresh()
-                            time.sleep(3)
-                        elif retry_num == 2:
-                            # 2nd retry: Re-access URL
-                            print(f"  [RETRY 2/3] Re-accessing URL...")
-                            self.driver.get(url)
-                            time.sleep(random.uniform(3, 5))
-                        else:
-                            # 3rd retry: Re-access URL with extended wait
-                            print(f"  [RETRY 3/3] Re-accessing URL with extended wait...")
-                            self.driver.get(url)
-                            time.sleep(5)
-                            # Wait for key elements
-                            try:
-                                WebDriverWait(self.driver, 15).until(
-                                    EC.presence_of_element_located((By.ID, 'productTitle'))
-                                )
-                            except:
-                                pass
+                    # Re-extract fields
+                    print(f"  [RETRY 1/1] Re-extracting fields...")
+                    re_extract_fields(errors, url, data)
 
-                        # Re-extract fields
-                        print(f"  [RETRY {retry_num}/3] Re-extracting fields...")
-                        re_extract_fields(errors, url, data)
-
-                        # Check if errors are resolved
-                        errors = check_error_conditions(data)
-                        if not has_any_error(errors):
-                            print(f"  [OK] All errors resolved after retry {retry_num}")
-                            break
+                    # Check if errors are resolved
+                    errors = check_error_conditions(data)
+                    if not has_any_error(errors):
+                        print(f"  [OK] All errors resolved after retry")
                     else:
-                        print(f"  [WARNING] Some errors persist after 3 retries")
+                        print(f"  [WARNING] Some errors persist after retry")
 
                 # Final error check for logging
                 errors = check_error_conditions(data)

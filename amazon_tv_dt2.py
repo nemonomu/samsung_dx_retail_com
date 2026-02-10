@@ -397,8 +397,6 @@ class AmazonDetailCrawler:
             co.set_user_agent(user_agent)
             co.set_argument('--disable-dev-shm-usage')
             co.set_argument('--no-sandbox')
-            # 매번 새 세션으로 시작 (쿠키 격리)
-            co.set_argument(f'--user-data-dir={tempfile.mkdtemp()}')
 
             self.page = ChromiumPage(co)
 

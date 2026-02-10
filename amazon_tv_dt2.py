@@ -1157,15 +1157,23 @@ class AmazonDetailCrawler:
                 time.sleep(random.uniform(3, 4))
                 print(f"  [DEBUG] Actual URL after navigation: {self.page.url}")
 
-                # 로그인 페이지 감지 - 실제 로그인 수행 후 재시도
-                if '/ap/signin' in self.page.url:
-                    print(f"  [WARNING] Login page detected, performing actual login...")
+                # 로그인 페이지 또는 Dogs of Amazon 404 감지 - 로그인 후 재시도
+                page_html_lower = self.page.html.lower() if self.page.html else ''
+                needs_login = '/ap/signin' in self.page.url or 'dogs of amazon' in page_html_lower or "couldn't find that page" in page_html_lower
+                if needs_login:
+                    if '/ap/signin' in self.page.url:
+                        print(f"  [WARNING] Login page detected, performing actual login...")
+                    else:
+                        print(f"  [WARNING] Dogs of Amazon (404) detected, attempting login...")
                     # 현재 계정에 따라 이메일/비밀번호 선택
                     if self.current_cookie_file == COOKIE_FILE_1:
                         email, password, cookie_file = AMAZON_EMAIL_1, AMAZON_PASSWORD_1, COOKIE_FILE_1
                     else:
                         email, password, cookie_file = AMAZON_EMAIL_2, AMAZON_PASSWORD_2, COOKIE_FILE_2
 
+                    # 먼저 Amazon 홈페이지로 이동하여 로그인
+                    self.page.get('https://www.amazon.com')
+                    time.sleep(2)
                     if login_to_amazon_dp(self.page, email, password):
                         print(f"  [OK] Login successful, saving cookies...")
                         save_cookies_dp(self.page, cookie_file)
@@ -1176,8 +1184,9 @@ class AmazonDetailCrawler:
                     else:
                         print(f"  [ERROR] Login failed")
 
-                # 여전히 로그인 페이지면 리뷰 페이지 수집 건너뜀
-                if '/ap/signin' in self.page.url:
+                # 여전히 로그인 페이지 또는 404면 리뷰 페이지 수집 건너뜀
+                page_html_lower = self.page.html.lower() if self.page.html else ''
+                if '/ap/signin' in self.page.url or 'dogs of amazon' in page_html_lower:
                     print(f"  [WARNING] Still on login page after login attempt, skipping review page")
                     count_of_reviews = None
                     all_reviews = []

@@ -1156,8 +1156,16 @@ class AmazonDetailCrawler:
                 time.sleep(random.uniform(3, 4))
                 print(f"  [DEBUG] Actual URL after navigation: {self.page.url}")
 
+                # 페이지 HTML 디버그 출력
+                _debug_html = self.page.html or ''
+                print(f"  [DEBUG] Review page HTML length: {len(_debug_html)}")
+                print(f"  [DEBUG] Review page title: {self.page.title if hasattr(self.page, 'title') else 'N/A'}")
+                # HTML 앞부분 500자 출력
+                _snippet = _debug_html[:500].replace('\n', ' ').replace('\r', '')
+                print(f"  [DEBUG] HTML snippet: {_snippet}")
+
                 # 로그인 페이지 또는 Dogs of Amazon 404 감지 - 로그인 후 재시도
-                page_html_lower = self.page.html.lower() if self.page.html else ''
+                page_html_lower = _debug_html.lower()
                 needs_login = '/ap/signin' in self.page.url or 'dogs of amazon' in page_html_lower or "couldn't find that page" in page_html_lower
                 if needs_login:
                     if '/ap/signin' in self.page.url:

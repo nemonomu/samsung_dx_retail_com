@@ -1114,7 +1114,31 @@ class AmazonDetailCrawler:
                     review_url = "https://www.amazon.com" + review_link
 
                 print(f"  [INFO] Navigating to review page: {review_url}")
-                self.page.get(review_url)
+
+                # 상세페이지에서 리뷰 링크를 직접 클릭 (자연스러운 네비게이션)
+                review_click_selectors = [
+                    'xpath://a[@data-hook="see-all-reviews-link-foot"]',
+                    'xpath://*[@id="reviews-medley-footer"]//a[contains(@href, "product-reviews")]',
+                    'xpath://a[contains(text(), "See more reviews")]',
+                    'xpath://a[contains(text(), "See all reviews")]',
+                ]
+                clicked = False
+                for sel in review_click_selectors:
+                    try:
+                        link_elem = self.page.ele(sel, timeout=2)
+                        if link_elem:
+                            link_elem.click()
+                            clicked = True
+                            print(f"  [DEBUG] Clicked review link element: {sel}")
+                            break
+                    except Exception:
+                        continue
+
+                if not clicked:
+                    # 클릭 실패 시 JS로 자연스럽게 이동
+                    print(f"  [DEBUG] Click failed, using JS navigation")
+                    self.page.run_js(f'window.location.href = "{review_url}";')
+
                 time.sleep(random.uniform(3, 4))
                 print(f"  [DEBUG] Actual URL after navigation: {self.page.url}")
 

@@ -392,7 +392,6 @@ class AmazonDetailCrawler:
             co.set_argument('--no-sandbox')
             # 매번 새 세션으로 시작 (쿠키 격리)
             co.set_argument(f'--user-data-dir={tempfile.mkdtemp()}')
-            co.incognito(True)
 
             self.page = ChromiumPage(co)
 

@@ -466,10 +466,17 @@ def login_with_account(account_name):
 def save_cookies_dp(page, filepath):
     """Save cookies to file (DrissionPage version)"""
     try:
-        cookies = page.cookies(as_dict=False)
+        # DrissionPage 버전에 따라 API가 다름
+        try:
+            cookies = page.cookies(all_info=True)
+        except TypeError:
+            try:
+                cookies = page.cookies(as_dict=False)
+            except TypeError:
+                cookies = page.cookies()
         with open(filepath, 'wb') as f:
             pickle.dump(cookies, f)
-        print(f"[OK] Cookies saved to {filepath}")
+        print(f"[OK] Cookies saved to {filepath} ({len(cookies) if isinstance(cookies, list) else 'dict'} cookies)")
     except Exception as e:
         print(f"[WARNING] Failed to save cookies: {e}")
 

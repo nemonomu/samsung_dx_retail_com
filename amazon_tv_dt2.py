@@ -436,11 +436,21 @@ class AmazonDetailCrawler:
             with open(cookie_file, 'rb') as f:
                 cookies = pickle.load(f)
                 print(f"[DEBUG] Found {len(cookies)} cookies in file")
+                loaded_count = 0
                 for cookie in cookies:
                     try:
+                        # Selenium → DrissionPage 쿠키 포맷 변환
+                        if isinstance(cookie, dict):
+                            if 'expiry' in cookie:
+                                cookie['expires'] = cookie.pop('expiry')
+                            # sameSite 값 보정
+                            if 'sameSite' in cookie and cookie['sameSite'] not in ('Strict', 'Lax', 'None'):
+                                cookie['sameSite'] = 'Lax'
                         self.page.set.cookies(cookie)
+                        loaded_count += 1
                     except Exception as e:
                         print(f"[DEBUG] Failed to add cookie: {e}")
+                print(f"[DEBUG] Successfully loaded {loaded_count}/{len(cookies)} cookies")
 
             print("[INFO] Refreshing page with cookies...")
             self.page.refresh()

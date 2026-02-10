@@ -466,19 +466,27 @@ def login_with_account(account_name):
 def save_cookies_dp(page, filepath):
     """Save cookies to file (DrissionPage version)"""
     try:
-        # DrissionPage 버전에 따라 API가 다름
-        try:
-            cookies = page.cookies(all_info=True)
-        except TypeError:
-            try:
-                cookies = page.cookies(as_dict=False)
-            except TypeError:
-                cookies = page.cookies()
+        os.makedirs(os.path.dirname(filepath), exist_ok=True) if os.path.dirname(filepath) else None
+        cookies = page.cookies(all_info=True)
         with open(filepath, 'wb') as f:
             pickle.dump(cookies, f)
         print(f"[OK] Cookies saved to {filepath} ({len(cookies) if isinstance(cookies, list) else 'dict'} cookies)")
     except Exception as e:
         print(f"[WARNING] Failed to save cookies: {e}")
+
+
+def _handle_continue_shopping_dp(page):
+    """Continue shopping 버튼 처리 (봇 감지 페이지) - HHP 패턴"""
+    try:
+        continue_btn = page.ele("xpath://button[contains(text(), 'Continue shopping')]", timeout=3)
+        if continue_btn:
+            continue_btn.click()
+            print("[INFO] Continue shopping button clicked (bot detection page)")
+            time.sleep(2)
+            return True
+    except:
+        pass
+    return False
 
 
 def login_to_amazon_dp(page, email, password):
@@ -499,6 +507,7 @@ def login_to_amazon_dp(page, email, password):
             print("\n[1] Accessing Amazon.com...")
             page.get("https://www.amazon.com")
             time.sleep(3)
+            _handle_continue_shopping_dp(page)  # 봇 감지 페이지 처리
 
             # Check if already logged in
             print("\n[2] Checking if already logged in...")

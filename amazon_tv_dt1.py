@@ -8,8 +8,6 @@ import os
 from datetime import datetime, timedelta
 import pytz
 from DrissionPage import ChromiumPage, ChromiumOptions
-import tempfile
-import requests as req_lib
 from lxml import html
 import re
 
@@ -385,13 +383,11 @@ class AmazonDetailCrawler:
         """Setup DrissionPage ChromiumPage"""
         try:
             print("[INFO] Setting up DrissionPage browser...")
-            user_agent = _config.get_browser('user_agent', 'amazon_tv_dt1') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
             co = ChromiumOptions()
-            co.set_user_agent(user_agent)
-            co.set_argument('--disable-dev-shm-usage')
-            co.set_argument('--no-sandbox')
+            co.set_argument('--lang=en-US')
 
             self.page = ChromiumPage(co)
+            self.page.set.window.max()
 
             print("[OK] DrissionPage browser setup complete")
 
@@ -420,28 +416,25 @@ class AmazonDetailCrawler:
             self.page.get(homepage_url)
             time.sleep(2)
 
+            # 기존 브라우저 쿠키 초기화 (이전 세션 잔존 방지)
+            self.page.set.cookies.clear()
+            print("[INFO] Browser cookies cleared")
+
             with open(COOKIE_FILE, 'rb') as f:
                 cookies = pickle.load(f)
                 print(f"[DEBUG] Found {len(cookies)} cookies in file")
                 loaded_count = 0
                 for cookie in cookies:
                     try:
-                        # Selenium → DrissionPage 쿠키 포맷 변환
-                        if isinstance(cookie, dict):
-                            if 'expiry' in cookie:
-                                cookie['expires'] = cookie.pop('expiry')
-                            # sameSite 값 보정
-                            if 'sameSite' in cookie and cookie['sameSite'] not in ('Strict', 'Lax', 'None'):
-                                cookie['sameSite'] = 'Lax'
                         self.page.set.cookies(cookie)
                         loaded_count += 1
                     except Exception as e:
-                        print(f"[DEBUG] Failed to add cookie: {e}")
+                        pass
                 print(f"[DEBUG] Successfully loaded {loaded_count}/{len(cookies)} cookies")
 
             print("[INFO] Refreshing page with cookies...")
             self.page.refresh()
-            time.sleep(2)
+            time.sleep(3)
             print(f"[OK] Cookies loaded successfully")
             return True
 
@@ -1045,8 +1038,41 @@ class AmazonDetailCrawler:
             print(f"  [WARNING] Failed to extract detailed reviews: {e}")
             return None
 
+    def check_and_handle_sorry_page(self, max_retries=3):
+        """Sorry/Robot check 페이지 감지 및 새로고침 재시도 (HHP 패턴)"""
+        for attempt in range(max_retries):
+            page_html_lower = self.page.html.lower()
+            title_lower = (self.page.title or '').lower()
+
+            is_sorry_page = (
+                'sorry' in title_lower or
+                'robot check' in title_lower or
+                'sorry' in page_html_lower[:2000] or
+                'robot check' in page_html_lower[:2000] or
+                "couldn't find that page" in page_html_lower[:3000] or
+                'dogs of amazon' in page_html_lower[:3000]
+            )
+
+            if is_sorry_page:
+                print(f"  [WARNING] Sorry/Robot/Dogs page detected (attempt {attempt + 1}/{max_retries})")
+                if attempt < max_retries - 1:
+                    time.sleep(random.uniform(2, 3))
+                    self.page.refresh()
+                    time.sleep(random.uniform(5, 8))
+                    continue
+                else:
+                    print(f"  [ERROR] Still sorry page after {max_retries} retries")
+                    return False
+            else:
+                if attempt > 0:
+                    print(f"  [OK] Page loaded after {attempt} refresh(es)")
+                return True
+
+        return False
+
     def extract_detailed_reviews_from_review_page(self, product_url):
         """Extract up to 20 detailed reviews and count_of_reviews from review pages
+        Uses DrissionPage browser (HHP pattern) - clicks 'See more reviews' button
 
         Returns:
             tuple: (detailed_review_content, count_of_reviews)
@@ -1056,270 +1082,214 @@ class AmazonDetailCrawler:
             try:
                 if attempt > 0:
                     print(f"  [INFO] Retrying review extraction (attempt {attempt + 1}/2)...")
-                    # 크롬 종료 후 재시작
                     self.page.quit()
                     self.setup_driver()
                     self.load_cookies()
                     self.page.get(product_url)
-                    time.sleep(random.uniform(4, 5))
-                    # 대기 후 로드 안되면 새로고침
+                    time.sleep(random.uniform(5, 8))
                     tree = html.fromstring(self.page.html)
                     if not tree.xpath('//a[contains(@href, "product-reviews")]/@href'):
                         print(f"  [INFO] Page not loaded properly, refreshing...")
                         self.page.refresh()
-                        time.sleep(random.uniform(4, 5))
+                        time.sleep(random.uniform(5, 8))
 
-                # Get current page HTML
-                tree = html.fromstring(self.page.html)
+                # Extract ASIN from product URL
+                asin = self.extract_asin(product_url)
 
-                # Extract "See more reviews" link
-                # Priority: data-hook attribute is most reliable
-                review_link_xpaths = self.xpaths.get('review_link') or [
-                    '//a[@data-hook="see-all-reviews-link-foot"]/@href',  # Most reliable - data-hook attribute
-                    '//*[@id="reviews-medley-footer"]//a[contains(@href, "product-reviews")]/@href',  # Footer container
-                    '//*[@id="reviews-medley-footer"]/div[2]/a/@href',  # Legacy structure
-                    '//a[contains(text(), "See more reviews")]/@href',
-                    '//a[contains(text(), "See all reviews")]/@href',
-                    '//a[contains(@href, "product-reviews")]/@href'
-                ]
+                # === DrissionPage 브라우저로 리뷰 페이지 접근 (HHP 패턴) ===
+                # 1단계: 'See more reviews' 버튼 클릭 시도
+                clicked = False
+                try:
+                    button = self.page.ele("xpath://a[@data-hook='see-all-reviews-link-foot']", timeout=5)
+                    if button:
+                        button.scroll.to_see()
+                        time.sleep(1)
+                        button.click()
+                        clicked = True
+                        print(f"  [OK] 'See more reviews' button clicked")
+                except Exception:
+                    pass
 
-                review_link = None
-                for idx, xpath in enumerate(review_link_xpaths, 1):
-                    result = tree.xpath(xpath)
-                    if result:
-                        review_link = result[0]
-                        print(f"  [DEBUG] Found review link with XPath #{idx}: {review_link[:80]}...")
-                        break
-                    else:
-                        print(f"  [DEBUG] XPath #{idx} not found")
+                # 2단계: 버튼 클릭 실패 시 URL로 직접 이동
+                if not clicked:
+                    review_url = f"https://www.amazon.com/product-reviews/{asin}/ref=cm_cr_dp_d_show_all_btm?ie=UTF8&reviewerType=all_reviews"
+                    print(f"  [INFO] Button not found, navigating to: {review_url}")
+                    self.page.get(review_url)
 
-                if not review_link:
-                    print("  [WARNING] Could not find review page link")
+                time.sleep(random.uniform(8, 12))
+
+                # 3단계: Sorry/Robot/Dogs 페이지 처리
+                if not self.check_and_handle_sorry_page(max_retries=self.sorry_page_max_retry):
+                    print(f"  [WARNING] Review page Sorry/Dogs - skipping")
+                    self.page.get(product_url)
+                    time.sleep(random.uniform(2, 3))
                     return None, None
 
-                # Extract ASIN from review link
-                asin_match = re.search(r'/product-reviews/([A-Z0-9]{10})', review_link)
-                if asin_match:
-                    asin = asin_match.group(1)
-                    print(f"  [DEBUG] Extracted ASIN from review link: {asin}")
-                else:
-                    asin = None
-                    print(f"  [WARNING] Could not extract ASIN from review link")
-
-                # Use original review link (Amazon requires specific ref parameter for pagination)
-                if review_link.startswith('http'):
-                    review_url = review_link
-                else:
-                    review_url = "https://www.amazon.com" + review_link
-
-                print(f"  [INFO] Navigating to review page: {review_url}")
-
-                print(f"  [INFO] Fetching review page via HTTP request: {review_url}")
-
-                # === requests로 리뷰 페이지 접근 (브라우저 우회) ===
-                _review_session = req_lib.Session()
-                try:
-                    _browser_cookies = self.page.cookies()
-                    if isinstance(_browser_cookies, dict):
-                        _review_session.cookies.update(_browser_cookies)
-                    elif isinstance(_browser_cookies, list):
-                        for _c in _browser_cookies:
-                            if isinstance(_c, dict) and 'name' in _c and 'value' in _c:
-                                _review_session.cookies.set(_c['name'], _c['value'], domain=_c.get('domain', '.amazon.com'))
-                except Exception as _ce:
-                    print(f"  [DEBUG] Cookie transfer error: {_ce}")
+                # 4단계: 로그인 페이지 리다이렉트 처리
+                current_url = self.page.url
+                if 'signin' in current_url or 'ap/signin' in current_url:
+                    print(f"  [WARNING] Redirected to login page, attempting login...")
                     try:
-                        with open(COOKIE_FILE, 'rb') as _f:
-                            _pkl_cookies = pickle.load(_f)
-                            for _c in _pkl_cookies:
-                                if isinstance(_c, dict) and 'name' in _c and 'value' in _c:
-                                    _review_session.cookies.set(_c['name'], _c['value'], domain=_c.get('domain', '.amazon.com'))
-                    except Exception:
-                        pass
+                        login_to_amazon_dp(self.page, AMAZON_EMAIL, AMAZON_PASSWORD)
+                        save_cookies_dp(self.page, COOKIE_FILE)
+                        review_url = f"https://www.amazon.com/product-reviews/{asin}/ref=cm_cr_dp_d_show_all_btm?ie=UTF8&reviewerType=all_reviews"
+                        self.page.get(review_url)
+                        time.sleep(random.uniform(8, 12))
+                        if 'signin' in self.page.url:
+                            print(f"  [WARNING] Still on login page after login attempt")
+                            self.page.get(product_url)
+                            time.sleep(random.uniform(2, 3))
+                            return None, None
+                    except Exception as e:
+                        print(f"  [WARNING] Login failed: {e}")
+                        self.page.get(product_url)
+                        time.sleep(random.uniform(2, 3))
+                        return None, None
 
-                _ua = _config.get_browser('user_agent', 'amazon_tv_dt1') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-                _review_session.headers.update({
-                    'User-Agent': _ua,
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Referer': product_url,
-                })
+                # 5단계: 리뷰 페이지 HTML 파싱
+                page_html = self.page.html
+                tree = html.fromstring(page_html)
 
-                _resp = _review_session.get(review_url, timeout=30)
-                _review_html = _resp.text
-                print(f"  [DEBUG] HTTP response status: {_resp.status_code}, length: {len(_review_html)}, URL: {_resp.url[:80]}...")
+                page_html_lower = page_html.lower()
+                if "couldn't find that page" in page_html_lower or 'dogs of amazon' in page_html_lower:
+                    print(f"  [WARNING] Review page 404/Dogs detected in HTML")
+                    self.page.get(product_url)
+                    time.sleep(random.uniform(2, 3))
+                    return None, None
 
-                # 404/Dogs 감지 시 간소화된 URL로 재시도
-                _html_lower = _review_html.lower()
-                if _resp.status_code == 404 or 'dogs of amazon' in _html_lower or "couldn't find that page" in _html_lower:
-                    simple_review_url = f"https://www.amazon.com/product-reviews/{asin}?reviewerType=all_reviews" if asin else None
-                    if simple_review_url and simple_review_url != review_url:
-                        print(f"  [DEBUG] Retrying with simplified URL: {simple_review_url}")
-                        _resp = _review_session.get(simple_review_url, timeout=30)
-                        _review_html = _resp.text
-                        _html_lower = _review_html.lower()
-                        print(f"  [DEBUG] HTTP response status: {_resp.status_code}, length: {len(_review_html)}")
+                # 6단계: count_of_reviews 추출
+                count_of_reviews = None
+                count_xpaths = [
+                    '//*[@id="filter-info-section"]/div',
+                    '//div[@data-hook="cr-filter-info-review-rating-count"]',
+                    '//div[contains(@data-hook, "review-rating-count")]',
+                    '//*[@id="filter-info-section"]'
+                ]
 
-                    if _resp.status_code == 404 or 'dogs of amazon' in _html_lower or "couldn't find that page" in _html_lower:
-                        _plain_url = f"https://www.amazon.com/product-reviews/{asin}" if asin else review_url
-                        print(f"  [DEBUG] Retrying without cookies: {_plain_url}")
-                        _plain_session = req_lib.Session()
-                        _plain_session.headers.update({
-                            'User-Agent': _ua,
-                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                            'Accept-Language': 'en-US,en;q=0.9',
-                        })
-                        _resp = _plain_session.get(_plain_url, timeout=30)
-                        _review_html = _resp.text
-                        _html_lower = _review_html.lower()
-                        print(f"  [DEBUG] HTTP response (no cookies): status={_resp.status_code}, length={len(_review_html)}")
-                        if _resp.status_code != 404 and 'dogs of amazon' not in _html_lower:
-                            _review_session = _plain_session
-
-                _html_lower = _review_html.lower()
-                if _resp.status_code == 404 or 'dogs of amazon' in _html_lower or "couldn't find that page" in _html_lower:
-                    print(f"  [WARNING] Review page blocked after all URL attempts, skipping reviews")
-                    count_of_reviews = None
-                elif '/ap/signin' in _resp.url:
-                    print(f"  [WARNING] Redirected to login page via HTTP, skipping reviews")
-                    count_of_reviews = None
-                else:
-                    count_of_reviews = None
-                    count_xpaths = [
-                        '//*[@id="filter-info-section"]/div',
-                        '//div[@data-hook="cr-filter-info-review-rating-count"]',
-                        '//div[contains(@data-hook, "review-rating-count")]',
-                        '//*[@id="filter-info-section"]'
-                    ]
-
-                    tree = html.fromstring(_review_html)
-                    for xpath in count_xpaths:
-                        count_elements = tree.xpath(xpath)
-                        if count_elements:
-                            count_text = count_elements[0].text_content().strip() if hasattr(count_elements[0], 'text_content') else str(count_elements[0]).strip()
-                            if count_text:
-                                print(f"  [DEBUG] count_text found: {count_text[:100]}...")
-                                match = re.search(r'([\d,]+)\s*customer\s*reviews?', count_text, re.IGNORECASE)
-                                if not match:
-                                    match = re.search(r'([\d,]+)\s*with\s*reviews?', count_text, re.IGNORECASE)
-                                if not match:
-                                    match = re.search(r'([\d,]+)\s*reviews?', count_text, re.IGNORECASE)
-                                if not match:
-                                    match = re.search(r'([\d,]+)\s*total\s*ratings?,\s*([\d,]+)', count_text, re.IGNORECASE)
-                                    if match:
-                                        count_of_reviews = match.group(2)
-                                        print(f"  [OK] Extracted count_of_reviews (fallback): {count_of_reviews}")
-                                        break
+                for xpath in count_xpaths:
+                    count_elements = tree.xpath(xpath)
+                    if count_elements:
+                        count_text = count_elements[0].text_content().strip() if hasattr(count_elements[0], 'text_content') else str(count_elements[0]).strip()
+                        if count_text:
+                            print(f"  [DEBUG] count_text found: {count_text[:100]}...")
+                            match = re.search(r'([\d,]+)\s*customer\s*reviews?', count_text, re.IGNORECASE)
+                            if not match:
+                                match = re.search(r'([\d,]+)\s*with\s*reviews?', count_text, re.IGNORECASE)
+                            if not match:
+                                match = re.search(r'([\d,]+)\s*reviews?', count_text, re.IGNORECASE)
+                            if not match:
+                                match = re.search(r'([\d,]+)\s*total\s*ratings?,\s*([\d,]+)', count_text, re.IGNORECASE)
                                 if match:
-                                    count_of_reviews = match.group(1)
-                                    print(f"  [OK] Extracted count_of_reviews: {count_of_reviews}")
+                                    count_of_reviews = match.group(2)
+                                    print(f"  [OK] Extracted count_of_reviews (fallback): {count_of_reviews}")
+                                    break
+                            if match:
+                                count_of_reviews = match.group(1)
+                                print(f"  [OK] Extracted count_of_reviews: {count_of_reviews}")
+                                break
+
+                if not count_of_reviews:
+                    print(f"  [WARNING] count_of_reviews not found")
+
+                # 7단계: 리뷰 수집
+                all_reviews = []
+                collected_reviews = set()
+                print(f"  [DEBUG] Parsing review page 1...")
+
+                review_container_xpaths = self.xpaths.get('review_container') or [
+                    '//div[starts-with(@id, "customer_review-") or starts-with(@id, "customer_review_foreign-")]',
+                    '//div[@data-hook="review"]',
+                ]
+                review_containers = []
+                review_container_xpath = None
+                for xpath in review_container_xpaths:
+                    review_containers = tree.xpath(xpath)
+                    if review_containers:
+                        review_container_xpath = xpath
+                        break
+
+                if review_containers:
+                    for container in review_containers[:10]:
+                        body_elem = container.xpath('.//span[@data-hook="review-body"]/span')
+                        if body_elem:
+                            review_text = body_elem[0].text_content().strip()
+                            review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
+                            if review_text and review_text not in collected_reviews:
+                                all_reviews.append(review_text)
+                                collected_reviews.add(review_text)
+
+                print(f"  [INFO] Review page 1: collected {len(all_reviews)} reviews")
+
+                count_int = 0
+                if count_of_reviews:
+                    try:
+                        count_int = int(str(count_of_reviews).replace(',', ''))
+                    except:
+                        count_int = 0
+
+                # 8단계: 페이지네이션 (DrissionPage 브라우저로 Next 클릭)
+                current_page = 1
+                max_pages = self.max_review_pages
+
+                while len(all_reviews) < self.target_reviews and current_page < max_pages:
+                    try:
+                        next_button = self.page.ele('xpath://li[@class="a-last"]/a', timeout=3)
+                        if not next_button:
+                            print(f"  [WARNING] Next page button not found")
+                            break
+
+                        next_button.scroll.to_see()
+                        time.sleep(random.uniform(1, 2))
+                        next_button.click()
+                        current_page += 1
+                        time.sleep(random.uniform(5, 10))
+
+                        page_html = self.page.html
+                        tree = html.fromstring(page_html)
+
+                        review_containers = []
+                        if review_container_xpath:
+                            review_containers = tree.xpath(review_container_xpath)
+                        if not review_containers:
+                            for xpath in review_container_xpaths:
+                                review_containers = tree.xpath(xpath)
+                                if review_containers:
+                                    review_container_xpath = xpath
                                     break
 
-                    if not count_of_reviews:
-                        print(f"  [WARNING] count_of_reviews not found, will try pagination anyway")
+                        print(f"  [DEBUG] Review page {current_page}: found {len(review_containers)} review containers")
 
-                # Collect reviews from first page
-                all_reviews = []
-                if 'dogs of amazon' not in (_review_html or '').lower() and '/ap/signin' not in (_resp.url if _resp else ''):
-                    print(f"  [DEBUG] Parsing review page 1...")
-                    tree = html.fromstring(_review_html)
-
-                    review_container_xpaths = self.xpaths.get('review_container') or [
-                        '//div[starts-with(@id, "customer_review-") or starts-with(@id, "customer_review_foreign-")]',
-                        '//div[@data-hook="review"]',
-                    ]
-                    review_containers = []
-                    review_container_xpath = None
-                    for xpath in review_container_xpaths:
-                        review_containers = tree.xpath(xpath)
+                        page_count = 0
+                        duplicates = 0
                         if review_containers:
-                            review_container_xpath = xpath
+                            for container in review_containers[:10]:
+                                if len(all_reviews) >= self.target_reviews:
+                                    break
+                                body_elem = container.xpath('.//span[@data-hook="review-body"]/span')
+                                if body_elem:
+                                    review_text = body_elem[0].text_content().strip()
+                                    review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
+                                    if review_text:
+                                        if review_text in collected_reviews:
+                                            duplicates += 1
+                                            continue
+                                        all_reviews.append(review_text)
+                                        collected_reviews.add(review_text)
+                                        page_count += 1
+
+                        if duplicates > 0:
+                            print(f"  [WARNING] Found {duplicates} duplicate reviews on page {current_page}")
+                        print(f"  [INFO] Review page {current_page}: added {page_count} reviews, total {len(all_reviews)} reviews")
+
+                        if page_count == 0:
+                            print(f"  [INFO] No new reviews on page {current_page}, stopping pagination")
                             break
 
-                    if review_containers:
-                        for container in review_containers[:10]:
-                            body_elem = container.xpath('.//span[@data-hook="review-body"]/span')
-                            if body_elem:
-                                review_text = body_elem[0].text_content().strip()
-                                review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
-                                if review_text:
-                                    all_reviews.append(review_text)
+                    except Exception as e:
+                        print(f"  [WARNING] Could not fetch page {current_page + 1}: {e}")
+                        break
 
-                    print(f"  [INFO] Review page 1: collected {len(all_reviews)} reviews")
-
-                    count_int = 0
-                    if count_of_reviews:
-                        try:
-                            count_int = int(str(count_of_reviews).replace(',', ''))
-                        except:
-                            count_int = 0
-
-                    collected_reviews = set(all_reviews)
-
-                    # 페이지네이션: Next 링크 URL 추출 후 requests로 접근
-                    current_page = 1
-                    max_pages = self.max_review_pages
-
-                    while len(all_reviews) < self.target_reviews and current_page < max_pages:
-                        try:
-                            next_links = tree.xpath('//li[@class="a-last"]/a/@href')
-                            if not next_links:
-                                print(f"  [WARNING] Next page link not found")
-                                break
-
-                            next_url = next_links[0]
-                            if not next_url.startswith('http'):
-                                next_url = 'https://www.amazon.com' + next_url
-
-                            current_page += 1
-                            print(f"  [INFO] Fetching review page {current_page}: {next_url[:80]}...")
-                            time.sleep(random.uniform(2, 4))
-                            _resp = _review_session.get(next_url, timeout=30)
-                            _review_html = _resp.text
-
-                            tree = html.fromstring(_review_html)
-                            review_containers = []
-                            if review_container_xpath:
-                                review_containers = tree.xpath(review_container_xpath)
-                            if not review_containers:
-                                for xpath in review_container_xpaths:
-                                    review_containers = tree.xpath(xpath)
-                                    if review_containers:
-                                        review_container_xpath = xpath
-                                        break
-
-                            print(f"  [DEBUG] Review page {current_page}: found {len(review_containers)} review containers")
-
-                            page_count = 0
-                            duplicates = 0
-                            if review_containers:
-                                for container in review_containers[:10]:
-                                    if len(all_reviews) >= self.target_reviews:
-                                        break
-                                    body_elem = container.xpath('.//span[@data-hook="review-body"]/span')
-                                    if body_elem:
-                                        review_text = body_elem[0].text_content().strip()
-                                        review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
-                                        if review_text:
-                                            if review_text in collected_reviews:
-                                                duplicates += 1
-                                                continue
-                                            all_reviews.append(review_text)
-                                            collected_reviews.add(review_text)
-                                            page_count += 1
-
-                            if duplicates > 0:
-                                print(f"  [WARNING] Found {duplicates} duplicate reviews on page {current_page}")
-                            print(f"  [INFO] Review page {current_page}: added {page_count} reviews, total {len(all_reviews)} reviews")
-
-                            if page_count == 0:
-                                print(f"  [INFO] No new reviews on page {current_page}, stopping pagination")
-                                break
-
-                        except Exception as e:
-                            print(f"  [WARNING] Could not fetch page {current_page + 1}: {e}")
-                            break
+                # 상세 페이지로 복귀
                 self.page.get(product_url)
                 time.sleep(random.uniform(2, 3))
 

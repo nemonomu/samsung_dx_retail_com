@@ -1156,45 +1156,49 @@ class AmazonDetailCrawler:
                 time.sleep(random.uniform(3, 4))
                 print(f"  [DEBUG] Actual URL after navigation: {self.page.url}")
 
-                # 페이지 HTML 디버그 출력
-                _debug_html = self.page.html or ''
-                print(f"  [DEBUG] Review page HTML length: {len(_debug_html)}")
-                print(f"  [DEBUG] Review page title: {self.page.title if hasattr(self.page, 'title') else 'N/A'}")
-                # HTML 앞부분 500자 출력
-                _snippet = _debug_html[:500].replace('\n', ' ').replace('\r', '')
-                print(f"  [DEBUG] HTML snippet: {_snippet}")
-
-                # 로그인 페이지 또는 Dogs of Amazon 404 감지 - 로그인 후 재시도
-                page_html_lower = _debug_html.lower()
-                needs_login = '/ap/signin' in self.page.url or 'dogs of amazon' in page_html_lower or "couldn't find that page" in page_html_lower
-                if needs_login:
+                # Sorry/Dogs/404/로그인 페이지 감지 → 새로고침 재시도 (최대 10회, 2초 간격)
+                def _is_review_page_blocked():
+                    _html = (self.page.html or '').lower()
                     if '/ap/signin' in self.page.url:
-                        print(f"  [WARNING] Login page detected, performing actual login...")
-                    else:
-                        print(f"  [WARNING] Dogs of Amazon (404) detected, attempting login...")
-                    # 현재 계정에 따라 이메일/비밀번호 선택
-                    if self.current_cookie_file == COOKIE_FILE_1:
-                        email, password, cookie_file = AMAZON_EMAIL_1, AMAZON_PASSWORD_1, COOKIE_FILE_1
-                    else:
-                        email, password, cookie_file = AMAZON_EMAIL_2, AMAZON_PASSWORD_2, COOKIE_FILE_2
+                        return 'signin'
+                    if 'dogs of amazon' in _html or "couldn't find that page" in _html:
+                        return 'dogs'
+                    if 'sorry' in self.page.url.lower() or ('sorry' in _html[:2000] and 'robot' in _html[:2000]):
+                        return 'sorry'
+                    return None
 
-                    # 먼저 Amazon 홈페이지로 이동하여 로그인
-                    self.page.get('https://www.amazon.com')
-                    time.sleep(2)
-                    if login_to_amazon_dp(self.page, email, password):
-                        print(f"  [OK] Login successful, saving cookies...")
-                        save_cookies_dp(self.page, cookie_file)
-                        # 로그인 후 리뷰 페이지 재접속
-                        self.page.get(review_url)
-                        time.sleep(random.uniform(3, 4))
-                        print(f"  [DEBUG] URL after login: {self.page.url}")
+                block_reason = _is_review_page_blocked()
+                if block_reason:
+                    print(f"  [WARNING] Review page blocked ({block_reason}), retrying with refresh...")
+                    for retry_i in range(1, 11):
+                        time.sleep(2)
+                        self.page.refresh()
+                        time.sleep(2)
+                        block_reason = _is_review_page_blocked()
+                        if not block_reason:
+                            print(f"  [OK] Review page loaded after {retry_i} refresh(es)")
+                            break
+                        print(f"  [WARNING] Refresh {retry_i}/10 - still blocked ({block_reason})")
                     else:
-                        print(f"  [ERROR] Login failed")
+                        # 10회 재시도 실패 → 로그인 시도
+                        print(f"  [WARNING] 10 refreshes failed, attempting login...")
+                        if self.current_cookie_file == COOKIE_FILE_1:
+                            email, password, cookie_file = AMAZON_EMAIL_1, AMAZON_PASSWORD_1, COOKIE_FILE_1
+                        else:
+                            email, password, cookie_file = AMAZON_EMAIL_2, AMAZON_PASSWORD_2, COOKIE_FILE_2
+                        self.page.get('https://www.amazon.com')
+                        time.sleep(2)
+                        if login_to_amazon_dp(self.page, email, password):
+                            print(f"  [OK] Login successful, saving cookies...")
+                            save_cookies_dp(self.page, cookie_file)
+                            self.page.get(review_url)
+                            time.sleep(random.uniform(3, 4))
+                        else:
+                            print(f"  [ERROR] Login failed")
 
-                # 여전히 로그인 페이지 또는 404면 리뷰 페이지 수집 건너뜀
-                page_html_lower = self.page.html.lower() if self.page.html else ''
-                if '/ap/signin' in self.page.url or 'dogs of amazon' in page_html_lower:
-                    print(f"  [WARNING] Still on login page after login attempt, skipping review page")
+                # 최종 확인: 여전히 차단 상태면 리뷰 수집 건너뜀
+                if _is_review_page_blocked():
+                    print(f"  [WARNING] Review page still blocked after all retries, skipping")
                     count_of_reviews = None
                     all_reviews = []
                     return '|||'.join(all_reviews) if all_reviews else None, count_of_reviews

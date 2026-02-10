@@ -1118,31 +1118,45 @@ class AmazonDetailCrawler:
                 time.sleep(random.uniform(3, 4))
                 print(f"  [DEBUG] Actual URL after navigation: {self.page.url}")
 
-                # 로그인 페이지 또는 Dogs of Amazon 404 감지 - 로그인 후 재시도
-                page_html_lower = self.page.html.lower() if self.page.html else ''
-                needs_login = '/ap/signin' in self.page.url or 'dogs of amazon' in page_html_lower or "couldn't find that page" in page_html_lower
-                if needs_login:
+                # Sorry/Dogs/404/로그인 페이지 감지 → 새로고침 재시도 (최대 10회, 2초 간격)
+                def _is_review_page_blocked():
+                    _html = (self.page.html or '').lower()
                     if '/ap/signin' in self.page.url:
-                        print(f"  [WARNING] Login page detected, performing actual login...")
-                    else:
-                        print(f"  [WARNING] Dogs of Amazon (404) detected, attempting login...")
-                    # 먼저 Amazon 홈페이지로 이동하여 로그인
-                    self.page.get('https://www.amazon.com')
-                    time.sleep(2)
-                    if login_to_amazon_dp(self.page, AMAZON_EMAIL, AMAZON_PASSWORD):
-                        print(f"  [OK] Login successful, saving cookies...")
-                        save_cookies_dp(self.page, COOKIE_FILE)
-                        # 로그인 후 리뷰 페이지 재접속
-                        self.page.get(review_url)
-                        time.sleep(random.uniform(3, 4))
-                        print(f"  [DEBUG] URL after login: {self.page.url}")
-                    else:
-                        print(f"  [ERROR] Login failed")
+                        return 'signin'
+                    if 'dogs of amazon' in _html or "couldn't find that page" in _html:
+                        return 'dogs'
+                    if 'sorry' in self.page.url.lower() or ('sorry' in _html[:2000] and 'robot' in _html[:2000]):
+                        return 'sorry'
+                    return None
 
-                # 여전히 로그인 페이지 또는 404면 리뷰 페이지 수집 포기
-                page_html_lower = self.page.html.lower() if self.page.html else ''
-                if '/ap/signin' in self.page.url or 'dogs of amazon' in page_html_lower:
-                    print(f"  [WARNING] Still on login page after login attempt, falling back to detail page reviews")
+                block_reason = _is_review_page_blocked()
+                if block_reason:
+                    print(f"  [WARNING] Review page blocked ({block_reason}), retrying with refresh...")
+                    for retry_i in range(1, 11):
+                        time.sleep(2)
+                        self.page.refresh()
+                        time.sleep(2)
+                        block_reason = _is_review_page_blocked()
+                        if not block_reason:
+                            print(f"  [OK] Review page loaded after {retry_i} refresh(es)")
+                            break
+                        print(f"  [WARNING] Refresh {retry_i}/10 - still blocked ({block_reason})")
+                    else:
+                        # 10회 재시도 실패 → 로그인 시도
+                        print(f"  [WARNING] 10 refreshes failed, attempting login...")
+                        self.page.get('https://www.amazon.com')
+                        time.sleep(2)
+                        if login_to_amazon_dp(self.page, AMAZON_EMAIL, AMAZON_PASSWORD):
+                            print(f"  [OK] Login successful, saving cookies...")
+                            save_cookies_dp(self.page, COOKIE_FILE)
+                            self.page.get(review_url)
+                            time.sleep(random.uniform(3, 4))
+                        else:
+                            print(f"  [ERROR] Login failed")
+
+                # 최종 확인: 여전히 차단 상태면 리뷰 수집 포기
+                if _is_review_page_blocked():
+                    print(f"  [WARNING] Review page still blocked after all retries, falling back to detail page reviews")
                     count_of_reviews = None
                 else:
                     # Wait for count_of_reviews element to load, with sorry page retry (max 5 times)

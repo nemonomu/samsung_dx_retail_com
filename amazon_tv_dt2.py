@@ -1188,10 +1188,39 @@ class AmazonDetailCrawler:
                 _review_html = _resp.text
                 print(f"  [DEBUG] HTTP response status: {_resp.status_code}, length: {len(_review_html)}, URL: {_resp.url[:80]}...")
 
-                # 차단 확인
+                # 404/Dogs 감지 시 간소화된 URL로 재시도
                 _html_lower = _review_html.lower()
-                if 'dogs of amazon' in _html_lower or "couldn't find that page" in _html_lower:
-                    print(f"  [WARNING] Review page blocked (dogs) via HTTP, skipping reviews")
+                if _resp.status_code == 404 or 'dogs of amazon' in _html_lower or "couldn't find that page" in _html_lower:
+                    # ref 파라미터 없는 간소화 URL로 재시도
+                    simple_review_url = f"https://www.amazon.com/product-reviews/{asin}?reviewerType=all_reviews" if asin else None
+                    if simple_review_url and simple_review_url != review_url:
+                        print(f"  [DEBUG] Retrying with simplified URL: {simple_review_url}")
+                        _resp = _review_session.get(simple_review_url, timeout=30)
+                        _review_html = _resp.text
+                        _html_lower = _review_html.lower()
+                        print(f"  [DEBUG] HTTP response status: {_resp.status_code}, length: {len(_review_html)}")
+
+                    # 여전히 실패면 쿠키 없이 시도 (Amazon이 쿠키에 따라 다르게 응답할 수 있음)
+                    if _resp.status_code == 404 or 'dogs of amazon' in _html_lower or "couldn't find that page" in _html_lower:
+                        _plain_url = f"https://www.amazon.com/product-reviews/{asin}" if asin else review_url
+                        print(f"  [DEBUG] Retrying without cookies: {_plain_url}")
+                        _plain_session = req_lib.Session()
+                        _plain_session.headers.update({
+                            'User-Agent': _ua,
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                            'Accept-Language': 'en-US,en;q=0.9',
+                        })
+                        _resp = _plain_session.get(_plain_url, timeout=30)
+                        _review_html = _resp.text
+                        _html_lower = _review_html.lower()
+                        print(f"  [DEBUG] HTTP response (no cookies): status={_resp.status_code}, length={len(_review_html)}")
+                        if _resp.status_code != 404 and 'dogs of amazon' not in _html_lower:
+                            _review_session = _plain_session  # 이후 페이지네이션에도 이 세션 사용
+
+                # 최종 차단 확인
+                _html_lower = _review_html.lower()
+                if _resp.status_code == 404 or 'dogs of amazon' in _html_lower or "couldn't find that page" in _html_lower:
+                    print(f"  [WARNING] Review page blocked after all URL attempts, skipping reviews")
                     count_of_reviews = None
                     all_reviews = []
                     return '|||'.join(all_reviews) if all_reviews else None, count_of_reviews

@@ -7,13 +7,8 @@ import json
 import os
 from datetime import datetime, timedelta
 import pytz
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
+from DrissionPage import ChromiumPage, ChromiumOptions
+import tempfile
 from lxml import html
 import re
 
@@ -42,7 +37,7 @@ class Tee:
 
 # Import database and account configuration
 from config import DB_CONFIG, AMAZON_ACCOUNTS
-from amazon_login import login_to_amazon, save_cookies
+from amazon_login import login_to_amazon_dp, save_cookies_dp
 from amazon_config_loader import get_amazon_config
 
 # Load config from DB
@@ -64,7 +59,7 @@ from alert_monitor import monitor_and_alert
 
 class AmazonDetailCrawler:
     def __init__(self):
-        self.driver = None
+        self.page = None
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
@@ -394,40 +389,28 @@ class AmazonDetailCrawler:
             return []
 
     def setup_driver(self):
-        """Setup Chrome WebDriver"""
+        """Setup DrissionPage ChromiumPage"""
         try:
-            print("[INFO] Setting up Chrome WebDriver...")
+            print("[INFO] Setting up DrissionPage browser...")
             user_agent = _config.get_browser('user_agent', 'amazon_tv_dt2') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-            chrome_options = Options()
-            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-            chrome_options.add_argument(f'--user-agent={user_agent}')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--window-size=1920,1080')
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
+            co = ChromiumOptions()
+            co.set_user_agent(user_agent)
+            co.no_imgs(True)
+            co.set_argument('--disable-dev-shm-usage')
+            co.set_argument('--no-sandbox')
+            # 매번 새 세션으로 시작 (쿠키 격리)
+            co.set_argument(f'--user-data-dir={tempfile.mkdtemp()}')
+            co.incognito(True)
 
-            print("[INFO] Installing ChromeDriver...")
-            service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            self.page = ChromiumPage(co)
 
-            # Anti-detection scripts
-            print("[INFO] Applying anti-detection scripts...")
-            self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-                'source': '''
-                    Object.defineProperty(navigator, 'webdriver', {
-                        get: () => undefined
-                    });
-                '''
-            })
-
-            print("[OK] WebDriver setup complete")
+            print("[OK] DrissionPage browser setup complete")
 
             # Load cookies for login
             self.load_cookies()
 
         except Exception as e:
-            print(f"[ERROR] Failed to setup WebDriver: {e}")
+            print(f"[ERROR] Failed to setup browser: {e}")
             import traceback
             traceback.print_exc()
             raise
@@ -448,7 +431,7 @@ class AmazonDetailCrawler:
         try:
             print("[INFO] Accessing Amazon.com to set cookies...")
             homepage_url = _config.get_url('homepage') or 'https://www.amazon.com'
-            self.driver.get(homepage_url)
+            self.page.get(homepage_url)
             time.sleep(2)
 
             with open(cookie_file, 'rb') as f:
@@ -456,12 +439,12 @@ class AmazonDetailCrawler:
                 print(f"[DEBUG] Found {len(cookies)} cookies in file")
                 for cookie in cookies:
                     try:
-                        self.driver.add_cookie(cookie)
+                        self.page.set.cookies(cookie)
                     except Exception as e:
                         print(f"[DEBUG] Failed to add cookie: {e}")
 
             print("[INFO] Refreshing page with cookies...")
-            self.driver.refresh()
+            self.page.refresh()
             time.sleep(2)
             print(f"[OK] Cookies loaded successfully from {cookie_file}")
             return True
@@ -499,29 +482,20 @@ class AmazonDetailCrawler:
         """
         try:
             # Wait for product title element (required)
-            try:
-                WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.ID, 'productTitle'))
-                )
-            except:
+            elem = self.page.ele('#productTitle', timeout=10)
+            if not elem:
                 print("  [WARNING] Product title element not found within timeout")
                 return False
 
             # Wait for price element (optional but important)
             if wait_for_price:
-                try:
-                    WebDriverWait(self.driver, 5).until(
-                        EC.presence_of_element_located((By.XPATH, '//*[@id="corePriceDisplay_desktop_feature_div"] | //*[@id="corePrice_feature_div"] | //*[@id="outOfStock"]'))
-                    )
-                except:
+                price_elem = self.page.ele('xpath://*[@id="corePriceDisplay_desktop_feature_div"] | //*[@id="corePrice_feature_div"] | //*[@id="outOfStock"]', timeout=5)
+                if not price_elem:
                     print("  [WARNING] Price element not found within timeout - may be unavailable product")
 
             # Wait for star rating element (optional)
-            try:
-                WebDriverWait(self.driver, 3).until(
-                    EC.presence_of_element_located((By.XPATH, '//*[@id="acrPopover"] | //*[@id="averageCustomerReviews"] | //span[contains(text(), "No customer reviews")]'))
-                )
-            except:
+            star_elem = self.page.ele('xpath://*[@id="acrPopover"] | //*[@id="averageCustomerReviews"] | //span[contains(text(), "No customer reviews")]', timeout=3)
+            if not star_elem:
                 print("  [WARNING] Star rating element not found within timeout")
 
             return True
@@ -540,7 +514,7 @@ class AmazonDetailCrawler:
 
         try:
             # Clear existing cookies
-            self.driver.delete_all_cookies()
+            self.page.set.cookies.clear()
             print("[INFO] Cleared existing cookies")
 
             # Update current cookie file
@@ -1068,7 +1042,7 @@ class AmazonDetailCrawler:
         """Extract detailed reviews from product detail page"""
         try:
             # Get current page HTML
-            tree = html.fromstring(self.driver.page_source)
+            tree = html.fromstring(self.page.html)
 
             # Extract reviews from detail page review section using container-based approach
             # Container: <ul id="cm-cr-dp-review-list" data-hook="top-customer-reviews-widget">
@@ -1114,20 +1088,20 @@ class AmazonDetailCrawler:
                 if attempt > 0:
                     print(f"  [INFO] Retrying review extraction (attempt {attempt + 1}/2)...")
                     # 크롬 종료 후 재시작
-                    self.driver.quit()
+                    self.page.quit()
                     self.setup_driver()
                     self.load_cookies()
-                    self.driver.get(product_url)
+                    self.page.get(product_url)
                     time.sleep(random.uniform(4, 5))
                     # 대기 후 로드 안되면 새로고침
-                    tree = html.fromstring(self.driver.page_source)
+                    tree = html.fromstring(self.page.html)
                     if not tree.xpath('//a[contains(@href, "product-reviews")]/@href'):
                         print(f"  [INFO] Page not loaded properly, refreshing...")
-                        self.driver.refresh()
+                        self.page.refresh()
                         time.sleep(random.uniform(4, 5))
 
                 # Get current page HTML
-                tree = html.fromstring(self.driver.page_source)
+                tree = html.fromstring(self.page.html)
 
                 # Extract "See more reviews" link
                 # Priority: data-hook attribute is most reliable
@@ -1170,12 +1144,12 @@ class AmazonDetailCrawler:
                     review_url = "https://www.amazon.com" + review_link
 
                 print(f"  [INFO] Navigating to review page: {review_url}")
-                self.driver.get(review_url)
+                self.page.get(review_url)
                 time.sleep(random.uniform(3, 4))
-                print(f"  [DEBUG] Actual URL after navigation: {self.driver.current_url}")
+                print(f"  [DEBUG] Actual URL after navigation: {self.page.url}")
 
                 # 로그인 페이지 감지 - 실제 로그인 수행 후 재시도
-                if '/ap/signin' in self.driver.current_url:
+                if '/ap/signin' in self.page.url:
                     print(f"  [WARNING] Login page detected, performing actual login...")
                     # 현재 계정에 따라 이메일/비밀번호 선택
                     if self.current_cookie_file == COOKIE_FILE_1:
@@ -1183,18 +1157,18 @@ class AmazonDetailCrawler:
                     else:
                         email, password, cookie_file = AMAZON_EMAIL_2, AMAZON_PASSWORD_2, COOKIE_FILE_2
 
-                    if login_to_amazon(self.driver, email, password):
+                    if login_to_amazon_dp(self.page, email, password):
                         print(f"  [OK] Login successful, saving cookies...")
-                        save_cookies(self.driver, cookie_file)
+                        save_cookies_dp(self.page, cookie_file)
                         # 로그인 후 리뷰 페이지 재접속
-                        self.driver.get(review_url)
+                        self.page.get(review_url)
                         time.sleep(random.uniform(3, 4))
-                        print(f"  [DEBUG] URL after login: {self.driver.current_url}")
+                        print(f"  [DEBUG] URL after login: {self.page.url}")
                     else:
                         print(f"  [ERROR] Login failed")
 
                 # 여전히 로그인 페이지면 리뷰 페이지 수집 건너뜀
-                if '/ap/signin' in self.driver.current_url:
+                if '/ap/signin' in self.page.url:
                     print(f"  [WARNING] Still on login page after login attempt, skipping review page")
                     count_of_reviews = None
                     all_reviews = []
@@ -1211,12 +1185,12 @@ class AmazonDetailCrawler:
 
                 try:
                     # 로그인 페이지 체크
-                    current_url = self.driver.current_url
+                    current_url = self.page.url
                     if '/ap/signin' in current_url:
                         print(f"  [WARNING] Redirected to login page")
                     else:
                         # 바로 수집 시도
-                        tree = html.fromstring(self.driver.page_source)
+                        tree = html.fromstring(self.page.html)
                         for xpath in count_xpaths:
                             count_elements = tree.xpath(xpath)
                             if count_elements:
@@ -1244,9 +1218,9 @@ class AmazonDetailCrawler:
                         # 추출 실패 시 1회 새로고침 후 재시도
                         if not count_of_reviews:
                             print(f"  [WARNING] count_of_reviews not found, refreshing once...")
-                            self.driver.refresh()
+                            self.page.refresh()
                             time.sleep(5)
-                            tree = html.fromstring(self.driver.page_source)
+                            tree = html.fromstring(self.page.html)
                             for xpath in count_xpaths:
                                 count_elements = tree.xpath(xpath)
                                 if count_elements:
@@ -1278,10 +1252,10 @@ class AmazonDetailCrawler:
                 all_reviews = []
 
                 # Debug: Print current URL to verify we're on review page
-                current_url = self.driver.current_url
+                current_url = self.page.url
                 print(f"  [DEBUG] Current URL before extracting reviews: {current_url[:100]}...")
 
-                tree = html.fromstring(self.driver.page_source)
+                tree = html.fromstring(self.page.html)
 
                 # Extract reviews from first page using container-based approach
                 # Use DB XPaths if available, otherwise use hardcoded fallback
@@ -1327,26 +1301,29 @@ class AmazonDetailCrawler:
                 while len(all_reviews) < self.target_reviews and current_page < max_pages:
                     try:
                         # Scroll to bottom of page to ensure Next button is visible
-                        self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                        self.page.run_js("window.scrollTo(0, document.body.scrollHeight);")
                         time.sleep(1)
 
                         # Find and click Next page button
-                        next_button = self.driver.find_element(By.XPATH, '//li[@class="a-last"]/a')
+                        next_button = self.page.ele('xpath://li[@class="a-last"]/a', timeout=5)
+                        if not next_button:
+                            print(f"  [WARNING] Next page button not found")
+                            break
                         print(f"  [INFO] Clicking Next page button (page {current_page} -> {current_page + 1})...")
-                        self.driver.execute_script("arguments[0].click();", next_button)
+                        next_button.click(by_js=True)
                         time.sleep(random.uniform(3, 5))
 
                         current_page += 1
 
                         # Verify we're on expected page
-                        current_url = self.driver.current_url
+                        current_url = self.page.url
                         if f'pageNumber={current_page}' not in current_url:
                             print(f"  [WARNING] Page {current_page} not loaded properly, current URL: {current_url[:80]}...")
                         else:
                             print(f"  [DEBUG] Confirmed on page {current_page}: {current_url[:80]}...")
 
                         # Extract reviews from current page using container-based approach
-                        tree = html.fromstring(self.driver.page_source)
+                        tree = html.fromstring(self.page.html)
                         review_containers = []
                         if review_container_xpath:
                             review_containers = tree.xpath(review_container_xpath)
@@ -1389,10 +1366,10 @@ class AmazonDetailCrawler:
                         if page_count == 0:
                             for refresh_attempt in range(5):
                                 print(f"  [WARNING] No reviews found on page {current_page}, refreshing ({refresh_attempt + 1}/5)...")
-                                self.driver.refresh()
+                                self.page.refresh()
                                 time.sleep(5)
                                 # 새로고침 후 리뷰 다시 추출 시도 (container-based)
-                                tree = html.fromstring(self.driver.page_source)
+                                tree = html.fromstring(self.page.html)
                                 review_containers = []
                                 for xpath in review_container_xpaths:
                                     review_containers = tree.xpath(xpath)
@@ -1427,7 +1404,7 @@ class AmazonDetailCrawler:
 
                 # Navigate back to product page
                 print(f"  [INFO] Navigating back to product page...")
-                self.driver.get(product_url)
+                self.page.get(product_url)
                 time.sleep(random.uniform(2, 3))
 
                 # max_pages까지 갔는데 target_reviews개 미만이면 재시도
@@ -1592,7 +1569,7 @@ class AmazonDetailCrawler:
             print(f"[{page_type.upper()}] Accessing: {url[:80]}...")
             print(f"[INFO] Page type: {page_type} | Main rank: {url_data.get('main_rank', 'N/A')} | BSR rank: {url_data.get('bsr_rank', 'N/A')}")
 
-            self.driver.get(url)
+            self.page.get(url)
             time.sleep(random.uniform(3, 5))
 
             # Verify page is properly loaded before extraction (with retry logic)
@@ -1603,7 +1580,7 @@ class AmazonDetailCrawler:
                 # 1차 재시도: URL 재접속
                 print(f"  [RETRY 1/2] Page verification failed - retrying with URL re-access...")
                 time.sleep(3)
-                self.driver.get(url)
+                self.page.get(url)
                 time.sleep(random.uniform(3, 5))
                 page_loaded = self.verify_page_loaded(wait_for_price=True)
 
@@ -1611,7 +1588,7 @@ class AmazonDetailCrawler:
                     # 2차 재시도: 쿠키 재로드 후 URL 재접속
                     print(f"  [RETRY 2/2] Still failed - reloading cookies and retrying...")
                     self.load_cookies()
-                    self.driver.get(url)
+                    self.page.get(url)
                     time.sleep(random.uniform(3, 5))
                     page_loaded = self.verify_page_loaded(wait_for_price=True)
 
@@ -1626,12 +1603,12 @@ class AmazonDetailCrawler:
             # Click "Item details" section to expand it (needed for item, rank_1, rank_2)
             try:
                 # Find "Item details" button specifically (not "Display")
-                item_details_button = self.driver.find_element("xpath", '//span[contains(text(), "Item details")]/ancestor::a[contains(@class, "a-expander-header")]')
+                item_details_button = self.page.ele('xpath://span[contains(text(), "Item details")]/ancestor::a[contains(@class, "a-expander-header")]', timeout=3)
                 if item_details_button:
                     # Check if already expanded
-                    aria_expanded = item_details_button.get_attribute("aria-expanded")
+                    aria_expanded = item_details_button.attr('aria-expanded')
                     if aria_expanded != "true":
-                        self.driver.execute_script("arguments[0].click();", item_details_button)
+                        item_details_button.click(by_js=True)
                         time.sleep(1)
                         print("  [INFO] Expanded 'Item details' section")
                     else:
@@ -1639,7 +1616,7 @@ class AmazonDetailCrawler:
             except Exception as e:
                 print(f"  [WARNING] Could not find/click 'Item details': {e}")
 
-            page_source = self.driver.page_source
+            page_source = self.page.html
             tree = html.fromstring(page_source)
 
             # Extract data
@@ -1660,7 +1637,7 @@ class AmazonDetailCrawler:
 
             # Item - Extract ASIN from final URL (after redirect)
             # sspa/click URL redirects to actual product page with /dp/ASIN/
-            final_url = self.driver.current_url
+            final_url = self.page.url
             item = self.extract_asin(final_url)
 
             if item and len(item) == 10:
@@ -1719,11 +1696,9 @@ class AmazonDetailCrawler:
             summarized_review_content = None
             try:
                 # Wait for the summarized review element to load (up to 10 seconds)
-                wait = WebDriverWait(self.driver, 10)
-                summary_element = wait.until(
-                    EC.presence_of_element_located((By.XPATH, '//div[@data-testid="overall-summary"]//span[contains(@class, "__SAR2l0zNyyuZ")]'))
-                )
-                summarized_review_content = summary_element.text.strip() if summary_element.text else None
+                summary_element = self.page.ele('xpath://div[@data-testid="overall-summary"]//span[contains(@class, "__SAR2l0zNyyuZ")]', timeout=10)
+                if summary_element:
+                    summarized_review_content = summary_element.text.strip() if summary_element.text else None
                 if summarized_review_content:
                     print(f"  [INFO] Found summarized review: {summarized_review_content[:50]}...")
             except Exception as e:
@@ -1836,49 +1811,37 @@ class AmazonDetailCrawler:
                 print(f"  [WARNING] All 5 key fields are null - retrying with extended wait for all elements...")
 
                 # Re-access the URL
-                self.driver.get(url)
+                self.page.get(url)
 
                 # Wait for all key elements to load with extended timeout
                 print(f"  [INFO] Waiting for product title element...")
-                try:
-                    WebDriverWait(self.driver, 30).until(
-                        EC.presence_of_element_located((By.ID, 'productTitle'))
-                    )
+                if self.page.ele('#productTitle', timeout=30):
                     print(f"  [OK] Product title element loaded")
-                except:
+                else:
                     print(f"  [WARNING] Product title element not loaded within 30s")
 
                 print(f"  [INFO] Waiting for star rating element...")
-                try:
-                    WebDriverWait(self.driver, 30).until(
-                        EC.presence_of_element_located((By.XPATH, '//*[@id="acrPopover"] | //*[@id="averageCustomerReviews"]'))
-                    )
+                if self.page.ele('xpath://*[@id="acrPopover"] | //*[@id="averageCustomerReviews"]', timeout=30):
                     print(f"  [OK] Star rating element loaded")
-                except:
+                else:
                     print(f"  [WARNING] Star rating element not loaded within 30s")
 
                 print(f"  [INFO] Waiting for count of star ratings element...")
-                try:
-                    WebDriverWait(self.driver, 30).until(
-                        EC.presence_of_element_located((By.ID, 'acrCustomerReviewText'))
-                    )
+                if self.page.ele('#acrCustomerReviewText', timeout=30):
                     print(f"  [OK] Count of star ratings element loaded")
-                except:
+                else:
                     print(f"  [WARNING] Count of star ratings element not loaded within 30s")
 
                 print(f"  [INFO] Waiting for price element...")
-                try:
-                    WebDriverWait(self.driver, 30).until(
-                        EC.presence_of_element_located((By.XPATH, '//*[@id="corePriceDisplay_desktop_feature_div"] | //*[@id="corePrice_feature_div"]'))
-                    )
+                if self.page.ele('xpath://*[@id="corePriceDisplay_desktop_feature_div"] | //*[@id="corePrice_feature_div"]', timeout=30):
                     print(f"  [OK] Price element loaded")
-                except:
+                else:
                     print(f"  [WARNING] Price element not loaded within 30s")
 
                 print(f"  [INFO] All element waits complete, re-extracting data...")
 
                 # Re-parse page
-                page_source = self.driver.page_source
+                page_source = self.page.html
                 tree = html.fromstring(page_source)
 
                 # Re-extract key fields
@@ -1978,19 +1941,18 @@ class AmazonDetailCrawler:
                             errors['has_src_null'])
 
                 def re_extract_summarized_review():
-                    """Re-extract summarized review content with WebDriverWait"""
+                    """Re-extract summarized review content"""
                     try:
-                        wait = WebDriverWait(self.driver, 10)
-                        summary_element = wait.until(
-                            EC.presence_of_element_located((By.XPATH, '//div[@data-testid="overall-summary"]//span[contains(@class, "__SAR2l0zNyyuZ")]'))
-                        )
-                        return summary_element.text.strip() if summary_element.text else None
+                        summary_element = self.page.ele('xpath://div[@data-testid="overall-summary"]//span[contains(@class, "__SAR2l0zNyyuZ")]', timeout=10)
+                        if summary_element:
+                            return summary_element.text.strip() if summary_element.text else None
+                        return None
                     except:
                         return None
 
                 def re_extract_fields(errors, url, data):
                     """Re-extract fields based on error type"""
-                    tree = html.fromstring(self.driver.page_source)
+                    tree = html.fromstring(self.page.html)
 
                     if errors['has_sr_null']:
                         sr = self.extract_star_rating(tree)
@@ -2050,7 +2012,7 @@ class AmazonDetailCrawler:
                 if has_any_error(errors):
                     print(f"  [RETRY 1/1] Errors: sr={errors['has_sr_null']}, cor={errors['has_cor_null']}, cosr={errors['has_cosr_null']}, fsp={errors['has_fsp_null']}, rv={errors['has_rv_detail_null']}, rv_insuf={errors['has_rv_insufficient']}, src={errors['has_src_null']}")
                     print(f"  [RETRY 1/1] Refreshing page...")
-                    self.driver.refresh()
+                    self.page.refresh()
                     time.sleep(3)
 
                     # Re-extract fields
@@ -2355,10 +2317,10 @@ class AmazonDetailCrawler:
                 print("[ERROR] No product URLs found. Stopping.")
                 return
 
-            # Step 4: Setup WebDriver
-            print("\n[STEP 4/5] Setting up WebDriver...")
+            # Step 4: Setup Browser
+            print("\n[STEP 4/5] Setting up Browser...")
             self.setup_driver()
-            print("[OK] WebDriver ready")
+            print("[OK] Browser ready")
 
             # Step 5: Scrape each detail page
             print("\n[STEP 5/5] Starting to scrape detail pages...")
@@ -2377,7 +2339,7 @@ class AmazonDetailCrawler:
                     if not self.switch_account():
                         print("[WARNING] Account switch failed, restarting browser and retrying...")
                         try:
-                            self.driver.quit()
+                            self.page.quit()
                         except:
                             pass
                         time.sleep(3)
@@ -2451,10 +2413,10 @@ class AmazonDetailCrawler:
 
         finally:
             print("\n[INFO] Cleaning up...")
-            if self.driver:
+            if self.page:
                 try:
-                    self.driver.quit()
-                    print("[OK] WebDriver closed")
+                    self.page.quit()
+                    print("[OK] Browser closed")
                 except:
                     pass
             if self.db_conn:

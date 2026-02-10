@@ -459,6 +459,292 @@ def login_with_account(account_name):
         return None
 
 
+# ============================================================
+# DrissionPage compatible functions (for amazon_tv_dt1/dt2)
+# ============================================================
+
+def save_cookies_dp(page, filepath):
+    """Save cookies to file (DrissionPage version)"""
+    try:
+        cookies = page.cookies(as_dict=False)
+        with open(filepath, 'wb') as f:
+            pickle.dump(cookies, f)
+        print(f"[OK] Cookies saved to {filepath}")
+    except Exception as e:
+        print(f"[WARNING] Failed to save cookies: {e}")
+
+
+def login_to_amazon_dp(page, email, password):
+    """Login to Amazon (DrissionPage version)"""
+    try:
+        print("\n" + "=" * 80)
+        print("Amazon Login Process (DrissionPage)")
+        print("=" * 80)
+
+        # Check if already on login page
+        current_url = page.url
+        already_on_login_page = '/ap/signin' in current_url
+
+        if already_on_login_page:
+            print("\n[1] Already on login page, proceeding with login...")
+        else:
+            # Go to Amazon
+            print("\n[1] Accessing Amazon.com...")
+            page.get("https://www.amazon.com")
+            time.sleep(3)
+
+            # Check if already logged in
+            print("\n[2] Checking if already logged in...")
+            try:
+                account_element = page.ele('#nav-link-accountList', timeout=5)
+                if account_element:
+                    account_text = account_element.text.lower()
+                    if "hello" in account_text and "sign in" not in account_text:
+                        print("    ✓ Already logged in!")
+                        return True
+            except:
+                pass
+
+            # Click "Sign in" button
+            print("\n[3] Clicking 'Sign in' button...")
+            try:
+                sign_in_selectors = [
+                    '#nav-link-accountList',
+                    'css:a[data-nav-role="signin"]',
+                    'xpath://a[contains(@href, "ap/signin")]'
+                ]
+
+                signed_in = False
+                for selector in sign_in_selectors:
+                    try:
+                        sign_in = page.ele(selector, timeout=5)
+                        if sign_in:
+                            sign_in.click()
+                            signed_in = True
+                            print("    ✓ Clicked sign in button")
+                            break
+                    except:
+                        continue
+
+                if not signed_in:
+                    print("    [WARNING] Could not find sign-in button, might already be on sign-in page")
+
+                time.sleep(2)
+
+            except Exception as e:
+                print(f"    [WARNING] Error clicking sign-in: {e}")
+
+            # Check if redirected to account page (already logged in)
+            current_url = page.url
+            if '/gp/css/homepage' in current_url or '/gp/yourstore' in current_url:
+                print("    ✓ Redirected to account page - already logged in!")
+                return True
+
+        # Check for account selection screen first
+        step_num = "[2]" if already_on_login_page else "[4]"
+        print(f"\n{step_num} Checking for account selection screen...")
+        print(f"    Current URL: {page.url}")
+
+        # Save page source for debugging
+        try:
+            with open('login_page_debug.html', 'w', encoding='utf-8') as f:
+                f.write(page.html)
+            print("    [DEBUG] Saved page source to login_page_debug.html")
+        except:
+            pass
+
+        # Try to find existing account button
+        account_button_selectors = [
+            'css:div[data-a-input-name="accountSelectionSelect"] span.a-button-text',
+            'xpath://div[@data-a-input-name="accountSelectionSelect"]//span[contains(@class, "a-button-text")]',
+            'xpath://div[contains(@class, "cvf-account-switcher-account")]',
+            'xpath://div[contains(@data-testid, "account-list-item")]',
+            'css:div[data-testid*="account-list-item"]',
+            f'xpath://span[contains(text(), "{email}")]',
+            f'xpath://div[contains(text(), "{email}")]',
+            'xpath://span[contains(text(), "@")]',
+            'xpath://div[contains(text(), "@")]',
+            'css:div.cvf-account-switcher-account',
+            'css:div[class*="account"]',
+        ]
+
+        account_found = False
+        for idx, selector in enumerate(account_button_selectors, 1):
+            try:
+                account_button = page.ele(selector, timeout=3)
+                if account_button:
+                    print(f"    ✓ Found existing account button using selector #{idx}")
+                    button_text = account_button.text[:80] if account_button.text else "[No text]"
+                    print(f"    ✓ Clicking account: {button_text}...")
+                    account_button.click()
+                    account_found = True
+                    time.sleep(2)
+                    break
+            except:
+                continue
+
+        if account_found:
+            print("    ✓ Selected existing account, skipping email entry")
+        else:
+            # No account selection, proceed with email entry
+            print("    ✗ No account selection screen, entering email...")
+
+            email_selectors = [
+                '#ap_email',
+                'css:input[name="email"]',
+                'css:input[type="email"]',
+                'xpath://input[@type="email"]'
+            ]
+
+            email_input = None
+            for idx, selector in enumerate(email_selectors, 1):
+                try:
+                    email_input = page.ele(selector, timeout=5)
+                    if email_input:
+                        print(f"    ✓ Found email input using selector #{idx}")
+                        break
+                except:
+                    print(f"    ✗ Not found using selector #{idx}")
+                    continue
+
+            if not email_input:
+                print("\n[ERROR] Could not find email input field!")
+                print("Please check login_page_debug.html for page structure")
+                raise Exception("Email input field not found")
+
+            email_input.clear()
+            email_input.input(email)
+            print("    ✓ Email entered")
+            time.sleep(1)
+
+            # Click Continue
+            print("\n[4] Clicking 'Continue' button...")
+            continue_selectors = [
+                '#continue',
+                'css:input[type="submit"]',
+                'css:input.a-button-input',
+                'xpath://input[@id="continue"]'
+            ]
+
+            for idx, selector in enumerate(continue_selectors, 1):
+                try:
+                    continue_button = page.ele(selector, timeout=3)
+                    if continue_button:
+                        continue_button.click()
+                        print(f"    ✓ Clicked continue button using selector #{idx}")
+                        break
+                except:
+                    continue
+
+            time.sleep(3)
+
+        # Enter password
+        print("\n[5] Entering password...")
+        password_selectors = [
+            '#ap_password',
+            'css:input[name="password"]',
+            'css:input[type="password"]',
+            'xpath://input[@type="password"]'
+        ]
+
+        password_input = None
+        for idx, selector in enumerate(password_selectors, 1):
+            try:
+                password_input = page.ele(selector, timeout=5)
+                if password_input:
+                    print(f"    ✓ Found password input using selector #{idx}")
+                    break
+            except:
+                print(f"    ✗ Not found using selector #{idx}")
+                continue
+
+        if not password_input:
+            print("\n[ERROR] Could not find password input field!")
+            raise Exception("Password input field not found")
+
+        password_input.clear()
+        password_input.input(password)
+        print("    ✓ Password entered")
+        time.sleep(1)
+
+        # Click Sign-In
+        print("\n[6] Clicking 'Sign-In' button...")
+        signin_selectors = [
+            '#signInSubmit',
+            'css:input[type="submit"]',
+            'css:input.a-button-input',
+            'xpath://input[@id="signInSubmit"]'
+        ]
+
+        for idx, selector in enumerate(signin_selectors, 1):
+            try:
+                sign_in_button = page.ele(selector, timeout=3)
+                if sign_in_button:
+                    sign_in_button.click()
+                    print(f"    ✓ Clicked sign-in button using selector #{idx}")
+                    break
+            except:
+                continue
+
+        time.sleep(5)
+
+        # Check for CAPTCHA or OTP
+        print("\n[7] Checking for CAPTCHA or OTP...")
+        current_url = page.url
+
+        if "ap/cvf" in current_url or "ap/mfa" in current_url:
+            print("\n" + "!" * 80)
+            print("! OTP / 2-Factor Authentication Required!")
+            print("! Please enter the OTP code manually in the browser")
+            print("! Waiting 60 seconds for you to complete...")
+            print("!" * 80)
+            time.sleep(60)
+
+        elif "ap/captcha" in current_url or "captcha" in page.html.lower():
+            print("\n" + "!" * 80)
+            print("! CAPTCHA Detected!")
+            print("! Please solve the CAPTCHA manually in the browser")
+            print("! Waiting 60 seconds for you to complete...")
+            print("!" * 80)
+            time.sleep(60)
+
+        # Verify login success
+        print("\n[8] Verifying login status...")
+        page.get("https://www.amazon.com")
+        time.sleep(3)
+
+        # Check if logged in
+        try:
+            account_element = page.ele('#nav-link-accountList', timeout=5)
+            if account_element:
+                account_text = account_element.text.lower()
+                if "hello" in account_text and "sign in" not in account_text:
+                    print("\n" + "=" * 80)
+                    print("✓ LOGIN SUCCESSFUL!")
+                    print("=" * 80)
+                    return True
+                else:
+                    print("\n" + "=" * 80)
+                    print("✗ LOGIN FAILED - Still showing 'Sign in'")
+                    print("=" * 80)
+                    return False
+            else:
+                print(f"\n[WARNING] Could not find account element")
+                print("Assuming login successful...")
+                return True
+
+        except Exception as e:
+            print(f"\n[WARNING] Could not verify login status: {e}")
+            print("Assuming login successful...")
+            return True
+
+    except Exception as e:
+        print(f"\n[ERROR] Login failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 if __name__ == "__main__":
     # Check command line arguments
     if len(sys.argv) > 1:

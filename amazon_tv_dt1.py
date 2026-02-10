@@ -387,7 +387,6 @@ class AmazonDetailCrawler:
             user_agent = _config.get_browser('user_agent', 'amazon_tv_dt1') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
             co = ChromiumOptions()
             co.set_user_agent(user_agent)
-            co.no_imgs(True)
             co.set_argument('--disable-dev-shm-usage')
             co.set_argument('--no-sandbox')
             # 매번 새 세션으로 시작 (쿠키 격리)

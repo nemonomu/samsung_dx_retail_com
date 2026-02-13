@@ -2223,6 +2223,8 @@ class AmazonDetailCrawler:
             print("\n[STEP 5/5] Starting to scrape detail pages...")
             print(f"[INFO] Total pages to scrape: {len(product_urls)}")
 
+            consecutive_failures = 0
+
             for idx, url_data in enumerate(product_urls, 1):
                 # Check if we've reached the maximum SKU limit
                 if self.total_collected >= self.max_skus:
@@ -2234,7 +2236,27 @@ class AmazonDetailCrawler:
                 print(f"\n{'='*80}")
                 print(f"Processing {idx}/{len(product_urls)}")
 
-                self.scrape_detail_page(url_data)
+                success = self.scrape_detail_page(url_data)
+
+                if success:
+                    consecutive_failures = 0
+                else:
+                    consecutive_failures += 1
+                    if consecutive_failures >= self.browser_restart_after_fail:
+                        print(f"\n[WARNING] {consecutive_failures} consecutive failures detected - restarting browser...")
+                        try:
+                            self.page.quit()
+                        except Exception:
+                            pass
+                        time.sleep(5)
+                        try:
+                            self.setup_driver()
+                            consecutive_failures = 0
+                            print("[OK] Browser restarted successfully")
+                        except Exception as e:
+                            print(f"[ERROR] Browser restart failed: {e}")
+                            print("[ERROR] Stopping crawler due to unrecoverable browser failure")
+                            break
 
                 # Random delay between requests
                 delay = random.uniform(2, 4)

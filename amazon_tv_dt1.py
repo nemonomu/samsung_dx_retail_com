@@ -2177,11 +2177,13 @@ class AmazonDetailCrawler:
 
             return False
 
-    def run(self):
-        """Main execution"""
+    def run(self, start_from=0):
+        """Main execution. start_from: 0-based index to skip already-processed URLs"""
         try:
             print("="*80)
             print(f"Amazon TV Detail1 Crawler (Price Collection from Detail Pages) - Starting (Batch ID: {self.batch_id})")
+            if start_from > 0:
+                print(f"[INFO] Resuming from index {start_from + 1}")
             print("="*80)
 
             # Step 1: Connect to database
@@ -2223,9 +2225,13 @@ class AmazonDetailCrawler:
             print("\n[STEP 5/5] Starting to scrape detail pages...")
             print(f"[INFO] Total pages to scrape: {len(product_urls)}")
 
+            if start_from > 0:
+                product_urls = product_urls[start_from:]
+                print(f"[INFO] Skipped first {start_from} URLs, remaining: {len(product_urls)}")
+
             consecutive_failures = 0
 
-            for idx, url_data in enumerate(product_urls, 1):
+            for idx, url_data in enumerate(product_urls, start_from + 1):
                 # Check if we've reached the maximum SKU limit
                 if self.total_collected >= self.max_skus:
                     print(f"\n{'='*80}")
@@ -2355,9 +2361,20 @@ if __name__ == "__main__":
     sys.stdout = _tee
     print(f"[INFO] Log file: {_log_filepath}")
 
+    # Parse start_from argument: python amazon_tv_dt1.py 99
+    _start_from = 0
+    if len(sys.argv) > 1:
+        try:
+            _start_from = int(sys.argv[1]) - 1  # user provides 1-based, convert to 0-based
+            if _start_from < 0:
+                _start_from = 0
+            print(f"[INFO] Start from: {_start_from + 1} (skipping first {_start_from})")
+        except ValueError:
+            print(f"[WARNING] Invalid start argument '{sys.argv[1]}', starting from 1")
+
     try:
         crawler = AmazonDetailCrawler()
-        crawler.run()
+        crawler.run(start_from=_start_from)
     except Exception as e:
         print(f"\n[FATAL ERROR] {e}")
         import traceback

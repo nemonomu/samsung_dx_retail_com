@@ -440,7 +440,7 @@ class BestBuyDetailCrawler:
             # Use main batch_id as session start time
             detail_table = self.config.get_table('detail_data') or 'bby_tv_crawl'
             if main_batch_id:
-                session_start_time = datetime.strptime(main_batch_id, '%Y%m%d_%H%M%S')
+                session_start_time = datetime.strptime(main_batch_id, '%Y%m%d_%H%M%S') - timedelta(hours=9)
                 session_start_str = session_start_time.strftime('%Y-%m-%d %H:%M:%S')
 
                 print(f"[INFO] Session start time (from main batch): {session_start_str}")

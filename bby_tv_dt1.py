@@ -145,6 +145,11 @@ class BestBuyDetailCrawler:
             co.set_argument('--disable-blink-features=AutomationControlled')
             co.set_user_agent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
             self.page = ChromiumPage(co)
+            # 메인 페이지 먼저 방문하여 Akamai 쿠키 확보
+            print("[INFO] Visiting bestbuy.com main page for cookie warmup...")
+            self.page.get('https://www.bestbuy.com')
+            time.sleep(random.uniform(5, 8))
+            print("[OK] Cookie warmup complete")
             print("[OK] DrissionPage browser setup complete")
             return True
         except Exception as e:

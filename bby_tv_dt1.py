@@ -476,35 +476,27 @@ class BestBuyDetailCrawler:
 
             print(f"[OK] Total unique items from main/bsr/promo/trend: {len(all_urls)}")
 
-            # Filter out already processed URLs from current session (based on main batch start time)
-            print("[INFO] Checking for already processed URLs (current session)...")
+            # Filter out already processed URLs (오늘 날짜 기준 - batch 변경과 무관하게 중복 방지)
+            print("[INFO] Checking for already processed URLs (today)...")
             cursor = self.db_conn.cursor()
 
-            # Use main batch_id as session start time
             detail_table = self.config.get_table('detail_data') or 'bby_tv_crawl'
-            if main_batch_id:
-                session_start_time = datetime.strptime(main_batch_id, '%Y%m%d_%H%M%S') - timedelta(hours=9)
-                session_start_str = session_start_time.strftime('%Y-%m-%d %H:%M:%S')
+            today_str = datetime.now().strftime('%Y-%m-%d')
+            print(f"[INFO] Checking crawl_datetime >= '{today_str}'")
 
-                print(f"[INFO] Session start time (from main batch): {session_start_str}")
+            # 오늘 수집된 URL 중 핵심 필드가 모두 있는 경우만 완료로 간주
+            cursor.execute(f"""
+                SELECT DISTINCT product_url
+                FROM {detail_table}
+                WHERE product_url IS NOT NULL
+                  AND crawl_datetime >= %s
+                  AND retailer_sku_name IS NOT NULL
+                  AND final_sku_price IS NOT NULL
+                  AND Detailed_Review_Content IS NOT NULL
+            """, (today_str,))
 
-                # Get all distinct processed URLs from current session in bby_tv_crawl
-                # 핵심 필드(retailer_sku_name, final_sku_price, Detailed_Review_Content)가 모두 있는 경우만 완료로 간주
-                cursor.execute(f"""
-                    SELECT DISTINCT product_url
-                    FROM {detail_table}
-                    WHERE product_url IS NOT NULL
-                      AND crawl_datetime >= %s
-                      AND retailer_sku_name IS NOT NULL
-                      AND final_sku_price IS NOT NULL
-                      AND Detailed_Review_Content IS NOT NULL
-                """, (session_start_str,))
-
-                already_processed_urls = {row[0] for row in cursor.fetchall()}
-                print(f"[INFO] Found {len(already_processed_urls)} already processed URLs in current session")
-            else:
-                already_processed_urls = set()
-                print(f"[WARNING] No main batch_id found, skipping duplicate check")
+            already_processed_urls = {row[0] for row in cursor.fetchall()}
+            print(f"[INFO] Found {len(already_processed_urls)} already processed URLs today")
 
             cursor.close()
 

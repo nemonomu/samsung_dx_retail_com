@@ -2332,8 +2332,8 @@ class BestBuyDetailCrawler:
         except Exception as e:
             print(f"[WARNING] Failed to cleanup old logs: {e}")
 
-    def run(self):
-        """메인 execution"""
+    def run(self, start_from=0):
+        """메인 execution. start_from: 0-based index to skip already-processed URLs"""
         # 콘솔 출력을 파일로도 저장
         log_dir = r"C:\samsung_dx_retail_com\log"
         if not os.path.exists(log_dir):
@@ -2364,7 +2364,11 @@ class BestBuyDetailCrawler:
 
             # 각 URL crawling
             success_count = 0
-            for url_data in urls:
+            if start_from > 0:
+                urls = urls[start_from:]
+                print(f"[INFO] Skipped first {start_from} URLs, remaining: {len(urls)}")
+
+            for idx, url_data in enumerate(urls, start_from + 1):
                 # Check if we've reached the maximum SKU limit
                 if self.total_collected >= self.max_skus:
                     print(f"\n{'='*80}")
@@ -2480,8 +2484,19 @@ class BestBuyDetailCrawler:
                 self.tee.close()
 
 def main():
+    # Parse start_from argument: python bby_tv_dt1.py 39
+    start_from = 0
+    if len(sys.argv) > 1:
+        try:
+            start_from = int(sys.argv[1]) - 1  # user provides 1-based, convert to 0-based
+            if start_from < 0:
+                start_from = 0
+            print(f"[INFO] Start from: {start_from + 1} (skipping first {start_from})")
+        except ValueError:
+            print(f"[WARNING] Invalid start argument '{sys.argv[1]}', starting from 1")
+
     crawler = BestBuyDetailCrawler()
-    crawler.run()
+    crawler.run(start_from=start_from)
 
 if __name__ == "__main__":
     main()

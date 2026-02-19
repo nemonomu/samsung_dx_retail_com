@@ -2380,7 +2380,7 @@ class BestBuyDetailCrawler:
                     success_count += 1
 
                 # page 간 딜레이
-                time.sleep(random.uniform(8, 12))
+                time.sleep(random.uniform(2, 4))
 
             print("\n" + "="*80)
             print(f"crawling complete! successful: {success_count}/{len(urls)}items")

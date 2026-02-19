@@ -142,7 +142,8 @@ class BestBuyDetailCrawler:
             print("[INFO] Setting up DrissionPage browser...")
             co = ChromiumOptions()
             co.no_imgs(True)
-            co.set_argument('--disable-http2')
+            co.set_argument('--disable-blink-features=AutomationControlled')
+            co.set_user_agent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
             self.page = ChromiumPage(co)
             print("[OK] DrissionPage browser setup complete")
             return True

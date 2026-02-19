@@ -151,6 +151,49 @@ class BestBuyDetailCrawler:
             traceback.print_exc()
             return False
 
+    def close_browser(self):
+        """브라우저 안전 종료 + 잔여 프로세스 정리"""
+        try:
+            if self.page:
+                self.page.quit()
+                self.page = None
+                print("[INFO] Browser closed")
+        except Exception as e:
+            print(f"[WARNING] Browser close error: {e}")
+            self.page = None
+        # 잔여 chrome 프로세스 강제 종료
+        try:
+            import subprocess
+            subprocess.run(['taskkill', '/f', '/im', 'chrome.exe'],
+                         capture_output=True, timeout=10)
+        except Exception:
+            pass
+
+    def restart_browser(self):
+        """브라우저 종료 후 재시작"""
+        print("[INFO] Restarting browser...")
+        self.close_browser()
+        time.sleep(3)
+        return self.setup_browser()
+
+    def check_db_connection(self):
+        """DB 커넥션 상태 확인 및 재연결"""
+        try:
+            cursor = self.db_conn.cursor()
+            cursor.execute("SELECT 1")
+            cursor.close()
+            return True
+        except Exception:
+            print("[WARNING] DB connection lost, reconnecting...")
+            try:
+                self.db_conn = psycopg2.connect(**DB_CONFIG)
+                self.db_conn.autocommit = True
+                print("[OK] DB reconnected")
+                return True
+            except Exception as e:
+                print(f"[ERROR] DB reconnection failed: {e}")
+                return False
+
     def get_recent_urls(self):
         """최신 batch_id의 product URLs와 추가 data 가져오기"""
         try:
@@ -1812,6 +1855,16 @@ class BestBuyDetailCrawler:
             print(f"  [INFO] Loading page...")
             self.page.get(product_url)
 
+            # ERR_HTTP2_PROTOCOL_ERROR 감지
+            try:
+                page_title = self.page.title or ''
+                page_text = self.page.html[:2000] if self.page.html else ''
+                if 'ERR_HTTP2_PROTOCOL_ERROR' in page_text or "This site can't be reached" in page_text or 'ERR_HTTP2_PROTOCOL_ERROR' in page_title:
+                    print(f"  [BLOCKED] ERR_HTTP2_PROTOCOL_ERROR detected - Best Buy blocked this request")
+                    return 'blocked'
+            except Exception:
+                pass
+
             # 핵심 element load wait (최대 20sec) - DrissionPage
             try:
                 h1_elem = self.page.ele('xpath://h1[contains(@class, "h4") or contains(@class, "heading")]', timeout=20)
@@ -2368,7 +2421,17 @@ class BestBuyDetailCrawler:
                 urls = urls[start_from:]
                 print(f"[INFO] Skipped first {start_from} URLs, remaining: {len(urls)}")
 
-            for idx, url_data in enumerate(urls, start_from + 1):
+            # 자동 재시도 설정
+            MAX_RETRIES = 5          # 최대 재시도 횟수
+            INITIAL_WAIT = 300       # 초기 대기 시간 (5분)
+            retry_count = 0          # 현재 재시도 횟수
+            consecutive_fails = 0    # 연속 실패 횟수
+
+            i = 0
+            while i < len(urls):
+                url_data = urls[i]
+                idx = i + start_from + 1
+
                 # Check if we've reached the maximum SKU limit
                 if self.total_collected >= self.max_skus:
                     print(f"\n{'='*80}")
@@ -2376,11 +2439,86 @@ class BestBuyDetailCrawler:
                     print(f"[INFO] Stopping collection. Total collected: {self.total_collected}")
                     break
 
-                if self.scrape_detail_page(url_data):
+                result = self.scrape_detail_page(url_data)
+
+                if result == 'blocked':
+                    # ERR_HTTP2_PROTOCOL_ERROR 감지 - 재시도 로직
+                    retry_count += 1
+                    if retry_count > MAX_RETRIES:
+                        print(f"\n{'='*80}")
+                        print(f"[ERROR] Max retries ({MAX_RETRIES}) exceeded. Stopping.")
+                        print(f"[INFO] Resume later with: python bby_tv_dt1.py {idx}")
+                        break
+
+                    wait_time = INITIAL_WAIT * retry_count  # 5분, 10분, 15분, 20분, 25분
+                    print(f"\n{'='*80}")
+                    print(f"[RETRY {retry_count}/{MAX_RETRIES}] Blocked by Best Buy. Waiting {wait_time // 60} minutes...")
+                    print(f"[INFO] Will restart browser and retry item {idx}")
+                    print(f"{'='*80}")
+
+                    # 브라우저 종료
+                    self.close_browser()
+
+                    # 대기
+                    time.sleep(wait_time)
+
+                    # DB 커넥션 체크
+                    if not self.check_db_connection():
+                        print("[ERROR] DB reconnection failed. Stopping.")
+                        break
+
+                    # 브라우저 새로 시작
+                    if not self.setup_browser():
+                        print("[ERROR] Browser restart failed. Stopping.")
+                        break
+
+                    # 같은 URL 다시 시도 (i 증가 안 함)
+                    self.order -= 1  # order 카운터 복원 (scrape_detail_page에서 증가했으므로)
+                    continue
+
+                elif result is True:
                     success_count += 1
+                    consecutive_fails = 0
+                    retry_count = 0  # 성공하면 재시도 카운터 리셋
+
+                else:
+                    # 일반 실패 (blocked 아님)
+                    consecutive_fails += 1
+                    # 3회 연속 실패 시 blocked로 판단
+                    if consecutive_fails >= 3:
+                        retry_count += 1
+                        if retry_count > MAX_RETRIES:
+                            print(f"\n{'='*80}")
+                            print(f"[ERROR] Max retries ({MAX_RETRIES}) exceeded. Stopping.")
+                            print(f"[INFO] Resume later with: python bby_tv_dt1.py {idx}")
+                            break
+
+                        wait_time = INITIAL_WAIT * retry_count
+                        print(f"\n{'='*80}")
+                        print(f"[RETRY {retry_count}/{MAX_RETRIES}] {consecutive_fails} consecutive failures. Possible block detected.")
+                        print(f"[INFO] Waiting {wait_time // 60} minutes before retry...")
+                        print(f"{'='*80}")
+
+                        self.close_browser()
+                        time.sleep(wait_time)
+
+                        if not self.check_db_connection():
+                            print("[ERROR] DB reconnection failed. Stopping.")
+                            break
+
+                        if not self.setup_browser():
+                            print("[ERROR] Browser restart failed. Stopping.")
+                            break
+
+                        consecutive_fails = 0
+                        # 실패한 3개 중 첫번째부터 다시 시도
+                        i -= 2
+                        self.order -= 2
+                        continue
 
                 # page 간 딜레이
                 time.sleep(random.uniform(2, 4))
+                i += 1
 
             print("\n" + "="*80)
             print(f"crawling complete! successful: {success_count}/{len(urls)}items")
@@ -2472,9 +2610,7 @@ class BestBuyDetailCrawler:
             traceback.print_exc()
 
         finally:
-            if self.page:
-                self.page.quit()
-                print("\n[INFO] Browser closed")
+            self.close_browser()
             if self.db_conn:
                 self.db_conn.close()
                 print("[INFO] DB connection closed")

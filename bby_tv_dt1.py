@@ -2476,8 +2476,8 @@ class BestBuyDetailCrawler:
                 else:
                     # 일반 실패 (blocked 아님)
                     consecutive_fails += 1
-                    # 3회 연속 실패 시 blocked로 판단
-                    if consecutive_fails >= 3:
+                    # 1회 실패 시 바로 blocked로 판단
+                    if consecutive_fails >= 1:
                         retry_count += 1
                         if retry_count > MAX_RETRIES:
                             print(f"\n{'='*80}")
@@ -2503,9 +2503,8 @@ class BestBuyDetailCrawler:
                             break
 
                         consecutive_fails = 0
-                        # 실패한 3개 중 첫번째부터 다시 시도
-                        i -= 2
-                        self.order -= 2
+                        # 실패한 항목 다시 시도 (i 증가 안 함)
+                        self.order -= 1
                         continue
 
                 # page 간 딜레이

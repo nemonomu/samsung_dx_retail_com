@@ -142,6 +142,7 @@ class BestBuyDetailCrawler:
             print("[INFO] Setting up DrissionPage browser...")
             co = ChromiumOptions()
             co.no_imgs(True)
+            co.set_argument('--disable-http2')
             self.page = ChromiumPage(co)
             print("[OK] DrissionPage browser setup complete")
             return True

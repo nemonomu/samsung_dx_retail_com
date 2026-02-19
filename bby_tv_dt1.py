@@ -2415,7 +2415,7 @@ class BestBuyDetailCrawler:
 
             # 자동 재시도 설정
             MAX_RETRIES = 5          # 최대 재시도 횟수
-            INITIAL_WAIT = 300       # 초기 대기 시간 (5분)
+            INITIAL_WAIT = 600       # 초기 대기 시간 (10분)
             retry_count = 0          # 현재 재시도 횟수
             consecutive_fails = 0    # 연속 실패 횟수
 

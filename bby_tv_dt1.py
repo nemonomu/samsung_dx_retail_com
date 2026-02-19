@@ -2508,7 +2508,7 @@ class BestBuyDetailCrawler:
                         continue
 
                 # page 간 딜레이
-                time.sleep(random.uniform(2, 4))
+                time.sleep(random.uniform(5, 10))
                 i += 1
 
             print("\n" + "="*80)

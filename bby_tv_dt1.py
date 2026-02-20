@@ -2438,7 +2438,7 @@ class BestBuyDetailCrawler:
                         print(f"[INFO] Resume later with: python bby_tv_dt1.py {idx}")
                         break
 
-                    wait_time = INITIAL_WAIT * retry_count  # 5분, 10분, 15분, 20분, 25분
+                    wait_time = INITIAL_WAIT + 300 * (retry_count - 1)  # 10분, 15분, 20분, 25분, 30분
                     print(f"\n{'='*80}")
                     print(f"[RETRY {retry_count}/{MAX_RETRIES}] Blocked by Best Buy. Waiting {wait_time // 60} minutes...")
                     print(f"[INFO] Will restart browser and retry item {idx}")
@@ -2481,7 +2481,7 @@ class BestBuyDetailCrawler:
                             print(f"[INFO] Resume later with: python bby_tv_dt1.py {idx}")
                             break
 
-                        wait_time = INITIAL_WAIT * retry_count
+                        wait_time = INITIAL_WAIT + 300 * (retry_count - 1)  # 10분, 15분, 20분, 25분, 30분
                         print(f"\n{'='*80}")
                         print(f"[RETRY {retry_count}/{MAX_RETRIES}] {consecutive_fails} consecutive failures. Possible block detected.")
                         print(f"[INFO] Waiting {wait_time // 60} minutes before retry...")

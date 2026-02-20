@@ -1265,9 +1265,28 @@ class BestBuyDetailCrawler:
     def extract_top_mentions_from_reviews_page(self, tree):
         """Top_Mentions extraction (See All Customer Reviews page에서) - lxml tree
         Returns: 콤마로 구분된 모든 mentions (예: "Picture Quality, Setup, Size")
+        우선순위: pros-container + cons-container (Pros/Cons 모두 수집) → 기존 XPath fallback
         """
         try:
-            # XPath 패턴 - 제공된 HTML 구조 기반
+            # 1순위: distillation-card에서 Pros + Cons mentioned 수집 (data-feature-name 속성 사용)
+            try:
+                mentions = []
+                # Pros mentioned 먼저
+                pros_elements = tree.xpath('//div[contains(@class, "pros-container")]//button[@data-feature-name]/@data-feature-name')
+                for feature_name in pros_elements:
+                    if feature_name:
+                        mentions.append(feature_name.strip())
+                # Cons mentioned 다음
+                cons_elements = tree.xpath('//div[contains(@class, "cons-container")]//button[@data-feature-name]/@data-feature-name')
+                for feature_name in cons_elements:
+                    if feature_name:
+                        mentions.append(feature_name.strip())
+                if mentions:
+                    return ', '.join(mentions)
+            except Exception:
+                pass
+
+            # 2순위 (fallback): 기존 XPath 패턴
             xpaths = self.config.get_xpath_list('top_mentions', self.file_name) or [
                 '/html/body/div[5]/div[8]/div[2]/aside/ul/li/a',
                 '//ul[@class="list-unstyled"]/li/a[contains(@class, "v-text-tech-black")]',
@@ -1284,10 +1303,7 @@ class BestBuyDetailCrawler:
                         for elem in elements:
                             text = elem.text_content().strip()
                             if text:
-                                # 숫자와 괄호 제거 (예: "Picture Quality (1014)" -> "Picture Quality")
-                                # "&nbsp;" 처리 및 괄호+숫자 패턴 제거 (콤마 포함 숫자도 처리)
                                 clean_text = re.sub(r'\s*\([\d,]+\)\s*$', '', text)
-                                # 앞뒤 공백 및 특수문자 정리
                                 clean_text = clean_text.replace('\xa0', ' ').strip()
                                 if clean_text:
                                     mentions.append(clean_text)
@@ -1296,26 +1312,7 @@ class BestBuyDetailCrawler:
                     continue
 
             if mentions:
-                # 모든 mentions를 콤마로 구분하여 반환
                 return ', '.join(mentions)
-
-            # Fallback: distillation-card에서 Pros + Cons mentioned 수집 (data-feature-name 속성 사용)
-            try:
-                fallback_mentions = []
-                # Pros mentioned 먼저
-                pros_elements = tree.xpath('//div[contains(@class, "pros-container")]//button[@data-feature-name]/@data-feature-name')
-                for feature_name in pros_elements:
-                    if feature_name:
-                        fallback_mentions.append(feature_name.strip())
-                # Cons mentioned 다음
-                cons_elements = tree.xpath('//div[contains(@class, "cons-container")]//button[@data-feature-name]/@data-feature-name')
-                for feature_name in cons_elements:
-                    if feature_name:
-                        fallback_mentions.append(feature_name.strip())
-                if fallback_mentions:
-                    return ', '.join(fallback_mentions)
-            except Exception:
-                pass
 
             return None
 

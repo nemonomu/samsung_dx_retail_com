@@ -476,26 +476,26 @@ class BestBuyDetailCrawler:
 
             print(f"[OK] Total unique items from main/bsr/promo/trend: {len(all_urls)}")
 
-            # Filter out already processed URLs (현재 실행 기준 - 같은 batch_id만)
-            print("[INFO] Checking for already processed URLs (current run)...")
+            # Filter out already processed URLs (세션 기반 - main_batch_id 이후 처리된 것만)
+            print("[INFO] Checking for already processed URLs (current session)...")
             cursor = self.db_conn.cursor()
 
             detail_table = self.config.get_table('detail_data') or 'bby_tv_crawl'
-            print(f"[INFO] Checking batch_id = '{self.batch_id}' (current run)")
+            print(f"[INFO] Checking batch_id >= '{main_batch_id}' (session-based)")
 
-            # 현재 실행(batch_id)에서 수집된 URL 중 핵심 필드가 모두 있는 경우만 완료로 간주
+            # 현재 세션(main_batch_id 이후)에서 수집된 URL 중 핵심 필드가 모두 있는 경우만 완료로 간주
             cursor.execute(f"""
                 SELECT DISTINCT product_url
                 FROM {detail_table}
                 WHERE product_url IS NOT NULL
-                  AND batch_id = %s
+                  AND batch_id >= %s
                   AND retailer_sku_name IS NOT NULL
                   AND final_sku_price IS NOT NULL
                   AND Detailed_Review_Content IS NOT NULL
-            """, (self.batch_id,))
+            """, (main_batch_id,))
 
             already_processed_urls = {row[0] for row in cursor.fetchall()}
-            print(f"[INFO] Found {len(already_processed_urls)} already processed URLs in current run")
+            print(f"[INFO] Found {len(already_processed_urls)} already processed URLs in current session")
 
             cursor.close()
 

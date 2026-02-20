@@ -152,22 +152,29 @@ class BestBuyDetailCrawler:
             return False
 
     def close_browser(self):
-        """브라우저 안전 종료 + 잔여 프로세스 정리"""
+        """브라우저 안전 종료 + 해당 프로세스만 정리"""
+        browser_pid = None
         try:
             if self.page:
+                # quit 전에 브라우저 PID 확보
+                try:
+                    browser_pid = self.page.browser.process.pid
+                except Exception:
+                    pass
                 self.page.quit()
                 self.page = None
                 print("[INFO] Browser closed")
         except Exception as e:
             print(f"[WARNING] Browser close error: {e}")
             self.page = None
-        # 잔여 chrome 프로세스 강제 종료
-        try:
-            import subprocess
-            subprocess.run(['taskkill', '/f', '/im', 'chrome.exe'],
-                         capture_output=True, timeout=10)
-        except Exception:
-            pass
+        # quit 실패 시 해당 PID의 프로세스 트리만 강제 종료
+        if browser_pid:
+            try:
+                import subprocess
+                subprocess.run(['taskkill', '/f', '/t', '/pid', str(browser_pid)],
+                             capture_output=True, timeout=10)
+            except Exception:
+                pass
 
     def restart_browser(self):
         """브라우저 종료 후 재시작"""

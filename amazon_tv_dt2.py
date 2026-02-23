@@ -1472,13 +1472,31 @@ class AmazonDetailCrawler:
             return None
 
     def extract_discount_type(self, tree):
-        """Extract discount type (e.g., 'Limited time deal')"""
+        """Extract discount type (e.g., 'Limited time deal', 'Ends in 13 hours 7 minutes')"""
         try:
             # Use DB XPath if available, otherwise use hardcoded fallback
             xpath = (self.xpaths.get('discount_type') or ['//*[@id="dealBadgeSupportingText"]'])[0]
             text = self.extract_text_safe(tree, xpath)
             if text:
-                return text.strip()
+                # 카운트다운 타이머인 경우
+                if 'Ends in' in text:
+                    # 1순위: 스크린 리더 라벨에서 깔끔한 텍스트 추출
+                    sr_xpaths = [
+                        '//*[@id="deals_countdown_timer_from_hours_screen_reader_label" and not(contains(@class, "aok-hidden"))]',
+                        '//*[@id="deals_countdown_timer_from_minutes_without_seconds_screen_reader_label" and not(contains(@class, "aok-hidden"))]',
+                        '//*[@id="deals_countdown_timer_from_seconds_screen_reader_label" and not(contains(@class, "aok-hidden"))]',
+                    ]
+                    for sr_xpath in sr_xpaths:
+                        sr_text = self.extract_text_safe(tree, sr_xpath)
+                        if sr_text and 'NO_OF' not in sr_text:
+                            return re.sub(r'\s+', ' ', sr_text).strip()
+                    # 2순위: 타이머 span에서 직접 추출 (e.g., "13:07:04")
+                    timer_text = self.extract_text_safe(tree, '//*[@id="detailpage-dealBadge-countdown-timer"]')
+                    if timer_text:
+                        return f"Ends in {timer_text.strip()}"
+                    return None
+                # 일반 텍스트 (e.g., "Limited time deal")
+                return re.sub(r'\s+', ' ', text).strip()
             return None
 
         except Exception as e:

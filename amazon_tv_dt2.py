@@ -1052,8 +1052,11 @@ class AmazonDetailCrawler:
                 if review_section:
                     review_section.scroll.to_see()
                     time.sleep(2)
-            except Exception:
-                pass
+                    print(f"  [DEBUG] reviewsMedley found, scrolled to review section")
+                else:
+                    print(f"  [DEBUG] reviewsMedley not found on page")
+            except Exception as e:
+                print(f"  [DEBUG] reviewsMedley scroll failed: {e}")
 
             # Get current page HTML
             tree = html.fromstring(self.page.html)
@@ -1063,6 +1066,7 @@ class AmazonDetailCrawler:
             # Each review: <li data-hook="review">
             review_container_xpath = '//ul[@id="cm-cr-dp-review-list"]//li[@data-hook="review"]'
             review_containers = tree.xpath(review_container_xpath)
+            print(f"  [DEBUG] review containers found: {len(review_containers)}")
 
             all_reviews = []
             collected_reviews = set()  # 중복 방지
@@ -1078,6 +1082,7 @@ class AmazonDetailCrawler:
                             collected_reviews.add(review_text)
 
             # Format as "1-review, 2-review, ..."
+            print(f"  [DEBUG] extracted reviews: {len(all_reviews)}")
             if all_reviews:
                 formatted_reviews = []
                 for idx, review in enumerate(all_reviews, 1):

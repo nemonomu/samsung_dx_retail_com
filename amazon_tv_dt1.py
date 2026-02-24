@@ -1651,33 +1651,39 @@ class AmazonDetailCrawler:
             discount_type = self.extract_discount_type(tree)
             number_of_units_purchased = self.extract_number_of_units_purchased_past_month(tree)
 
-            # Extract detailed review content and count_of_reviews from review page (up to 20 reviews)
-            # Skip review page navigation if star_rating == "No customer reviews"
-            # This avoids collecting wrong reviews from bundle products (e.g., Asurion warranty reviews)
+            # [주석처리] 리뷰페이지 접속 중단 - 상세페이지에서 리뷰 수집
+            # # Extract detailed review content and count_of_reviews from review page (up to 20 reviews)
+            # # Skip review page navigation if star_rating == "No customer reviews"
+            # # This avoids collecting wrong reviews from bundle products (e.g., Asurion warranty reviews)
+            #
+            # # First check for "0 customer reviews" pattern on detail page
+            # # e.g., "There are 0 customer reviews and 2 customer ratings."
+            # zero_reviews_detected = False
+            # zero_reviews_xpaths = [
+            #     '//*[@id="reviewsMedley"]//div[@class="a-box-inner"]',
+            #     '//*[@id="reviewsMedley"]/div/div[2]/div/div[2]/div[3]/div[2]/div/div',
+            #     '//div[contains(text(), "customer reviews and")]'
+            # ]
+            # for xpath in zero_reviews_xpaths:
+            #     zero_text = self.extract_text_safe(tree, xpath)
+            #     if zero_text:
+            #         match = re.search(r'(\d+)\s*customer\s*reviews?', zero_text, re.IGNORECASE)
+            #         if match and match.group(1) == '0':
+            #             print(f"  [INFO] Detected '0 customer reviews' on detail page: {zero_text[:80]}...")
+            #             zero_reviews_detected = True
+            #             break
+            #
+            # if star_rating == "No customer reviews" or zero_reviews_detected:
+            #     print(f"  [INFO] Skipping review page - No customer reviews (count_of_reviews=0)")
+            #     detailed_review_content = None
+            #     count_of_reviews = "0"
+            # else:
+            #     detailed_review_content, count_of_reviews = self.extract_detailed_reviews_from_review_page(url)
 
-            # First check for "0 customer reviews" pattern on detail page
-            # e.g., "There are 0 customer reviews and 2 customer ratings."
-            zero_reviews_detected = False
-            zero_reviews_xpaths = [
-                '//*[@id="reviewsMedley"]//div[@class="a-box-inner"]',
-                '//*[@id="reviewsMedley"]/div/div[2]/div/div[2]/div[3]/div[2]/div/div',
-                '//div[contains(text(), "customer reviews and")]'
-            ]
-            for xpath in zero_reviews_xpaths:
-                zero_text = self.extract_text_safe(tree, xpath)
-                if zero_text:
-                    match = re.search(r'(\d+)\s*customer\s*reviews?', zero_text, re.IGNORECASE)
-                    if match and match.group(1) == '0':
-                        print(f"  [INFO] Detected '0 customer reviews' on detail page: {zero_text[:80]}...")
-                        zero_reviews_detected = True
-                        break
-
-            if star_rating == "No customer reviews" or zero_reviews_detected:
-                print(f"  [INFO] Skipping review page - No customer reviews (count_of_reviews=0)")
-                detailed_review_content = None
-                count_of_reviews = "0"
-            else:
-                detailed_review_content, count_of_reviews = self.extract_detailed_reviews_from_review_page(url)
+            # count_of_reviews: None (DB에 NULL 저장)
+            count_of_reviews = None
+            # detailed_review_content: 상세페이지에서 수집 (기존 extract_detailed_reviews 함수 활용)
+            detailed_review_content = self.extract_detailed_reviews(url)
 
             data = {
                 'page_type': page_type,
@@ -1759,28 +1765,9 @@ class AmazonDetailCrawler:
                 count_of_star_ratings = self.extract_count_of_star_ratings(tree)
                 final_sku_price = self.extract_final_sku_price(tree)
 
-                # Re-extract count_of_reviews from review page (only if has reviews)
-                # First check for "0 customer reviews" pattern on detail page
-                zero_reviews_detected = False
-                zero_reviews_xpaths = [
-                    '//*[@id="reviewsMedley"]//div[@class="a-box-inner"]',
-                    '//*[@id="reviewsMedley"]/div/div[2]/div/div[2]/div[3]/div[2]/div/div',
-                    '//div[contains(text(), "customer reviews and")]'
-                ]
-                for xpath in zero_reviews_xpaths:
-                    zero_text = self.extract_text_safe(tree, xpath)
-                    if zero_text:
-                        match = re.search(r'(\d+)\s*customer\s*reviews?', zero_text, re.IGNORECASE)
-                        if match and match.group(1) == '0':
-                            print(f"  [INFO] Retry: Detected '0 customer reviews' on detail page")
-                            zero_reviews_detected = True
-                            break
-
-                if star_rating == "No customer reviews" or zero_reviews_detected:
-                    detailed_review_content = None
-                    count_of_reviews = "0"
-                else:
-                    detailed_review_content, count_of_reviews = self.extract_detailed_reviews_from_review_page(url)
+                # [주석처리] 리뷰페이지 접속 중단 - 상세페이지에서 리뷰 수집
+                count_of_reviews = None
+                detailed_review_content = self.extract_detailed_reviews(url)
 
                 # Update data dict
                 data['Retailer_SKU_Name'] = retailer_sku_name
@@ -1883,36 +1870,12 @@ class AmazonDetailCrawler:
                         data['Summarized_Review_Content'] = src
                         print(f"    - summarized_review: {'OK' if src else 'NULL'}")
 
-                    if errors['has_cor_null'] or errors['has_rv_detail_null'] or errors['has_rv_insufficient']:
-                        # Check for "0 customer reviews" pattern
-                        sr = data.get('Star_Rating')
-                        zero_reviews_detected = False
-                        zero_reviews_xpaths = [
-                            '//*[@id="reviewsMedley"]//div[@class="a-box-inner"]',
-                            '//*[@id="reviewsMedley"]/div/div[2]/div/div[2]/div[3]/div[2]/div/div',
-                            '//div[contains(text(), "customer reviews and")]'
-                        ]
-                        for xpath in zero_reviews_xpaths:
-                            zero_text = self.extract_text_safe(tree, xpath)
-                            if zero_text:
-                                match = re.search(r'(\d+)\s*customer\s*reviews?', zero_text, re.IGNORECASE)
-                                if match and match.group(1) == '0':
-                                    zero_reviews_detected = True
-                                    break
-
-                        if sr == "No customer reviews" or zero_reviews_detected:
-                            data['Detailed_Review_Content'] = None
-                            data['count_of_reviews'] = "0"
-                            print(f"    - count_of_reviews: 0 (no customer reviews)")
-                        else:
-                            if errors['has_rv_insufficient']:
-                                print(f"    - rv_insufficient: count={errors['cor_int']}, collected={errors['collected_review_count']}, retrying...")
-                            drc, cor = self.extract_detailed_reviews_from_review_page(url)
-                            data['Detailed_Review_Content'] = drc
-                            data['count_of_reviews'] = cor
-                            # 재수집 후 리뷰 개수 계산
-                            new_collected = len([r for r in drc.split(', ') if r and '-' in r]) if drc else 0
-                            print(f"    - count_of_reviews: {cor}, detailed_review: {new_collected} collected")
+                    if errors['has_rv_detail_null'] or errors['has_rv_insufficient']:
+                        # [주석처리] 리뷰페이지 접속 중단 - 상세페이지에서 리뷰 수집
+                        data['count_of_reviews'] = None
+                        data['Detailed_Review_Content'] = self.extract_detailed_reviews(url)
+                        new_collected = len([r for r in (data['Detailed_Review_Content'] or '').split(', ') if r and '-' in r])
+                        print(f"    - count_of_reviews: None, detailed_review: {new_collected} collected (from detail page)")
 
                 # Initial error check
                 errors = check_error_conditions(data)

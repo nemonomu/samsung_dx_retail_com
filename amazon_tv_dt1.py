@@ -1008,6 +1008,15 @@ class AmazonDetailCrawler:
     def extract_detailed_reviews(self, product_url):
         """Extract detailed reviews from product detail page"""
         try:
+            # 리뷰 섹션으로 스크롤하여 lazy loading 트리거
+            try:
+                review_section = self.page.ele('xpath://*[@id="reviewsMedley"]', timeout=5)
+                if review_section:
+                    review_section.scroll.to_see()
+                    time.sleep(2)
+            except Exception:
+                pass
+
             # Get current page HTML
             tree = html.fromstring(self.page.html)
 

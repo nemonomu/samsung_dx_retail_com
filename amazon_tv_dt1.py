@@ -1034,7 +1034,7 @@ class AmazonDetailCrawler:
             collected_reviews = set()  # 중복 방지
             if review_containers:
                 for container in review_containers:
-                    body_elem = container.xpath('.//span[@data-hook="review-body"]/span')
+                    body_elem = container.xpath('.//span[@data-hook="review-body"]')
                     if body_elem:
                         review_text = body_elem[0].text_content().strip()
                         # Remove "Read more" text

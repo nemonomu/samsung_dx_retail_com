@@ -894,18 +894,23 @@ class AmazonDetailCrawler:
                 if text and 'currently unavailable' in text.lower():
                     return "Currently unavailable."
 
-            # PRIORITY 2: Check for "Price higher than typical"
+            # PRIORITY 2: Check for "Price higher than typical" / "High price"
             # NOTE: Checked before "No featured offers" because they use same XPath location
             price_higher_xpaths = self.xpaths.get('price_higher') or [
                 '//*[@id="fod-cx-message-with-learn-more"]/span[1]',
                 '//span[@id="fod-cx-message-with-learn-more"]/span[1]',
-                '//span[contains(text(), "Price higher than typical")]'
+                '//span[contains(text(), "Price higher than typical")]',
+                '//span[contains(text(), "High price")]'
             ]
 
             for xpath in price_higher_xpaths:
                 text = self.extract_text_safe(tree, xpath)
-                if text and 'price higher than typical' in text.lower():
-                    return "Price higher than typical"
+                if text:
+                    text_lower = text.lower().strip()
+                    if 'price higher than typical' in text_lower:
+                        return "Price higher than typical"
+                    if text_lower == 'high price':
+                        return "High price"
 
             # PRIORITY 3: Check for "No featured offers available"
             no_offers_xpaths = self.xpaths.get('no_offers') or [

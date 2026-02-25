@@ -1023,33 +1023,42 @@ class AmazonDetailCrawler:
             # Get current page HTML
             tree = html.fromstring(self.page.html)
 
-            # Extract reviews from detail page review section using container-based approach
-            # Container: <ul id="cm-cr-dp-review-list" data-hook="top-customer-reviews-widget">
-            # Each review: <li data-hook="review">
-            review_container_xpath = '//ul[@id="cm-cr-dp-review-list"]//li[@data-hook="review"]'
-            review_containers = tree.xpath(review_container_xpath)
+            # review_container: DB config 우선, fallback 하드코딩
+            review_container_xpaths = self.xpaths.get('review_container') or [
+                '//ul[@id="cm-cr-dp-review-list"]//li[@data-hook="review"]'
+            ]
+            # review_body: DB config 우선, fallback 하드코딩
+            review_body_xpaths = self.xpaths.get('review_body') or [
+                './/span[@data-hook="review-body"]'
+            ]
+
+            review_containers = []
+            for xpath in review_container_xpaths:
+                review_containers = tree.xpath(xpath)
+                if review_containers:
+                    break
             print(f"  [DEBUG] review containers found: {len(review_containers)}")
 
             all_reviews = []
             collected_reviews = set()  # 중복 방지
             if review_containers:
                 for container in review_containers:
-                    body_elem = container.xpath('.//span[@data-hook="review-body"]')
-                    if body_elem:
-                        review_text = body_elem[0].text_content().strip()
-                        # Remove "Read more" text
-                        review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
-                        if review_text and review_text not in collected_reviews:
-                            all_reviews.append(review_text)
-                            collected_reviews.add(review_text)
+                    for body_xpath in review_body_xpaths:
+                        body_elem = container.xpath(body_xpath)
+                        if body_elem:
+                            review_text = ' '.join(body_elem[0].text_content().split())
+                            # Remove "Read more" text
+                            review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
+                            if review_text and review_text not in collected_reviews:
+                                all_reviews.append(review_text)
+                                collected_reviews.add(review_text)
+                            break
 
-            # Format as "1-review, 2-review, ..."
+            # Format as "review1 - text ||| review2 - text"
             print(f"  [DEBUG] extracted reviews: {len(all_reviews)}")
             if all_reviews:
-                formatted_reviews = []
-                for idx, review in enumerate(all_reviews, 1):
-                    formatted_reviews.append(f"{idx}-{review}")
-                return ", ".join(formatted_reviews)
+                formatted_reviews = [f"review{idx} - {review}" for idx, review in enumerate(all_reviews, 1)]
+                return ' ||| '.join(formatted_reviews)
             else:
                 return None
 
@@ -1825,7 +1834,7 @@ class AmazonDetailCrawler:
                     # 수집된 리뷰 개수 계산 (count가 수집된 개수보다 크면 재시도, 최대 20개까지)
                     collected_review_count = 0
                     if drc and isinstance(drc, str):
-                        collected_review_count = len([r for r in drc.split(', ') if r and '-' in r])
+                        collected_review_count = len(drc.split(' ||| '))
                     has_rv_insufficient = cor_int > collected_review_count and collected_review_count < 20
 
                     return {
@@ -1888,7 +1897,7 @@ class AmazonDetailCrawler:
                         # [주석처리] 리뷰페이지 접속 중단 - 상세페이지에서 리뷰 수집
                         data['count_of_reviews'] = None
                         data['Detailed_Review_Content'] = self.extract_detailed_reviews(url)
-                        new_collected = len([r for r in (data['Detailed_Review_Content'] or '').split(', ') if r and '-' in r])
+                        new_collected = len((data['Detailed_Review_Content'] or '').split(' ||| ')) if data['Detailed_Review_Content'] else 0
                         print(f"    - count_of_reviews: None, detailed_review: {new_collected} collected (from detail page)")
 
                 # Initial error check

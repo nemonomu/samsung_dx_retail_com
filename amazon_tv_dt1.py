@@ -1042,6 +1042,10 @@ class AmazonDetailCrawler:
             all_reviews = []
             collected_reviews = set()  # 중복 방지
             if review_containers:
+                # 첫 번째 컨테이너 HTML 구조 디버그
+                from lxml import etree
+                first_html = etree.tostring(review_containers[0], encoding='unicode', pretty_print=True)
+                print(f"  [DEBUG] first review container HTML (500 chars):\n{first_html[:500]}")
                 for container in review_containers:
                     for body_xpath in review_body_xpaths:
                         body_elem = container.xpath(body_xpath)

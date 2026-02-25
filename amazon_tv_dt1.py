@@ -1029,7 +1029,9 @@ class AmazonDetailCrawler:
             ]
             # review_body: DB config 우선, fallback 하드코딩
             review_body_xpaths = self.xpaths.get('review_body') or [
-                './/span[@data-hook="review-body"]'
+                './/span[@data-hook="review-body"]',
+                './/div[@data-hook="review-collapsed"]',
+                './/div[contains(@class, "reviewText")]'
             ]
 
             review_containers = []

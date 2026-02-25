@@ -1715,7 +1715,7 @@ class WalmartDetailCrawler:
                             for span in review_spans:
                                 if len(reviews) >= 20:
                                     break
-                                review_text = span.text.strip() if span.text else ''
+                                review_text = ' '.join(span.text.split()) if span.text else ''
                                 if review_text and len(review_text) > 5:  # Skip very short texts
                                     reviews.append(review_text)
                         else:
@@ -1740,7 +1740,7 @@ class WalmartDetailCrawler:
                             for span in review_spans_lxml:
                                 if len(reviews) >= 20:
                                     break
-                                review_text = span.text_content().strip() if hasattr(span, 'text_content') else str(span).strip()
+                                review_text = ' '.join(span.text_content().split()) if hasattr(span, 'text_content') else ' '.join(str(span).split())
                                 if review_text and len(review_text) > 5:
                                     reviews.append(review_text)
                         else:
@@ -1794,13 +1794,11 @@ class WalmartDetailCrawler:
                     print(f"  [INFO] Only collected {len(reviews)} reviews after {page_num} pages, will retry...")
                     continue
 
-                # Format as "review1-content, review2-content, ..."
+                # Format as "review1 - content ||| review2 - content ||| ..."
                 if reviews:
                     print(f"  [INFO] Extracted {len(reviews)} reviews from {page_num} page(s)")
-                    formatted = []
-                    for idx, review in enumerate(reviews[:20], 1):
-                        formatted.append(f"review{idx}-{review}")
-                    return ', '.join(formatted)
+                    formatted = [f"review{idx} - {review}" for idx, review in enumerate(reviews[:20], 1)]
+                    return ' ||| '.join(formatted)
 
             print(f"  [WARNING] No reviews extracted")
             return None
@@ -2047,7 +2045,7 @@ class WalmartDetailCrawler:
                 cor_int = int(str(count_of_reviews).replace(',', '')) if count_of_reviews else 0
                 collected_count = 0
                 if detailed_review_content:
-                    collected_count = len([r for r in detailed_review_content.split(', ') if r.startswith('review')])
+                    collected_count = len(detailed_review_content.split(' ||| '))
 
                 has_error = False
                 expected_count = 0
@@ -2095,7 +2093,7 @@ class WalmartDetailCrawler:
                 print(f"       Popularity: {sku_popularity or 'N/A'}")
 
                 if detailed_review_content:
-                    review_count = len([r for r in detailed_review_content.split(', ') if r.startswith('review')])
+                    review_count = len(detailed_review_content.split(' ||| '))
                     print(f"       Reviews: {review_count} collected")
 
                 return True

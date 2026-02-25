@@ -1508,7 +1508,7 @@ class BestBuyDetailCrawler:
 
     def extract_reviews(self):
         """review 20items collected (page네이션 포함) - DrissionPage
-        저장 형식: "review 1- 내용 | review 2- 내용 | ... | review 20- 내용"
+        저장 형식: "review1 - 내용 ||| review2 - 내용 ||| ... ||| review20 - 내용"
         """
         try:
             time.sleep(3)  # page 로딩 wait
@@ -1534,11 +1534,10 @@ class BestBuyDetailCrawler:
                 for elem in review_elements:
                     if collected >= 20:
                         break
-                    review_text = elem.text_content().strip()
+                    review_text = ' '.join(elem.text_content().split())
                     if review_text:
                         collected += 1
-                        # "review N- 내용" 형식으로 저장
-                        formatted_review = f"review {collected}- {review_text}"
+                        formatted_review = f"review{collected} - {review_text}"
                         reviews.append(formatted_review)
                         print(f"    [review {collected}/20] {review_text[:50]}...")
 
@@ -1563,8 +1562,8 @@ class BestBuyDetailCrawler:
                     print("  [INFO] next page button not found. collected closed.")
                     break
 
-            # review를 구분자로 connection (예: "review 1- 내용 | review 2- 내용 | ...")
-            return " | ".join(reviews) if reviews else None
+            # review를 구분자로 connection (예: "review1 - 내용 ||| review2 - 내용 ||| ...")
+            return ' ||| '.join(reviews) if reviews else None
 
         except Exception as e:
             print(f"  [ERROR] review collected failed: {e}")

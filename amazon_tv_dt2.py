@@ -1044,58 +1044,72 @@ class AmazonDetailCrawler:
             return None
 
     def extract_detailed_reviews(self, product_url):
-        """Extract detailed reviews from product detail page (DrissionPage 직접 추출)"""
+        """Extract detailed reviews from product detail page (JavaScript 직접 추출)"""
         try:
-            # 리뷰 섹션으로 스크롤하여 lazy loading 트리거
+            # 페이지 하단까지 점진적 스크롤 → lazy loading 트리거
             try:
-                review_section = self.page.ele('xpath://*[@id="reviewsMedley"]', timeout=5)
-                if review_section:
-                    review_section.scroll.to_see()
-                    time.sleep(2)
-                    print(f"  [DEBUG] reviewsMedley found, scrolled to review section")
-                else:
-                    print(f"  [DEBUG] reviewsMedley not found on page")
-                    return None
+                for _ in range(5):
+                    self.page.run_js("window.scrollBy(0, window.innerHeight)")
+                    time.sleep(0.5)
+                time.sleep(2)
+                print(f"  [DEBUG] scrolled to bottom for lazy loading")
             except Exception as e:
-                print(f"  [DEBUG] reviewsMedley scroll failed: {e}")
-                return None
+                print(f"  [DEBUG] scroll failed: {e}")
 
-            # 리뷰 본문 로드 대기 (ele: timeout까지 대기, eles: 즉시 반환)
-            # prefix: //*[starts-with(@id, "customer_review-")] (사용자 제공 XPath 기반)
-            review_body_xpaths = self.xpaths.get('review_body') or [
-                '//*[starts-with(@id, "customer_review-")]//span[@data-hook="review-body"]',
-                '//*[starts-with(@id, "customer_review-")]//div[@data-hook="review-collapsed"]',
-                '//*[starts-with(@id, "customer_review-")]//div[contains(@class, "reviewText")]'
-            ]
+            # JavaScript로 리뷰 텍스트 직접 추출
+            # 구조: [id^="customer_review-"] > ... > div[data-hook="review-collapsed"] > span
+            js_code = """
+            var reviews = [];
+            var containers = document.querySelectorAll('[id^="customer_review-"]');
+            containers.forEach(function(container) {
+                var collapsed = container.querySelector('[data-hook="review-collapsed"]');
+                if (collapsed) {
+                    var span = collapsed.querySelector('span');
+                    if (span && span.innerText.trim().length > 5) {
+                        reviews.push(span.innerText.trim());
+                    }
+                }
+            });
+            return reviews;
+            """
+            review_texts = self.page.run_js(js_code)
+            print(f"  [DEBUG] JS extracted reviews: {len(review_texts) if review_texts else 0}")
 
-            review_elements = []
-            for xpath in review_body_xpaths:
-                try:
-                    # ele()로 첫 번째 요소 로드 대기 (timeout=10초)
-                    first_elem = self.page.ele(f'xpath:{xpath}', timeout=10)
-                    if first_elem:
-                        # 로드 확인 후 eles()로 전체 수집
-                        review_elements = self.page.eles(f'xpath:{xpath}')
-                        print(f"  [DEBUG] review elements found: {len(review_elements)} (xpath: {xpath[:60]})")
-                        break
-                except Exception:
-                    continue
+            # JS 실패 시 fallback: DrissionPage XPath (사용자 제공 경로)
+            if not review_texts:
+                fallback_xpaths = self.xpaths.get('review_body') or [
+                    '//*[starts-with(@id, "customer_review-")]/div[4]/span/div/div[1]/span',
+                    '//*[starts-with(@id, "customer_review-")]/div[4]/span/div/div[1]',
+                ]
+                for xpath in fallback_xpaths:
+                    try:
+                        first_elem = self.page.ele(f'xpath:{xpath}', timeout=10)
+                        if first_elem:
+                            elems = self.page.eles(f'xpath:{xpath}')
+                            review_texts = []
+                            for e in elems:
+                                t = ' '.join((e.text or '').split())
+                                if t and len(t) > 5:
+                                    review_texts.append(t)
+                            if review_texts:
+                                print(f"  [DEBUG] Fallback XPath found: {len(review_texts)} reviews")
+                                break
+                    except Exception:
+                        continue
 
-            if not review_elements:
+            if not review_texts:
                 print(f"  [DEBUG] No review elements found on detail page")
                 return None
 
             all_reviews = []
-            collected_reviews = set()  # 중복 방지
-            for elem in review_elements:
-                review_text = ' '.join((elem.text or '').split())
-                # Remove "Read more" text
+            collected_reviews = set()
+            for text in review_texts:
+                review_text = ' '.join(text.split())
                 review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
                 if review_text and len(review_text) > 5 and review_text not in collected_reviews:
                     all_reviews.append(review_text)
                     collected_reviews.add(review_text)
 
-            # Format as "review1 - text ||| review2 - text"
             print(f"  [DEBUG] extracted reviews: {len(all_reviews)}")
             if all_reviews:
                 formatted_reviews = [f"review{idx} - {review}" for idx, review in enumerate(all_reviews, 1)]

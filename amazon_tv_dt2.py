@@ -1060,19 +1060,23 @@ class AmazonDetailCrawler:
                 print(f"  [DEBUG] reviewsMedley scroll failed: {e}")
                 return None
 
-            # DrissionPage로 리뷰 본문 직접 추출 (lazy rendering 대응)
+            # 리뷰 본문 로드 대기 (ele: timeout까지 대기, eles: 즉시 반환)
+            # prefix: //*[starts-with(@id, "customer_review-")] (사용자 제공 XPath 기반)
             review_body_xpaths = self.xpaths.get('review_body') or [
-                '//ul[@id="cm-cr-dp-review-list"]//span[@data-hook="review-body"]',
-                '//ul[@id="cm-cr-dp-review-list"]//div[@data-hook="review-collapsed"]',
-                '//ul[@id="cm-cr-dp-review-list"]//div[contains(@class, "reviewText")]'
+                '//*[starts-with(@id, "customer_review-")]//span[@data-hook="review-body"]',
+                '//*[starts-with(@id, "customer_review-")]//div[@data-hook="review-collapsed"]',
+                '//*[starts-with(@id, "customer_review-")]//div[contains(@class, "reviewText")]'
             ]
 
             review_elements = []
             for xpath in review_body_xpaths:
                 try:
-                    review_elements = self.page.eles(f'xpath:{xpath}')
-                    if review_elements:
-                        print(f"  [DEBUG] review elements found: {len(review_elements)} (xpath: {xpath[:60]}...)")
+                    # ele()로 첫 번째 요소 로드 대기 (timeout=10초)
+                    first_elem = self.page.ele(f'xpath:{xpath}', timeout=10)
+                    if first_elem:
+                        # 로드 확인 후 eles()로 전체 수집
+                        review_elements = self.page.eles(f'xpath:{xpath}')
+                        print(f"  [DEBUG] review elements found: {len(review_elements)} (xpath: {xpath[:60]})")
                         break
                 except Exception:
                     continue

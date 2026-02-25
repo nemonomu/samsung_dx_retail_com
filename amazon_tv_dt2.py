@@ -1044,7 +1044,7 @@ class AmazonDetailCrawler:
             return None
 
     def extract_detailed_reviews(self, product_url):
-        """Extract detailed reviews from product detail page"""
+        """Extract detailed reviews from product detail page (DrissionPage 직접 추출)"""
         try:
             # 리뷰 섹션으로 스크롤하여 lazy loading 트리거
             try:
@@ -1055,44 +1055,41 @@ class AmazonDetailCrawler:
                     print(f"  [DEBUG] reviewsMedley found, scrolled to review section")
                 else:
                     print(f"  [DEBUG] reviewsMedley not found on page")
+                    return None
             except Exception as e:
                 print(f"  [DEBUG] reviewsMedley scroll failed: {e}")
+                return None
 
-            # Get current page HTML
-            tree = html.fromstring(self.page.html)
-
-            # review_container: DB config 우선, fallback 하드코딩
-            review_container_xpaths = self.xpaths.get('review_container') or [
-                '//ul[@id="cm-cr-dp-review-list"]//li[@data-hook="review"]'
-            ]
-            # review_body: DB config 우선, fallback 하드코딩
+            # DrissionPage로 리뷰 본문 직접 추출 (lazy rendering 대응)
             review_body_xpaths = self.xpaths.get('review_body') or [
-                './/span[@data-hook="review-body"]',
-                './/div[@data-hook="review-collapsed"]',
-                './/div[contains(@class, "reviewText")]'
+                '//ul[@id="cm-cr-dp-review-list"]//span[@data-hook="review-body"]',
+                '//ul[@id="cm-cr-dp-review-list"]//div[@data-hook="review-collapsed"]',
+                '//ul[@id="cm-cr-dp-review-list"]//div[contains(@class, "reviewText")]'
             ]
 
-            review_containers = []
-            for xpath in review_container_xpaths:
-                review_containers = tree.xpath(xpath)
-                if review_containers:
-                    break
-            print(f"  [DEBUG] review containers found: {len(review_containers)}")
+            review_elements = []
+            for xpath in review_body_xpaths:
+                try:
+                    review_elements = self.page.eles(f'xpath:{xpath}')
+                    if review_elements:
+                        print(f"  [DEBUG] review elements found: {len(review_elements)} (xpath: {xpath[:60]}...)")
+                        break
+                except Exception:
+                    continue
+
+            if not review_elements:
+                print(f"  [DEBUG] No review elements found on detail page")
+                return None
 
             all_reviews = []
             collected_reviews = set()  # 중복 방지
-            if review_containers:
-                for container in review_containers:
-                    for body_xpath in review_body_xpaths:
-                        body_elem = container.xpath(body_xpath)
-                        if body_elem:
-                            review_text = ' '.join(body_elem[0].text_content().split())
-                            # Remove "Read more" text
-                            review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
-                            if review_text and review_text not in collected_reviews:
-                                all_reviews.append(review_text)
-                                collected_reviews.add(review_text)
-                            break
+            for elem in review_elements:
+                review_text = ' '.join((elem.text or '').split())
+                # Remove "Read more" text
+                review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
+                if review_text and len(review_text) > 5 and review_text not in collected_reviews:
+                    all_reviews.append(review_text)
+                    collected_reviews.add(review_text)
 
             # Format as "review1 - text ||| review2 - text"
             print(f"  [DEBUG] extracted reviews: {len(all_reviews)}")

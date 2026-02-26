@@ -498,7 +498,6 @@ class BestBuyDetailCrawler:
                   AND batch_id >= %s
                   AND retailer_sku_name IS NOT NULL
                   AND final_sku_price IS NOT NULL
-                  AND Detailed_Review_Content IS NOT NULL
             """, (main_batch_id,))
 
             already_processed_urls = {row[0] for row in cursor.fetchall()}
@@ -2417,7 +2416,7 @@ class BestBuyDetailCrawler:
 
             # 자동 재시도 설정
             MAX_RETRIES = 5          # 최대 재시도 횟수
-            INITIAL_WAIT = 600       # 초기 대기 시간 (10분)
+            INITIAL_WAIT = 1200      # 대기 시간 (20분)
             retry_count = 0          # 현재 재시도 횟수
             consecutive_fails = 0    # 연속 실패 횟수
 
@@ -2436,7 +2435,8 @@ class BestBuyDetailCrawler:
                 result = self.scrape_detail_page(url_data)
 
                 if result == 'blocked':
-                    # ERR_HTTP2_PROTOCOL_ERROR 감지 - 재시도 로직
+                    # ERR_HTTP2_PROTOCOL_ERROR 감지 - 차단 확실 → 20분 대기
+                    consecutive_fails += 1
                     retry_count += 1
                     if retry_count > MAX_RETRIES:
                         print(f"\n{'='*80}")
@@ -2444,7 +2444,7 @@ class BestBuyDetailCrawler:
                         print(f"[INFO] Resume later with: python bby_tv_dt1.py {idx}")
                         break
 
-                    wait_time = INITIAL_WAIT + 300 * (retry_count - 1)  # 10분, 15분, 20분, 25분, 30분
+                    wait_time = INITIAL_WAIT
                     print(f"\n{'='*80}")
                     print(f"[RETRY {retry_count}/{MAX_RETRIES}] Blocked by Best Buy. Waiting {wait_time // 60} minutes...")
                     print(f"[INFO] Will restart browser and retry item {idx}")
@@ -2476,10 +2476,11 @@ class BestBuyDetailCrawler:
                     retry_count = 0  # 성공하면 재시도 카운터 리셋
 
                 else:
-                    # 일반 실패 (blocked 아님)
+                    # 일반 실패 (h1 not found 등) → skip하고 다음 URL로
                     consecutive_fails += 1
-                    # 1회 실패 시 바로 blocked로 판단
-                    if consecutive_fails >= 1:
+
+                    if consecutive_fails >= 3:
+                        # 연속 3회 실패 → 차단 판정 → 20분 대기
                         retry_count += 1
                         if retry_count > MAX_RETRIES:
                             print(f"\n{'='*80}")
@@ -2487,10 +2488,9 @@ class BestBuyDetailCrawler:
                             print(f"[INFO] Resume later with: python bby_tv_dt1.py {idx}")
                             break
 
-                        wait_time = INITIAL_WAIT + 300 * (retry_count - 1)  # 10분, 15분, 20분, 25분, 30분
+                        wait_time = INITIAL_WAIT
                         print(f"\n{'='*80}")
-                        print(f"[RETRY {retry_count}/{MAX_RETRIES}] {consecutive_fails} consecutive failures. Possible block detected.")
-                        print(f"[INFO] Waiting {wait_time // 60} minutes before retry...")
+                        print(f"[RETRY {retry_count}/{MAX_RETRIES}] {consecutive_fails} consecutive failures. Blocked. Waiting {wait_time // 60} minutes...")
                         print(f"{'='*80}")
 
                         self.close_browser()
@@ -2508,6 +2508,7 @@ class BestBuyDetailCrawler:
                         # 실패한 항목 다시 시도 (i 증가 안 함)
                         self.order -= 1
                         continue
+                    # 연속 3회 미만 → skip, 다음 URL로
 
                 # page 간 딜레이
                 time.sleep(random.uniform(5, 10))

@@ -41,15 +41,13 @@ def add_xpath_configs():
         ('sku_model_number', '//div[contains(text(), "Model Number")]/following-sibling::div', 4),
 
         # === extract_final_sku_price() - no_longer_available ===
-        ('no_longer_available', '/html/body/div[5]/div[3]/div[1]/div/div[2]/div[4]', 1),
-        ('no_longer_available', '//div[@class="text-danger text-4 font-500 leading-4"]', 2),
-        ('no_longer_available', '//div[contains(@class, "text-danger")][contains(text(), "no longer available")]', 3),
-        ('no_longer_available', '//div[contains(text(), "This item is no longer available in new condition")]', 4),
+        ('no_longer_available', '//div[@class="text-danger text-4 font-500 leading-4"]', 1),
+        ('no_longer_available', '//div[contains(@class, "text-danger")][contains(text(), "no longer available")]', 2),
+        ('no_longer_available', '//div[contains(text(), "This item is no longer available in new condition")]', 3),
 
         # === price_container (공통 컨테이너) ===
-        ('price_container', '/html/body/div[5]/div[4]/div[1]', 1),
-        ('price_container', '//div[@class="order-2 t3V0AOwowrTfUzPn "]', 2),
-        ('price_container', '//div[contains(@class, "order-2")]', 3),
+        ('price_container', '//div[contains(@class, "order-2")]', 1),
+        ('price_container', '//div[@data-testid="price-block"]', 2),
 
         # === extract_final_sku_price() - price_xpaths ===
         ('final_price_inner', './/div[@data-testid="price-block-customer-price"]//span', 1),

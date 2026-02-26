@@ -25,7 +25,7 @@ v1 추가 수정사항 (2025-11-15):
 7. 가격 정보 직접 collected으로 변경 (컨테이너 기반):
    - final_sku_price, original_sku_price, savings를 소스 table에서 가져오지 않고 detail page에서 직접 crawling
    - extract_final_sku_price(), extract_original_sku_price(), extract_savings() 메서드 추가
-   - 2단계 extraction: 1) 가격 컨테이너 찾기 (/html/body/div[5]/div[4]/div[1]) 2) 컨테이너 내부에서만 가격 extraction
+   - 2단계 extraction: 1) 가격 컨테이너 찾기 (order-2 또는 price-block) 2) 컨테이너 내부에서만 가격 extraction
    - data-testid 기반 XPath 사용 (price-block-customer-price, price-block-total-savings-text 등)
    - 다른 element와의 혼동 방지 (컨테이너 내부만 검색)
    - savings는 "Save $1,200" → "$1,200" 형식으로 정규식 파싱 (콤마 처리 포함)
@@ -33,7 +33,7 @@ v1 추가 수정사항 (2025-11-15):
    - star_rating: 소스 table → 메인 page에서 직접 crawling (예: "4.7")
    - count_of_reviews: review page → 메인 page에서 직접 crawling (예: "(79 reviews)" → "79")
    - extract_star_rating(), extract_count_of_reviews_from_detail() 메서드 추가
-   - 동일한 가격 컨테이너 사용 (/html/body/div[5]/div[4]/div[1])
+   - 동일한 가격 컨테이너 사용 (order-2 또는 price-block)
    - 콤마 처리 포함 (예: "(1,234 reviews)" → "1234")
 """
 import time
@@ -775,7 +775,6 @@ class BestBuyDetailCrawler:
         try:
             # 0단계: "no longer available" 체크를 먼저 수행 (가격 컨테이너가 없을 수 있음)
             no_longer_available_xpaths = self.config.get_xpath_list('no_longer_available', self.file_name) or [
-                '/html/body/div[5]/div[3]/div[1]/div/div[2]/div[4]',
                 '//div[@class="text-danger text-4 font-500 leading-4"]',
                 '//div[contains(@class, "text-danger")][contains(text(), "no longer available")]',
                 '//div[contains(text(), "This item is no longer available in new condition")]'
@@ -791,9 +790,8 @@ class BestBuyDetailCrawler:
 
             # 1단계: 가격 컨테이너 찾기
             container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
-                '/html/body/div[5]/div[4]/div[1]',
-                '//div[@class="order-2 t3V0AOwowrTfUzPn "]',
-                '//div[contains(@class, "order-2")]'
+                '//div[contains(@class, "order-2")]',
+                '//div[@data-testid="price-block"]'
             ]
 
             price_container = None
@@ -803,7 +801,7 @@ class BestBuyDetailCrawler:
                     price_container = containers[0]
                     break
 
-            if price_container is None or len(price_container) == 0:
+            if price_container is None:
                 print(f"  [WARNING] price container not found")
                 return None
 
@@ -856,9 +854,8 @@ class BestBuyDetailCrawler:
         try:
             # 1단계: 가격 컨테이너 찾기
             container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
-                '/html/body/div[5]/div[4]/div[1]',
-                '//div[@class="order-2 t3V0AOwowrTfUzPn "]',
-                '//div[contains(@class, "order-2")]'
+                '//div[contains(@class, "order-2")]',
+                '//div[@data-testid="price-block"]'
             ]
 
             price_container = None
@@ -868,7 +865,7 @@ class BestBuyDetailCrawler:
                     price_container = containers[0]
                     break
 
-            if price_container is None or len(price_container) == 0:
+            if price_container is None:
                 # 컨테이너 없으면 None 반환 (경고 none - 정상 케이스일 수 있음)
                 return None
 
@@ -914,9 +911,8 @@ class BestBuyDetailCrawler:
         try:
             # 1단계: 가격 컨테이너 찾기
             container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
-                '/html/body/div[5]/div[4]/div[1]',
-                '//div[@class="order-2 t3V0AOwowrTfUzPn "]',
-                '//div[contains(@class, "order-2")]'
+                '//div[contains(@class, "order-2")]',
+                '//div[@data-testid="price-block"]'
             ]
 
             price_container = None
@@ -926,7 +922,7 @@ class BestBuyDetailCrawler:
                     price_container = containers[0]
                     break
 
-            if price_container is None or len(price_container) == 0:
+            if price_container is None:
                 # 컨테이너 없으면 None 반환
                 return None
 
@@ -968,9 +964,8 @@ class BestBuyDetailCrawler:
 
             # Priority 2: 컨테이너 기반 extraction (fallback)
             container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
-                '/html/body/div[5]/div[4]/div[1]',
-                '//div[@class="order-2 t3V0AOwowrTfUzPn "]',
-                '//div[contains(@class, "order-2")]'
+                '//div[contains(@class, "order-2")]',
+                '//div[@data-testid="price-block"]'
             ]
 
             price_container = None
@@ -980,7 +975,7 @@ class BestBuyDetailCrawler:
                     price_container = containers[0]
                     break
 
-            if price_container is None or len(price_container) == 0:
+            if price_container is None:
                 return None
 
             rating_xpaths = self.config.get_xpath_list('star_rating_inner', self.file_name) or [

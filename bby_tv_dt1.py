@@ -143,7 +143,6 @@ class BestBuyDetailCrawler:
             co = ChromiumOptions()
             co.auto_port()  # 새 포트 + 새 유저 데이터 폴더 (쿠키/핑거프린트 초기화)
             co.no_imgs(True)
-            co.set_argument('--disable-http2')
             co.set_argument('--disable-blink-features=AutomationControlled')
             co.set_argument('--disable-features=AutomationControlled')
             co.set_user_agent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')

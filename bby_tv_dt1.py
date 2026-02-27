@@ -824,9 +824,7 @@ class BestBuyDetailCrawler:
             see_price_xpaths = self.config.get_xpath_list('see_price_in_cart', self.file_name) or [
                 './/div[@data-testid="price-restricted-price-tap-for-price"]//span',
                 './/span[contains(text(), "See price in cart")]',
-                './/span[contains(text(), "See details in checkout")]',
-                './/div[@data-testid="price-block"]//span[contains(text(), "See price in cart")]',
-                './/div[@data-testid="price-block"]//span[contains(text(), "See details in checkout")]'
+                './/span[contains(text(), "See details in checkout")]'
             ]
 
             for xpath in see_price_xpaths:
@@ -888,7 +886,6 @@ class BestBuyDetailCrawler:
             # 조건: savings와 final_sku_price를 모두 수집했을 때만 시도
             if savings and final_sku_price:
                 buy_new_xpaths = self.config.get_xpath_list('buy_new_price', self.file_name) or [
-                    '/html/body/div[4]/div[4]/div[1]/div/div[4]/div/div/div/div/div[1]/div[2]/div/div/div/div/div[2]/div[2]/div/a',
                     '//a[@data-testid="price-block-regular-price-message-link"]//span',
                     '//div[@data-testid="price-block-regular-price-link-text-wrapper"]//a//span'
                 ]
@@ -1920,7 +1917,7 @@ class BestBuyDetailCrawler:
             # 가격 컨테이너 로딩 대기 (최대 10초) - DrissionPage
             try:
                 price_elem = self.page.ele(
-                    'xpath://div[contains(@class, "order-2")]//div[@data-testid="price-block-customer-price"] | //div[contains(@class, "order-2")]//span[contains(text(), "See price in cart")] | //div[contains(text(), "no longer available in new condition")]',
+                    'xpath://div[@data-testid="price-block-customer-price"] | //div[@data-testid="price-restricted-price-tap-for-price"] | //div[contains(text(), "no longer available in new condition")]',
                     timeout=10
                 )
                 if price_elem:

@@ -62,8 +62,6 @@ def add_xpath_configs():
         ('see_price_in_cart', './/div[@data-testid="price-restricted-price-tap-for-price"]//span', 1),
         ('see_price_in_cart', './/span[contains(text(), "See price in cart")]', 2),
         ('see_price_in_cart', './/span[contains(text(), "See details in checkout")]', 3),
-        ('see_price_in_cart', './/div[@data-testid="price-block"]//span[contains(text(), "See price in cart")]', 4),
-        ('see_price_in_cart', './/div[@data-testid="price-block"]//span[contains(text(), "See details in checkout")]', 5),
 
         # === extract_original_sku_price() - price_xpaths ===
         ('original_price_inner', './/span[@data-lu-target="comp_value"]', 1),
@@ -71,9 +69,8 @@ def add_xpath_configs():
         ('original_price_inner', './/span[contains(@style, "color: rgb(108, 111, 117)") and contains(., "$")]', 3),
 
         # === extract_original_sku_price() - buy_new_xpaths ===
-        ('buy_new_price', '/html/body/div[4]/div[4]/div[1]/div/div[4]/div/div/div/div/div[1]/div[2]/div/div/div/div/div[2]/div[2]/div/a', 1),
-        ('buy_new_price', '//a[@data-testid="price-block-regular-price-message-link"]//span', 2),
-        ('buy_new_price', '//div[@data-testid="price-block-regular-price-link-text-wrapper"]//a//span', 3),
+        ('buy_new_price', '//a[@data-testid="price-block-regular-price-message-link"]//span', 1),
+        ('buy_new_price', '//div[@data-testid="price-block-regular-price-link-text-wrapper"]//a//span', 2),
 
         # === extract_savings() - savings_xpaths ===
         ('savings_inner', './/span[@data-testid="price-block-total-savings-text"]', 1),

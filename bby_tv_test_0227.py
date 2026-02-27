@@ -4,11 +4,12 @@ bby_tv_dt1.py 가격 추출 테스트 (See price in cart)
 """
 import time
 import re
+import sys
 from DrissionPage import ChromiumPage, ChromiumOptions
 from lxml import html
 from bby_config_loader import get_config
 
-TEST_URL = 'https://www.bestbuy.com/product/samsung-55-class-qn70f-series-neo-qled-mini-led-4k-uhd-samsungvision-ai-smart-tizen-tv-2025/J3ZYG2F963'
+TEST_URL = sys.argv[1] if len(sys.argv) > 1 else 'https://www.bestbuy.com/product/samsung-55-class-qn70f-series-neo-qled-mini-led-4k-uhd-samsungvision-ai-smart-tizen-tv-2025/J3ZYG2F963'
 
 
 def main():
@@ -75,7 +76,7 @@ def main():
                     no_longer = True
                     break
         if not no_longer:
-            print(f'  [0단계] no longer available: 해당 없음 ✓')
+            print(f'  [0단계] no longer available: 해당 없음 OK')
 
         # 1단계: 컨테이너 찾기
         container_xpaths = config.get_xpath_list('price_block_container', file_name) or [
@@ -94,8 +95,28 @@ def main():
                 print(f'  [1단계] → 자식 element 수: {len(price_container)}, text_content 길이: {len(price_container.text_content())}')
 
         if price_container is None:
-            print(f'  [1단계] ❌ 컨테이너 못 찾음')
+            print(f'  [1단계] [FAIL] 컨테이너 못 찾음')
             return
+
+        # 컨테이너 내부 디버깅
+        print(f'\n  [DEBUG] price-block text_content: "{price_container.text_content().strip()}"')
+        print(f'  [DEBUG] price-block inner HTML (500chars):')
+        from lxml import etree
+        inner_html = etree.tostring(price_container, encoding='unicode', method='html')
+        print(f'  {inner_html[:1500]}')
+
+        # data-testid 속성 전수 조사
+        print(f'\n  [DEBUG] price-block 내 data-testid 목록:')
+        for el in price_container.xpath('.//*[@data-testid]'):
+            text = el.text_content().strip()[:40] if el.text_content().strip() else ''
+            print(f'    <{el.tag} data-testid="{el.get("data-testid")}"> text="{text}"')
+
+        # data-lu-target 속성 전수 조사
+        print(f'\n  [DEBUG] price-block 내 data-lu-target 목록:')
+        for el in price_container.xpath('.//*[@data-lu-target]'):
+            text = el.text_content().strip()[:40] if el.text_content().strip() else ''
+            print(f'    <{el.tag} data-lu-target="{el.get("data-lu-target")}"> text="{text}"')
+        print()
 
         # 2단계: price_xpaths
         price_xpaths = config.get_xpath_list('final_price_inner', file_name) or [
@@ -110,7 +131,7 @@ def main():
                 text = elem[0].text_content().strip()
                 print(f'  [2단계] xpath[{i}] 매칭 → "{text}"')
                 if text and '$' in text:
-                    print(f'  [2단계] → ✅ final_sku_price = "{text}"')
+                    print(f'  [2단계] → [OK] final_sku_price = "{text}"')
                     price_found = True
                     break
                 else:
@@ -131,18 +152,18 @@ def main():
                     text = elem[0].text_content().strip()
                     print(f'  [Fallback] xpath[{i}] 매칭 → "{text}"')
                     if "See price in cart" in text:
-                        print(f'  [Fallback] → ✅ final_sku_price = "See price in cart"')
+                        print(f'  [Fallback] → [OK] final_sku_price = "See price in cart"')
                         price_found = True
                         break
                     elif "See details in checkout" in text:
-                        print(f'  [Fallback] → ✅ final_sku_price = "See details in checkout"')
+                        print(f'  [Fallback] → [OK] final_sku_price = "See details in checkout"')
                         price_found = True
                         break
                 else:
                     print(f'  [Fallback] xpath[{i}] 매칭 없음')
 
         if not price_found:
-            print(f'  [결과] ❌ final_sku_price 추출 실패 (None)')
+            print(f'  [결과] [FAIL] final_sku_price 추출 실패 (None)')
 
         # ============================================================
         # 2. extract_savings 로직 재현
@@ -164,7 +185,7 @@ def main():
                 match = re.search(r'\$[\d,]+(?:\.\d{2})?', text)
                 if match:
                     savings = match.group()
-                    print(f'  xpath[{i}] 매칭 → "{text}" → ✅ savings = "{savings}"')
+                    print(f'  xpath[{i}] 매칭 → "{text}" → [OK] savings = "{savings}"')
                     break
             else:
                 print(f'  xpath[{i}] 매칭 없음')
@@ -190,7 +211,7 @@ def main():
                 text = elem[0].text_content().strip()
                 if text and '$' in text:
                     original_price = text
-                    print(f'  xpath[{i}] 매칭 → ✅ original_sku_price = "{text}"')
+                    print(f'  xpath[{i}] 매칭 → [OK] original_sku_price = "{text}"')
                     break
             else:
                 print(f'  xpath[{i}] 매칭 없음')
@@ -204,7 +225,7 @@ def main():
         print(f'[결과 요약]')
         print(f'{"="*80}')
         print(f'  URL: {TEST_URL}')
-        print(f'  final_sku_price:    {price_found and "추출 성공" or "❌ 실패"}')
+        print(f'  final_sku_price:    {price_found and "추출 성공" or "[FAIL] 실패"}')
         print(f'  savings:            {savings}')
         print(f'  original_sku_price: {original_price}')
         print(f'{"="*80}')

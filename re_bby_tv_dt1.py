@@ -176,8 +176,8 @@ class BbyTvRecovery:
                         break
 
             final_sku_price = self.extract_final_sku_price(tree)
-            savings = self.extract_savings(tree)
             original_sku_price = self.extract_original_sku_price(tree)
+            savings = self.extract_savings(tree)
 
             return {
                 'final_sku_price': final_sku_price,
@@ -257,25 +257,14 @@ class BbyTvRecovery:
                 './/div[@data-testid="price-block-total-savings"]//span',
             ]
 
-            # 모든 price-block을 순회하며 savings 찾기 (첫 번째 compact에 없을 수 있음)
-            container_xpaths = self.config.get_xpath_list('price_block_container', self.file_name) or [
-                '//div[@data-testid="price-block"]',
-                '//div[contains(@class, "order-2")]'
-            ]
-            price_blocks = []
-            for xpath in container_xpaths:
-                price_blocks = tree.xpath(xpath)
-                if price_blocks:
-                    break
-
-            for price_block in price_blocks:
-                for xpath in savings_xpaths:
-                    elem = price_block.xpath(xpath)
-                    if elem:
-                        text = elem[0].text_content().strip()
-                        match = re.search(r'\$[\d,]+(?:\.\d{2})?', text)
-                        if match:
-                            return match.group()
+            # savings 요소는 price-block 컨테이너 외부에 있을 수 있으므로 tree에서 직접 검색
+            for xpath in savings_xpaths:
+                elem = tree.xpath(xpath)
+                if elem:
+                    text = elem[0].text_content().strip()
+                    match = re.search(r'\$[\d,]+(?:\.\d{2})?', text)
+                    if match:
+                        return match.group()
 
             return None
         except Exception as e:

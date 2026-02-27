@@ -788,10 +788,10 @@ class BestBuyDetailCrawler:
                         print(f"  [INFO] Item no longer available in new condition")
                         return "no longer available"
 
-            # 1단계: 가격 컨테이너 찾기
-            container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
-                '//div[contains(@class, "order-2")]',
-                '//div[@data-testid="price-block"]'
+            # 1단계: 가격 컨테이너 찾기 (price-block 우선 - 유사상품 가격 혼입 방지)
+            container_xpaths = self.config.get_xpath_list('price_block_container', self.file_name) or [
+                '//div[@data-testid="price-block"]',
+                '//div[contains(@class, "order-2")]'
             ]
 
             price_container = None
@@ -852,10 +852,10 @@ class BestBuyDetailCrawler:
             final_sku_price: final price value (for fallback condition check)
         """
         try:
-            # 1단계: 가격 컨테이너 찾기
-            container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
-                '//div[contains(@class, "order-2")]',
-                '//div[@data-testid="price-block"]'
+            # 1단계: 가격 컨테이너 찾기 (price-block 우선 - 유사상품 가격 혼입 방지)
+            container_xpaths = self.config.get_xpath_list('price_block_container', self.file_name) or [
+                '//div[@data-testid="price-block"]',
+                '//div[contains(@class, "order-2")]'
             ]
 
             price_container = None
@@ -909,10 +909,10 @@ class BestBuyDetailCrawler:
     def extract_savings(self, tree):
         """Savings extraction (할인 금액) - 컨테이너 기반"""
         try:
-            # 1단계: 가격 컨테이너 찾기
-            container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
-                '//div[contains(@class, "order-2")]',
-                '//div[@data-testid="price-block"]'
+            # 1단계: 가격 컨테이너 찾기 (price-block 우선 - 유사상품 가격 혼입 방지)
+            container_xpaths = self.config.get_xpath_list('price_block_container', self.file_name) or [
+                '//div[@data-testid="price-block"]',
+                '//div[contains(@class, "order-2")]'
             ]
 
             price_container = None

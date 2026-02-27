@@ -45,7 +45,11 @@ def add_xpath_configs():
         ('no_longer_available', '//div[contains(@class, "text-danger")][contains(text(), "no longer available")]', 2),
         ('no_longer_available', '//div[contains(text(), "This item is no longer available in new condition")]', 3),
 
-        # === price_container (공통 컨테이너) ===
+        # === price_block_container (가격 전용 컨테이너 - price-block 우선) ===
+        ('price_block_container', '//div[@data-testid="price-block"]', 1),
+        ('price_block_container', '//div[contains(@class, "order-2")]', 2),
+
+        # === price_container (star_rating 등 광역 컨테이너 - order-2 우선) ===
         ('price_container', '//div[contains(@class, "order-2")]', 1),
         ('price_container', '//div[@data-testid="price-block"]', 2),
 

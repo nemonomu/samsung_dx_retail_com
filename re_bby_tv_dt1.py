@@ -54,15 +54,14 @@ class BbyTvRecovery:
             return False
 
     def get_null_records(self, date_from, date_to):
-        """날짜 범위에서 original_sku_price AND savings 모두 NULL인 레코드 조회"""
+        """날짜 범위에서 original_sku_price 또는 savings 중 하나라도 NULL인 레코드 조회"""
         query = """
         SELECT product_url, crawl_datetime, retailer_sku_name, item, final_sku_price
         FROM bby_tv_crawl
         WHERE account_name = 'Bestbuy'
           AND crawl_datetime >= %s
           AND crawl_datetime < %s
-          AND original_sku_price IS NULL
-          AND savings IS NULL
+          AND (original_sku_price IS NULL OR savings IS NULL)
           AND final_sku_price IS NOT NULL
           AND final_sku_price != 'no longer available'
         ORDER BY crawl_datetime ASC
@@ -83,7 +82,7 @@ class BbyTvRecovery:
         query = """
         SELECT
             COUNT(*) as total_count,
-            SUM(CASE WHEN original_sku_price IS NULL AND savings IS NULL THEN 1 ELSE 0 END) as both_null_count,
+            SUM(CASE WHEN original_sku_price IS NULL OR savings IS NULL THEN 1 ELSE 0 END) as either_null_count,
             SUM(CASE WHEN original_sku_price IS NULL THEN 1 ELSE 0 END) as orig_null_count,
             SUM(CASE WHEN savings IS NULL THEN 1 ELSE 0 END) as savings_null_count
         FROM bby_tv_crawl
@@ -373,12 +372,12 @@ class BbyTvRecovery:
             print("[ERROR] Summary query failed")
             return
 
-        total, both_null, orig_null, save_null = summary
+        total, either_null, orig_null, save_null = summary
         print(f"[INFO] Total records: {total}")
-        print(f"[INFO] Both NULL (recovery target): {both_null}")
+        print(f"[INFO] Either NULL (recovery target): {either_null}")
         print(f"[INFO] Original NULL: {orig_null} | Savings NULL: {save_null}")
 
-        if both_null == 0:
+        if either_null == 0:
             print("[INFO] No recovery targets. Done.")
             return
 

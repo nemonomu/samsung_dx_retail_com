@@ -41,18 +41,12 @@ class BbyTvRecovery:
             return False
 
     def setup_browser(self):
-        """브라우저 설정 - 안티 감지 + 새 프로필"""
+        """브라우저 설정"""
         try:
             print("[INFO] Setting up browser...")
             co = ChromiumOptions()
-            co.auto_port()
             co.no_imgs(True)
-            co.set_argument('--disable-blink-features=AutomationControlled')
-            co.set_argument('--disable-features=AutomationControlled')
-            co.set_user_agent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
             self.page = ChromiumPage(co)
-            self.page.run_cdp('Page.addScriptToEvaluateOnNewDocument',
-                              source='Object.defineProperty(navigator, "webdriver", {get: () => undefined})')
             print("[OK] Browser ready")
             return True
         except Exception as e:

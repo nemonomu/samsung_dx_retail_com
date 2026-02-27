@@ -299,6 +299,7 @@ class BbyTvRecovery:
 
             price_xpaths = self.config.get_xpath_list('original_price_inner', self.file_name) or [
                 './/div[@data-testid="price-block-regular-price-message-text"]//span[contains(@style, "line-through")]',
+                './/div[@data-testid="price-block-regular-price-message-text"][contains(., "was")]',
             ]
             for xpath in price_xpaths:
                 elem = price_container.xpath(xpath)

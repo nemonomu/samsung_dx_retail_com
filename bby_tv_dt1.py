@@ -871,6 +871,7 @@ class BestBuyDetailCrawler:
             # 2단계: 컨테이너 내부에서만 원가 extraction
             price_xpaths = self.config.get_xpath_list('original_price_inner', self.file_name) or [
                 './/div[@data-testid="price-block-regular-price-message-text"]//span[contains(@style, "line-through")]',
+                './/div[@data-testid="price-block-regular-price-message-text"][contains(., "was")]',
             ]
 
             for xpath in price_xpaths:

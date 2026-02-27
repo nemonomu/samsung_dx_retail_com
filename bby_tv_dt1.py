@@ -841,14 +841,8 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Final_SKU_Price extraction failed: {e}")
             return None
 
-    def extract_original_sku_price(self, tree, savings=None, final_sku_price=None):
-        """Original SKU Price extraction (세일 전 원가) - 컨테이너 기반
-
-        Args:
-            tree: HTML tree
-            savings: savings value (for fallback condition check)
-            final_sku_price: final price value (for fallback condition check)
-        """
+    def extract_original_sku_price(self, tree):
+        """Original SKU Price extraction (세일 전 원가) - 컨테이너 기반"""
         try:
             # 1단계: final_sku_price와 동일한 컨테이너 사용
             container_xpaths = self.config.get_xpath_list('price_block_container', self.file_name) or [
@@ -886,37 +880,32 @@ class BestBuyDetailCrawler:
             return None
 
     def extract_savings(self, tree):
-        """Savings extraction (할인 금액) - 컨테이너 기반"""
+        """Savings extraction (할인 금액) - price-block 컨테이너 기반, 모든 price-block 순회"""
         try:
-            # 1단계: final_sku_price와 동일한 컨테이너 사용
-            container_xpaths = self.config.get_xpath_list('price_block_container', self.file_name) or [
-                '//div[@data-testid="price-block"]',
-                '//div[contains(@class, "order-2")]'
-            ]
-
-            price_container = None
-            for xpath in container_xpaths:
-                containers = tree.xpath(xpath)
-                if containers:
-                    price_container = containers[0]
-                    break
-
-            if price_container is None:
-                return None
-
-            # 2단계: 컨테이너 내부에서만 할인 금액 extraction
             savings_xpaths = self.config.get_xpath_list('savings_inner', self.file_name) or [
                 './/span[@data-testid="price-block-total-savings-text"]',
                 './/div[@data-testid="price-block-total-savings"]//span',
             ]
 
-            for xpath in savings_xpaths:
-                elem = price_container.xpath(xpath)
-                if elem:
-                    text = elem[0].text_content().strip()
-                    match = re.search(r'\$[\d,]+(?:\.\d{2})?', text)
-                    if match:
-                        return match.group()
+            # 모든 price-block을 순회하며 savings 찾기 (첫 번째 compact에 없을 수 있음)
+            container_xpaths = self.config.get_xpath_list('price_block_container', self.file_name) or [
+                '//div[@data-testid="price-block"]',
+                '//div[contains(@class, "order-2")]'
+            ]
+            price_blocks = []
+            for xpath in container_xpaths:
+                price_blocks = tree.xpath(xpath)
+                if price_blocks:
+                    break
+
+            for price_block in price_blocks:
+                for xpath in savings_xpaths:
+                    elem = price_block.xpath(xpath)
+                    if elem:
+                        text = elem[0].text_content().strip()
+                        match = re.search(r'\$[\d,]+(?:\.\d{2})?', text)
+                        if match:
+                            return match.group()
 
             return None
         except Exception as e:
@@ -1912,13 +1901,11 @@ class BestBuyDetailCrawler:
             final_sku_price = self.extract_final_sku_price(tree)
             print(f"  [✓] Final_SKU_Price: {final_sku_price}")
 
+            original_sku_price = self.extract_original_sku_price(tree)
+            print(f"  [✓] Original_SKU_Price: {original_sku_price}")
+
             savings = self.extract_savings(tree)
             print(f"  [✓] Savings: {savings}")
-
-            # original_sku_price는 savings와 final_sku_price 추출 후에 시도
-            # (fallback 로직이 두 값을 모두 확인하기 때문)
-            original_sku_price = self.extract_original_sku_price(tree, savings, final_sku_price)
-            print(f"  [✓] Original_SKU_Price: {original_sku_price}")
 
             # 2-2. Star Rating 및 Reviews 정보 extraction (메인 page에서 직접 collected)
             star_rating = self.extract_star_rating(tree)

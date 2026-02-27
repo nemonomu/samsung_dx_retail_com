@@ -2366,7 +2366,7 @@ class BestBuyDetailCrawler:
             # 자동 재시도 설정
             MAX_RETRIES = 5          # 최대 재시도 횟수
             INITIAL_WAIT = 1200      # 대기 시간 (20분)
-            RESTART_EVERY = 15       # N건마다 브라우저 재시작 (세션 초기화)
+            RESTART_EVERY = 5        # N건마다 브라우저 재시작 (세션 초기화)
             retry_count = 0          # 현재 재시도 횟수
             consecutive_fails = 0    # 연속 실패 횟수
             since_restart = 0        # 마지막 재시작 이후 수집 건수
@@ -2429,9 +2429,9 @@ class BestBuyDetailCrawler:
 
                     # 일정 건수마다 브라우저 재시작 (세션 초기화로 차단 방지)
                     if since_restart >= RESTART_EVERY:
-                        print(f"\n[INFO] {RESTART_EVERY}건 수집 완료 - 브라우저 재시작 (세션 초기화)")
+                        print(f"\n[INFO] {RESTART_EVERY}건 수집 완료 - 브라우저 재시작 (세션 초기화, 30~60초 쿨다운)")
                         self.close_browser()
-                        time.sleep(random.uniform(3, 5))
+                        time.sleep(random.uniform(30, 60))
                         if not self.setup_browser():
                             print("[ERROR] Browser restart failed. Stopping.")
                             break
@@ -2473,7 +2473,7 @@ class BestBuyDetailCrawler:
                     # 연속 3회 미만 → skip, 다음 URL로
 
                 # page 간 딜레이
-                time.sleep(random.uniform(5, 10))
+                time.sleep(random.uniform(10, 15))
                 i += 1
 
             print("\n" + "="*80)

@@ -55,7 +55,7 @@ class BbyTvRecovery:
         """세션 목록 조회 (bby_tv_crawl 기준, 시간대별 그룹)"""
         query = """
         SELECT
-            DATE(crawl_datetime) as crawl_date,
+            SUBSTRING(crawl_datetime, 1, 10) as crawl_date,
             MIN(crawl_datetime) as session_start,
             MAX(crawl_datetime) as session_end,
             COUNT(*) as total_count,
@@ -64,7 +64,7 @@ class BbyTvRecovery:
             SUM(CASE WHEN savings IS NULL THEN 1 ELSE 0 END) as savings_null_count
         FROM bby_tv_crawl
         WHERE account_name = 'Bestbuy'
-        GROUP BY DATE(crawl_datetime), DATE_PART('hour', crawl_datetime)
+        GROUP BY SUBSTRING(crawl_datetime, 1, 10), SUBSTRING(crawl_datetime, 12, 2)
         ORDER BY crawl_date DESC, session_start DESC
         LIMIT 20
         """

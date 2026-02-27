@@ -137,17 +137,19 @@ class BestBuyDetailCrawler:
             return None
 
     def setup_browser(self):
-        """Setup DrissionPage ChromiumPage - 안티 감지 + 이미지 비활성화"""
+        """Setup DrissionPage ChromiumPage - 안티 감지 + 새 프로필 + 이미지 비활성화"""
         try:
             print("[INFO] Setting up DrissionPage browser...")
             co = ChromiumOptions()
+            co.auto_port()  # 새 포트 + 새 유저 데이터 폴더 (쿠키/핑거프린트 초기화)
             co.no_imgs(True)
             co.set_argument('--disable-blink-features=AutomationControlled')
             co.set_argument('--disable-features=AutomationControlled')
             co.set_user_agent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
             self.page = ChromiumPage(co)
-            # navigator.webdriver 플래그 제거
-            self.page.run_js('Object.defineProperty(navigator, "webdriver", {get: () => undefined})')
+            # 모든 페이지 로드 전에 navigator.webdriver 제거 (CDP 주입)
+            self.page.run_cdp('Page.addScriptToEvaluateOnNewDocument',
+                              source='Object.defineProperty(navigator, "webdriver", {get: () => undefined})')
             print("[OK] DrissionPage browser setup complete")
             return True
         except Exception as e:

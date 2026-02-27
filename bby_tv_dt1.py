@@ -869,6 +869,7 @@ class BestBuyDetailCrawler:
 
             # 2단계: 컨테이너 내부에서만 원가 extraction
             price_xpaths = self.config.get_xpath_list('original_price_inner', self.file_name) or [
+                './/div[@data-testid="price-block-regular-price-message-text"]//span[contains(@style, "line-through")]',
                 './/span[@data-lu-target="comp_value"]',
                 './/span[@data-testid="price-block-regular-price-message-text"]//span[@data-lu-target="comp_value"]',
                 './/span[contains(@style, "color: rgb(108, 111, 117)") and contains(., "$")]'
@@ -877,10 +878,11 @@ class BestBuyDetailCrawler:
             for xpath in price_xpaths:
                 elem = price_container.xpath(xpath)
                 if elem:
-                    price = elem[0].text_content().strip()
-                    # "$" 기호가 포함되어 있고 유효한 가격인지 확인
-                    if price and '$' in price:
-                        return price  # "$149.99" 형식 반환
+                    text = elem[0].text_content().strip()
+                    # "The price was $2,499.99" -> "$2,499.99" 추출
+                    match = re.search(r'\$[\d,]+(?:\.\d{2})?', text)
+                    if match:
+                        return match.group()
 
             # Fallback: "Buy New: $X,XXX.XX" 패턴 찾기 (전체 페이지에서)
             # 조건: savings와 final_sku_price를 모두 수집했을 때만 시도
@@ -938,6 +940,26 @@ class BestBuyDetailCrawler:
                     match = re.search(r'\$[\d,]+(?:\.\d{2})?', text)
                     if match:
                         return match.group()  # "$1,200.00" 형식 반환
+
+            # Fallback: "The price was $X,XXX.XX" 형식에서 원가-현재가로 savings 계산
+            # Best Buy가 "Save $X" 대신 "The price was $X" 형식으로 변경한 경우 대응
+            orig_elem = price_container.xpath('.//div[@data-testid="price-block-regular-price-message-text"]//span[contains(@style, "line-through")]')
+            current_elem = price_container.xpath('.//div[@data-testid="price-block-customer-price"]')
+            if orig_elem and current_elem:
+                orig_text = orig_elem[0].text_content().strip()
+                current_text = current_elem[0].text_content().strip()
+                orig_match = re.search(r'\$[\d,]+(?:\.\d{2})?', orig_text)
+                current_match = re.search(r'\$[\d,]+(?:\.\d{2})?', current_text)
+                if orig_match and current_match:
+                    try:
+                        orig_val = float(orig_match.group().replace('$', '').replace(',', ''))
+                        current_val = float(current_match.group().replace('$', '').replace(',', ''))
+                        if orig_val > current_val:
+                            savings_val = orig_val - current_val
+                            return f"${savings_val:,.2f}"
+                    except (ValueError, TypeError):
+                        pass
+
             return None  # 세일이 아니면 None
         except Exception as e:
             print(f"  [ERROR] Savings extraction failed: {e}")

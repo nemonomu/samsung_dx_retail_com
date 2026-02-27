@@ -192,9 +192,11 @@ def main():
         print(f"{'='*80}")
         for xpath in ['//span[@data-testid="price-block-total-savings-text"]',
                        '//div[@data-testid="price-block-total-savings"]',
+                       '//div[@data-testid="price-block-savings"]',
+                       '//div[@data-testid="price-block-regular-price-message-text"]//span[contains(@style, "line-through")]',
                        '//*[contains(text(), "Save $")]',
                        '//*[@data-lu-target="comp_value"]',
-                       '//*[contains(text(), "Was ")]']:
+                       '//*[contains(text(), "The price was")]']:
             found = tree.xpath(xpath)
             if found:
                 for el in found[:3]:

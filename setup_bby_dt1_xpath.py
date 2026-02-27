@@ -64,9 +64,10 @@ def add_xpath_configs():
         ('see_price_in_cart', './/span[contains(text(), "See details in checkout")]', 3),
 
         # === extract_original_sku_price() - price_xpaths ===
-        ('original_price_inner', './/span[@data-lu-target="comp_value"]', 1),
-        ('original_price_inner', './/span[@data-testid="price-block-regular-price-message-text"]//span[@data-lu-target="comp_value"]', 2),
-        ('original_price_inner', './/span[contains(@style, "color: rgb(108, 111, 117)") and contains(., "$")]', 3),
+        ('original_price_inner', './/div[@data-testid="price-block-regular-price-message-text"]//span[contains(@style, "line-through")]', 1),
+        ('original_price_inner', './/span[@data-lu-target="comp_value"]', 2),
+        ('original_price_inner', './/span[@data-testid="price-block-regular-price-message-text"]//span[@data-lu-target="comp_value"]', 3),
+        ('original_price_inner', './/span[contains(@style, "color: rgb(108, 111, 117)") and contains(., "$")]', 4),
 
         # === extract_original_sku_price() - buy_new_xpaths ===
         ('buy_new_price', '//a[@data-testid="price-block-regular-price-message-link"]//span', 1),

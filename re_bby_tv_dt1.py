@@ -101,10 +101,19 @@ class BbyTvRecovery:
             print(f"[ERROR] Summary query failed: {e}")
             return None
 
-    def load_page_and_extract(self, url):
-        """URL 접속 후 가격 정보 재추출"""
+    def load_page_and_extract(self, url, debug=False):
+        """URL 접속 후 가격 정보 재추출 (bby_tv_dt1.py crawl_detail_page와 동일한 로딩 로직)"""
         try:
             self.page.get(url)
+
+            # ERR_HTTP2_PROTOCOL_ERROR 감지
+            try:
+                page_text = self.page.html[:2000] if self.page.html else ''
+                if 'ERR_HTTP2_PROTOCOL_ERROR' in page_text or "This site can't be reached" in page_text:
+                    print(f"    [BLOCKED] ERR_HTTP2_PROTOCOL_ERROR")
+                    return None
+            except Exception:
+                pass
 
             # h1 로딩 대기
             h1_elem = self.page.ele(
@@ -115,6 +124,24 @@ class BbyTvRecovery:
                 print(f"    [ERROR] page load failed - h1 not found")
                 return None
 
+            # DOM 체크 - 핵심 요소 존재 확인
+            page_source = self.page.html
+            tree = html.fromstring(page_source)
+            key_elements = {
+                'price': tree.xpath('//div[@data-testid="price-block-customer-price"] | //span[contains(text(), "See price in cart")]'),
+                'rating': tree.xpath('//p[contains(@class, "visually-hidden")][contains(text(), "Rating")]'),
+                'savings': tree.xpath('//span[@data-testid="price-block-total-savings-text"] | //div[@data-testid="price-block-total-savings"]'),
+            }
+            elements_found = sum(1 for v in key_elements.values() if v)
+
+            # 핵심 요소가 부족하면 스크롤 수행 (lazy loading 대응)
+            if elements_found < 2:
+                for pos in [1000, 3000, 5000, 8000]:
+                    self.page.run_js(f"window.scrollTo(0, {pos})")
+                    time.sleep(0.3)
+                self.page.run_js("window.scrollTo(0, 0)")
+                time.sleep(0.5)
+
             # 가격 컨테이너 로딩 대기
             try:
                 self.page.ele(
@@ -124,8 +151,29 @@ class BbyTvRecovery:
             except Exception:
                 pass
 
+            # 로딩 완료 후 최종 HTML 가져오기
             page_source = self.page.html
             tree = html.fromstring(page_source)
+
+            # debug: 첫 번째 URL에서 컨테이너 내부 확인
+            if debug:
+                from lxml import etree
+                container_xpaths = self.config.get_xpath_list('price_block_container', self.file_name) or [
+                    '//div[@data-testid="price-block"]',
+                    '//div[contains(@class, "order-2")]'
+                ]
+                for xpath in container_xpaths:
+                    containers = tree.xpath(xpath)
+                    if containers:
+                        c = containers[0]
+                        inner = etree.tostring(c, encoding='unicode', method='html')
+                        print(f"    [DEBUG] container({xpath}) inner HTML (1500chars):")
+                        print(f"    {inner[:1500]}")
+                        print(f"    [DEBUG] data-testid list:")
+                        for el in c.xpath('.//*[@data-testid]'):
+                            t = el.text_content().strip()[:40]
+                            print(f"      <{el.tag} data-testid=\"{el.get('data-testid')}\"> text=\"{t}\"")
+                        break
 
             final_sku_price = self.extract_final_sku_price(tree)
             savings = self.extract_savings(tree)
@@ -389,7 +437,8 @@ class BbyTvRecovery:
                 original_dt = rec['crawl_datetime']
                 print(f"\n[{i+1}/{len(null_records)}] {url[:70]}...")
 
-                result = self.load_page_and_extract(url)
+                # 첫 번째 URL은 debug 모드로 실행 (컨테이너 내부 확인)
+                result = self.load_page_and_extract(url, debug=(i == 0))
 
                 if result is None:
                     print(f"    [FAIL] extraction failed")

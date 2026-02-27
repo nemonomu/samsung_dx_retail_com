@@ -137,12 +137,17 @@ class BestBuyDetailCrawler:
             return None
 
     def setup_browser(self):
-        """Setup DrissionPage ChromiumPage - 이미지 비활성화로 속도 향상"""
+        """Setup DrissionPage ChromiumPage - 안티 감지 + 이미지 비활성화"""
         try:
             print("[INFO] Setting up DrissionPage browser...")
             co = ChromiumOptions()
             co.no_imgs(True)
+            co.set_argument('--disable-blink-features=AutomationControlled')
+            co.set_argument('--disable-features=AutomationControlled')
+            co.set_user_agent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
             self.page = ChromiumPage(co)
+            # navigator.webdriver 플래그 제거
+            self.page.run_js('Object.defineProperty(navigator, "webdriver", {get: () => undefined})')
             print("[OK] DrissionPage browser setup complete")
             return True
         except Exception as e:
@@ -2366,8 +2371,10 @@ class BestBuyDetailCrawler:
             # 자동 재시도 설정
             MAX_RETRIES = 5          # 최대 재시도 횟수
             INITIAL_WAIT = 1200      # 대기 시간 (20분)
+            RESTART_EVERY = 15       # N건마다 브라우저 재시작 (세션 초기화)
             retry_count = 0          # 현재 재시도 횟수
             consecutive_fails = 0    # 연속 실패 횟수
+            since_restart = 0        # 마지막 재시작 이후 수집 건수
 
             i = 0
             while i < len(urls):
@@ -2422,7 +2429,18 @@ class BestBuyDetailCrawler:
                 elif result is True:
                     success_count += 1
                     consecutive_fails = 0
-                    retry_count = 0  # 성공하면 재시도 카운터 리셋
+                    retry_count = 0
+                    since_restart += 1
+
+                    # 일정 건수마다 브라우저 재시작 (세션 초기화로 차단 방지)
+                    if since_restart >= RESTART_EVERY:
+                        print(f"\n[INFO] {RESTART_EVERY}건 수집 완료 - 브라우저 재시작 (세션 초기화)")
+                        self.close_browser()
+                        time.sleep(random.uniform(3, 5))
+                        if not self.setup_browser():
+                            print("[ERROR] Browser restart failed. Stopping.")
+                            break
+                        since_restart = 0
 
                 else:
                     # 일반 실패 (h1 not found 등) → skip하고 다음 URL로

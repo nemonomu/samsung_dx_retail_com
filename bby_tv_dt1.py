@@ -2327,8 +2327,8 @@ class BestBuyDetailCrawler:
         except Exception as e:
             print(f"[WARNING] Failed to cleanup old logs: {e}")
 
-    def run(self, start_from=0):
-        """메인 execution. start_from: 0-based index to skip already-processed URLs"""
+    def run(self, start_from=0, stop_at=None):
+        """메인 execution. start_from: 0-based index, stop_at: datetime 종료 시각"""
         # 콘솔 출력을 파일로도 저장
         log_dir = r"C:\samsung_dx_retail_com\log"
         if not os.path.exists(log_dir):
@@ -2375,6 +2375,13 @@ class BestBuyDetailCrawler:
             while i < len(urls):
                 url_data = urls[i]
                 idx = i + start_from + 1
+
+                # 종료 시각 체크
+                if stop_at and datetime.now() >= stop_at:
+                    print(f"\n{'='*80}")
+                    print(f"[INFO] Reached stop time: {stop_at.strftime('%Y-%m-%d %H:%M:%S')}")
+                    print(f"[INFO] Collected so far: {success_count}")
+                    break
 
                 # Check if we've reached the maximum SKU limit
                 if self.total_collected >= self.max_skus:
@@ -2576,19 +2583,36 @@ class BestBuyDetailCrawler:
                 self.tee.close()
 
 def main():
-    # Parse start_from argument: python bby_tv_dt1.py 39
+    # Parse arguments:
+    #   python bby_tv_dt1.py                       # 처음부터
+    #   python bby_tv_dt1.py 39                    # 39번부터
+    #   python bby_tv_dt1.py until 20260228060000  # 지정 시각까지 수집 후 종료
+    #   python bby_tv_dt1.py 39 until 20260228060000  # 39번부터 + 시간 제한
     start_from = 0
-    if len(sys.argv) > 1:
-        try:
-            start_from = int(sys.argv[1]) - 1  # user provides 1-based, convert to 0-based
-            if start_from < 0:
-                start_from = 0
-            print(f"[INFO] Start from: {start_from + 1} (skipping first {start_from})")
-        except ValueError:
-            print(f"[WARNING] Invalid start argument '{sys.argv[1]}', starting from 1")
+    stop_at = None
+
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        if args[i] == 'until' and i + 1 < len(args):
+            try:
+                stop_at = datetime.strptime(args[i + 1], '%Y%m%d%H%M%S')
+                print(f"[INFO] Stop at: {stop_at.strftime('%Y-%m-%d %H:%M:%S')}")
+            except ValueError:
+                print(f"[WARNING] Invalid until format '{args[i + 1]}', use YYYYMMDDHHmmss")
+            i += 2
+        else:
+            try:
+                start_from = int(args[i]) - 1
+                if start_from < 0:
+                    start_from = 0
+                print(f"[INFO] Start from: {start_from + 1} (skipping first {start_from})")
+            except ValueError:
+                print(f"[WARNING] Invalid argument '{args[i]}'")
+            i += 1
 
     crawler = BestBuyDetailCrawler()
-    crawler.run(start_from=start_from)
+    crawler.run(start_from=start_from, stop_at=stop_at)
 
 if __name__ == "__main__":
     main()

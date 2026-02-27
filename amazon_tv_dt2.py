@@ -967,8 +967,8 @@ class AmazonDetailCrawler:
                     match = re.search(r'\$[\d,]+\.?\d*', price_text)
                     if match:
                         return match.group()
-                    # Fallback: return original if no price pattern found
-                    return price_text.strip()
+                    # No price pattern found, try next xpath
+                    continue
 
             return None
 

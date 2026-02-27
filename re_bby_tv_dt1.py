@@ -4,7 +4,9 @@ bby_tv_dt1 Recovery Script
 - 해당 URL을 재크롤링하여 DB UPDATE
 
 사용법:
-    python re_bby_tv_dt1.py
+    python re_bby_tv_dt1.py                          # 날짜 입력 모드
+    python re_bby_tv_dt1.py 2026-02-27               # 특정 날짜 전체 복구
+    python re_bby_tv_dt1.py 2026-02-27 2026-02-28    # 날짜 범위 복구
 """
 import time
 import re
@@ -51,41 +53,14 @@ class BbyTvRecovery:
             print(f"[ERROR] Browser setup failed: {e}")
             return False
 
-    def get_sessions(self):
-        """세션 목록 조회 (bby_tv_crawl 기준, 시간대별 그룹)"""
-        query = """
-        SELECT
-            SUBSTRING(crawl_datetime, 1, 10) as crawl_date,
-            MIN(crawl_datetime) as session_start,
-            MAX(crawl_datetime) as session_end,
-            COUNT(*) as total_count,
-            SUM(CASE WHEN original_sku_price IS NULL AND savings IS NULL THEN 1 ELSE 0 END) as both_null_count,
-            SUM(CASE WHEN original_sku_price IS NULL THEN 1 ELSE 0 END) as orig_null_count,
-            SUM(CASE WHEN savings IS NULL THEN 1 ELSE 0 END) as savings_null_count
-        FROM bby_tv_crawl
-        WHERE account_name = 'Bestbuy'
-        GROUP BY SUBSTRING(crawl_datetime, 1, 10), SUBSTRING(crawl_datetime, 12, 2)
-        ORDER BY crawl_date DESC, session_start DESC
-        LIMIT 20
-        """
-        try:
-            cursor = self.db_conn.cursor()
-            cursor.execute(query)
-            rows = cursor.fetchall()
-            cursor.close()
-            return rows
-        except Exception as e:
-            print(f"[ERROR] Session query failed: {e}")
-            return None
-
-    def get_null_records(self, session_start, session_end):
-        """original_sku_price AND savings 모두 NULL인 레코드 조회 (bby_tv_crawl)"""
+    def get_null_records(self, date_from, date_to):
+        """날짜 범위에서 original_sku_price AND savings 모두 NULL인 레코드 조회"""
         query = """
         SELECT product_url, crawl_datetime, retailer_sku_name, item, final_sku_price
         FROM bby_tv_crawl
         WHERE account_name = 'Bestbuy'
           AND crawl_datetime >= %s
-          AND crawl_datetime <= %s
+          AND crawl_datetime < %s
           AND original_sku_price IS NULL
           AND savings IS NULL
           AND final_sku_price IS NOT NULL
@@ -94,13 +69,36 @@ class BbyTvRecovery:
         """
         try:
             cursor = self.db_conn.cursor()
-            cursor.execute(query, (session_start, session_end))
+            cursor.execute(query, (f"{date_from} 00:00:00", f"{date_to} 23:59:59"))
             rows = cursor.fetchall()
             columns = [desc[0] for desc in cursor.description]
             cursor.close()
             return [dict(zip(columns, row)) for row in rows]
         except Exception as e:
             print(f"[ERROR] NULL records query failed: {e}")
+            return None
+
+    def get_summary(self, date_from, date_to):
+        """날짜 범위의 요약 정보 조회"""
+        query = """
+        SELECT
+            COUNT(*) as total_count,
+            SUM(CASE WHEN original_sku_price IS NULL AND savings IS NULL THEN 1 ELSE 0 END) as both_null_count,
+            SUM(CASE WHEN original_sku_price IS NULL THEN 1 ELSE 0 END) as orig_null_count,
+            SUM(CASE WHEN savings IS NULL THEN 1 ELSE 0 END) as savings_null_count
+        FROM bby_tv_crawl
+        WHERE account_name = 'Bestbuy'
+          AND crawl_datetime >= %s
+          AND crawl_datetime < %s
+        """
+        try:
+            cursor = self.db_conn.cursor()
+            cursor.execute(query, (f"{date_from} 00:00:00", f"{date_to} 23:59:59"))
+            row = cursor.fetchone()
+            cursor.close()
+            return row
+        except Exception as e:
+            print(f"[ERROR] Summary query failed: {e}")
             return None
 
     def load_page_and_extract(self, url):
@@ -123,14 +121,12 @@ class BbyTvRecovery:
                     'xpath://div[@data-testid="price-block-customer-price"] | //div[@data-testid="price-restricted-price-tap-for-price"] | //div[contains(text(), "no longer available in new condition")]',
                     timeout=10
                 )
-                # 로딩 후 tree 갱신
             except Exception:
                 pass
 
             page_source = self.page.html
             tree = html.fromstring(page_source)
 
-            # extract
             final_sku_price = self.extract_final_sku_price(tree)
             savings = self.extract_savings(tree)
             original_sku_price = self.extract_original_sku_price(tree, savings, final_sku_price)
@@ -149,7 +145,6 @@ class BbyTvRecovery:
     # ====================================================================
 
     def extract_final_sku_price(self, tree):
-        """Final SKU Price extraction"""
         try:
             no_longer_available_xpaths = self.config.get_xpath_list('no_longer_available', self.file_name) or [
                 '//div[@class="text-danger text-4 font-500 leading-4"]',
@@ -208,7 +203,6 @@ class BbyTvRecovery:
             return None
 
     def extract_savings(self, tree):
-        """Savings extraction"""
         try:
             container_xpaths = self.config.get_xpath_list('price_block_container', self.file_name) or [
                 '//div[@data-testid="price-block"]',
@@ -241,7 +235,6 @@ class BbyTvRecovery:
             return None
 
     def extract_original_sku_price(self, tree, savings=None, final_sku_price=None):
-        """Original SKU Price extraction"""
         try:
             container_xpaths = self.config.get_xpath_list('price_block_container', self.file_name) or [
                 '//div[@data-testid="price-block"]',
@@ -291,7 +284,6 @@ class BbyTvRecovery:
             cursor = self.db_conn.cursor()
             updated = 0
 
-            # 1) bby_tv_crawl UPDATE
             cursor.execute("""
                 UPDATE bby_tv_crawl
                 SET final_sku_price = %s,
@@ -308,7 +300,6 @@ class BbyTvRecovery:
             ))
             updated += cursor.rowcount
 
-            # 2) tv_retail_com UPDATE
             cursor.execute("""
                 UPDATE tv_retail_com
                 SET final_sku_price = %s,
@@ -332,7 +323,7 @@ class BbyTvRecovery:
             print(f"    [ERROR] DB update failed: {e}")
             return 0
 
-    def run(self):
+    def run(self, date_from=None, date_to=None):
         """메인 실행"""
         print("=" * 80)
         print("  bby_tv_dt1 Recovery Script")
@@ -343,126 +334,107 @@ class BbyTvRecovery:
         if not self.connect_db():
             return
 
-        while True:
-            # 1. 세션 선택
-            sessions = self.get_sessions()
-            if not sessions:
-                print("[ERROR] No sessions found")
-                return
+        # 날짜 결정
+        if not date_from:
+            date_from = input("Start date (YYYY-MM-DD): ").strip()
+        if not date_to:
+            date_to = date_from
 
-            print(f"\n{'='*90}")
-            print(f"{'No':>3} | {'Session Start':<22} | {'Total':>6} | {'Both NULL':>10} | {'Orig NULL':>10} | {'Save NULL':>10}")
-            print("-" * 90)
+        print(f"\n[INFO] Recovery range: {date_from} ~ {date_to}")
 
-            for i, row in enumerate(sessions):
-                crawl_date, session_start, session_end, total, both_null, orig_null, save_null = row
-                print(f"{i+1:>3} | {str(session_start):<22} | {total:>6} | {both_null:>10} | {orig_null:>10} | {save_null:>10}")
+        # 요약 조회
+        summary = self.get_summary(date_from, date_to)
+        if not summary:
+            print("[ERROR] Summary query failed")
+            return
 
-            print("\n0. Exit")
-            choice = input("\nSelect session number: ").strip()
-            if choice == '0':
-                print("Exit.")
-                return
+        total, both_null, orig_null, save_null = summary
+        print(f"[INFO] Total records: {total}")
+        print(f"[INFO] Both NULL (recovery target): {both_null}")
+        print(f"[INFO] Original NULL: {orig_null} | Savings NULL: {save_null}")
 
-            try:
-                idx = int(choice) - 1
-                if idx < 0 or idx >= len(sessions):
-                    print("Invalid number.")
-                    continue
-            except ValueError:
-                print("Enter a number.")
-                continue
+        if both_null == 0:
+            print("[INFO] No recovery targets. Done.")
+            return
 
-            selected = sessions[idx]
-            session_start = selected[1]
-            session_end = selected[2]
+        # NULL 레코드 조회
+        null_records = self.get_null_records(date_from, date_to)
+        if not null_records:
+            print("[INFO] No recovery targets found.")
+            return
 
-            # 2. NULL 레코드 조회
-            null_records = self.get_null_records(session_start, session_end)
-            if not null_records:
-                print("[INFO] No recovery targets found (both NULL records = 0)")
-                continue
+        print(f"\n[INFO] Recovery targets: {len(null_records)} records")
+        for i, rec in enumerate(null_records[:5]):
+            print(f"  [{i+1}] {rec['product_url'][:70]}... | price: {rec['final_sku_price']}")
+        if len(null_records) > 5:
+            print(f"  ... and {len(null_records) - 5} more")
 
-            print(f"\n[INFO] Recovery targets: {len(null_records)} records")
-            print(f"[INFO] Session: {session_start} ~ {session_end}")
+        confirm = input(f"\nProceed? (y/n): ").strip().lower()
+        if confirm != 'y':
+            print("Cancelled.")
+            return
 
-            # 미리보기
-            for i, rec in enumerate(null_records[:5]):
-                print(f"  [{i+1}] {rec['product_url'][:70]}... | price: {rec['final_sku_price']}")
-            if len(null_records) > 5:
-                print(f"  ... and {len(null_records) - 5} more")
+        # 브라우저 시작
+        if not self.setup_browser():
+            return
 
-            confirm = input(f"\nProceed with recovery? (y/n): ").strip().lower()
-            if confirm != 'y':
-                print("Cancelled.")
-                continue
+        # 재크롤링 + DB UPDATE
+        success_count = 0
+        fail_count = 0
+        skip_count = 0
 
-            # 3. 브라우저 시작
-            if not self.setup_browser():
-                return
+        try:
+            for i, rec in enumerate(null_records):
+                url = rec['product_url']
+                original_dt = rec['crawl_datetime']
+                print(f"\n[{i+1}/{len(null_records)}] {url[:70]}...")
 
-            # 4. 재크롤링 + DB UPDATE
-            success_count = 0
-            fail_count = 0
-            skip_count = 0
+                result = self.load_page_and_extract(url)
 
-            try:
-                for i, rec in enumerate(null_records):
-                    url = rec['product_url']
-                    original_dt = rec['crawl_datetime']
-                    print(f"\n[{i+1}/{len(null_records)}] {url[:70]}...")
-
-                    result = self.load_page_and_extract(url)
-
-                    if result is None:
-                        print(f"    [FAIL] extraction failed")
-                        fail_count += 1
-                        time.sleep(2)
-                        continue
-
-                    # savings 또는 original_sku_price 중 하나라도 있으면 성공
-                    if result['savings'] is None and result['original_sku_price'] is None:
-                        print(f"    [SKIP] still NULL (no sale?) - price: {result['final_sku_price']}")
-                        skip_count += 1
-                        time.sleep(2)
-                        continue
-
-                    print(f"    [OK] final: {result['final_sku_price']} | savings: {result['savings']} | original: {result['original_sku_price']}")
-
-                    # DB UPDATE
-                    updated = self.update_db(url, original_dt, result)
-                    if updated > 0:
-                        print(f"    [DB] Updated {updated} rows")
-                        success_count += 1
-                    else:
-                        print(f"    [DB] No rows updated")
-                        fail_count += 1
-
+                if result is None:
+                    print(f"    [FAIL] extraction failed")
+                    fail_count += 1
                     time.sleep(2)
+                    continue
 
-            except KeyboardInterrupt:
-                print("\n[INFO] Interrupted by user")
-            except Exception as e:
-                print(f"[ERROR] Recovery failed: {e}")
-                import traceback
-                traceback.print_exc()
-            finally:
-                if self.page:
-                    self.page.quit()
-                    print("[INFO] Browser closed")
+                if result['savings'] is None and result['original_sku_price'] is None:
+                    print(f"    [SKIP] still NULL (no sale) - price: {result['final_sku_price']}")
+                    skip_count += 1
+                    time.sleep(2)
+                    continue
 
-            # 5. 결과 요약
-            print(f"\n{'='*80}")
-            print(f"[Recovery Result]")
-            print(f"  Total targets: {len(null_records)}")
-            print(f"  Success (DB updated): {success_count}")
-            print(f"  Skip (still NULL - no sale): {skip_count}")
-            print(f"  Fail: {fail_count}")
-            print(f"{'='*80}")
+                print(f"    [OK] final: {result['final_sku_price']} | savings: {result['savings']} | original: {result['original_sku_price']}")
 
-            cont = input("\nContinue with another session? (y/n): ").strip().lower()
-            if cont != 'y':
-                break
+                updated = self.update_db(url, original_dt, result)
+                if updated > 0:
+                    print(f"    [DB] Updated {updated} rows")
+                    success_count += 1
+                else:
+                    print(f"    [DB] No rows updated")
+                    fail_count += 1
+
+                time.sleep(2)
+
+        except KeyboardInterrupt:
+            print("\n[INFO] Interrupted by user")
+        except Exception as e:
+            print(f"[ERROR] Recovery failed: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            if self.page:
+                self.page.quit()
+                print("[INFO] Browser closed")
+
+        # 결과 요약
+        print(f"\n{'='*80}")
+        print(f"[Recovery Result]")
+        print(f"  Range: {date_from} ~ {date_to}")
+        print(f"  Total targets: {len(null_records)}")
+        print(f"  Success (DB updated): {success_count}")
+        print(f"  Skip (no sale - NULL is correct): {skip_count}")
+        print(f"  Fail: {fail_count}")
+        print(f"{'='*80}")
 
         # cleanup
         if self.db_conn:
@@ -473,7 +445,13 @@ class BbyTvRecovery:
 
 def main():
     recovery = BbyTvRecovery()
-    recovery.run()
+
+    if len(sys.argv) >= 3:
+        recovery.run(date_from=sys.argv[1], date_to=sys.argv[2])
+    elif len(sys.argv) == 2:
+        recovery.run(date_from=sys.argv[1], date_to=sys.argv[1])
+    else:
+        recovery.run()
 
 
 if __name__ == '__main__':

@@ -850,10 +850,10 @@ class BestBuyDetailCrawler:
             final_sku_price: final price value (for fallback condition check)
         """
         try:
-            # 1단계: 가격 컨테이너 찾기 (order-2 안의 첫 번째 price-block = 메인 상품)
-            container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
-                '//div[contains(@class, "order-2")]//div[@data-testid="price-block"]',
-                '//div[@data-testid="price-block"]'
+            # 1단계: final_sku_price와 동일한 컨테이너 사용
+            container_xpaths = self.config.get_xpath_list('price_block_container', self.file_name) or [
+                '//div[@data-testid="price-block"]',
+                '//div[contains(@class, "order-2")]'
             ]
 
             price_container = None
@@ -864,7 +864,6 @@ class BestBuyDetailCrawler:
                     break
 
             if price_container is None:
-                # 컨테이너 없으면 None 반환 (경고 none - 정상 케이스일 수 있음)
                 return None
 
             # 2단계: 컨테이너 내부에서만 원가 extraction
@@ -889,10 +888,10 @@ class BestBuyDetailCrawler:
     def extract_savings(self, tree):
         """Savings extraction (할인 금액) - 컨테이너 기반"""
         try:
-            # 1단계: 가격 컨테이너 찾기 (order-2 안의 첫 번째 price-block = 메인 상품)
-            container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
-                '//div[contains(@class, "order-2")]//div[@data-testid="price-block"]',
-                '//div[@data-testid="price-block"]'
+            # 1단계: final_sku_price와 동일한 컨테이너 사용
+            container_xpaths = self.config.get_xpath_list('price_block_container', self.file_name) or [
+                '//div[@data-testid="price-block"]',
+                '//div[contains(@class, "order-2")]'
             ]
 
             price_container = None

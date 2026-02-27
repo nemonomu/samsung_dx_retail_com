@@ -49,8 +49,8 @@ def add_xpath_configs():
         ('price_block_container', '//div[@data-testid="price-block"]', 1),
         ('price_block_container', '//div[contains(@class, "order-2")]', 2),
 
-        # === price_container (star_rating 등 광역 컨테이너 - order-2 우선) ===
-        ('price_container', '//div[contains(@class, "order-2")]', 1),
+        # === price_container (order-2 안의 첫 번째 price-block = 메인 상품) ===
+        ('price_container', '//div[contains(@class, "order-2")]//div[@data-testid="price-block"]', 1),
         ('price_container', '//div[@data-testid="price-block"]', 2),
 
         # === extract_final_sku_price() - price_xpaths ===
@@ -231,6 +231,8 @@ def add_xpath_configs():
         ('original_price_inner', './/span[@data-lu-target="comp_value"]'),
         ('original_price_inner', './/div[@data-testid="price-block-regular-price-message-text"]//span[@data-lu-target="comp_value"]'),
         ('original_price_inner', './/span[@data-testid="price-block-regular-price-message-text"]//span[@data-lu-target="comp_value"]'),
+        # price_container: order-2 단독은 범위가 넓어 비교상품 price-block까지 포함
+        ('price_container', '//div[contains(@class, "order-2")]'),
         # final_price_inner: data-lu-target="customer_price" 더 이상 존재하지 않음
         ('final_price_inner', './/div[@data-lu-target="customer_price"]//span'),
         # final_price_inner: class명 변경으로 매칭 불가

@@ -253,7 +253,7 @@ class BbyTvRecovery:
     def extract_savings(self, tree):
         try:
             container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
-                '//div[contains(@class, "order-2")]',
+                '//div[contains(@class, "order-2")]//div[@data-testid="price-block"]',
                 '//div[@data-testid="price-block"]'
             ]
             price_container = None
@@ -285,7 +285,7 @@ class BbyTvRecovery:
     def extract_original_sku_price(self, tree, savings=None, final_sku_price=None):
         try:
             container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
-                '//div[contains(@class, "order-2")]',
+                '//div[contains(@class, "order-2")]//div[@data-testid="price-block"]',
                 '//div[@data-testid="price-block"]'
             ]
             price_container = None

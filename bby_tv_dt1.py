@@ -850,10 +850,9 @@ class BestBuyDetailCrawler:
             final_sku_price: final price value (for fallback condition check)
         """
         try:
-            # 1단계: 가격 컨테이너 찾기 (order-2 우선 - price-block이 22개 매칭되어 compact 카드가 먼저 잡힘 방지)
-            # comp_value, line-through 등 원가 testid는 메인 상품에만 있으므로 order-2 사용 가능
+            # 1단계: 가격 컨테이너 찾기 (order-2 안의 첫 번째 price-block = 메인 상품)
             container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
-                '//div[contains(@class, "order-2")]',
+                '//div[contains(@class, "order-2")]//div[@data-testid="price-block"]',
                 '//div[@data-testid="price-block"]'
             ]
 
@@ -890,9 +889,9 @@ class BestBuyDetailCrawler:
     def extract_savings(self, tree):
         """Savings extraction (할인 금액) - 컨테이너 기반"""
         try:
-            # 1단계: 가격 컨테이너 찾기 (order-2 우선 - price-block은 22개 매칭되어 compact 카드가 먼저 잡힘)
+            # 1단계: 가격 컨테이너 찾기 (order-2 안의 첫 번째 price-block = 메인 상품)
             container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
-                '//div[contains(@class, "order-2")]',
+                '//div[contains(@class, "order-2")]//div[@data-testid="price-block"]',
                 '//div[@data-testid="price-block"]'
             ]
 

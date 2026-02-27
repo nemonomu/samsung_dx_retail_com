@@ -203,10 +203,10 @@ def add_xpath_configs():
             if existing[1] == config_value:
                 skipped_count += 1
                 continue
-            # 값이 다르면 업데이트
+            # 값이 다르면 업데이트 (is_active도 TRUE로 복원)
             cursor.execute('''
                 UPDATE bby_tv_config
-                SET config_value = %s, description = %s
+                SET config_value = %s, description = %s, is_active = TRUE
                 WHERE id = %s
             ''', (config_value, f'Updated for {config_key}', existing[0]))
             added_count += 1

@@ -941,7 +941,8 @@ class BestBuyDetailCrawler:
                         return match.group(1)
 
             # Priority 2: 컨테이너 기반 extraction (fallback)
-            container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
+            # star_rating은 price-block 밖에 있으므로 order-2 전체 사용
+            container_xpaths = self.config.get_xpath_list('star_rating_container', self.file_name) or [
                 '//div[contains(@class, "order-2")]',
                 '//div[@data-testid="price-block"]'
             ]

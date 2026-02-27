@@ -53,6 +53,10 @@ def add_xpath_configs():
         ('price_container', '//div[contains(@class, "order-2")]//div[@data-testid="price-block"]', 1),
         ('price_container', '//div[@data-testid="price-block"]', 2),
 
+        # === star_rating_container (star_rating은 price-block 밖 → order-2 전체) ===
+        ('star_rating_container', '//div[contains(@class, "order-2")]', 1),
+        ('star_rating_container', '//div[@data-testid="price-block"]', 2),
+
         # === extract_final_sku_price() - price_xpaths ===
         ('final_price_inner', './/div[@data-testid="price-block-customer-price"]//span', 1),
         ('final_price_inner', './/div[@data-lu-target="customer_price"]//span', 2),
@@ -191,7 +195,7 @@ def add_xpath_configs():
     for config_key, config_value, priority in xpath_configs:
         # 중복 체크 (priority 포함)
         cursor.execute('''
-            SELECT id, config_value FROM bby_tv_config
+            SELECT id, config_value, is_active FROM bby_tv_config
             WHERE category = 'xpath'
               AND config_key = %s
               AND file_name = %s
@@ -200,15 +204,22 @@ def add_xpath_configs():
 
         existing = cursor.fetchone()
         if existing:
-            if existing[1] == config_value:
-                skipped_count += 1
+            existing_id, existing_value, existing_active = existing
+            if existing_value == config_value:
+                if not existing_active:
+                    # 값은 같은데 비활성화 상태 → 재활성화
+                    cursor.execute('UPDATE bby_tv_config SET is_active = TRUE WHERE id = %s', (existing_id,))
+                    added_count += 1
+                    print(f'  [REACTIVATED] {config_key} priority={priority}')
+                else:
+                    skipped_count += 1
                 continue
             # 값이 다르면 업데이트 (is_active도 TRUE로 복원)
             cursor.execute('''
                 UPDATE bby_tv_config
                 SET config_value = %s, description = %s, is_active = TRUE
                 WHERE id = %s
-            ''', (config_value, f'Updated for {config_key}', existing[0]))
+            ''', (config_value, f'Updated for {config_key}', existing_id))
             added_count += 1
             continue
 

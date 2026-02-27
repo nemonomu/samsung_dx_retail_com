@@ -227,9 +227,9 @@ def add_xpath_configs():
         ('savings_inner', './/span[contains(@style, "color: rgb(232, 30, 37)") and contains(., "Save")]'),
         # original_price_inner: rgb() → rgba() 변경으로 매칭 불가
         ('original_price_inner', './/span[contains(@style, "color: rgb(108, 111, 117)") and contains(., "$")]'),
-        # original_price_inner: generic comp_value는 비교상품 등 다른 영역의 comp_value를 잡음
+        # original_price_inner: comp_value는 "Comp. Value"(비교가격)도 잡아서 원가가 아닌 값 반환
         ('original_price_inner', './/span[@data-lu-target="comp_value"]'),
-        # original_price_inner: span[@data-testid]은 실제로 div[@data-testid]이라 매칭 불가
+        ('original_price_inner', './/div[@data-testid="price-block-regular-price-message-text"]//span[@data-lu-target="comp_value"]'),
         ('original_price_inner', './/span[@data-testid="price-block-regular-price-message-text"]//span[@data-lu-target="comp_value"]'),
         # final_price_inner: data-lu-target="customer_price" 더 이상 존재하지 않음
         ('final_price_inner', './/div[@data-lu-target="customer_price"]//span'),

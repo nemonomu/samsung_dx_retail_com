@@ -252,9 +252,9 @@ class BbyTvRecovery:
 
     def extract_savings(self, tree):
         try:
-            container_xpaths = self.config.get_xpath_list('price_block_container', self.file_name) or [
-                '//div[@data-testid="price-block"]',
-                '//div[contains(@class, "order-2")]'
+            container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
+                '//div[contains(@class, "order-2")]',
+                '//div[@data-testid="price-block"]'
             ]
             price_container = None
             for xpath in container_xpaths:
@@ -268,7 +268,6 @@ class BbyTvRecovery:
             savings_xpaths = self.config.get_xpath_list('savings_inner', self.file_name) or [
                 './/span[@data-testid="price-block-total-savings-text"]',
                 './/div[@data-testid="price-block-total-savings"]//span',
-                './/span[contains(@style, "color: rgb(232, 30, 37)") and contains(., "Save")]'
             ]
             for xpath in savings_xpaths:
                 elem = price_container.xpath(xpath)
@@ -278,23 +277,6 @@ class BbyTvRecovery:
                     if match:
                         return match.group()
 
-            # Fallback: "The price was $X" 형식 -> 원가-현재가로 savings 계산
-            orig_elem = price_container.xpath('.//div[@data-testid="price-block-regular-price-message-text"]//span[contains(@style, "line-through")]')
-            current_elem = price_container.xpath('.//div[@data-testid="price-block-customer-price"]')
-            if orig_elem and current_elem:
-                orig_text = orig_elem[0].text_content().strip()
-                current_text = current_elem[0].text_content().strip()
-                orig_match = re.search(r'\$[\d,]+(?:\.\d{2})?', orig_text)
-                current_match = re.search(r'\$[\d,]+(?:\.\d{2})?', current_text)
-                if orig_match and current_match:
-                    try:
-                        orig_val = float(orig_match.group().replace('$', '').replace(',', ''))
-                        current_val = float(current_match.group().replace('$', '').replace(',', ''))
-                        if orig_val > current_val:
-                            return f"${orig_val - current_val:,.2f}"
-                    except (ValueError, TypeError):
-                        pass
-
             return None
         except Exception as e:
             print(f"    [ERROR] savings extraction failed: {e}")
@@ -302,9 +284,9 @@ class BbyTvRecovery:
 
     def extract_original_sku_price(self, tree, savings=None, final_sku_price=None):
         try:
-            container_xpaths = self.config.get_xpath_list('price_block_container', self.file_name) or [
-                '//div[@data-testid="price-block"]',
-                '//div[contains(@class, "order-2")]'
+            container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
+                '//div[contains(@class, "order-2")]',
+                '//div[@data-testid="price-block"]'
             ]
             price_container = None
             for xpath in container_xpaths:
@@ -318,8 +300,6 @@ class BbyTvRecovery:
             price_xpaths = self.config.get_xpath_list('original_price_inner', self.file_name) or [
                 './/div[@data-testid="price-block-regular-price-message-text"]//span[contains(@style, "line-through")]',
                 './/span[@data-lu-target="comp_value"]',
-                './/span[@data-testid="price-block-regular-price-message-text"]//span[@data-lu-target="comp_value"]',
-                './/span[contains(@style, "color: rgb(108, 111, 117)") and contains(., "$")]'
             ]
             for xpath in price_xpaths:
                 elem = price_container.xpath(xpath)
@@ -328,18 +308,6 @@ class BbyTvRecovery:
                     match = re.search(r'\$[\d,]+(?:\.\d{2})?', text)
                     if match:
                         return match.group()
-
-            if savings and final_sku_price:
-                buy_new_xpaths = self.config.get_xpath_list('buy_new_price', self.file_name) or [
-                    '//a[@data-testid="price-block-regular-price-message-link"]//span',
-                    '//div[@data-testid="price-block-regular-price-link-text-wrapper"]//a//span'
-                ]
-                for xpath in buy_new_xpaths:
-                    elem = tree.xpath(xpath)
-                    if elem:
-                        price = elem[0].text_content().strip()
-                        if price and '$' in price:
-                            return price
 
             return None
         except Exception as e:

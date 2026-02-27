@@ -850,10 +850,11 @@ class BestBuyDetailCrawler:
             final_sku_price: final price value (for fallback condition check)
         """
         try:
-            # 1단계: 가격 컨테이너 찾기 (price-block 우선 - 유사상품 가격 혼입 방지)
-            container_xpaths = self.config.get_xpath_list('price_block_container', self.file_name) or [
-                '//div[@data-testid="price-block"]',
-                '//div[contains(@class, "order-2")]'
+            # 1단계: 가격 컨테이너 찾기 (order-2 우선 - price-block이 22개 매칭되어 compact 카드가 먼저 잡힘 방지)
+            # comp_value, line-through 등 원가 testid는 메인 상품에만 있으므로 order-2 사용 가능
+            container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
+                '//div[contains(@class, "order-2")]',
+                '//div[@data-testid="price-block"]'
             ]
 
             price_container = None
@@ -871,34 +872,15 @@ class BestBuyDetailCrawler:
             price_xpaths = self.config.get_xpath_list('original_price_inner', self.file_name) or [
                 './/div[@data-testid="price-block-regular-price-message-text"]//span[contains(@style, "line-through")]',
                 './/span[@data-lu-target="comp_value"]',
-                './/span[@data-testid="price-block-regular-price-message-text"]//span[@data-lu-target="comp_value"]',
-                './/span[contains(@style, "color: rgb(108, 111, 117)") and contains(., "$")]'
             ]
 
             for xpath in price_xpaths:
                 elem = price_container.xpath(xpath)
                 if elem:
                     text = elem[0].text_content().strip()
-                    # "The price was $2,499.99" -> "$2,499.99" 추출
                     match = re.search(r'\$[\d,]+(?:\.\d{2})?', text)
                     if match:
                         return match.group()
-
-            # Fallback: "Buy New: $X,XXX.XX" 패턴 찾기 (전체 페이지에서)
-            # 조건: savings와 final_sku_price를 모두 수집했을 때만 시도
-            if savings and final_sku_price:
-                buy_new_xpaths = self.config.get_xpath_list('buy_new_price', self.file_name) or [
-                    '//a[@data-testid="price-block-regular-price-message-link"]//span',
-                    '//div[@data-testid="price-block-regular-price-link-text-wrapper"]//a//span'
-                ]
-
-                for xpath in buy_new_xpaths:
-                    elem = tree.xpath(xpath)
-                    if elem:
-                        price = elem[0].text_content().strip()
-                        if price and '$' in price:
-                            print(f"  [INFO] Original price found via 'Buy New' fallback: {price}")
-                            return price
 
             return None  # 세일이 아니면 None
         except Exception as e:
@@ -908,10 +890,10 @@ class BestBuyDetailCrawler:
     def extract_savings(self, tree):
         """Savings extraction (할인 금액) - 컨테이너 기반"""
         try:
-            # 1단계: 가격 컨테이너 찾기 (price-block 우선 - 유사상품 가격 혼입 방지)
-            container_xpaths = self.config.get_xpath_list('price_block_container', self.file_name) or [
-                '//div[@data-testid="price-block"]',
-                '//div[contains(@class, "order-2")]'
+            # 1단계: 가격 컨테이너 찾기 (order-2 우선 - price-block은 22개 매칭되어 compact 카드가 먼저 잡힘)
+            container_xpaths = self.config.get_xpath_list('price_container', self.file_name) or [
+                '//div[contains(@class, "order-2")]',
+                '//div[@data-testid="price-block"]'
             ]
 
             price_container = None
@@ -922,45 +904,23 @@ class BestBuyDetailCrawler:
                     break
 
             if price_container is None:
-                # 컨테이너 없으면 None 반환
                 return None
 
             # 2단계: 컨테이너 내부에서만 할인 금액 extraction
             savings_xpaths = self.config.get_xpath_list('savings_inner', self.file_name) or [
                 './/span[@data-testid="price-block-total-savings-text"]',
                 './/div[@data-testid="price-block-total-savings"]//span',
-                './/span[contains(@style, "color: rgb(232, 30, 37)") and contains(., "Save")]'
             ]
 
             for xpath in savings_xpaths:
                 elem = price_container.xpath(xpath)
                 if elem:
-                    text = elem[0].text_content().strip()  # "Save $1,200"
-                    # "$숫자" 패턴 extraction (콤마 포함 정규식 사용)
+                    text = elem[0].text_content().strip()
                     match = re.search(r'\$[\d,]+(?:\.\d{2})?', text)
                     if match:
-                        return match.group()  # "$1,200.00" 형식 반환
+                        return match.group()
 
-            # Fallback: "The price was $X,XXX.XX" 형식에서 원가-현재가로 savings 계산
-            # Best Buy가 "Save $X" 대신 "The price was $X" 형식으로 변경한 경우 대응
-            orig_elem = price_container.xpath('.//div[@data-testid="price-block-regular-price-message-text"]//span[contains(@style, "line-through")]')
-            current_elem = price_container.xpath('.//div[@data-testid="price-block-customer-price"]')
-            if orig_elem and current_elem:
-                orig_text = orig_elem[0].text_content().strip()
-                current_text = current_elem[0].text_content().strip()
-                orig_match = re.search(r'\$[\d,]+(?:\.\d{2})?', orig_text)
-                current_match = re.search(r'\$[\d,]+(?:\.\d{2})?', current_text)
-                if orig_match and current_match:
-                    try:
-                        orig_val = float(orig_match.group().replace('$', '').replace(',', ''))
-                        current_val = float(current_match.group().replace('$', '').replace(',', ''))
-                        if orig_val > current_val:
-                            savings_val = orig_val - current_val
-                            return f"${savings_val:,.2f}"
-                    except (ValueError, TypeError):
-                        pass
-
-            return None  # 세일이 아니면 None
+            return None
         except Exception as e:
             print(f"  [ERROR] Savings extraction failed: {e}")
             return None

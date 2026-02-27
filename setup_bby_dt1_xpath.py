@@ -219,7 +219,38 @@ def add_xpath_configs():
         ''', (config_key, config_value, file_name, priority, f'Auto-added for {config_key}'))
         added_count += 1
 
-    print(f'[OK] Added {added_count} xpath configs, skipped {skipped_count} duplicates')
+    print(f'[OK] Added/updated {added_count} xpath configs, skipped {skipped_count} duplicates')
+
+    # === 비작동 xpath 비활성화 (is_active = FALSE) ===
+    deactivate_xpaths = [
+        # savings_inner: rgb() → rgba() 변경으로 매칭 불가
+        ('savings_inner', './/span[contains(@style, "color: rgb(232, 30, 37)") and contains(., "Save")]'),
+        # original_price_inner: rgb() → rgba() 변경으로 매칭 불가
+        ('original_price_inner', './/span[contains(@style, "color: rgb(108, 111, 117)") and contains(., "$")]'),
+        # original_price_inner: comp_value가 중첩 셀렉터에 있을 필요 없음 (단독 comp_value로 충분)
+        ('original_price_inner', './/span[@data-testid="price-block-regular-price-message-text"]//span[@data-lu-target="comp_value"]'),
+        # final_price_inner: data-lu-target="customer_price" 더 이상 존재하지 않음
+        ('final_price_inner', './/div[@data-lu-target="customer_price"]//span'),
+        # final_price_inner: class명 변경으로 매칭 불가
+        ('final_price_inner', './/span[@class="font-sans text-default text-style-body-md-400 font-500 text-7 leading-7"]'),
+    ]
+
+    deactivated_count = 0
+    for config_key, config_value in deactivate_xpaths:
+        cursor.execute('''
+            UPDATE bby_tv_config
+            SET is_active = FALSE, description = 'Deactivated - no longer matches current HTML'
+            WHERE category = 'xpath'
+              AND config_key = %s
+              AND config_value = %s
+              AND file_name = %s
+              AND is_active = TRUE
+        ''', (config_key, config_value, file_name))
+        if cursor.rowcount > 0:
+            deactivated_count += cursor.rowcount
+            print(f'  [DEACTIVATED] {config_key}: {config_value}')
+
+    print(f'[OK] Deactivated {deactivated_count} non-working xpath configs')
 
     cursor.close()
     conn.close()

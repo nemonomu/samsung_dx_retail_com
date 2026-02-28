@@ -151,6 +151,33 @@ class BestBuyDetailCrawler:
             traceback.print_exc()
             return False
 
+    def _warmup_with_different_page(self):
+        """차단 후 세션 워밍업 - TV가 아닌 다른 카테고리 상품 페이지 접속"""
+        warmup_urls = [
+            'https://www.bestbuy.com/site/apple-macbook-air-13-inch-laptop-m4-chip-16gb-memory-256gb/6604203.p',
+            'https://www.bestbuy.com/site/sony-wh-1000xm5-wireless-noise-canceling-over-the-ear-headphones/6505727.p',
+            'https://www.bestbuy.com/site/dyson-v15-detect-extra-cordless-vacuum/6539767.p',
+            'https://www.bestbuy.com/site/nintendo-switch-oled-model-w-white-joy-con/6470923.p',
+            'https://www.bestbuy.com/site/apple-ipad-10th-generation-with-wi-fi-64gb/4901809.p',
+            'https://www.bestbuy.com/site/bose-quietcomfort-ultra-headphones/6554461.p',
+        ]
+        try:
+            url = random.choice(warmup_urls)
+            print(f"[INFO] Session warmup: {url[:60]}...")
+            self.page.get(url)
+            time.sleep(random.uniform(5, 10))
+            # 페이지 내 스크롤 (사람처럼 행동)
+            try:
+                self.page.scroll.down(300)
+                time.sleep(random.uniform(2, 4))
+                self.page.scroll.down(300)
+                time.sleep(random.uniform(2, 3))
+            except Exception:
+                pass
+            print("[OK] Session warmup complete")
+        except Exception as e:
+            print(f"[WARNING] Session warmup failed: {e}")
+
     def close_browser(self):
         """브라우저 안전 종료 + 해당 프로세스만 정리"""
         browser_pid = None
@@ -2393,7 +2420,7 @@ class BestBuyDetailCrawler:
                 result = self.scrape_detail_page(url_data)
 
                 if result == 'blocked':
-                    # ERR_HTTP2_PROTOCOL_ERROR 감지 - 차단 확실 → 20분 대기
+                    # ERR_HTTP2_PROTOCOL_ERROR 감지 - 차단 확실 → 20분 대기 후 세션 워밍업
                     consecutive_fails += 1
                     retry_count += 1
                     if retry_count > MAX_RETRIES:
@@ -2405,13 +2432,9 @@ class BestBuyDetailCrawler:
                     wait_time = INITIAL_WAIT
                     print(f"\n{'='*80}")
                     print(f"[RETRY {retry_count}/{MAX_RETRIES}] Blocked by Best Buy. Waiting {wait_time // 60} minutes...")
-                    print(f"[INFO] Will restart browser and retry item {idx}")
                     print(f"{'='*80}")
 
-                    # 브라우저 종료
-                    self.close_browser()
-
-                    # 대기
+                    # 세션 유지한 채 대기
                     time.sleep(wait_time)
 
                     # DB 커넥션 체크
@@ -2419,10 +2442,8 @@ class BestBuyDetailCrawler:
                         print("[ERROR] DB reconnection failed. Stopping.")
                         break
 
-                    # 브라우저 새로 시작
-                    if not self.setup_browser():
-                        print("[ERROR] Browser restart failed. Stopping.")
-                        break
+                    # 다른 카테고리 상품 페이지 접속 (세션 워밍업)
+                    self._warmup_with_different_page()
 
                     # 같은 URL 다시 시도 (i 증가 안 함)
                     self.order -= 1  # order 카운터 복원 (scrape_detail_page에서 증가했으므로)
@@ -2434,14 +2455,10 @@ class BestBuyDetailCrawler:
                     retry_count = 0
                     since_restart += 1
 
-                    # 일정 건수마다 브라우저 재시작 (세션 초기화로 차단 방지)
+                    # 일정 건수마다 다른 페이지 접속 (세션 유지 + 패턴 분산)
                     if since_restart >= RESTART_EVERY:
-                        print(f"\n[INFO] {RESTART_EVERY}건 수집 완료 - 브라우저 재시작 (세션 초기화, 60~90초 쿨다운)")
-                        self.close_browser()
-                        time.sleep(random.uniform(60, 90))
-                        if not self.setup_browser():
-                            print("[ERROR] Browser restart failed. Stopping.")
-                            break
+                        print(f"\n[INFO] {RESTART_EVERY}건 수집 완료 - 다른 카테고리 페이지로 세션 워밍업")
+                        self._warmup_with_different_page()
                         since_restart = 0
 
                 else:
@@ -2449,7 +2466,7 @@ class BestBuyDetailCrawler:
                     consecutive_fails += 1
 
                     if consecutive_fails >= 3:
-                        # 연속 3회 실패 → 차단 판정 → 20분 대기
+                        # 연속 3회 실패 → 차단 판정 → 20분 대기 후 세션 워밍업
                         retry_count += 1
                         if retry_count > MAX_RETRIES:
                             print(f"\n{'='*80}")
@@ -2462,16 +2479,15 @@ class BestBuyDetailCrawler:
                         print(f"[RETRY {retry_count}/{MAX_RETRIES}] {consecutive_fails} consecutive failures. Blocked. Waiting {wait_time // 60} minutes...")
                         print(f"{'='*80}")
 
-                        self.close_browser()
+                        # 세션 유지한 채 대기
                         time.sleep(wait_time)
 
                         if not self.check_db_connection():
                             print("[ERROR] DB reconnection failed. Stopping.")
                             break
 
-                        if not self.setup_browser():
-                            print("[ERROR] Browser restart failed. Stopping.")
-                            break
+                        # 다른 카테고리 상품 페이지 접속 (세션 워밍업)
+                        self._warmup_with_different_page()
 
                         consecutive_fails = 0
                         # 실패한 항목 다시 시도 (i 증가 안 함)

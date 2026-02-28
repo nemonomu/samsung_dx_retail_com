@@ -2480,7 +2480,7 @@ class BestBuyDetailCrawler:
                     # 연속 3회 미만 → skip, 다음 URL로
 
                 # page 간 딜레이
-                time.sleep(random.uniform(45, 60))
+                time.sleep(random.uniform(5, 10))
                 i += 1
 
             print("\n" + "="*80)

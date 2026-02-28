@@ -2420,7 +2420,7 @@ class BestBuyDetailCrawler:
                 result = self.scrape_detail_page(url_data)
 
                 if result == 'blocked':
-                    # ERR_HTTP2_PROTOCOL_ERROR 감지 - 차단 확실 → 20분 대기 후 세션 워밍업
+                    # ERR_HTTP2_PROTOCOL_ERROR 감지 - 차단 확실
                     consecutive_fails += 1
                     retry_count += 1
                     if retry_count > MAX_RETRIES:
@@ -2429,13 +2429,16 @@ class BestBuyDetailCrawler:
                         print(f"[INFO] Resume later with: python bby_tv_dt1.py {idx}")
                         break
 
-                    wait_time = INITIAL_WAIT
-                    print(f"\n{'='*80}")
-                    print(f"[RETRY {retry_count}/{MAX_RETRIES}] Blocked by Best Buy. Waiting {wait_time // 60} minutes...")
-                    print(f"{'='*80}")
-
-                    # 세션 유지한 채 대기
-                    time.sleep(wait_time)
+                    if retry_count == 1:
+                        print(f"\n{'='*80}")
+                        print(f"[RETRY {retry_count}/{MAX_RETRIES}] Blocked by Best Buy. Warmup and retry...")
+                        print(f"{'='*80}")
+                    else:
+                        wait_time = INITIAL_WAIT * (retry_count - 1)
+                        print(f"\n{'='*80}")
+                        print(f"[RETRY {retry_count}/{MAX_RETRIES}] Blocked by Best Buy. Waiting {wait_time // 60} minutes...")
+                        print(f"{'='*80}")
+                        time.sleep(wait_time)
 
                     # DB 커넥션 체크
                     if not self.check_db_connection():
@@ -2466,7 +2469,7 @@ class BestBuyDetailCrawler:
                     consecutive_fails += 1
 
                     if consecutive_fails >= 3:
-                        # 연속 3회 실패 → 차단 판정 → 20분 대기 후 세션 워밍업
+                        # 연속 3회 실패 → 차단 판정
                         retry_count += 1
                         if retry_count > MAX_RETRIES:
                             print(f"\n{'='*80}")
@@ -2474,13 +2477,16 @@ class BestBuyDetailCrawler:
                             print(f"[INFO] Resume later with: python bby_tv_dt1.py {idx}")
                             break
 
-                        wait_time = INITIAL_WAIT
-                        print(f"\n{'='*80}")
-                        print(f"[RETRY {retry_count}/{MAX_RETRIES}] {consecutive_fails} consecutive failures. Blocked. Waiting {wait_time // 60} minutes...")
-                        print(f"{'='*80}")
-
-                        # 세션 유지한 채 대기
-                        time.sleep(wait_time)
+                        if retry_count == 1:
+                            print(f"\n{'='*80}")
+                            print(f"[RETRY {retry_count}/{MAX_RETRIES}] {consecutive_fails} consecutive failures. Warmup and retry...")
+                            print(f"{'='*80}")
+                        else:
+                            wait_time = min(INITIAL_WAIT * (retry_count - 1), 1200)
+                            print(f"\n{'='*80}")
+                            print(f"[RETRY {retry_count}/{MAX_RETRIES}] {consecutive_fails} consecutive failures. Waiting {wait_time // 60} minutes...")
+                            print(f"{'='*80}")
+                            time.sleep(wait_time)
 
                         if not self.check_db_connection():
                             print("[ERROR] DB reconnection failed. Stopping.")

@@ -247,6 +247,75 @@ def calculate_savings(final_price, original_price):
         return None
 
 
+def extract_detailed_reviews(page, xpaths):
+    """상품 페이지에서 detailed_review_content 추출 (JS → fallback XPath)"""
+    try:
+        # 페이지 하단까지 스크롤 (lazy loading 트리거)
+        for _ in range(5):
+            page.run_js("window.scrollBy(0, window.innerHeight)")
+            time.sleep(0.5)
+        time.sleep(2)
+
+        # JS로 리뷰 텍스트 추출
+        js_code = """
+        var reviews = [];
+        var containers = document.querySelectorAll('[id^="customer_review-"]');
+        containers.forEach(function(container) {
+            var collapsed = container.querySelector('[data-hook="review-collapsed"]');
+            if (collapsed) {
+                var span = collapsed.querySelector('span');
+                if (span && span.innerText.trim().length > 5) {
+                    reviews.push(span.innerText.trim());
+                }
+            }
+        });
+        return reviews;
+        """
+        review_texts = page.run_js(js_code)
+
+        # JS 실패 시 fallback: XPath (DB 로드)
+        if not review_texts:
+            fallback_xpaths = xpaths.get('review_body_detail') or [
+                '//*[starts-with(@id, "customer_review-")]/div[4]/span/div/div[1]/span',
+                '//*[starts-with(@id, "customer_review-")]/div[4]/span/div/div[1]',
+            ]
+            for xpath in fallback_xpaths:
+                try:
+                    first_elem = page.ele(f'xpath:{xpath}', timeout=10)
+                    if first_elem:
+                        elems = page.eles(f'xpath:{xpath}')
+                        review_texts = []
+                        for e in elems:
+                            t = ' '.join((e.text or '').split())
+                            if t and len(t) > 5:
+                                review_texts.append(t)
+                        if review_texts:
+                            break
+                except Exception:
+                    continue
+
+        if not review_texts:
+            return None
+
+        all_reviews = []
+        collected_reviews = set()
+        for text in review_texts:
+            review_text = ' '.join(text.split())
+            review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
+            if review_text and len(review_text) > 5 and review_text not in collected_reviews:
+                all_reviews.append(review_text)
+                collected_reviews.add(review_text)
+
+        if all_reviews:
+            formatted_reviews = [f"review{idx} - {review}" for idx, review in enumerate(all_reviews, 1)]
+            return ' ||| '.join(formatted_reviews)
+        return None
+
+    except Exception as e:
+        print(f"  [WARNING] Failed to extract detailed reviews: {e}")
+        return None
+
+
 def extract_asin(url):
     match = re.search(r'/dp/([A-Z0-9]{10})', url)
     return match.group(1) if match else None
@@ -331,11 +400,14 @@ def main():
 
             savings = calculate_savings(fsp, osp)
 
+            # detailed_review_content 추출
+            detailed_review = extract_detailed_reviews(page, xpaths)
+
             # No customer reviews 처리
             if sr == "No customer reviews":
                 cosr = 0
 
-            print(f"  name={'OK' if retailer_sku_name else 'NULL'}, sr={sr!r}, cosr={cosr!r}, fsp={fsp!r}, osp={osp!r}, savings={savings!r}")
+            print(f"  name={'OK' if retailer_sku_name else 'NULL'}, sr={sr!r}, cosr={cosr!r}, fsp={fsp!r}, osp={osp!r}, savings={savings!r}, review={'OK' if detailed_review else 'NULL'}")
 
             # DB UPDATE - amazon_tv_detail_crawled
             cur = conn.cursor()
@@ -345,25 +417,31 @@ def main():
                     star_rating = COALESCE(%s, star_rating),
                     count_of_star_ratings = COALESCE(%s, count_of_star_ratings),
                     final_sku_price = COALESCE(%s, final_sku_price),
-                    original_sku_price = COALESCE(%s, original_sku_price)
+                    original_sku_price = COALESCE(%s, original_sku_price),
+                    detailed_review_content = COALESCE(%s, detailed_review_content)
                 WHERE batch_id = %s AND item = %s
             """, (retailer_sku_name, sr, str(cosr) if cosr is not None else None,
-                  fsp, osp, TARGET_BATCH_ID, asin))
+                  fsp, osp, detailed_review, TARGET_BATCH_ID, asin))
             detail_rows = cur.rowcount
 
-            # DB UPDATE - tv_retail_com
+            # DB UPDATE - tv_retail_com (crawl_datetime >= '2026-03-05 12:09:57' 이후, NULL 필드 있는 row만)
             cur.execute("""
                 UPDATE tv_retail_com
                 SET retailer_sku_name = COALESCE(%s, retailer_sku_name),
                     star_rating = COALESCE(%s, star_rating),
                     count_of_star_ratings = COALESCE(%s, count_of_star_ratings),
+                    count_of_reviews = NULL,
                     final_sku_price = COALESCE(%s, final_sku_price),
                     original_sku_price = COALESCE(%s, original_sku_price),
-                    savings = COALESCE(%s, savings)
+                    savings = COALESCE(%s, savings),
+                    detailed_review_content = COALESCE(%s, detailed_review_content)
                 WHERE account_name = 'Amazon' AND item = %s
-                AND crawl_datetime >= '2026-03-06 02:00:00' AND crawl_datetime < '2026-03-06 16:00:00'
+                AND crawl_datetime >= '2026-03-05 12:09:57'
+                AND (final_sku_price IS NULL OR detailed_review_content IS NULL
+                     OR retailer_sku_name IS NULL OR count_of_star_ratings IS NULL
+                     OR count_of_reviews IS NULL OR star_rating IS NULL)
             """, (retailer_sku_name, sr, str(cosr) if cosr is not None else None,
-                  fsp, osp, savings, asin))
+                  fsp, osp, savings, detailed_review, asin))
             retail_rows = cur.rowcount
 
             cur.close()

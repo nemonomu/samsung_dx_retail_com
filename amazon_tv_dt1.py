@@ -830,6 +830,11 @@ class AmazonDetailCrawler:
                     if total_match:
                         return int(total_match.group(1).replace(',', ''))
 
+                    # Fallback: "(102)" or "102 Reviews" (new Amazon layout 2026-03)
+                    total_match = re.search(r'([\d,]+)', total_text)
+                    if total_match:
+                        return int(total_match.group(1).replace(',', ''))
+
             return None
 
         except Exception as e:

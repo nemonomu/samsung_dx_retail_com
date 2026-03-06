@@ -247,6 +247,27 @@ def calculate_savings(final_price, original_price):
         return None
 
 
+def extract_summarized_review(page, xpaths):
+    """AI 요약 리뷰 추출 (DrissionPage - JS 동적 로딩 요소)"""
+    try:
+        sr_xpaths = xpaths.get('summarized_review') or [
+            '//div[@data-testid="overall-summary"]//span[contains(@class, "__SAR2l0zNyyuZ")]',
+            '//*[@id="product-summary"]/p[1]/span',
+            '//div[@data-testid="overall-summary"]//span'
+        ]
+        for xpath in sr_xpaths:
+            try:
+                elem = page.ele(f'xpath:{xpath}', timeout=10)
+                if elem and elem.text and elem.text.strip():
+                    return elem.text.strip()
+            except Exception:
+                continue
+        return None
+    except Exception as e:
+        print(f"  [WARNING] Failed to extract summarized review: {e}")
+        return None
+
+
 def extract_detailed_reviews(page, xpaths):
     """상품 페이지에서 detailed_review_content 추출 (JS → fallback XPath)"""
     try:
@@ -400,6 +421,9 @@ def main():
 
             savings = calculate_savings(fsp, osp)
 
+            # summarized_review_content 추출
+            summarized_review = extract_summarized_review(page, xpaths)
+
             # detailed_review_content 추출
             detailed_review = extract_detailed_reviews(page, xpaths)
 
@@ -407,7 +431,7 @@ def main():
             if sr == "No customer reviews":
                 cosr = 0
 
-            print(f"  name={'OK' if retailer_sku_name else 'NULL'}, sr={sr!r}, cosr={cosr!r}, fsp={fsp!r}, osp={osp!r}, savings={savings!r}, review={'OK' if detailed_review else 'NULL'}")
+            print(f"  name={'OK' if retailer_sku_name else 'NULL'}, sr={sr!r}, cosr={cosr!r}, fsp={fsp!r}, osp={osp!r}, savings={savings!r}, summary={'OK' if summarized_review else 'NULL'}, review={'OK' if detailed_review else 'NULL'}")
 
             # DB UPDATE - amazon_tv_detail_crawled
             cur = conn.cursor()
@@ -418,10 +442,11 @@ def main():
                     count_of_star_ratings = COALESCE(%s, count_of_star_ratings),
                     final_sku_price = COALESCE(%s, final_sku_price),
                     original_sku_price = COALESCE(%s, original_sku_price),
+                    summarized_review_content = COALESCE(%s, summarized_review_content),
                     detailed_review_content = COALESCE(%s, detailed_review_content)
                 WHERE batch_id = %s AND item = %s
             """, (retailer_sku_name, sr, str(cosr) if cosr is not None else None,
-                  fsp, osp, detailed_review, TARGET_BATCH_ID, asin))
+                  fsp, osp, summarized_review, detailed_review, TARGET_BATCH_ID, asin))
             detail_rows = cur.rowcount
 
             # DB UPDATE - tv_retail_com (crawl_datetime >= '2026-03-05 12:09:57' 이후, NULL 필드 있는 row만)
@@ -434,14 +459,16 @@ def main():
                     final_sku_price = COALESCE(%s, final_sku_price),
                     original_sku_price = COALESCE(%s, original_sku_price),
                     savings = COALESCE(%s, savings),
+                    summarized_review_content = COALESCE(%s, summarized_review_content),
                     detailed_review_content = COALESCE(%s, detailed_review_content)
                 WHERE account_name = 'Amazon' AND item = %s
                 AND crawl_datetime >= '2026-03-05 12:09:57'
                 AND (final_sku_price IS NULL OR detailed_review_content IS NULL
+                     OR summarized_review_content IS NULL
                      OR retailer_sku_name IS NULL OR count_of_star_ratings IS NULL
                      OR count_of_reviews IS NULL OR star_rating IS NULL)
             """, (retailer_sku_name, sr, str(cosr) if cosr is not None else None,
-                  fsp, osp, savings, detailed_review, asin))
+                  fsp, osp, savings, summarized_review, detailed_review, asin))
             retail_rows = cur.rowcount
 
             cur.close()

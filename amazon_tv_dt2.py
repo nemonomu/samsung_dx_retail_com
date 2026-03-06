@@ -1080,9 +1080,9 @@ class AmazonDetailCrawler:
             review_texts = self.page.run_js(js_code)
             print(f"  [DEBUG] JS extracted reviews: {len(review_texts) if review_texts else 0}")
 
-            # JS 실패 시 fallback: DrissionPage XPath (사용자 제공 경로)
+            # JS 실패 시 fallback: DrissionPage XPath (DB 로드)
             if not review_texts:
-                fallback_xpaths = self.xpaths.get('review_body') or [
+                fallback_xpaths = self.xpaths.get('review_body_detail') or [
                     '//*[starts-with(@id, "customer_review-")]/div[4]/span/div/div[1]/span',
                     '//*[starts-with(@id, "customer_review-")]/div[4]/span/div/div[1]',
                 ]
@@ -1619,6 +1619,17 @@ class AmazonDetailCrawler:
                 print(f"  [INFO] Skipping retailer_sku_name extraction (page load failed)")
             else:
                 retailer_sku_name = self.extract_with_xpaths(tree, 'product_name', ['//*[@id="productTitle"]'])
+
+                # retailer_sku_name NULL 시 refresh 후 재추출
+                if not retailer_sku_name:
+                    print(f"  [WARNING] retailer_sku_name is NULL - refreshing page and retrying...")
+                    self.page.refresh()
+                    time.sleep(10)
+                    page_source = self.page.html
+                    tree = html.fromstring(page_source)
+                    retailer_sku_name = self.extract_with_xpaths(tree, 'product_name', ['//*[@id="productTitle"]'])
+                    print(f"  [INFO] Retry result - retailer_sku_name: {'OK' if retailer_sku_name else 'STILL NULL'}")
+
             star_rating = self.extract_star_rating(tree)
 
             # SKU_Popularity - only collect if "Amazon's Choice"

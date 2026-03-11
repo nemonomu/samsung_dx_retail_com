@@ -449,7 +449,7 @@ class BbyTvReviewRecovery:
             return False
 
     def extract_reviews_from_dom(self):
-        """리뷰 탭 클릭 후 DOM에서 리뷰 20개 수집 (페이지네이션 포함)
+        """리뷰 페이지에서 DOM 리뷰 20개 수집 (페이지네이션 포함)
         저장 형식: "review1 - 내용 ||| review2 - 내용 ||| ... ||| review20 - 내용"
         """
         reviews = []
@@ -457,8 +457,16 @@ class BbyTvReviewRecovery:
         page_num = 1
 
         try:
-            # 리뷰 콘텐츠 렌더링 대기
-            time.sleep(2)
+            # 리뷰 콘텐츠 렌더링 대기 (최대 15초 폴링)
+            for wait in range(15):
+                count = self.page.run_js('return document.querySelectorAll("p.pre-white-space").length')
+                if count and count > 0:
+                    print(f"    [OK] Reviews rendered in DOM ({count} items, waited {wait}s)")
+                    break
+                time.sleep(1)
+            else:
+                print(f"    [WARNING] Reviews not rendered in DOM after 15s wait")
+                return None
 
             while collected < 20:
                 # JS로 현재 페이지의 리뷰 텍스트 추출

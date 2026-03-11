@@ -2397,6 +2397,15 @@ class BestBuyDetailCrawler:
             if is_external_reviews:
                 print(f"  [INFO] 외부 리뷰 - 리뷰 페이지 수집 스킵 (detailed_reviews, top_mentions 등 수집 안함)")
             else:
+                # 페이지 새로 로드 (이전 인터랙션으로 인한 상태 오염 방지 - re 파일과 동일 조건)
+                print(f"  [INFO] Reloading product page for review extraction...")
+                self.page.get(product_url)
+                time.sleep(3)
+                try:
+                    self.page.ele('xpath://h1', timeout=10)
+                except:
+                    time.sleep(3)
+
                 # 9-0. GraphQL 캡처로 top_mentions, recommendation, AI summary, 리뷰 본문 획득
                 gql_data = self.capture_review_data_via_graphql()
                 gql_top_mentions = self.parse_graphql_top_mentions(gql_data)

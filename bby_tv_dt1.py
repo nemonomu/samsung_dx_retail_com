@@ -2429,10 +2429,21 @@ class BestBuyDetailCrawler:
                             star_rating = star_rating_from_reviews
                             print(f"  [✓] Star_Rating (from reviews page): {star_rating}")
 
-                    # 9-2. Detailed reviews: JS DOM 우선 → lxml fallback → GraphQL fallback
+                    # 9-2. Detailed reviews: JS DOM 우선
                     detailed_reviews = self.extract_reviews_from_js_dom()
+
+                    # 새 형식 /product/ 페이지에서 실패 시 → 구 형식 /site/reviews/ URL로 이동 후 재시도
+                    if not detailed_reviews and '/site/reviews/' not in self.page.url:
+                        print(f"  [INFO] New format page - trying old /site/reviews/ URL...")
+                        if self.navigate_to_reviews_page(product_url):
+                            reviews_page_source = self.page.html
+                            reviews_tree = html.fromstring(reviews_page_source)
+                            detailed_reviews = self.extract_reviews_from_js_dom()
+                            if not detailed_reviews:
+                                detailed_reviews = self.extract_reviews()
+
                     if not detailed_reviews:
-                        print(f"  [INFO] JS DOM review extraction failed, trying lxml fallback...")
+                        print(f"  [INFO] All DOM extraction failed, trying lxml fallback...")
                         detailed_reviews = self.extract_reviews()
 
                 # DOM/lxml 모두 실패 시 GraphQL 리뷰 본문 사용 (re 파일과 동일 fallback)

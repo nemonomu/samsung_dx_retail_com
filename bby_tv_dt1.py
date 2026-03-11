@@ -2422,7 +2422,9 @@ class BestBuyDetailCrawler:
             if is_external_reviews:
                 print(f"  [INFO] 외부 리뷰 - 리뷰 페이지 수집 스킵 (detailed_reviews, top_mentions 등 수집 안함)")
             else:
-                # 페이지 새로 로드 (이전 인터랙션으로 인한 상태 오염 방지 - re 파일과 동일 조건)
+                # ── re_bby_tv_dt1_reviews.py와 완전 동일한 흐름 ──
+
+                # 1) 페이지 새로 로드 (이전 인터랙션 상태 초기화)
                 print(f"  [INFO] Reloading product page for review extraction...")
                 self.page.get(product_url)
                 time.sleep(3)
@@ -2431,91 +2433,130 @@ class BestBuyDetailCrawler:
                 except:
                     time.sleep(3)
 
-                # 9-0. GraphQL 캡처로 top_mentions, recommendation, AI summary, 리뷰 본문 획득
+                # 2) Rating link 클릭 → GraphQL 캡처
                 gql_data = self.capture_review_data_via_graphql()
                 gql_top_mentions = self.parse_graphql_top_mentions(gql_data)
                 gql_recommendation = self.parse_graphql_recommendation(gql_data)
                 gql_ai_summary = self.parse_graphql_ai_summary(gql_data)
                 gql_reviews = self.parse_graphql_reviews(gql_data)
 
-                # 9-1. See All Customer Reviews 클릭 → 리뷰 페이지 이동
-                on_reviews_page = self.click_see_all_reviews(product_url)
-                reviews_tree = None
+                # 3) "See All Customer Reviews" 클릭 (re 파일과 동일 - 단순 JS 클릭)
+                self.page.run_js("window.scrollTo(0, document.body.scrollHeight * 0.7)")
+                time.sleep(1)
+                see_all_result = self.page.run_js('''
+                    var btns = document.querySelectorAll('button, a');
+                    for (var i = 0; i < btns.length; i++) {
+                        var text = btns[i].textContent.trim().toLowerCase();
+                        if (text.includes('see all') && text.includes('review')) {
+                            btns[i].scrollIntoView({behavior: "smooth", block: "center"});
+                            btns[i].click();
+                            return 'clicked: ' + btns[i].textContent.trim().substring(0, 60);
+                        }
+                    }
+                    return 'not found';
+                ''')
+                print(f"  [INFO] See All Reviews: {see_all_result}")
 
-                if on_reviews_page:
-                    # 리뷰 페이지 DOM을 먼저 캡처 (페이지네이션 전에)
-                    reviews_page_source = self.page.html
-                    reviews_tree = html.fromstring(reviews_page_source)
+                if see_all_result == 'not found':
+                    # 추가 스크롤 후 재시도 (re 파일과 동일)
+                    for scroll_pct in [0.8, 0.9, 1.0]:
+                        self.page.run_js(f"window.scrollTo(0, document.body.scrollHeight * {scroll_pct})")
+                        time.sleep(1.5)
+                        see_all_result = self.page.run_js('''
+                            var btns = document.querySelectorAll('button, a');
+                            for (var i = 0; i < btns.length; i++) {
+                                var text = btns[i].textContent.trim().toLowerCase();
+                                if (text.includes('see all') && text.includes('review')) {
+                                    btns[i].scrollIntoView({behavior: "smooth", block: "center"});
+                                    btns[i].click();
+                                    return 'clicked: ' + btns[i].textContent.trim().substring(0, 60);
+                                }
+                            }
+                            return 'not found';
+                        ''')
+                        if see_all_result != 'not found':
+                            print(f"  [INFO] See All Reviews (scroll {int(scroll_pct*100)}%): {see_all_result}")
+                            break
 
-                    # 리뷰 페이지에서 star_rating 재추출 (필요 시)
-                    if not star_rating or star_rating == "Not yet reviewed":
-                        star_rating_from_reviews = self.extract_star_rating_from_reviews_page(reviews_tree)
-                        if star_rating_from_reviews:
-                            star_rating = star_rating_from_reviews
-                            print(f"  [✓] Star_Rating (from reviews page): {star_rating}")
+                if see_all_result != 'not found':
+                    # 4) 리뷰 페이지 로딩 대기 (re 파일과 동일)
+                    time.sleep(5)
+                    print(f"  [INFO] Reviews page URL: {self.page.url[:100]}")
 
-                    # 9-2. Detailed reviews: JS DOM 우선
-                    detailed_reviews = self.extract_reviews_from_js_dom()
+                    # 5) DOM에서 리뷰 20개 수집 (re 파일 extract_reviews_from_dom과 동일)
+                    reviews = []
+                    collected = 0
+                    page_num = 1
 
-                    # 새 형식 /product/ 페이지에서 실패 시 → 구 형식 /site/reviews/ URL로 직접 이동
-                    if not detailed_reviews and '/site/reviews/' not in self.page.url:
-                        current_url = self.page.url
-                        # URL에서 slug와 SKU 직접 추출: /product/{slug}/{item_id}/sku/{sku_number}/reviews
-                        sku_match = re.search(r'/product/([^/]+)/[^/]+/sku/(\d+)', current_url)
-                        if not sku_match:
-                            # product_url에서도 시도
-                            sku_match = re.search(r'/product/([^/]+)/[^/]+/sku/(\d+)', product_url)
-                        if sku_match:
-                            slug = sku_match.group(1)
-                            sku_num = sku_match.group(2)
-                            old_reviews_url = f"https://www.bestbuy.com/site/reviews/{slug}/{sku_num}"
-                            print(f"  [INFO] New format page - navigating to old reviews URL: {old_reviews_url[:80]}")
-                            self.page.get(old_reviews_url)
-                            time.sleep(5)
-                            reviews_page_source = self.page.html
-                            reviews_tree = html.fromstring(reviews_page_source)
-                            detailed_reviews = self.extract_reviews_from_js_dom()
-                            if not detailed_reviews:
-                                detailed_reviews = self.extract_reviews()
+                    # p.pre-white-space 렌더링 대기 (최대 15초)
+                    for wait in range(15):
+                        count = self.page.run_js('return document.querySelectorAll("p.pre-white-space").length')
+                        if count and count > 0:
+                            print(f"  [OK] Reviews rendered in DOM ({count} items, waited {wait}s)")
+                            break
+                        time.sleep(1)
+                    else:
+                        print(f"  [WARNING] Reviews not rendered in DOM after 15s wait")
+
+                    # 리뷰 수집 + 페이지네이션
+                    while collected < 20:
+                        page_reviews = self.page.run_js('''
+                            var reviews = [];
+                            document.querySelectorAll('p.pre-white-space').forEach(function(el) {
+                                var text = el.textContent.trim();
+                                if (text && text.length > 10) reviews.push(text);
+                            });
+                            return reviews;
+                        ''')
+                        if page_reviews:
+                            for text in page_reviews:
+                                if collected >= 20:
+                                    break
+                                collected += 1
+                                reviews.append(f"review{collected} - {text}")
+                            print(f"  [INFO] Page {page_num}: {len(page_reviews)} reviews (total: {collected}/20)")
                         else:
-                            print(f"  [INFO] Could not extract SKU from URL, trying navigate_to_reviews_page...")
-                            if self.navigate_to_reviews_page(product_url):
-                                reviews_page_source = self.page.html
-                                reviews_tree = html.fromstring(reviews_page_source)
-                                detailed_reviews = self.extract_reviews_from_js_dom()
-                                if not detailed_reviews:
-                                    detailed_reviews = self.extract_reviews()
+                            break
 
-                    if not detailed_reviews:
-                        print(f"  [INFO] All DOM extraction failed, trying lxml fallback...")
-                        detailed_reviews = self.extract_reviews()
+                        if collected >= 20:
+                            break
 
-                # DOM/lxml 모두 실패 시 GraphQL 리뷰 본문 사용 (re 파일과 동일 fallback)
+                        has_next = self.page.run_js('''
+                            var nextBtn = document.querySelector('li.page.next a, a[aria-label="Next"]');
+                            if (nextBtn) {
+                                nextBtn.scrollIntoView({behavior: "smooth", block: "center"});
+                                nextBtn.click();
+                                return true;
+                            }
+                            return false;
+                        ''')
+                        if not has_next:
+                            break
+                        page_num += 1
+                        time.sleep(4)
+
+                    if reviews:
+                        detailed_reviews = ' ||| '.join(reviews)
+                        print(f"  [OK] Detailed_Reviews: {collected} reviews, {len(detailed_reviews)} chars")
+
+                # GraphQL fallback (DOM 실패 시)
                 if not detailed_reviews and gql_reviews:
                     detailed_reviews = gql_reviews
                     print(f"  [INFO] Using GraphQL reviews as fallback")
 
                 print(f"  [✓] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
 
-                # 9-3. Top mentions: GraphQL 우선 → lxml fallback
+                # Top mentions / Recommendation / AI Summary: GraphQL에서 획득 (re 파일과 동일)
                 if gql_top_mentions:
                     top_mentions = gql_top_mentions
-                elif on_reviews_page and reviews_tree is not None:
-                    top_mentions = self.extract_top_mentions_from_reviews_page(reviews_tree)
                 print(f"  [✓] Top_Mentions: {top_mentions}")
 
-                # 9-4. Recommendation intent: GraphQL 우선 → lxml fallback
                 if gql_recommendation:
                     recommendation_intent = gql_recommendation
-                elif on_reviews_page and reviews_tree is not None:
-                    recommendation_intent = self.extract_recommendation_intent_from_reviews_page(reviews_tree)
                 print(f"  [✓] Recommendation_Intent: {recommendation_intent}")
 
-                # 9-5. Summarized_Review_Content: GraphQL 우선 → lxml fallback
                 if gql_ai_summary:
                     summarized_review_content = gql_ai_summary
-                elif on_reviews_page and reviews_tree is not None:
-                    summarized_review_content = self.extract_summarized_review_content_from_reviews_page(reviews_tree)
                 print(f"  [✓] Summarized_Review_Content: {summarized_review_content[:50] if summarized_review_content else 'None'}...")
 
             # 9-4-1. detailed_reviews NULL 로그 기록 (count_of_reviews > 0인데 NULL인 경우)

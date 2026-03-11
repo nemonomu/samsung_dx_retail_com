@@ -16,7 +16,6 @@ import psycopg2
 from datetime import datetime
 import pytz
 from DrissionPage import ChromiumPage, ChromiumOptions
-from lxml import html
 
 from config import DB_CONFIG
 from bby_config_loader import get_config
@@ -103,9 +102,11 @@ class BbyTvReviewRecovery:
             return None
 
     def navigate_to_reviews_page(self, product_url):
-        """리뷰 페이지로 이동 - 제품 페이지 접근 → SKU 추출 → /site/reviews/ 직접 이동"""
+        """리뷰 페이지로 이동 - 제품 페이지 → 스크롤 → See All Customer Reviews 버튼 클릭
+        /site/reviews/ URL은 제품 페이지로 리다이렉트되므로 버튼 클릭 방식 사용
+        """
         try:
-            # 1. 제품 페이지 접근 (BestBuy SKU 번호 추출용)
+            # 1. 제품 페이지 접근
             self.page.get(product_url)
 
             # h1 로딩 대기
@@ -117,89 +118,58 @@ class BbyTvReviewRecovery:
                 print(f"    [ERROR] Product page load failed")
                 return False
 
-            # 2. BestBuy SKU 번호 추출
-            expected_sku = self.extract_bestbuy_sku_number()
-            if not expected_sku:
-                print("    [WARNING] Could not extract BestBuy SKU number")
-                return False
-            print(f"    [OK] BestBuy SKU: {expected_sku}")
+            # 2. See All Customer Reviews 버튼 검색 (단계적 스크롤)
+            selectors = self.config.get_xpath_list('see_all_reviews_btn', self.file_name) or [
+                'xpath://button[contains(., "See All Customer Reviews")]',
+            ]
 
-            # 3. slug 추출
-            match = re.search(r'/product/([^/]+)/', product_url)
-            if not match:
-                print("    [WARNING] Could not extract product slug")
-                return False
-            product_slug = match.group(1)
+            # DOM에서 바로 검색
+            for selector in selectors:
+                try:
+                    button = self.page.ele(selector, timeout=2)
+                    if button:
+                        print("    [OK] See All Reviews button found (in DOM)")
+                        button.scroll.to_see()
+                        time.sleep(0.5)
+                        button.click()
+                        time.sleep(5)
 
-            # 4. /site/reviews/ 직접 이동
-            reviews_url = f"https://www.bestbuy.com/site/reviews/{product_slug}/{expected_sku}"
-            print(f"    [INFO] Reviews URL: {reviews_url}")
-            self.page.get(reviews_url)
-            time.sleep(3)
+                        # 버튼 클릭 후 URL 확인
+                        current_url = self.page.url
+                        print(f"    [INFO] After click URL: {current_url[:100]}")
+                        return True
+                except:
+                    continue
 
-            # 5. 리뷰 페이지 로드 확인
-            current_url = self.page.url
-            print(f"    [INFO] Current URL: {current_url[:100]}")
+            # 단계적 스크롤 후 검색
+            for scroll_pct in [0.5, 0.7, 0.85, 1.0]:
+                self.page.run_js(f"window.scrollTo(0, document.body.scrollHeight * {scroll_pct})")
+                time.sleep(1.5)
+                for selector in selectors:
+                    try:
+                        button = self.page.ele(selector, timeout=2)
+                        if button:
+                            print(f"    [OK] See All Reviews button found (after scroll {int(scroll_pct*100)}%)")
+                            button.scroll.to_see()
+                            time.sleep(0.5)
+                            button.click()
+                            time.sleep(5)
 
-            # reviews-accordion 대기
-            try:
-                self.page.ele('xpath://div[@id="reviews-accordion"]', timeout=10)
-                print("    [OK] Reviews page loaded")
-            except:
-                print("    [WARNING] reviews-accordion not found")
+                            current_url = self.page.url
+                            print(f"    [INFO] After click URL: {current_url[:100]}")
+                            return True
+                    except:
+                        continue
 
-            return True
+            print("    [WARNING] See All Reviews button not found")
+            return False
 
         except Exception as e:
             print(f"    [ERROR] Navigate to reviews page failed: {e}")
             return False
 
-    def extract_bestbuy_sku_number(self):
-        """BestBuy SKU 번호 추출 (numeric)"""
-        try:
-            # 방법 1: SKU 텍스트에서
-            sku_selectors = self.config.get_xpath_list('bestbuy_sku', self.file_name) or [
-                'xpath://div[contains(text(), "SKU:")]',
-                'xpath://div[@class="pr-150 inline-block"][contains(text(), "SKU")]'
-            ]
-            for selector in sku_selectors:
-                try:
-                    elem = self.page.ele(selector, timeout=2)
-                    if elem:
-                        text = elem.text.strip()
-                        match = re.search(r'SKU[:\s]+(\d+)', text)
-                        if match:
-                            return match.group(1)
-                except:
-                    continue
-
-            # 방법 2: data-testid에서
-            testid_selectors = self.config.get_xpath_list('bestbuy_sku_testid', self.file_name) or [
-                'xpath://div[contains(@data-testid, "mbo-entrypoint-")]'
-            ]
-            for selector in testid_selectors:
-                try:
-                    elem = self.page.ele(selector, timeout=2)
-                    if elem:
-                        testid = elem.attr('data-testid')
-                        match = re.search(r'mbo-entrypoint-(\d+)', testid)
-                        if match:
-                            return match.group(1)
-                except:
-                    continue
-
-            # 방법 3: 페이지 소스에서
-            page_html = self.page.html
-            match = re.search(r'mbo-entrypoint-(\d+)', page_html)
-            if match:
-                return match.group(1)
-
-            return None
-        except:
-            return None
-
     def extract_all_review_data(self):
-        """리뷰 페이지에서 detailed_reviews, top_mentions, summarized, recommendation_intent 추출"""
+        """리뷰 페이지에서 모든 리뷰 데이터 추출 - DrissionPage eles() 사용 (live DOM 직접 접근)"""
         result = {
             'detailed_review_content': None,
             'top_mentions': None,
@@ -215,16 +185,12 @@ class BbyTvReviewRecovery:
             print("    [WARNING] Review content DOM wait timeout, waiting 3s fallback")
             time.sleep(3)
 
-        # tree 파싱
-        page_source = self.page.run_js('return document.documentElement.outerHTML')
-        tree = html.fromstring(page_source)
-
-        # 1. Top Mentions
-        result['top_mentions'] = self.extract_top_mentions(tree)
+        # 1. Top Mentions (eles로 직접 추출)
+        result['top_mentions'] = self.extract_top_mentions()
         print(f"    [✓] Top_Mentions: {result['top_mentions'][:50] if result['top_mentions'] else 'None'}")
 
         # 2. Recommendation Intent
-        result['recommendation_intent'] = self.extract_recommendation_intent(tree)
+        result['recommendation_intent'] = self.extract_recommendation_intent()
         print(f"    [✓] Recommendation_Intent: {result['recommendation_intent']}")
 
         # 3. Detailed Reviews (페이지네이션 포함)
@@ -233,42 +199,44 @@ class BbyTvReviewRecovery:
         print(f"    [✓] Detailed_Reviews: {review_len} chars")
 
         # 4. Summarized Review Content
-        result['summarized_review_content'] = self.extract_summarized_review_content(tree)
+        result['summarized_review_content'] = self.extract_summarized_review_content()
         print(f"    [✓] Summarized_Review: {result['summarized_review_content'][:50] if result['summarized_review_content'] else 'None'}")
 
         return result
 
-    def extract_top_mentions(self, tree):
-        """Top Mentions 추출"""
+    def extract_top_mentions(self):
+        """Top Mentions 추출 - DrissionPage eles() 사용"""
         try:
-            # 1순위: distillation-card Pros + Cons
             mentions = []
-            pros_elements = tree.xpath('//div[contains(@class, "pros-container")]//button[@data-feature-name]/@data-feature-name')
-            for feature_name in pros_elements:
-                if feature_name:
-                    mentions.append(feature_name.strip())
-            cons_elements = tree.xpath('//div[contains(@class, "cons-container")]//button[@data-feature-name]/@data-feature-name')
-            for feature_name in cons_elements:
-                if feature_name:
-                    mentions.append(feature_name.strip())
+            # 1순위: Pros + Cons data-feature-name
+            try:
+                pros = self.page.eles('xpath://div[contains(@class, "pros-container")]//button[@data-feature-name]')
+                for btn in pros:
+                    name = btn.attr('data-feature-name')
+                    if name:
+                        mentions.append(name.strip())
+                cons = self.page.eles('xpath://div[contains(@class, "cons-container")]//button[@data-feature-name]')
+                for btn in cons:
+                    name = btn.attr('data-feature-name')
+                    if name:
+                        mentions.append(name.strip())
+            except:
+                pass
+
             if mentions:
                 return ', '.join(mentions)
 
-            # 2순위: 기존 XPath
-            xpaths = self.config.get_xpath_list('top_mentions', self.file_name) or [
-                '/html/body/div[5]/div[8]/div[2]/aside/ul/li/a',
-                '//ul[@class="list-unstyled"]/li/a[contains(@class, "v-text-tech-black")]',
-                '//ul[@class="list-unstyled"]/li/a',
-                '//div[contains(@class, "customer-review-pros-stats")]//span[@class="text-nowrap"]',
-                '//div[contains(., "Highly rated by customers for")]//span[@class="text-nowrap"]'
+            # 2순위: 기존 패턴
+            xpaths = [
+                'xpath://ul[@class="list-unstyled"]/li/a',
+                'xpath://div[contains(@class, "customer-review-pros-stats")]//span[@class="text-nowrap"]',
             ]
-            mentions = []
             for xpath in xpaths:
                 try:
-                    elements = tree.xpath(xpath)
-                    if elements:
-                        for elem in elements:
-                            text = elem.text_content().strip()
+                    elems = self.page.eles(xpath)
+                    if elems:
+                        for elem in elems:
+                            text = elem.text.strip() if elem.text else ''
                             if text:
                                 clean_text = re.sub(r'\s*\([\d,]+\)\s*$', '', text)
                                 clean_text = clean_text.replace('\xa0', ' ').strip()
@@ -282,18 +250,17 @@ class BbyTvReviewRecovery:
             print(f"    [ERROR] Top mentions extraction failed: {e}")
             return None
 
-    def extract_recommendation_intent(self, tree):
-        """Recommendation Intent 추출"""
+    def extract_recommendation_intent(self):
+        """Recommendation Intent 추출 - DrissionPage ele() 사용"""
         try:
             xpaths = [
-                '//div[contains(@class, "recommendation-card-no-donut")]//span[@class="recommendation-percent v-fw-medium"]',
-                '//span[contains(@class, "recommendation-percent")]'
+                'xpath://span[contains(@class, "recommendation-percent")]',
             ]
             for xpath in xpaths:
                 try:
-                    elem = tree.xpath(xpath)
+                    elem = self.page.ele(xpath, timeout=2)
                     if elem:
-                        percent = elem[0].text_content().strip()
+                        percent = elem.text.strip() if elem.text else ''
                         if percent:
                             return f"{percent} would recommend to a friend"
                 except:
@@ -304,31 +271,30 @@ class BbyTvReviewRecovery:
             return None
 
     def extract_reviews(self):
-        """리뷰 20개 추출 (페이지네이션 포함)"""
+        """리뷰 20개 추출 (페이지네이션 포함) - DrissionPage eles() 사용"""
         try:
             reviews = []
             collected = 0
             page_num = 1
 
             while collected < 20:
-                page_source = self.page.run_js('return document.documentElement.outerHTML')
-                tree = html.fromstring(page_source)
+                # live DOM에서 직접 리뷰 요소 검색
+                review_elems = self.page.eles('xpath://li[@class="review-item"]//p[@class="pre-white-space"]')
 
-                review_xpaths = self.config.get_xpath_list('review_items', self.file_name) or [
-                    '//li[@class="review-item"]//div[@class="ugc-review-body"]//p[@class="pre-white-space"]'
-                ]
-                # fallback: 리다이렉트된 페이지에서 중간 구조가 다를 수 있으므로 간소화 xpath 추가
-                review_xpaths.append('//li[@class="review-item"]//p[@class="pre-white-space"]')
-                review_elements = []
-                for xpath in review_xpaths:
-                    review_elements = tree.xpath(xpath)
-                    if review_elements:
-                        break
+                if not review_elems:
+                    # fallback
+                    review_elems = self.page.eles('xpath://p[@class="pre-white-space"]')
 
-                for elem in review_elements:
+                for elem in review_elems:
                     if collected >= 20:
                         break
-                    review_text = ' '.join(elem.text_content().split())
+                    review_text = elem.text.strip() if elem.text else ''
+                    if not review_text:
+                        # text가 비어있으면 inner_text 시도
+                        try:
+                            review_text = ' '.join(elem.raw_text.split()) if elem.raw_text else ''
+                        except:
+                            pass
                     if review_text:
                         collected += 1
                         reviews.append(f"review{collected} - {review_text}")
@@ -345,6 +311,11 @@ class BbyTvReviewRecovery:
                         time.sleep(2)
                         next_button.click()
                         time.sleep(4)
+                        # 다음 페이지 리뷰 렌더링 대기
+                        try:
+                            self.page.ele('xpath://li[@class="review-item"]//p[@class="pre-white-space"]', timeout=10)
+                        except:
+                            time.sleep(3)
                         page_num += 1
                     else:
                         break
@@ -356,19 +327,18 @@ class BbyTvReviewRecovery:
             print(f"    [ERROR] Review extraction failed: {e}")
             return None
 
-    def extract_summarized_review_content(self, tree):
-        """Summarized Review Content 추출 (리뷰 페이지)"""
+    def extract_summarized_review_content(self):
+        """Summarized Review Content 추출 - DrissionPage ele() 사용"""
         try:
-            xpaths = self.config.get_xpath_list('summarized_review_reviews_page', self.file_name) or [
-                '//*[@id="reviews-accordion"]/div[1]/div/p[1]',
-                '//p[@class="mb-200 mt-none"]',
-                '//div[@id="reviews-accordion"]//p[contains(@class, "mb-200")]',
+            xpaths = [
+                'xpath://p[@class="mb-200 mt-none"]',
+                'xpath://div[@id="reviews-accordion"]//p[contains(@class, "mb-200")]',
             ]
             for xpath in xpaths:
                 try:
-                    elem = tree.xpath(xpath)
+                    elem = self.page.ele(xpath, timeout=2)
                     if elem:
-                        text = elem[0].text_content().strip()
+                        text = elem.text.strip() if elem.text else ''
                         if text:
                             return text
                 except:

@@ -314,26 +314,18 @@ class BbyTvReviewRecovery:
                 review_info = product.get('reviewInfo', {})
 
                 mentions = []
-                # pros
-                pros = review_info.get('pros', [])
-                if isinstance(pros, list):
-                    for p in pros:
-                        if isinstance(p, dict):
-                            name = p.get('name') or p.get('label') or p.get('text', '')
-                        else:
-                            name = str(p)
-                        if name:
-                            mentions.append(name)
-                # cons
-                cons = review_info.get('cons', [])
-                if isinstance(cons, list):
-                    for c in cons:
-                        if isinstance(c, dict):
-                            name = c.get('name') or c.get('label') or c.get('text', '')
-                        else:
-                            name = str(c)
-                        if name:
-                            mentions.append(name)
+                # proFeatures / conFeatures (Best Buy GraphQL 키)
+                for features_key in ['proFeatures', 'pros', 'conFeatures', 'cons']:
+                    features = review_info.get(features_key, [])
+                    if isinstance(features, list):
+                        for f in features:
+                            if isinstance(f, dict):
+                                name = (f.get('name') or f.get('label') or f.get('text')
+                                        or f.get('feature') or f.get('featureName', ''))
+                            else:
+                                name = str(f)
+                            if name:
+                                mentions.append(name)
 
                 if mentions:
                     result['top_mentions'] = ', '.join(mentions)
@@ -370,7 +362,9 @@ class BbyTvReviewRecovery:
                 product = rating_data.get('data', {}).get('productBySkuId', {})
                 review_info = product.get('reviewInfo', {})
 
-                rec = review_info.get('recommendedPercentage') or review_info.get('recommendPercent')
+                rec = (review_info.get('recommendedPercent')
+                       or review_info.get('recommendedPercentage')
+                       or review_info.get('recommendPercent'))
                 if rec is not None:
                     result['recommendation_intent'] = f"{rec}% would recommend to a friend"
                     print(f"    [OK] Recommendation: {result['recommendation_intent']}")
@@ -507,6 +501,25 @@ class BbyTvReviewRecovery:
 
                 # 4. 캡처 데이터 파싱
                 data = self.parse_graphql_reviews(captured_data)
+
+                # 5. GraphQL 리뷰 부족 시 DOM에서 추가 추출 (리뷰 탭 클릭 후 DOM에 렌더링되어 있을 수 있음)
+                review_count_from_gql = data['detailed_review_content'].count('review') if data['detailed_review_content'] else 0
+                if review_count_from_gql < 10:
+                    time.sleep(2)
+                    dom_reviews = self.page.run_js('''
+                        var reviews = [];
+                        document.querySelectorAll('p.pre-white-space').forEach(function(el) {
+                            var text = el.textContent.trim();
+                            if (text && text.length > 10) reviews.push(text);
+                        });
+                        return reviews;
+                    ''')
+                    if dom_reviews and len(dom_reviews) > review_count_from_gql:
+                        formatted = []
+                        for j, text in enumerate(dom_reviews[:20], 1):
+                            formatted.append(f"review{j} - {text}")
+                        data['detailed_review_content'] = ' ||| '.join(formatted)
+                        print(f"    [OK] DOM Reviews: {len(dom_reviews)} extracted (upgraded from {review_count_from_gql})")
 
                 if not data['detailed_review_content']:
                     print(f"    [FAIL] detailed_review_content still NULL")

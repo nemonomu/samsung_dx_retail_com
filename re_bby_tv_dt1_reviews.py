@@ -179,8 +179,21 @@ class BbyTvReviewRecovery:
 
         # 리뷰 콘텐츠 DOM 렌더링 대기
         try:
-            self.page.ele('xpath://li[@class="review-item"]//p[@class="pre-white-space"]', timeout=10)
+            found_elem = self.page.ele('xpath://li[@class="review-item"]//p[@class="pre-white-space"]', timeout=10)
             print("    [OK] Review content rendered")
+            # 디버그: ele()가 찾은 요소 정보
+            if found_elem:
+                print(f"    [DEBUG] ele().tag={found_elem.tag}")
+                print(f"    [DEBUG] ele().text={repr(found_elem.text[:100]) if found_elem.text else 'None'}")
+                print(f"    [DEBUG] ele().html={found_elem.html[:200] if found_elem.html else 'None'}")
+                # eles()로 전체 개수 확인
+                all_elems = self.page.eles('xpath://li[@class="review-item"]//p[@class="pre-white-space"]')
+                print(f"    [DEBUG] eles() count={len(all_elems)}")
+                # p.pre-white-space 전체 검색
+                all_p = self.page.eles('xpath://p[@class="pre-white-space"]')
+                print(f"    [DEBUG] all p.pre-white-space count={len(all_p)}")
+                if all_p:
+                    print(f"    [DEBUG] first p text={repr(all_p[0].text[:100]) if all_p[0].text else 'None'}")
         except:
             print("    [WARNING] Review content DOM wait timeout, waiting 3s fallback")
             time.sleep(3)

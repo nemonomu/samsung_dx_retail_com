@@ -564,8 +564,10 @@ class BbyTvReviewRecovery:
                 # 4. 캡처 데이터 파싱
                 data = self.parse_graphql_reviews(captured_data)
 
-                # 5. DOM에서 리뷰 20개 수집 (페이지네이션 포함)
-                data['detailed_review_content'] = self.extract_reviews_from_dom()
+                # 5. DOM에서 리뷰 20개 수집 시도 (페이지네이션 포함)
+                dom_reviews = self.extract_reviews_from_dom()
+                if dom_reviews:
+                    data['detailed_review_content'] = dom_reviews
 
                 if not data['detailed_review_content']:
                     print(f"    [FAIL] detailed_review_content still NULL")

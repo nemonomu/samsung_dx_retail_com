@@ -1624,11 +1624,11 @@ class BestBuyDetailCrawler:
         page_num = 1
 
         # 리뷰 텍스트를 추출할 셀렉터 목록 (우선순위 순)
+        # JS single-quote 문자열로 안전하게 삽입 가능한 셀렉터만 사용
         review_selectors = [
             'p.pre-white-space',
             'li.review-item .ugc-review-body p',
             'li.review-item p',
-            '[data-testid*="review"] p',
             '.review-body p',
             '.ugc-review-body p',
         ]
@@ -1638,7 +1638,8 @@ class BestBuyDetailCrawler:
             active_selector = None
             for wait in range(15):
                 for selector in review_selectors:
-                    count = self.page.run_js(f'return document.querySelectorAll("{selector}").length')
+                    safe_sel = json.dumps(selector)  # "selector" 형태로 escape
+                    count = self.page.run_js(f'return document.querySelectorAll({safe_sel}).length')
                     if count and count > 0:
                         active_selector = selector
                         print(f"  [OK] Reviews rendered in DOM ({count} items, waited {wait}s, selector: {selector})")
@@ -1657,7 +1658,6 @@ class BestBuyDetailCrawler:
                     result.preWhiteSpace = document.querySelectorAll('p.pre-white-space').length;
                     result.ugcBody = document.querySelectorAll('.ugc-review-body').length;
                     result.allP = document.querySelectorAll('p').length;
-                    // 리뷰 섹션 존재 여부
                     result.reviewsAccordion = document.querySelectorAll('#reviews-accordion').length;
                     result.tabbedReviews = document.querySelectorAll('#tabbed-customerreviews').length;
                     return result;
@@ -1666,10 +1666,11 @@ class BestBuyDetailCrawler:
                 print(f"  [DIAG] DOM state: {diag}")
                 return None
 
+            safe_active = json.dumps(active_selector)
             while collected < 20:
                 page_reviews = self.page.run_js(f'''
                     var reviews = [];
-                    document.querySelectorAll('{active_selector}').forEach(function(el) {{
+                    document.querySelectorAll({safe_active}).forEach(function(el) {{
                         var text = el.textContent.trim();
                         if (text && text.length > 10) reviews.push(text);
                     }});
@@ -1690,7 +1691,7 @@ class BestBuyDetailCrawler:
                 has_next = self.page.run_js('''
                     var nextBtn = document.querySelector(
                         'li.page.next a, a[aria-label="Next"], '
-                        + 'button[aria-label="Next"], [data-testid*="next"]'
+                        + "button[aria-label='Next'], [data-testid*='next']"
                     );
                     if (nextBtn) {
                         nextBtn.scrollIntoView({behavior: "smooth", block: "center"});

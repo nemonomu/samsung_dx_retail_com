@@ -62,7 +62,7 @@ class BbyTvReviewRecovery:
           AND crawl_datetime >= %s
           AND crawl_datetime < %s
           AND CAST(NULLIF(REPLACE(count_of_reviews, ',', ''), '') AS INTEGER) > 0
-          AND "Detailed_Review_Content" IS NULL
+          AND detailed_review_content IS NULL
         ORDER BY product_url, crawl_datetime DESC
         """
         try:
@@ -82,9 +82,9 @@ class BbyTvReviewRecovery:
         SELECT
             COUNT(*) as total_count,
             SUM(CASE WHEN CAST(NULLIF(REPLACE(count_of_reviews, ',', ''), '') AS INTEGER) > 0
-                      AND "Detailed_Review_Content" IS NULL THEN 1 ELSE 0 END) as review_null_count,
+                      AND detailed_review_content IS NULL THEN 1 ELSE 0 END) as review_null_count,
             SUM(CASE WHEN CAST(NULLIF(REPLACE(count_of_reviews, ',', ''), '') AS INTEGER) > 0
-                      AND "Top_Mentions" IS NULL THEN 1 ELSE 0 END) as mentions_null_count,
+                      AND top_mentions IS NULL THEN 1 ELSE 0 END) as mentions_null_count,
             SUM(CASE WHEN CAST(NULLIF(REPLACE(count_of_reviews, ',', ''), '') AS INTEGER) > 0
                       AND detailed_review_content IS NULL THEN 1 ELSE 0 END) as retail_review_null_count
         FROM bby_tv_crawl
@@ -438,9 +438,9 @@ class BbyTvReviewRecovery:
             detail_table = self.config.get_table('detail_data') or 'bby_tv_crawl'
             cursor.execute(f"""
                 UPDATE {detail_table}
-                SET "Detailed_Review_Content" = %s,
-                    "Top_Mentions" = %s,
-                    "Recommendation_Intent" = %s
+                SET detailed_review_content = %s,
+                    top_mentions = %s,
+                    recommendation_intent = %s
                 WHERE product_url = %s
                   AND crawl_datetime = %s
                   AND account_name = 'Bestbuy'
@@ -564,7 +564,7 @@ class BbyTvReviewRecovery:
                       AND crawl_datetime >= %s
                       AND crawl_datetime < %s
                       AND account_name = 'Bestbuy'
-                      AND "Detailed_Review_Content" IS NULL
+                      AND detailed_review_content IS NULL
                 """, (url, f"{date_from} 00:00:00", f"{date_to} 23:59:59"))
                 null_dts = [row[0] for row in cursor.fetchall()]
                 cursor.close()

@@ -1400,7 +1400,8 @@ class BestBuyDetailCrawler:
 
             # SKU 검증: 현재 URL에서 SKU 추출하여 비교
             current_url = self.page.url
-            actual_sku_match = re.search(r'/reviews/[^/]+/(\d+)', current_url)
+            # /site/reviews/slug/123456 또는 리다이렉트된 /product/.../sku/123456 둘 다 대응
+            actual_sku_match = re.search(r'(?:/reviews/[^/]+/|/sku/)(\d+)', current_url)
             if actual_sku_match:
                 actual_sku = actual_sku_match.group(1)
                 if actual_sku != expected_sku:
@@ -1412,6 +1413,16 @@ class BestBuyDetailCrawler:
                     print(f"  [OK] SKU verified: {actual_sku}")
             else:
                 print(f"  [WARNING] Could not extract SKU from review page URL for verification")
+                print(f"  [INFO] Current URL: {current_url}")
+
+            # 리다이렉트된 경우: 리뷰 탭 콘텐츠 로딩 대기
+            if '/site/reviews/' not in current_url:
+                print(f"  [INFO] Redirected from /site/reviews/ - waiting for review tab content...")
+                try:
+                    self.page.ele('xpath://li[@class="review-item"]//p[@class="pre-white-space"]', timeout=10)
+                    print(f"  [OK] Review content loaded after redirect")
+                except:
+                    print(f"  [WARNING] Review content not loaded after redirect")
 
             # 페이지 로드 확인
             page_html = self.page.html
@@ -1452,24 +1463,25 @@ class BestBuyDetailCrawler:
                 except:
                     continue
 
-            # 2. 리뷰 섹션으로 빠르게 스크롤 후 검색
+            # 2. 리뷰 섹션으로 단계적 스크롤 후 검색 (lazy loading 트리거)
             print("  [INFO] Scrolling to review section...")
-            self.page.run_js("window.scrollTo(0, document.body.scrollHeight * 0.7)")
-            time.sleep(1)
+            for scroll_pct in [0.7, 0.85, 1.0]:
+                self.page.run_js(f"window.scrollTo(0, document.body.scrollHeight * {scroll_pct})")
+                time.sleep(1)
 
-            for selector in selectors:
-                try:
-                    button = self.page.ele(selector, timeout=2)
-                    if button:
-                        print("  [OK] See All Customer Reviews button found (after scroll)")
-                        button.scroll.to_see()
-                        time.sleep(0.5)
-                        button.click()
-                        print("  [OK] See All Customer Reviews click successful")
-                        time.sleep(3)
-                        return True
-                except:
-                    continue
+                for selector in selectors:
+                    try:
+                        button = self.page.ele(selector, timeout=2)
+                        if button:
+                            print(f"  [OK] See All Customer Reviews button found (after scroll {int(scroll_pct*100)}%)")
+                            button.scroll.to_see()
+                            time.sleep(0.5)
+                            button.click()
+                            print("  [OK] See All Customer Reviews click successful")
+                            time.sleep(3)
+                            return True
+                    except:
+                        continue
 
             # 3. 버튼 못 찾으면 직접 URL 접근 시도 (fallback)
             print("  [WARNING] See All Customer Reviews button not found. Trying direct URL...")

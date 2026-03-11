@@ -268,7 +268,8 @@ class BbyTvReviewRecovery:
             time.sleep(3)
 
         # tree 파싱 (top_mentions, summarized, recommendation_intent용)
-        page_source = self.page.html
+        # page.html 대신 JS로 렌더링된 DOM을 직접 가져옴 (동적 콘텐츠 반영)
+        page_source = self.page.run_js('return document.documentElement.outerHTML')
         tree = html.fromstring(page_source)
 
         # 1. Top Mentions
@@ -363,7 +364,7 @@ class BbyTvReviewRecovery:
             page_num = 1
 
             while collected < 20:
-                page_source = self.page.html
+                page_source = self.page.run_js('return document.documentElement.outerHTML')
                 tree = html.fromstring(page_source)
 
                 review_xpaths = self.config.get_xpath_list('review_items', self.file_name) or [

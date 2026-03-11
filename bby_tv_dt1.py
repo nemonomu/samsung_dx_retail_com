@@ -1623,25 +1623,56 @@ class BestBuyDetailCrawler:
         collected = 0
         page_num = 1
 
+        # 리뷰 텍스트를 추출할 셀렉터 목록 (우선순위 순)
+        review_selectors = [
+            'p.pre-white-space',
+            'li.review-item .ugc-review-body p',
+            'li.review-item p',
+            '[data-testid*="review"] p',
+            '.review-body p',
+            '.ugc-review-body p',
+        ]
+
         try:
-            # 리뷰 콘텐츠 렌더링 대기 (최대 15초 폴링)
+            # 리뷰 콘텐츠 렌더링 대기 (최대 15초 폴링, 여러 셀렉터 시도)
+            active_selector = None
             for wait in range(15):
-                count = self.page.run_js('return document.querySelectorAll("p.pre-white-space").length')
-                if count and count > 0:
-                    print(f"  [OK] Reviews rendered in DOM ({count} items, waited {wait}s)")
+                for selector in review_selectors:
+                    count = self.page.run_js(f'return document.querySelectorAll("{selector}").length')
+                    if count and count > 0:
+                        active_selector = selector
+                        print(f"  [OK] Reviews rendered in DOM ({count} items, waited {wait}s, selector: {selector})")
+                        break
+                if active_selector:
                     break
                 time.sleep(1)
-            else:
+
+            if not active_selector:
+                # DOM 진단: 어떤 리뷰 관련 요소가 있는지 확인
+                diag = self.page.run_js('''
+                    var result = {};
+                    result.url = window.location.href;
+                    result.reviewItem = document.querySelectorAll('li.review-item').length;
+                    result.reviewClass = document.querySelectorAll('[class*="review"]').length;
+                    result.preWhiteSpace = document.querySelectorAll('p.pre-white-space').length;
+                    result.ugcBody = document.querySelectorAll('.ugc-review-body').length;
+                    result.allP = document.querySelectorAll('p').length;
+                    // 리뷰 섹션 존재 여부
+                    result.reviewsAccordion = document.querySelectorAll('#reviews-accordion').length;
+                    result.tabbedReviews = document.querySelectorAll('#tabbed-customerreviews').length;
+                    return result;
+                ''')
                 print(f"  [WARNING] Reviews not rendered in DOM after 15s wait")
+                print(f"  [DIAG] DOM state: {diag}")
                 return None
 
             while collected < 20:
-                page_reviews = self.page.run_js('''
+                page_reviews = self.page.run_js(f'''
                     var reviews = [];
-                    document.querySelectorAll('p.pre-white-space').forEach(function(el) {
+                    document.querySelectorAll('{active_selector}').forEach(function(el) {{
                         var text = el.textContent.trim();
                         if (text && text.length > 10) reviews.push(text);
-                    });
+                    }});
                     return reviews;
                 ''')
 
@@ -1657,7 +1688,10 @@ class BestBuyDetailCrawler:
                     break
 
                 has_next = self.page.run_js('''
-                    var nextBtn = document.querySelector('li.page.next a, a[aria-label="Next"]');
+                    var nextBtn = document.querySelector(
+                        'li.page.next a, a[aria-label="Next"], '
+                        + 'button[aria-label="Next"], [data-testid*="next"]'
+                    );
                     if (nextBtn) {
                         nextBtn.scrollIntoView({behavior: "smooth", block: "center"});
                         nextBtn.click();

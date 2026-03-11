@@ -2,7 +2,7 @@
 bby_tv_dt1 Review Recovery Script
 - detailed_review_content, top_mentions, summarized_review_content NULL 복구
 - count_of_reviews > 0인데 위 컬럼이 NULL인 레코드 대상
-- Bazaarvoice API로 리뷰 데이터 직접 조회 → bby_tv_crawl + tv_retail_com UPDATE
+- GraphQL 네트워크 캡처로 리뷰 데이터 직접 획득 → bby_tv_crawl + tv_retail_com UPDATE
 
 사용법:
     python re_bby_tv_dt1_reviews.py                          # 날짜 입력 모드
@@ -12,7 +12,7 @@ bby_tv_dt1 Review Recovery Script
 import time
 import re
 import sys
-import requests
+import json
 import psycopg2
 from datetime import datetime
 import pytz
@@ -29,7 +29,6 @@ class BbyTvReviewRecovery:
         self.korea_tz = pytz.timezone('Asia/Seoul')
         self.config = get_config()
         self.file_name = 'bby_tv_dt1'
-        self.bv_passkey = None  # Bazaarvoice API passkey (페이지에서 1회 추출)
 
     def connect_db(self):
         try:
@@ -103,184 +102,147 @@ class BbyTvReviewRecovery:
             print(f"[ERROR] Summary query failed: {e}")
             return None
 
-    def capture_bv_passkey_via_network(self):
-        """네트워크 리스닝으로 Bazaarvoice API passkey 캡처
-        제품 페이지에서 리뷰 섹션 스크롤 → BV API 요청 발생 → passkey 추출
-        """
-        if self.bv_passkey:
-            return self.bv_passkey
-
-        try:
-            # 1. bazaarvoice.com 요청 리스닝 시작
-            self.page.listen.start('bazaarvoice.com')
-
-            # 2. 리뷰 섹션으로 스크롤하여 BV API 트리거
-            for scroll_pct in [0.5, 0.7, 0.85, 1.0]:
-                self.page.run_js(f"window.scrollTo(0, document.body.scrollHeight * {scroll_pct})")
-                time.sleep(1.5)
-
-                # 패킷 확인 (non-blocking 대기)
-                packet = self.page.listen.wait(timeout=3)
-                if packet and packet.url:
-                    url_str = packet.url
-                    print(f"    [INFO] BV request captured: {url_str[:100]}...")
-
-                    # URL에서 passkey 추출
-                    match = re.search(r'[?&]passkey=([a-zA-Z0-9]+)', url_str)
-                    if match:
-                        self.bv_passkey = match.group(1)
-                        print(f"    [OK] BV passkey captured: {self.bv_passkey[:8]}...")
-                        self.page.listen.stop()
-                        return self.bv_passkey
-
-            self.page.listen.stop()
-            print("    [WARNING] No BV API request captured during scroll")
-            return None
-
-        except Exception as e:
-            print(f"    [ERROR] BV passkey capture failed: {e}")
-            try:
-                self.page.listen.stop()
-            except:
-                pass
-            return None
-
-    def capture_bv_review_data(self, sku_id):
-        """네트워크 리스닝으로 BV API 응답 직접 캡처 (passkey + 리뷰 데이터 동시)"""
-        try:
-            # 리뷰 탭 URL로 이동하여 BV API 트리거
-            self.page.listen.start('bazaarvoice.com')
-
-            # 리뷰 섹션 스크롤
-            for scroll_pct in [0.3, 0.5, 0.7, 0.85, 1.0]:
-                self.page.run_js(f"window.scrollTo(0, document.body.scrollHeight * {scroll_pct})")
-                time.sleep(1)
-
-            # BV 패킷 수집 (최대 10초 대기)
-            packets = []
-            for _ in range(5):
-                packet = self.page.listen.wait(timeout=3)
-                if packet:
-                    packets.append(packet)
-                    # passkey 추출
-                    if not self.bv_passkey and packet.url:
-                        match = re.search(r'[?&]passkey=([a-zA-Z0-9]+)', packet.url)
-                        if match:
-                            self.bv_passkey = match.group(1)
-                            print(f"    [OK] BV passkey: {self.bv_passkey[:8]}...")
-                else:
-                    break
-
-            self.page.listen.stop()
-
-            # 캡처된 패킷에서 리뷰 데이터 찾기
-            for packet in packets:
-                try:
-                    body = packet.response.body
-                    if isinstance(body, dict) and 'Results' in body:
-                        print(f"    [OK] BV review data captured from network ({len(body.get('Results', []))} reviews)")
-                        return body
-                except:
-                    continue
-
-            return None
-
-        except Exception as e:
-            print(f"    [ERROR] BV capture failed: {e}")
-            try:
-                self.page.listen.stop()
-            except:
-                pass
-            return None
-
     def extract_numeric_sku(self, product_url):
-        """URL 또는 페이지에서 numeric SKU 추출"""
-        # 1. URL에서 직접 추출 (/sku/1234567 또는 /1234567)
-        match = re.search(r'/(\d{7,})(?:\?|$|#)', product_url)
-        if match:
-            return match.group(1)
-
-        # 2. 페이지 소스에서 추출
+        """페이지 소스에서 numeric SKU 추출"""
         try:
             page_html = self.page.html
-            match = re.search(r'mbo-entrypoint-(\d+)', page_html)
-            if match:
-                return match.group(1)
-            match = re.search(r'"skuId"\s*:\s*"(\d+)"', page_html)
-            if match:
-                return match.group(1)
-            match = re.search(r'SKU[:\s]+(\d{7,})', page_html)
-            if match:
-                return match.group(1)
+            for pattern in [r'mbo-entrypoint-(\d+)', r'"skuId"\s*:\s*"(\d+)"', r'SKU[:\s]+(\d{7,})']:
+                match = re.search(pattern, page_html)
+                if match:
+                    return match.group(1)
         except:
             pass
         return None
 
-    def fetch_reviews_from_bv_api(self, sku_id):
-        """Bazaarvoice API로 리뷰 데이터 직접 조회"""
-        if not self.bv_passkey:
-            print("    [ERROR] No BV passkey available")
-            return None
+    def click_reviews_and_capture_graphql(self, numeric_sku):
+        """제품 페이지에서 리뷰 링크 클릭 → GraphQL 응답 캡처
 
-        url = "https://api.bazaarvoice.com/data/reviews.json"
-        params = {
-            'apiversion': '5.4',
-            'passkey': self.bv_passkey,
-            'Filter': f'ProductId:{sku_id}',
-            'Include': 'Products',
-            'Stats': 'Reviews',
-            'Limit': '20',
-            'Sort': 'SubmissionTime:desc'
+        캡처 대상 operations:
+        - CustomerReviewList_Init → reviews (리뷰 본문)
+        - Reviews_Pros_Cons_Init → reviewInfo (top mentions)
+        - Ai_Review_Summary_Init → reviewInfo (AI 요약)
+        """
+        captured_data = {
+            'reviews': None,           # CustomerReviewList_Init
+            'pros_cons': None,         # Reviews_Pros_Cons_Init
+            'ai_summary': None,        # Ai_Review_Summary_Init
+            'rating_card': None,       # CustomerRatingCard_Init
         }
 
         try:
-            resp = requests.get(url, params=params, timeout=15)
-            if resp.status_code != 200:
-                print(f"    [ERROR] BV API HTTP {resp.status_code}")
-                return None
+            # 1. GraphQL 리스닝 시작
+            self.page.listen.start('graphql')
 
-            data = resp.json()
-
-            if data.get('HasErrors'):
-                errors = data.get('Errors', [])
-                print(f"    [ERROR] BV API error: {errors}")
-                return None
-
-            return data
-        except Exception as e:
-            print(f"    [ERROR] BV API request failed: {e}")
-            return None
-
-    def fetch_reviews_via_browser(self, sku_id):
-        """브라우저 내에서 BV API fetch (CORS 우회)"""
-        if not self.bv_passkey:
-            return None
-
-        api_url = (
-            f"https://api.bazaarvoice.com/data/reviews.json"
-            f"?apiversion=5.4&passkey={self.bv_passkey}"
-            f"&Filter=ProductId:{sku_id}"
-            f"&Include=Products&Stats=Reviews&Limit=20"
-            f"&Sort=SubmissionTime:desc"
-        )
-
-        try:
-            data = self.page.run_js(f'''
-                var xhr = new XMLHttpRequest();
-                xhr.open("GET", "{api_url}", false);
-                xhr.send();
-                if (xhr.status === 200) {{
-                    return JSON.parse(xhr.responseText);
+            # 2. 제품 자체의 리뷰 링크 클릭 (추천 제품이 아닌 메인 제품의 리뷰)
+            click_result = self.page.run_js(f'''
+                // 메인 제품의 리뷰 링크 찾기 (SKU 기반으로 정확한 것 클릭)
+                // 방법 1: 페이지 상단의 star rating 링크 (가장 정확)
+                var ratingLink = document.querySelector(
+                    '.price-ratings a[href*="customerreviews"], '
+                    + '.c-stars-reviews a, '
+                    + 'a[href*="tabbed-customerreviews"]'
+                );
+                if (ratingLink) {{
+                    ratingLink.scrollIntoView({{behavior: "smooth", block: "center"}});
+                    ratingLink.click();
+                    return 'clicked rating link: ' + ratingLink.textContent.trim().substring(0, 50);
                 }}
-                return null;
-            ''')
-            return data
-        except Exception as e:
-            print(f"    [ERROR] Browser BV fetch failed: {e}")
-            return None
 
-    def parse_bv_response(self, bv_data):
-        """Bazaarvoice API 응답에서 리뷰 데이터 파싱"""
+                // 방법 2: 첫 번째 review 링크 (보통 메인 제품)
+                var links = document.querySelectorAll('a');
+                for (var i = 0; i < links.length; i++) {{
+                    var text = links[i].textContent.trim().toLowerCase();
+                    var href = links[i].href || '';
+                    if (text.includes('review') && href.includes('customerreviews')
+                        && !text.includes('write')) {{
+                        links[i].scrollIntoView({{behavior: "smooth", block: "center"}});
+                        links[i].click();
+                        return 'clicked: ' + links[i].textContent.trim().substring(0, 50);
+                    }}
+                }}
+
+                // 방법 3: See All Customer Reviews 버튼
+                var btns = document.querySelectorAll('button, a');
+                for (var i = 0; i < btns.length; i++) {{
+                    var text = btns[i].textContent.trim().toLowerCase();
+                    if (text.includes('see all') && text.includes('review')) {{
+                        btns[i].scrollIntoView({{behavior: "smooth", block: "center"}});
+                        btns[i].click();
+                        return 'clicked see all: ' + btns[i].textContent.trim().substring(0, 50);
+                    }}
+                }}
+
+                return 'not found';
+            ''')
+            print(f"    [INFO] Click result: {click_result}")
+
+            if click_result == 'not found':
+                self.page.listen.stop()
+                return captured_data
+
+            # 3. GraphQL 응답 수집 (최대 15초)
+            time.sleep(3)
+            target_ops = {
+                'CustomerReviewList_Init': 'reviews',
+                'Reviews_Pros_Cons_Init': 'pros_cons',
+                'Ai_Review_Summary_Init': 'ai_summary',
+                'CustomerRatingCard_Init': 'rating_card',
+            }
+
+            for _ in range(30):
+                packet = self.page.listen.wait(timeout=1)
+                if not packet:
+                    # 모든 타겟 획득했으면 조기 종료
+                    if captured_data['reviews']:
+                        break
+                    continue
+
+                # operationName 확인
+                try:
+                    req_body = None
+                    for attr in ['body', 'postData', 'data']:
+                        val = getattr(packet.request, attr, None)
+                        if val:
+                            req_body = val
+                            break
+
+                    if req_body:
+                        if isinstance(req_body, str):
+                            req_data = json.loads(req_body)
+                        else:
+                            req_data = req_body
+
+                        op_name = None
+                        if isinstance(req_data, dict):
+                            op_name = req_data.get('operationName')
+                        elif isinstance(req_data, list) and req_data:
+                            op_name = req_data[0].get('operationName') if isinstance(req_data[0], dict) else None
+
+                        if op_name and op_name in target_ops:
+                            key = target_ops[op_name]
+                            try:
+                                resp_body = packet.response.body
+                                if resp_body:
+                                    captured_data[key] = resp_body
+                                    print(f"    [OK] Captured: {op_name}")
+                            except:
+                                pass
+                except:
+                    continue
+
+            self.page.listen.stop()
+
+        except Exception as e:
+            print(f"    [ERROR] GraphQL capture failed: {e}")
+            try:
+                self.page.listen.stop()
+            except:
+                pass
+
+        return captured_data
+
+    def parse_graphql_reviews(self, captured_data):
+        """GraphQL 캡처 데이터에서 리뷰 정보 파싱"""
         result = {
             'detailed_review_content': None,
             'top_mentions': None,
@@ -288,123 +250,134 @@ class BbyTvReviewRecovery:
             'recommendation_intent': None
         }
 
-        if not bv_data:
-            return result
+        # 1. Detailed Reviews (CustomerReviewList_Init)
+        reviews_data = captured_data.get('reviews')
+        if reviews_data:
+            try:
+                product = reviews_data.get('data', {}).get('productBySkuId', {})
+                reviews_list = product.get('reviews', {})
 
-        # 1. Reviews → detailed_review_content
-        reviews_list = bv_data.get('Results', [])
-        if reviews_list:
-            formatted = []
-            for i, review in enumerate(reviews_list[:20], 1):
-                text = review.get('ReviewText', '').strip()
-                if text:
-                    formatted.append(f"review{i} - {text}")
-            if formatted:
-                result['detailed_review_content'] = ' ||| '.join(formatted)
+                # reviews가 dict일 수 있음 (edges/nodes 패턴 또는 직접 리스트)
+                review_items = []
+                if isinstance(reviews_list, dict):
+                    # edges 패턴
+                    edges = reviews_list.get('edges', [])
+                    if edges:
+                        review_items = [e.get('node', e) for e in edges]
+                    # customerReviews 키
+                    elif 'customerReviews' in reviews_list:
+                        review_items = reviews_list['customerReviews']
+                    # topics/items
+                    elif 'topics' in reviews_list:
+                        for topic in reviews_list.get('topics', []):
+                            if isinstance(topic, dict):
+                                items = topic.get('reviews', [])
+                                review_items.extend(items)
+                    else:
+                        # 직접 리스트 값 찾기
+                        for key, val in reviews_list.items():
+                            if isinstance(val, list) and val and isinstance(val[0], dict):
+                                review_items = val
+                                break
+                elif isinstance(reviews_list, list):
+                    review_items = reviews_list
 
-        total_reviews = bv_data.get('TotalResults', len(reviews_list))
-        content_len = len(result['detailed_review_content']) if result['detailed_review_content'] else 0
-        print(f"    [OK] BV Reviews: {len(reviews_list)} fetched (total: {total_reviews}), {content_len} chars")
+                if review_items:
+                    formatted = []
+                    for i, review in enumerate(review_items[:20], 1):
+                        if isinstance(review, dict):
+                            # 다양한 키 이름으로 리뷰 텍스트 찾기
+                            text = (review.get('reviewText') or review.get('text')
+                                    or review.get('comment') or review.get('body')
+                                    or review.get('content', '')).strip()
+                            if text:
+                                formatted.append(f"review{i} - {text}")
+                    if formatted:
+                        result['detailed_review_content'] = ' ||| '.join(formatted)
+                        print(f"    [OK] Reviews: {len(formatted)} extracted, {len(result['detailed_review_content'])} chars")
+                    else:
+                        # 구조 디버그
+                        if review_items:
+                            sample = review_items[0] if isinstance(review_items[0], dict) else review_items[0]
+                            print(f"    [DEBUG] review item keys: {list(sample.keys()) if isinstance(sample, dict) else type(sample)}")
+                        print(f"    [WARNING] Review items found but no text extracted")
+                else:
+                    print(f"    [DEBUG] reviews structure: {type(reviews_list)}, keys: {list(reviews_list.keys()) if isinstance(reviews_list, dict) else 'N/A'}")
+            except Exception as e:
+                print(f"    [ERROR] Review parsing failed: {e}")
 
-        # 2. Top Mentions (TagDimensions에서 pros/cons 추출)
-        includes = bv_data.get('Includes', {})
-        products = includes.get('Products', {})
-        mentions = []
-        for product_id, product_data in products.items():
-            # ReviewStatistics에서 TagDistribution 추출
-            review_stats = product_data.get('ReviewStatistics', {})
-            tag_dist = review_stats.get('TagDistribution', {})
-            for tag_group, tag_values in tag_dist.items():
-                if isinstance(tag_values, list):
-                    for tv in tag_values:
-                        if isinstance(tv, dict):
-                            label = tv.get('Label') or tv.get('Id', '')
-                            if label:
-                                mentions.append(label)
-                elif isinstance(tag_values, dict):
-                    for tag_id, tag_info in tag_values.items():
-                        label = tag_info.get('Label', tag_id) if isinstance(tag_info, dict) else tag_id
-                        mentions.append(label)
+        # 2. Top Mentions (Reviews_Pros_Cons_Init)
+        pros_cons_data = captured_data.get('pros_cons')
+        if pros_cons_data:
+            try:
+                product = pros_cons_data.get('data', {}).get('productBySkuId', {})
+                review_info = product.get('reviewInfo', {})
 
-        # 리뷰 자체의 TagDimensions에서도 추출
-        if not mentions:
-            for review in reviews_list[:5]:
-                tag_dims = review.get('TagDimensions', {})
-                for dim_name, dim_data in tag_dims.items():
-                    if isinstance(dim_data, dict):
-                        values = dim_data.get('Values', [])
-                        for v in values:
-                            mentions.append(v)
-                    elif isinstance(dim_data, list):
-                        mentions.extend(dim_data)
+                mentions = []
+                # pros
+                pros = review_info.get('pros', [])
+                if isinstance(pros, list):
+                    for p in pros:
+                        if isinstance(p, dict):
+                            name = p.get('name') or p.get('label') or p.get('text', '')
+                        else:
+                            name = str(p)
+                        if name:
+                            mentions.append(name)
+                # cons
+                cons = review_info.get('cons', [])
+                if isinstance(cons, list):
+                    for c in cons:
+                        if isinstance(c, dict):
+                            name = c.get('name') or c.get('label') or c.get('text', '')
+                        else:
+                            name = str(c)
+                        if name:
+                            mentions.append(name)
 
-        if mentions:
-            # 중복 제거 + 순서 유지
-            seen = set()
-            unique_mentions = []
-            for m in mentions:
-                if m not in seen:
-                    seen.add(m)
-                    unique_mentions.append(m)
-            result['top_mentions'] = ', '.join(unique_mentions)
-        print(f"    [OK] Top_Mentions: {result['top_mentions'] if result['top_mentions'] else 'None'}")
+                if mentions:
+                    result['top_mentions'] = ', '.join(mentions)
+                    print(f"    [OK] Top Mentions: {result['top_mentions'][:80]}")
+                else:
+                    print(f"    [DEBUG] reviewInfo keys: {list(review_info.keys()) if isinstance(review_info, dict) else 'N/A'}")
+            except Exception as e:
+                print(f"    [ERROR] Pros/Cons parsing failed: {e}")
 
-        # 3. Recommendation Intent
-        for product_id, product_data in products.items():
-            review_stats = product_data.get('ReviewStatistics', {})
-            rec_pct = review_stats.get('RecommendedCount')
-            total_rec = review_stats.get('TotalReviewCount')
-            if rec_pct is not None and total_rec and total_rec > 0:
-                pct = round(rec_pct / total_rec * 100)
-                result['recommendation_intent'] = f"{pct}% would recommend to a friend"
-                break
+        # 3. AI Summary (Ai_Review_Summary_Init)
+        ai_data = captured_data.get('ai_summary')
+        if ai_data:
+            try:
+                product = ai_data.get('data', {}).get('productBySkuId', {})
+                review_info = product.get('reviewInfo', {})
 
-        print(f"    [OK] Recommendation_Intent: {result['recommendation_intent']}")
+                # AI 요약 텍스트 찾기
+                summary = (review_info.get('aiSummary') or review_info.get('summary')
+                          or review_info.get('reviewSummary'))
+                if isinstance(summary, dict):
+                    summary = summary.get('text') or summary.get('content') or summary.get('summary', '')
+                if summary:
+                    result['summarized_review_content'] = str(summary).strip()
+                    print(f"    [OK] AI Summary: {result['summarized_review_content'][:60]}...")
+                else:
+                    print(f"    [DEBUG] ai reviewInfo keys: {list(review_info.keys()) if isinstance(review_info, dict) else 'N/A'}")
+            except Exception as e:
+                print(f"    [ERROR] AI Summary parsing failed: {e}")
 
-        # 4. Summarized Review Content (BV API에는 AI 요약이 없을 수 있음)
-        # 없으면 None 유지
-        print(f"    [OK] Summarized_Review: (not available via BV API)")
+        # 4. Recommendation Intent (CustomerRatingCard_Init)
+        rating_data = captured_data.get('rating_card')
+        if rating_data:
+            try:
+                product = rating_data.get('data', {}).get('productBySkuId', {})
+                review_info = product.get('reviewInfo', {})
 
-        return result
-
-    def extract_page_review_data(self):
-        """페이지 DOM에서 top_mentions, summarized_review, recommendation 추출 (fallback)"""
-        data = self.page.run_js('''
-            var result = {};
-
-            // Top Mentions (pros/cons data-feature-name)
-            var mentions = [];
-            document.querySelectorAll('.pros-container button[data-feature-name]').forEach(function(el) {
-                mentions.push(el.getAttribute('data-feature-name'));
-            });
-            document.querySelectorAll('.cons-container button[data-feature-name]').forEach(function(el) {
-                mentions.push(el.getAttribute('data-feature-name'));
-            });
-            result.topMentions = mentions;
-
-            // Recommendation Intent
-            var recElem = document.querySelector('.recommendation-percent');
-            result.recommendationIntent = recElem ? recElem.textContent.trim() : null;
-
-            // Summarized Review Content
-            var sumElem = document.querySelector('p.mb-200.mt-none')
-                || document.querySelector('#reviews-accordion p.mb-200');
-            result.summarizedReview = sumElem ? sumElem.textContent.trim() : null;
-
-            return result;
-        ''')
-
-        result = {}
-        if data:
-            mentions = data.get('topMentions', [])
-            if mentions:
-                result['top_mentions'] = ', '.join(mentions)
-
-            rec = data.get('recommendationIntent')
-            if rec:
-                result['recommendation_intent'] = f"{rec} would recommend to a friend"
-
-            result['summarized_review_content'] = data.get('summarizedReview')
+                rec = review_info.get('recommendedPercentage') or review_info.get('recommendPercent')
+                if rec is not None:
+                    result['recommendation_intent'] = f"{rec}% would recommend to a friend"
+                    print(f"    [OK] Recommendation: {result['recommendation_intent']}")
+                else:
+                    print(f"    [DEBUG] rating reviewInfo keys: {list(review_info.keys()) if isinstance(review_info, dict) else 'N/A'}")
+            except Exception as e:
+                print(f"    [ERROR] Recommendation parsing failed: {e}")
 
         return result
 
@@ -414,7 +387,6 @@ class BbyTvReviewRecovery:
             cursor = self.db_conn.cursor()
             updated = 0
 
-            # bby_tv_crawl UPDATE
             detail_table = self.config.get_table('detail_data') or 'bby_tv_crawl'
             cursor.execute(f"""
                 UPDATE {detail_table}
@@ -433,7 +405,6 @@ class BbyTvReviewRecovery:
             ))
             updated += cursor.rowcount
 
-            # tv_retail_com UPDATE
             retail_com_table = self.config.get_table('retail_com') or 'tv_retail_com'
             cursor.execute(f"""
                 UPDATE {retail_com_table}
@@ -462,7 +433,7 @@ class BbyTvReviewRecovery:
 
     def run(self, date_from=None, date_to=None):
         print("=" * 80)
-        print("  bby_tv_dt1 Review Recovery Script (Bazaarvoice API)")
+        print("  bby_tv_dt1 Review Recovery Script (GraphQL Capture)")
         print("  - detailed_review_content, top_mentions, summarized_review_content NULL 복구")
         print("=" * 80)
 
@@ -476,7 +447,6 @@ class BbyTvReviewRecovery:
 
         print(f"\n[INFO] Recovery range: {date_from} ~ {date_to}")
 
-        # 요약 조회
         summary = self.get_summary(date_from, date_to)
         if not summary:
             print("[ERROR] Summary query failed")
@@ -487,7 +457,6 @@ class BbyTvReviewRecovery:
         print(f"[INFO] Detailed_Review NULL (with reviews > 0): {review_null}")
         print(f"[INFO] Top_Mentions NULL (with reviews > 0): {mentions_null}")
 
-        # NULL 레코드 조회
         null_records = self.get_null_review_records(date_from, date_to)
         if not null_records:
             print("[INFO] No recovery targets found. Done.")
@@ -519,7 +488,7 @@ class BbyTvReviewRecovery:
                 # 1. 제품 페이지 접근
                 try:
                     self.page.get(url)
-                    time.sleep(3)
+                    time.sleep(4)
                 except Exception as e:
                     print(f"    [ERROR] Page load failed: {e}")
                     fail_count += 1
@@ -533,53 +502,11 @@ class BbyTvReviewRecovery:
                     continue
                 print(f"    [OK] Numeric SKU: {numeric_sku}")
 
-                bv_data = None
+                # 3. 리뷰 링크 클릭 → GraphQL 응답 캡처
+                captured_data = self.click_reviews_and_capture_graphql(numeric_sku)
 
-                # 3. 방법 A: 네트워크 캡처로 BV passkey + 리뷰 데이터 동시 획득
-                if not self.bv_passkey:
-                    print("    [INFO] Capturing BV API via network listening...")
-                    bv_data = self.capture_bv_review_data(numeric_sku)
-
-                # 4. 방법 B: passkey가 있으면 API 직접 호출
-                if not bv_data and self.bv_passkey:
-                    bv_data = self.fetch_reviews_from_bv_api(numeric_sku)
-
-                # 5. 방법 C: 리뷰 탭 URL로 이동 후 네트워크 캡처 재시도
-                if not bv_data:
-                    print("    [INFO] Navigating to reviews tab for network capture...")
-                    reviews_url = f"{url}/sku/{numeric_sku}#tabbed-customerreviews"
-                    try:
-                        self.page.get(reviews_url)
-                        time.sleep(3)
-                        bv_data = self.capture_bv_review_data(numeric_sku)
-                    except:
-                        pass
-
-                # 6. 방법 D: 브라우저 내 XHR fetch
-                if not bv_data and self.bv_passkey:
-                    print("    [INFO] Retrying via browser fetch...")
-                    bv_data = self.fetch_reviews_via_browser(numeric_sku)
-
-                if not bv_data:
-                    print(f"    [FAIL] All BV methods failed for SKU {numeric_sku}")
-                    fail_count += 1
-                    time.sleep(2)
-                    continue
-
-                # 7. API 응답 파싱
-                data = self.parse_bv_response(bv_data)
-
-                # 8. 페이지 DOM에서 추가 데이터 보충 (top_mentions, summarized_review 등)
-                if not data['top_mentions'] or not data['summarized_review_content']:
-                    page_data = self.extract_page_review_data()
-                    if not data['top_mentions'] and page_data.get('top_mentions'):
-                        data['top_mentions'] = page_data['top_mentions']
-                        print(f"    [OK] Top_Mentions from DOM: {data['top_mentions']}")
-                    if not data['summarized_review_content'] and page_data.get('summarized_review_content'):
-                        data['summarized_review_content'] = page_data['summarized_review_content']
-                        print(f"    [OK] Summarized_Review from DOM: {data['summarized_review_content'][:50]}")
-                    if not data['recommendation_intent'] and page_data.get('recommendation_intent'):
-                        data['recommendation_intent'] = page_data['recommendation_intent']
+                # 4. 캡처 데이터 파싱
+                data = self.parse_graphql_reviews(captured_data)
 
                 if not data['detailed_review_content']:
                     print(f"    [FAIL] detailed_review_content still NULL")
@@ -587,7 +514,7 @@ class BbyTvReviewRecovery:
                     time.sleep(2)
                     continue
 
-                # 7. DB UPDATE (같은 URL의 해당 날짜 범위 레코드 모두)
+                # 5. DB UPDATE
                 cursor = self.db_conn.cursor()
                 detail_table = self.config.get_table('detail_data') or 'bby_tv_crawl'
 

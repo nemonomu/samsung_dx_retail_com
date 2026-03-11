@@ -2432,15 +2432,34 @@ class BestBuyDetailCrawler:
                     # 9-2. Detailed reviews: JS DOM 우선
                     detailed_reviews = self.extract_reviews_from_js_dom()
 
-                    # 새 형식 /product/ 페이지에서 실패 시 → 구 형식 /site/reviews/ URL로 이동 후 재시도
+                    # 새 형식 /product/ 페이지에서 실패 시 → 구 형식 /site/reviews/ URL로 직접 이동
                     if not detailed_reviews and '/site/reviews/' not in self.page.url:
-                        print(f"  [INFO] New format page - trying old /site/reviews/ URL...")
-                        if self.navigate_to_reviews_page(product_url):
+                        current_url = self.page.url
+                        # URL에서 slug와 SKU 직접 추출: /product/{slug}/{item_id}/sku/{sku_number}/reviews
+                        sku_match = re.search(r'/product/([^/]+)/[^/]+/sku/(\d+)', current_url)
+                        if not sku_match:
+                            # product_url에서도 시도
+                            sku_match = re.search(r'/product/([^/]+)/[^/]+/sku/(\d+)', product_url)
+                        if sku_match:
+                            slug = sku_match.group(1)
+                            sku_num = sku_match.group(2)
+                            old_reviews_url = f"https://www.bestbuy.com/site/reviews/{slug}/{sku_num}"
+                            print(f"  [INFO] New format page - navigating to old reviews URL: {old_reviews_url[:80]}")
+                            self.page.get(old_reviews_url)
+                            time.sleep(5)
                             reviews_page_source = self.page.html
                             reviews_tree = html.fromstring(reviews_page_source)
                             detailed_reviews = self.extract_reviews_from_js_dom()
                             if not detailed_reviews:
                                 detailed_reviews = self.extract_reviews()
+                        else:
+                            print(f"  [INFO] Could not extract SKU from URL, trying navigate_to_reviews_page...")
+                            if self.navigate_to_reviews_page(product_url):
+                                reviews_page_source = self.page.html
+                                reviews_tree = html.fromstring(reviews_page_source)
+                                detailed_reviews = self.extract_reviews_from_js_dom()
+                                if not detailed_reviews:
+                                    detailed_reviews = self.extract_reviews()
 
                     if not detailed_reviews:
                         print(f"  [INFO] All DOM extraction failed, trying lxml fallback...")

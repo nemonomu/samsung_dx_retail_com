@@ -375,6 +375,68 @@ class BbyTvReviewRecovery:
 
         return result
 
+    def extract_reviews_from_dom(self):
+        """리뷰 탭 클릭 후 DOM에서 리뷰 20개 수집 (페이지네이션 포함)
+        저장 형식: "review1 - 내용 ||| review2 - 내용 ||| ... ||| review20 - 내용"
+        """
+        reviews = []
+        collected = 0
+        page_num = 1
+
+        try:
+            # 리뷰 콘텐츠 렌더링 대기
+            time.sleep(2)
+
+            while collected < 20:
+                # JS로 현재 페이지의 리뷰 텍스트 추출
+                page_reviews = self.page.run_js('''
+                    var reviews = [];
+                    document.querySelectorAll('p.pre-white-space').forEach(function(el) {
+                        var text = el.textContent.trim();
+                        if (text && text.length > 10) reviews.push(text);
+                    });
+                    return reviews;
+                ''')
+
+                if page_reviews:
+                    for text in page_reviews:
+                        if collected >= 20:
+                            break
+                        collected += 1
+                        reviews.append(f"review{collected} - {text}")
+                    print(f"    [INFO] Page {page_num}: {len(page_reviews)} reviews (total: {collected}/20)")
+
+                if collected >= 20:
+                    break
+
+                # 다음 페이지 버튼 클릭
+                has_next = self.page.run_js('''
+                    var nextBtn = document.querySelector('li.page.next a, a[aria-label="Next"]');
+                    if (nextBtn) {
+                        nextBtn.scrollIntoView({behavior: "smooth", block: "center"});
+                        nextBtn.click();
+                        return true;
+                    }
+                    return false;
+                ''')
+
+                if not has_next:
+                    break
+
+                page_num += 1
+                time.sleep(4)
+
+        except Exception as e:
+            print(f"    [ERROR] DOM review extraction failed: {e}")
+
+        if reviews:
+            result = ' ||| '.join(reviews)
+            print(f"    [OK] Detailed_Reviews: {collected} reviews, {len(result)} chars")
+            return result
+
+        print(f"    [WARNING] No reviews found in DOM")
+        return None
+
     def update_db(self, product_url, crawl_datetime, data):
         """bby_tv_crawl + tv_retail_com UPDATE"""
         try:
@@ -502,24 +564,8 @@ class BbyTvReviewRecovery:
                 # 4. 캡처 데이터 파싱
                 data = self.parse_graphql_reviews(captured_data)
 
-                # 5. GraphQL 리뷰 부족 시 DOM에서 추가 추출 (리뷰 탭 클릭 후 DOM에 렌더링되어 있을 수 있음)
-                review_count_from_gql = data['detailed_review_content'].count('review') if data['detailed_review_content'] else 0
-                if review_count_from_gql < 10:
-                    time.sleep(2)
-                    dom_reviews = self.page.run_js('''
-                        var reviews = [];
-                        document.querySelectorAll('p.pre-white-space').forEach(function(el) {
-                            var text = el.textContent.trim();
-                            if (text && text.length > 10) reviews.push(text);
-                        });
-                        return reviews;
-                    ''')
-                    if dom_reviews and len(dom_reviews) > review_count_from_gql:
-                        formatted = []
-                        for j, text in enumerate(dom_reviews[:20], 1):
-                            formatted.append(f"review{j} - {text}")
-                        data['detailed_review_content'] = ' ||| '.join(formatted)
-                        print(f"    [OK] DOM Reviews: {len(dom_reviews)} extracted (upgraded from {review_count_from_gql})")
+                # 5. DOM에서 리뷰 20개 수집 (페이지네이션 포함)
+                data['detailed_review_content'] = self.extract_reviews_from_dom()
 
                 if not data['detailed_review_content']:
                     print(f"    [FAIL] detailed_review_content still NULL")

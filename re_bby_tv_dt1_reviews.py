@@ -369,6 +369,8 @@ class BbyTvReviewRecovery:
                 review_xpaths = self.config.get_xpath_list('review_items', self.file_name) or [
                     '//li[@class="review-item"]//div[@class="ugc-review-body"]//p[@class="pre-white-space"]'
                 ]
+                # fallback: 리다이렉트된 페이지에서 중간 구조가 다를 수 있으므로 간소화 xpath 추가
+                review_xpaths.append('//li[@class="review-item"]//p[@class="pre-white-space"]')
                 review_elements = []
                 for xpath in review_xpaths:
                     review_elements = tree.xpath(xpath)

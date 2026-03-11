@@ -103,9 +103,9 @@ class BbyTvReviewRecovery:
             return None
 
     def navigate_to_reviews_page(self, product_url):
-        """리뷰 페이지로 이동 (버튼 클릭 → fallback: 직접 URL)"""
+        """리뷰 페이지로 이동 - 제품 페이지 접근 → SKU 추출 → /site/reviews/ 직접 이동"""
         try:
-            # 1. 제품 페이지 접근
+            # 1. 제품 페이지 접근 (BestBuy SKU 번호 추출용)
             self.page.get(product_url)
 
             # h1 로딩 대기
@@ -117,93 +117,41 @@ class BbyTvReviewRecovery:
                 print(f"    [ERROR] Product page load failed")
                 return False
 
-            # 2. See All Customer Reviews 버튼 검색
-            selectors = self.config.get_xpath_list('see_all_reviews_btn', self.file_name) or [
-                'xpath://button[contains(., "See All Customer Reviews")]',
-                'xpath://button[contains(@class, "Op9coqeII1kYHR9Q")]',
-                'css:button.Op9coqeII1kYHR9Q'
-            ]
-
-            # DOM에서 바로 검색
-            for selector in selectors:
-                try:
-                    button = self.page.ele(selector, timeout=2)
-                    if button:
-                        print("    [OK] See All Reviews button found (in DOM)")
-                        button.scroll.to_see()
-                        time.sleep(0.5)
-                        button.click()
-                        time.sleep(3)
-                        return True
-                except:
-                    continue
-
-            # 단계적 스크롤 후 검색
-            for scroll_pct in [0.7, 0.85, 1.0]:
-                self.page.run_js(f"window.scrollTo(0, document.body.scrollHeight * {scroll_pct})")
-                time.sleep(1)
-                for selector in selectors:
-                    try:
-                        button = self.page.ele(selector, timeout=2)
-                        if button:
-                            print(f"    [OK] See All Reviews button found (after scroll {int(scroll_pct*100)}%)")
-                            button.scroll.to_see()
-                            time.sleep(0.5)
-                            button.click()
-                            time.sleep(3)
-                            return True
-                    except:
-                        continue
-
-            # 3. fallback: 직접 URL 접근
-            print("    [INFO] Button not found, trying direct URL...")
-            return self.navigate_to_reviews_url(product_url)
-
-        except Exception as e:
-            print(f"    [ERROR] Navigate to reviews page failed: {e}")
-            return False
-
-    def navigate_to_reviews_url(self, product_url):
-        """리뷰 페이지 직접 URL 접근 (fallback)"""
-        try:
-            # BestBuy SKU 번호 추출
+            # 2. BestBuy SKU 번호 추출
             expected_sku = self.extract_bestbuy_sku_number()
             if not expected_sku:
                 print("    [WARNING] Could not extract BestBuy SKU number")
                 return False
+            print(f"    [OK] BestBuy SKU: {expected_sku}")
 
-            # slug 추출
+            # 3. slug 추출
             match = re.search(r'/product/([^/]+)/', product_url)
             if not match:
                 print("    [WARNING] Could not extract product slug")
                 return False
             product_slug = match.group(1)
 
+            # 4. /site/reviews/ 직접 이동
             reviews_url = f"https://www.bestbuy.com/site/reviews/{product_slug}/{expected_sku}"
             print(f"    [INFO] Reviews URL: {reviews_url}")
-
             self.page.get(reviews_url)
             time.sleep(3)
 
-            # 리다이렉트 감지 → 리뷰 콘텐츠 대기
+            # 5. 리뷰 페이지 로드 확인
             current_url = self.page.url
-            if '/site/reviews/' not in current_url:
-                print(f"    [INFO] Redirected - waiting for review content...")
-                try:
-                    self.page.ele('xpath://li[@class="review-item"]//p[@class="pre-white-space"]', timeout=10)
-                    print(f"    [OK] Review content loaded after redirect")
-                except:
-                    print(f"    [WARNING] Review content not loaded after redirect")
+            print(f"    [INFO] Current URL: {current_url[:100]}")
 
-            page_html = self.page.html
-            if "reviews" in page_html.lower() or "rating" in page_html.lower():
+            # reviews-accordion 대기
+            try:
+                self.page.ele('xpath://div[@id="reviews-accordion"]', timeout=10)
                 print("    [OK] Reviews page loaded")
-                return True
-            else:
-                print("    [WARNING] Reviews page may not have loaded correctly")
-                return True
+            except:
+                print("    [WARNING] reviews-accordion not found")
+
+            return True
+
         except Exception as e:
-            print(f"    [ERROR] Direct URL navigation failed: {e}")
+            print(f"    [ERROR] Navigate to reviews page failed: {e}")
             return False
 
     def extract_bestbuy_sku_number(self):
@@ -267,8 +215,7 @@ class BbyTvReviewRecovery:
             print("    [WARNING] Review content DOM wait timeout, waiting 3s fallback")
             time.sleep(3)
 
-        # tree 파싱 (top_mentions, summarized, recommendation_intent용)
-        # page.html 대신 JS로 렌더링된 DOM을 직접 가져옴 (동적 콘텐츠 반영)
+        # tree 파싱
         page_source = self.page.run_js('return document.documentElement.outerHTML')
         tree = html.fromstring(page_source)
 

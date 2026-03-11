@@ -1682,10 +1682,16 @@ class BestBuyDetailCrawler:
         """See All Customer Reviews - JS 클릭 우선, DrissionPage 셀렉터, 직접 URL 순서 (DrissionPage)"""
         try:
             print("  [INFO] See All Customer Reviews button searching...")
+            original_url = self.page.url
 
-            # 1. JS로 직접 버튼 검색 + 클릭 (recovery script와 동일 방식 - 가장 안정적)
-            for scroll_pct in [0.0, 0.7, 0.85, 1.0]:
-                if scroll_pct > 0:
+            # 1. 리뷰 섹션으로 스크롤 (lazy loading 트리거 - recovery script와 동일)
+            self.page.run_js("window.scrollTo(0, document.body.scrollHeight * 0.7)")
+            time.sleep(1)
+
+            # 2. JS로 직접 버튼 검색 + 클릭
+            clicked = False
+            for scroll_pct in [0.7, 0.85, 1.0]:
+                if scroll_pct > 0.7:
                     self.page.run_js(f"window.scrollTo(0, document.body.scrollHeight * {scroll_pct})")
                     time.sleep(1.5)
 
@@ -1704,35 +1710,50 @@ class BestBuyDetailCrawler:
 
                 if js_result != 'not found':
                     print(f"  [OK] See All Customer Reviews (JS): {js_result}")
-                    time.sleep(5)
+                    clicked = True
+                    break
+
+            # 3. JS 실패 시 DrissionPage 셀렉터 시도
+            if not clicked:
+                selectors = self.config.get_xpath_list('see_all_reviews_btn', self.file_name) or [
+                    'xpath://button[contains(., "See All Customer Reviews")]',
+                    'xpath://button[contains(@class, "Op9coqeII1kYHR9Q")]',
+                    'css:button.Op9coqeII1kYHR9Q'
+                ]
+                for selector in selectors:
+                    try:
+                        button = self.page.ele(selector, timeout=2)
+                        if button:
+                            print(f"  [OK] See All Customer Reviews button found (selector)")
+                            button.scroll.to_see()
+                            time.sleep(0.5)
+                            button.click()
+                            clicked = True
+                            break
+                    except:
+                        continue
+
+            # 4. 클릭 성공 시 페이지 이동 확인
+            if clicked:
+                time.sleep(5)
+                current_url = self.page.url
+                print(f"  [INFO] Reviews page URL: {current_url[:100]}")
+
+                # 페이지가 이동했으면 성공
+                if current_url != original_url:
                     return True
 
-            # 2. DrissionPage 셀렉터 기반 검색 (config 기반)
-            selectors = self.config.get_xpath_list('see_all_reviews_btn', self.file_name) or [
-                'xpath://button[contains(., "See All Customer Reviews")]',
-                'xpath://button[contains(@class, "Op9coqeII1kYHR9Q")]',
-                'css:button.Op9coqeII1kYHR9Q'
-            ]
-            for selector in selectors:
-                try:
-                    button = self.page.ele(selector, timeout=2)
-                    if button:
-                        print(f"  [OK] See All Customer Reviews button found (selector)")
-                        button.scroll.to_see()
-                        time.sleep(0.5)
-                        button.click()
-                        print("  [OK] See All Customer Reviews click successful")
-                        time.sleep(5)
-                        return True
-                except:
-                    continue
+                # 페이지 미이동 - 제품 페이지에 머물러 있음 → direct URL fallback
+                print(f"  [WARNING] Page did not navigate after button click. Trying direct URL...")
+                if product_url and self.navigate_to_reviews_page(product_url):
+                    return True
+            else:
+                # 5. 버튼 못 찾으면 직접 URL 접근 시도 (fallback)
+                print("  [WARNING] See All Customer Reviews button not found. Trying direct URL...")
+                if product_url and self.navigate_to_reviews_page(product_url):
+                    return True
 
-            # 3. 버튼 못 찾으면 직접 URL 접근 시도 (fallback)
-            print("  [WARNING] See All Customer Reviews button not found. Trying direct URL...")
-            if product_url and self.navigate_to_reviews_page(product_url):
-                return True
-
-            print("  [ERROR] Both button click and direct URL navigation failed.")
+            print("  [ERROR] All review page navigation methods failed.")
             return False
 
         except Exception as e:

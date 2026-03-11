@@ -2,7 +2,7 @@
 bby_tv_dt1 Review Recovery Script
 - detailed_review_content, top_mentions, summarized_review_content NULL 복구
 - count_of_reviews > 0인데 위 컬럼이 NULL인 레코드 대상
-- 리뷰 페이지 접근 → 추출 → bby_tv_crawl + tv_retail_com UPDATE
+- Bazaarvoice API로 리뷰 데이터 직접 조회 → bby_tv_crawl + tv_retail_com UPDATE
 
 사용법:
     python re_bby_tv_dt1_reviews.py                          # 날짜 입력 모드
@@ -12,6 +12,7 @@ bby_tv_dt1 Review Recovery Script
 import time
 import re
 import sys
+import requests
 import psycopg2
 from datetime import datetime
 import pytz
@@ -28,6 +29,7 @@ class BbyTvReviewRecovery:
         self.korea_tz = pytz.timezone('Asia/Seoul')
         self.config = get_config()
         self.file_name = 'bby_tv_dt1'
+        self.bv_passkey = None  # Bazaarvoice API passkey (페이지에서 1회 추출)
 
     def connect_db(self):
         try:
@@ -101,75 +103,138 @@ class BbyTvReviewRecovery:
             print(f"[ERROR] Summary query failed: {e}")
             return None
 
-    def navigate_to_reviews_page(self, product_url):
-        """리뷰 페이지로 이동 - 제품 페이지 → 스크롤 → See All Customer Reviews 버튼 클릭
-        /site/reviews/ URL은 제품 페이지로 리다이렉트되므로 버튼 클릭 방식 사용
-        """
+    def extract_bv_passkey(self):
+        """페이지 소스에서 Bazaarvoice API passkey 추출 (1회만)"""
+        if self.bv_passkey:
+            return self.bv_passkey
+
         try:
-            # 1. 제품 페이지 접근
-            self.page.get(product_url)
-
-            # h1 로딩 대기
-            h1_elem = self.page.ele(
-                'xpath://h1[contains(@class, "h4") or contains(@class, "heading")]',
-                timeout=20
-            )
-            if not h1_elem:
-                print(f"    [ERROR] Product page load failed")
-                return False
-
-            # 2. See All Customer Reviews 버튼 검색 (단계적 스크롤)
-            selectors = self.config.get_xpath_list('see_all_reviews_btn', self.file_name) or [
-                'xpath://button[contains(., "See All Customer Reviews")]',
+            page_html = self.page.html
+            # BV 설정에서 passkey 추출 (다양한 패턴 시도)
+            patterns = [
+                r'"passkey"\s*:\s*"([a-zA-Z0-9]+)"',
+                r'passkey=([a-zA-Z0-9]+)',
+                r"'passkey'\s*:\s*'([a-zA-Z0-9]+)'",
+                r'apiKey["\']?\s*[:=]\s*["\']([a-zA-Z0-9]+)["\']',
             ]
+            for pattern in patterns:
+                match = re.search(pattern, page_html)
+                if match:
+                    self.bv_passkey = match.group(1)
+                    print(f"    [OK] BV passkey found: {self.bv_passkey[:8]}...")
+                    return self.bv_passkey
 
-            # DOM에서 바로 검색
-            for selector in selectors:
-                try:
-                    button = self.page.ele(selector, timeout=2)
-                    if button:
-                        print("    [OK] See All Reviews button found (in DOM)")
-                        button.scroll.to_see()
-                        time.sleep(0.5)
-                        button.click()
-                        time.sleep(5)
+            # JS로 BV 설정 직접 추출 시도
+            bv_key = self.page.run_js('''
+                try {
+                    if (window.$BV && window.$BV.Internal && window.$BV.Internal.config) {
+                        return window.$BV.Internal.config.passKey || null;
+                    }
+                    if (window.BV && window.BV.options) {
+                        return window.BV.options.passkey || null;
+                    }
+                } catch(e) {}
+                return null;
+            ''')
+            if bv_key:
+                self.bv_passkey = bv_key
+                print(f"    [OK] BV passkey from JS: {self.bv_passkey[:8]}...")
+                return self.bv_passkey
 
-                        # 버튼 클릭 후 URL 확인
-                        current_url = self.page.url
-                        print(f"    [INFO] After click URL: {current_url[:100]}")
-                        return True
-                except:
-                    continue
-
-            # 단계적 스크롤 후 검색
-            for scroll_pct in [0.5, 0.7, 0.85, 1.0]:
-                self.page.run_js(f"window.scrollTo(0, document.body.scrollHeight * {scroll_pct})")
-                time.sleep(1.5)
-                for selector in selectors:
-                    try:
-                        button = self.page.ele(selector, timeout=2)
-                        if button:
-                            print(f"    [OK] See All Reviews button found (after scroll {int(scroll_pct*100)}%)")
-                            button.scroll.to_see()
-                            time.sleep(0.5)
-                            button.click()
-                            time.sleep(5)
-
-                            current_url = self.page.url
-                            print(f"    [INFO] After click URL: {current_url[:100]}")
-                            return True
-                    except:
-                        continue
-
-            print("    [WARNING] See All Reviews button not found")
-            return False
-
+            print("    [WARNING] BV passkey not found in page source")
+            return None
         except Exception as e:
-            print(f"    [ERROR] Navigate to reviews page failed: {e}")
-            return False
+            print(f"    [ERROR] BV passkey extraction failed: {e}")
+            return None
 
-    def extract_all_review_data(self):
-        """리뷰 페이지에서 모든 리뷰 데이터 추출 - DrissionPage eles() 사용 (live DOM 직접 접근)"""
+    def extract_numeric_sku(self, product_url):
+        """URL 또는 페이지에서 numeric SKU 추출"""
+        # 1. URL에서 직접 추출 (/sku/1234567 또는 /1234567)
+        match = re.search(r'/(\d{7,})(?:\?|$|#)', product_url)
+        if match:
+            return match.group(1)
+
+        # 2. 페이지 소스에서 추출
+        try:
+            page_html = self.page.html
+            match = re.search(r'mbo-entrypoint-(\d+)', page_html)
+            if match:
+                return match.group(1)
+            match = re.search(r'"skuId"\s*:\s*"(\d+)"', page_html)
+            if match:
+                return match.group(1)
+            match = re.search(r'SKU[:\s]+(\d{7,})', page_html)
+            if match:
+                return match.group(1)
+        except:
+            pass
+        return None
+
+    def fetch_reviews_from_bv_api(self, sku_id):
+        """Bazaarvoice API로 리뷰 데이터 직접 조회"""
+        if not self.bv_passkey:
+            print("    [ERROR] No BV passkey available")
+            return None
+
+        url = "https://api.bazaarvoice.com/data/reviews.json"
+        params = {
+            'apiversion': '5.4',
+            'passkey': self.bv_passkey,
+            'Filter': f'ProductId:{sku_id}',
+            'Include': 'Products',
+            'Stats': 'Reviews',
+            'Limit': '20',
+            'Sort': 'SubmissionTime:desc'
+        }
+
+        try:
+            resp = requests.get(url, params=params, timeout=15)
+            if resp.status_code != 200:
+                print(f"    [ERROR] BV API HTTP {resp.status_code}")
+                return None
+
+            data = resp.json()
+
+            if data.get('HasErrors'):
+                errors = data.get('Errors', [])
+                print(f"    [ERROR] BV API error: {errors}")
+                return None
+
+            return data
+        except Exception as e:
+            print(f"    [ERROR] BV API request failed: {e}")
+            return None
+
+    def fetch_reviews_via_browser(self, sku_id):
+        """브라우저 내에서 BV API fetch (CORS 우회)"""
+        if not self.bv_passkey:
+            return None
+
+        api_url = (
+            f"https://api.bazaarvoice.com/data/reviews.json"
+            f"?apiversion=5.4&passkey={self.bv_passkey}"
+            f"&Filter=ProductId:{sku_id}"
+            f"&Include=Products&Stats=Reviews&Limit=20"
+            f"&Sort=SubmissionTime:desc"
+        )
+
+        try:
+            data = self.page.run_js(f'''
+                var xhr = new XMLHttpRequest();
+                xhr.open("GET", "{api_url}", false);
+                xhr.send();
+                if (xhr.status === 200) {{
+                    return JSON.parse(xhr.responseText);
+                }}
+                return null;
+            ''')
+            return data
+        except Exception as e:
+            print(f"    [ERROR] Browser BV fetch failed: {e}")
+            return None
+
+    def parse_bv_response(self, bv_data):
+        """Bazaarvoice API 응답에서 리뷰 데이터 파싱"""
         result = {
             'detailed_review_content': None,
             'top_mentions': None,
@@ -177,189 +242,125 @@ class BbyTvReviewRecovery:
             'recommendation_intent': None
         }
 
-        # 리뷰 콘텐츠 DOM 렌더링 대기
-        try:
-            found_elem = self.page.ele('xpath://li[@class="review-item"]//p[@class="pre-white-space"]', timeout=10)
-            print("    [OK] Review content rendered")
-            # 디버그: ele()가 찾은 요소 정보
-            if found_elem:
-                print(f"    [DEBUG] ele().tag={found_elem.tag}")
-                print(f"    [DEBUG] ele().text={repr(found_elem.text[:100]) if found_elem.text else 'None'}")
-                print(f"    [DEBUG] ele().html={found_elem.html[:200] if found_elem.html else 'None'}")
-                # eles()로 전체 개수 확인
-                all_elems = self.page.eles('xpath://li[@class="review-item"]//p[@class="pre-white-space"]')
-                print(f"    [DEBUG] eles() count={len(all_elems)}")
-                # p.pre-white-space 전체 검색
-                all_p = self.page.eles('xpath://p[@class="pre-white-space"]')
-                print(f"    [DEBUG] all p.pre-white-space count={len(all_p)}")
-                if all_p:
-                    print(f"    [DEBUG] first p text={repr(all_p[0].text[:100]) if all_p[0].text else 'None'}")
-        except:
-            print("    [WARNING] Review content DOM wait timeout, waiting 3s fallback")
-            time.sleep(3)
+        if not bv_data:
+            return result
 
-        # 1. Top Mentions (eles로 직접 추출)
-        result['top_mentions'] = self.extract_top_mentions()
-        print(f"    [✓] Top_Mentions: {result['top_mentions'][:50] if result['top_mentions'] else 'None'}")
+        # 1. Reviews → detailed_review_content
+        reviews_list = bv_data.get('Results', [])
+        if reviews_list:
+            formatted = []
+            for i, review in enumerate(reviews_list[:20], 1):
+                text = review.get('ReviewText', '').strip()
+                if text:
+                    formatted.append(f"review{i} - {text}")
+            if formatted:
+                result['detailed_review_content'] = ' ||| '.join(formatted)
 
-        # 2. Recommendation Intent
-        result['recommendation_intent'] = self.extract_recommendation_intent()
-        print(f"    [✓] Recommendation_Intent: {result['recommendation_intent']}")
+        total_reviews = bv_data.get('TotalResults', len(reviews_list))
+        content_len = len(result['detailed_review_content']) if result['detailed_review_content'] else 0
+        print(f"    [OK] BV Reviews: {len(reviews_list)} fetched (total: {total_reviews}), {content_len} chars")
 
-        # 3. Detailed Reviews (페이지네이션 포함)
-        result['detailed_review_content'] = self.extract_reviews()
-        review_len = len(result['detailed_review_content']) if result['detailed_review_content'] else 0
-        print(f"    [✓] Detailed_Reviews: {review_len} chars")
+        # 2. Top Mentions (TagDimensions에서 pros/cons 추출)
+        includes = bv_data.get('Includes', {})
+        products = includes.get('Products', {})
+        mentions = []
+        for product_id, product_data in products.items():
+            # ReviewStatistics에서 TagDistribution 추출
+            review_stats = product_data.get('ReviewStatistics', {})
+            tag_dist = review_stats.get('TagDistribution', {})
+            for tag_group, tag_values in tag_dist.items():
+                if isinstance(tag_values, list):
+                    for tv in tag_values:
+                        if isinstance(tv, dict):
+                            label = tv.get('Label') or tv.get('Id', '')
+                            if label:
+                                mentions.append(label)
+                elif isinstance(tag_values, dict):
+                    for tag_id, tag_info in tag_values.items():
+                        label = tag_info.get('Label', tag_id) if isinstance(tag_info, dict) else tag_id
+                        mentions.append(label)
 
-        # 4. Summarized Review Content
-        result['summarized_review_content'] = self.extract_summarized_review_content()
-        print(f"    [✓] Summarized_Review: {result['summarized_review_content'][:50] if result['summarized_review_content'] else 'None'}")
+        # 리뷰 자체의 TagDimensions에서도 추출
+        if not mentions:
+            for review in reviews_list[:5]:
+                tag_dims = review.get('TagDimensions', {})
+                for dim_name, dim_data in tag_dims.items():
+                    if isinstance(dim_data, dict):
+                        values = dim_data.get('Values', [])
+                        for v in values:
+                            mentions.append(v)
+                    elif isinstance(dim_data, list):
+                        mentions.extend(dim_data)
+
+        if mentions:
+            # 중복 제거 + 순서 유지
+            seen = set()
+            unique_mentions = []
+            for m in mentions:
+                if m not in seen:
+                    seen.add(m)
+                    unique_mentions.append(m)
+            result['top_mentions'] = ', '.join(unique_mentions)
+        print(f"    [OK] Top_Mentions: {result['top_mentions'] if result['top_mentions'] else 'None'}")
+
+        # 3. Recommendation Intent
+        for product_id, product_data in products.items():
+            review_stats = product_data.get('ReviewStatistics', {})
+            rec_pct = review_stats.get('RecommendedCount')
+            total_rec = review_stats.get('TotalReviewCount')
+            if rec_pct is not None and total_rec and total_rec > 0:
+                pct = round(rec_pct / total_rec * 100)
+                result['recommendation_intent'] = f"{pct}% would recommend to a friend"
+                break
+
+        print(f"    [OK] Recommendation_Intent: {result['recommendation_intent']}")
+
+        # 4. Summarized Review Content (BV API에는 AI 요약이 없을 수 있음)
+        # 없으면 None 유지
+        print(f"    [OK] Summarized_Review: (not available via BV API)")
 
         return result
 
-    def extract_top_mentions(self):
-        """Top Mentions 추출 - DrissionPage eles() 사용"""
-        try:
-            mentions = []
-            # 1순위: Pros + Cons data-feature-name
-            try:
-                pros = self.page.eles('xpath://div[contains(@class, "pros-container")]//button[@data-feature-name]')
-                for btn in pros:
-                    name = btn.attr('data-feature-name')
-                    if name:
-                        mentions.append(name.strip())
-                cons = self.page.eles('xpath://div[contains(@class, "cons-container")]//button[@data-feature-name]')
-                for btn in cons:
-                    name = btn.attr('data-feature-name')
-                    if name:
-                        mentions.append(name.strip())
-            except:
-                pass
+    def extract_page_review_data(self):
+        """페이지 DOM에서 top_mentions, summarized_review, recommendation 추출 (fallback)"""
+        data = self.page.run_js('''
+            var result = {};
 
+            // Top Mentions (pros/cons data-feature-name)
+            var mentions = [];
+            document.querySelectorAll('.pros-container button[data-feature-name]').forEach(function(el) {
+                mentions.push(el.getAttribute('data-feature-name'));
+            });
+            document.querySelectorAll('.cons-container button[data-feature-name]').forEach(function(el) {
+                mentions.push(el.getAttribute('data-feature-name'));
+            });
+            result.topMentions = mentions;
+
+            // Recommendation Intent
+            var recElem = document.querySelector('.recommendation-percent');
+            result.recommendationIntent = recElem ? recElem.textContent.trim() : null;
+
+            // Summarized Review Content
+            var sumElem = document.querySelector('p.mb-200.mt-none')
+                || document.querySelector('#reviews-accordion p.mb-200');
+            result.summarizedReview = sumElem ? sumElem.textContent.trim() : null;
+
+            return result;
+        ''')
+
+        result = {}
+        if data:
+            mentions = data.get('topMentions', [])
             if mentions:
-                return ', '.join(mentions)
+                result['top_mentions'] = ', '.join(mentions)
 
-            # 2순위: 기존 패턴
-            xpaths = [
-                'xpath://ul[@class="list-unstyled"]/li/a',
-                'xpath://div[contains(@class, "customer-review-pros-stats")]//span[@class="text-nowrap"]',
-            ]
-            for xpath in xpaths:
-                try:
-                    elems = self.page.eles(xpath)
-                    if elems:
-                        for elem in elems:
-                            text = elem.text.strip() if elem.text else ''
-                            if text:
-                                clean_text = re.sub(r'\s*\([\d,]+\)\s*$', '', text)
-                                clean_text = clean_text.replace('\xa0', ' ').strip()
-                                if clean_text:
-                                    mentions.append(clean_text)
-                        break
-                except:
-                    continue
-            return ', '.join(mentions) if mentions else None
-        except Exception as e:
-            print(f"    [ERROR] Top mentions extraction failed: {e}")
-            return None
+            rec = data.get('recommendationIntent')
+            if rec:
+                result['recommendation_intent'] = f"{rec} would recommend to a friend"
 
-    def extract_recommendation_intent(self):
-        """Recommendation Intent 추출 - DrissionPage ele() 사용"""
-        try:
-            xpaths = [
-                'xpath://span[contains(@class, "recommendation-percent")]',
-            ]
-            for xpath in xpaths:
-                try:
-                    elem = self.page.ele(xpath, timeout=2)
-                    if elem:
-                        percent = elem.text.strip() if elem.text else ''
-                        if percent:
-                            return f"{percent} would recommend to a friend"
-                except:
-                    continue
-            return None
-        except Exception as e:
-            print(f"    [ERROR] Recommendation intent extraction failed: {e}")
-            return None
+            result['summarized_review_content'] = data.get('summarizedReview')
 
-    def extract_reviews(self):
-        """리뷰 20개 추출 (페이지네이션 포함) - DrissionPage eles() 사용"""
-        try:
-            reviews = []
-            collected = 0
-            page_num = 1
-
-            while collected < 20:
-                # live DOM에서 직접 리뷰 요소 검색
-                review_elems = self.page.eles('xpath://li[@class="review-item"]//p[@class="pre-white-space"]')
-
-                if not review_elems:
-                    # fallback
-                    review_elems = self.page.eles('xpath://p[@class="pre-white-space"]')
-
-                for elem in review_elems:
-                    if collected >= 20:
-                        break
-                    review_text = elem.text.strip() if elem.text else ''
-                    if not review_text:
-                        # text가 비어있으면 inner_text 시도
-                        try:
-                            review_text = ' '.join(elem.raw_text.split()) if elem.raw_text else ''
-                        except:
-                            pass
-                    if review_text:
-                        collected += 1
-                        reviews.append(f"review{collected} - {review_text}")
-
-                if collected >= 20:
-                    break
-
-                # next page
-                try:
-                    next_button = self.page.ele('xpath://li[contains(@class, "page next")]//a', timeout=3)
-                    if next_button:
-                        print(f"    [INFO] Next page... (Page {page_num + 1})")
-                        next_button.scroll.to_see()
-                        time.sleep(2)
-                        next_button.click()
-                        time.sleep(4)
-                        # 다음 페이지 리뷰 렌더링 대기
-                        try:
-                            self.page.ele('xpath://li[@class="review-item"]//p[@class="pre-white-space"]', timeout=10)
-                        except:
-                            time.sleep(3)
-                        page_num += 1
-                    else:
-                        break
-                except:
-                    break
-
-            return ' ||| '.join(reviews) if reviews else None
-        except Exception as e:
-            print(f"    [ERROR] Review extraction failed: {e}")
-            return None
-
-    def extract_summarized_review_content(self):
-        """Summarized Review Content 추출 - DrissionPage ele() 사용"""
-        try:
-            xpaths = [
-                'xpath://p[@class="mb-200 mt-none"]',
-                'xpath://div[@id="reviews-accordion"]//p[contains(@class, "mb-200")]',
-            ]
-            for xpath in xpaths:
-                try:
-                    elem = self.page.ele(xpath, timeout=2)
-                    if elem:
-                        text = elem.text.strip() if elem.text else ''
-                        if text:
-                            return text
-                except:
-                    continue
-            return None
-        except Exception as e:
-            print(f"    [ERROR] Summarized review extraction failed: {e}")
-            return None
+        return result
 
     def update_db(self, product_url, crawl_datetime, data):
         """bby_tv_crawl + tv_retail_com UPDATE"""
@@ -415,7 +416,7 @@ class BbyTvReviewRecovery:
 
     def run(self, date_from=None, date_to=None):
         print("=" * 80)
-        print("  bby_tv_dt1 Review Recovery Script")
+        print("  bby_tv_dt1 Review Recovery Script (Bazaarvoice API)")
         print("  - detailed_review_content, top_mentions, summarized_review_content NULL 복구")
         print("=" * 80)
 
@@ -466,19 +467,65 @@ class BbyTvReviewRecovery:
         try:
             for i, rec in enumerate(null_records):
                 url = rec['product_url']
-                original_dt = rec['crawl_datetime']
                 print(f"\n[{i+1}/{len(null_records)}] {rec['retailer_sku_name'][:60]}...")
                 print(f"  URL: {url[:80]}...")
 
-                # 리뷰 페이지 접근
-                if not self.navigate_to_reviews_page(url):
-                    print(f"    [FAIL] Could not access reviews page")
+                # 1. 제품 페이지 접근 (SKU + BV passkey 추출용)
+                try:
+                    self.page.get(url)
+                    time.sleep(3)
+                except Exception as e:
+                    print(f"    [ERROR] Page load failed: {e}")
+                    fail_count += 1
+                    continue
+
+                # 2. numeric SKU 추출
+                numeric_sku = self.extract_numeric_sku(url)
+                if not numeric_sku:
+                    print("    [ERROR] Could not extract numeric SKU")
+                    fail_count += 1
+                    continue
+                print(f"    [OK] Numeric SKU: {numeric_sku}")
+
+                # 3. BV passkey 추출 (첫 제품에서 1회만)
+                if not self.bv_passkey:
+                    self.extract_bv_passkey()
+
+                # 4. Bazaarvoice API로 리뷰 조회
+                bv_data = self.fetch_reviews_from_bv_api(numeric_sku)
+
+                # API 실패 시 브라우저 내 fetch로 재시도
+                if not bv_data:
+                    print("    [INFO] Retrying via browser fetch...")
+                    bv_data = self.fetch_reviews_via_browser(numeric_sku)
+
+                if not bv_data:
+                    print(f"    [FAIL] BV API failed for SKU {numeric_sku}")
                     fail_count += 1
                     time.sleep(2)
                     continue
 
-                # 리뷰 데이터 추출
-                data = self.extract_all_review_data()
+                # 5. API 응답 파싱
+                data = self.parse_bv_response(bv_data)
+
+                # 6. 페이지 DOM에서 추가 데이터 보충 (top_mentions, summarized_review 등)
+                if not data['top_mentions'] or not data['summarized_review_content']:
+                    # 리뷰 탭으로 이동하여 DOM 데이터 추출 시도
+                    reviews_url = f"{url}/sku/{numeric_sku}#tabbed-customerreviews"
+                    try:
+                        self.page.get(reviews_url)
+                        time.sleep(5)
+                        page_data = self.extract_page_review_data()
+                        if not data['top_mentions'] and page_data.get('top_mentions'):
+                            data['top_mentions'] = page_data['top_mentions']
+                            print(f"    [OK] Top_Mentions from DOM: {data['top_mentions']}")
+                        if not data['summarized_review_content'] and page_data.get('summarized_review_content'):
+                            data['summarized_review_content'] = page_data['summarized_review_content']
+                            print(f"    [OK] Summarized_Review from DOM: {data['summarized_review_content'][:50]}")
+                        if not data['recommendation_intent'] and page_data.get('recommendation_intent'):
+                            data['recommendation_intent'] = page_data['recommendation_intent']
+                    except:
+                        pass
 
                 if not data['detailed_review_content']:
                     print(f"    [FAIL] detailed_review_content still NULL")
@@ -486,11 +533,10 @@ class BbyTvReviewRecovery:
                     time.sleep(2)
                     continue
 
-                # DB UPDATE (같은 URL의 해당 날짜 범위 레코드 모두)
+                # 7. DB UPDATE (같은 URL의 해당 날짜 범위 레코드 모두)
                 cursor = self.db_conn.cursor()
                 detail_table = self.config.get_table('detail_data') or 'bby_tv_crawl'
 
-                # 같은 URL + 같은 날짜 범위의 모든 NULL 레코드 업데이트
                 cursor.execute(f"""
                     SELECT crawl_datetime FROM {detail_table}
                     WHERE product_url = %s
@@ -514,7 +560,7 @@ class BbyTvReviewRecovery:
                     print(f"    [DB] No rows updated")
                     fail_count += 1
 
-                time.sleep(3)
+                time.sleep(2)
 
         except KeyboardInterrupt:
             print("\n[INFO] Interrupted by user")

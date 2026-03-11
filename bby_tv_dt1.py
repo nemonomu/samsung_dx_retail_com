@@ -1488,7 +1488,6 @@ class BestBuyDetailCrawler:
         저장 형식: "review1 - 내용 ||| review2 - 내용 ||| ... ||| review20 - 내용"
         """
         try:
-            time.sleep(3)  # page 로딩 wait
             reviews = []
             collected = 0
             page_num = 1
@@ -2049,6 +2048,18 @@ class BestBuyDetailCrawler:
                         print(f"  [OK] Reviews page loaded")
                 except:
                     print(f"  [WARNING] Reviews page element wait timeout")
+
+                # 리뷰 콘텐츠 렌더링 대기 (DOM 기반)
+                try:
+                    review_content = self.page.ele('xpath://li[@class="review-item"]//p[@class="pre-white-space"]', timeout=10)
+                    if review_content:
+                        print(f"  [OK] Review content rendered")
+                    else:
+                        print(f"  [WARNING] Review content not found in DOM, waiting 3s fallback")
+                        time.sleep(3)
+                except:
+                    print(f"  [WARNING] Review content DOM wait timeout, waiting 3s fallback")
+                    time.sleep(3)
 
                 reviews_page_source = self.page.html
                 reviews_tree = html.fromstring(reviews_page_source)

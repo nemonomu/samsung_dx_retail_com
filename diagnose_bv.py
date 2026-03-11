@@ -1,7 +1,7 @@
-"""Best Buy 리뷰 네트워크 요청 진단 스크립트 v2
-- DB에서 실제 product_url 가져와서 테스트
-- GraphQL (/gateway/graphql) 요청 캡처
-- 리뷰 탭 이동 시 어떤 API가 호출되는지 확인
+"""Best Buy 리뷰 네트워크 요청 진단 스크립트 v3
+- 리뷰 탭 실제 클릭하여 GraphQL 요청 트리거
+- request postData (operationName) 캡처
+- 리뷰 GraphQL operation 식별
 """
 import time
 import re
@@ -9,6 +9,7 @@ import json
 import psycopg2
 from DrissionPage import ChromiumPage, ChromiumOptions
 from config import DB_CONFIG
+
 
 def get_test_url():
     """DB에서 리뷰 있는 제품 URL 1개 가져오기"""
@@ -19,7 +20,7 @@ def get_test_url():
             SELECT product_url, retailer_sku_name, count_of_reviews
             FROM bby_tv_crawl
             WHERE account_name = 'Bestbuy'
-              AND CAST(NULLIF(REPLACE(count_of_reviews, ',', ''), '') AS INTEGER) > 0
+              AND CAST(NULLIF(REPLACE(count_of_reviews, ',', ''), '') AS INTEGER) > 100
               AND detailed_review_content IS NULL
             ORDER BY crawl_datetime DESC
             LIMIT 1
@@ -35,15 +36,74 @@ def get_test_url():
         return None, None, None
 
 
+def analyze_packet(packet, label=""):
+    """패킷 상세 분석"""
+    url = packet.url if packet.url else ''
+    print(f"    [{label}] {url[:100]}")
+
+    # request body 읽기 (여러 방식 시도)
+    req_body = None
+    for attr in ['body', 'postData', 'data']:
+        try:
+            val = getattr(packet.request, attr, None)
+            if val:
+                req_body = val
+                break
+        except:
+            continue
+
+    if req_body:
+        try:
+            if isinstance(req_body, str):
+                req_data = json.loads(req_body)
+            else:
+                req_data = req_body
+
+            if isinstance(req_data, dict):
+                op = req_data.get('operationName', 'N/A')
+                print(f"      operationName: {op}")
+                variables = req_data.get('variables', {})
+                print(f"      variables: {json.dumps(variables, ensure_ascii=False)[:300]}")
+            elif isinstance(req_data, list):
+                for j, item in enumerate(req_data[:3]):
+                    if isinstance(item, dict):
+                        print(f"      [{j}] op: {item.get('operationName', 'N/A')}")
+                        variables = item.get('variables', {})
+                        print(f"      [{j}] vars: {json.dumps(variables, ensure_ascii=False)[:200]}")
+        except Exception as e:
+            print(f"      req_body type: {type(req_body).__name__}, preview: {str(req_body)[:200]}")
+
+    # response body
+    try:
+        resp_body = packet.response.body
+        if isinstance(resp_body, dict):
+            print(f"      resp keys: {list(resp_body.keys())[:10]}")
+            if 'data' in resp_body and isinstance(resp_body['data'], dict):
+                data_keys = list(resp_body['data'].keys())
+                print(f"      data keys: {data_keys}")
+                # review 관련 키 상세 출력
+                for key in data_keys:
+                    val = resp_body['data'][key]
+                    if isinstance(val, dict):
+                        print(f"        {key} keys: {list(val.keys())[:15]}")
+                    elif isinstance(val, list):
+                        print(f"        {key}: list[{len(val)}]")
+                        if val and isinstance(val[0], dict):
+                            print(f"          first item keys: {list(val[0].keys())[:10]}")
+        elif isinstance(resp_body, list):
+            print(f"      resp: list[{len(resp_body)}]")
+    except Exception as e:
+        print(f"      [resp error] {e}")
+
+
 def main():
     print("=" * 80)
-    print("  Best Buy Review Network Diagnostic v2 (GraphQL)")
+    print("  Best Buy Review Network Diagnostic v3")
     print("=" * 80)
 
-    # DB에서 테스트 URL 가져오기
     test_url, sku_name, review_count = get_test_url()
     if not test_url:
-        print("[ERROR] No test URL found in DB")
+        print("[ERROR] No test URL found")
         return
 
     print(f"\n[TEST] {sku_name[:60]}...")
@@ -57,180 +117,136 @@ def main():
     print(f"\n[1] Loading product page...")
     page.get(test_url)
     time.sleep(5)
+    print(f"    Title: {page.title[:80]}")
 
-    # 현재 URL 확인 (리다이렉트 여부)
-    current_url = page.url
-    print(f"    Current URL: {current_url[:100]}")
+    # 2. Customer Reviews 탭 찾기
+    print(f"\n[2] Finding Customer Reviews tab...")
 
-    # SKU 추출 시도
-    page_html = page.html
-    sku = None
-    for pattern in [r'mbo-entrypoint-(\d+)', r'"skuId"\s*:\s*"(\d+)"', r'SKU[:\s]+(\d{7,})']:
-        match = re.search(pattern, page_html)
-        if match:
-            sku = match.group(1)
-            print(f"    SKU found ({pattern[:20]}...): {sku}")
-            break
+    # JS로 리뷰 탭 링크/버튼 찾기
+    tab_info = page.run_js('''
+        var result = [];
+        // 모든 링크/버튼에서 "review" 텍스트 검색
+        var allElements = document.querySelectorAll('a, button, [role="tab"]');
+        for (var i = 0; i < allElements.length; i++) {
+            var el = allElements[i];
+            var text = el.textContent.trim().toLowerCase();
+            if (text.includes('review') && text.length < 100) {
+                result.push({
+                    tag: el.tagName,
+                    text: el.textContent.trim().substring(0, 80),
+                    id: el.id || '',
+                    className: el.className || '',
+                    href: el.href || '',
+                    role: el.getAttribute('role') || ''
+                });
+            }
+        }
+        return result;
+    ''')
 
-    if not sku:
-        print("    [WARNING] SKU not found in page source")
-        # URL에서 시도
-        match = re.search(r'/(\d{7,})', test_url)
-        if match:
-            sku = match.group(1)
-            print(f"    SKU from URL: {sku}")
+    if tab_info:
+        print(f"    Found {len(tab_info)} review-related elements:")
+        for i, info in enumerate(tab_info):
+            print(f"      [{i}] <{info['tag']}> text=\"{info['text'][:60]}\"")
+            print(f"           class=\"{info['className'][:80]}\" id=\"{info['id']}\" role=\"{info['role']}\"")
+    else:
+        print("    No review-related elements found")
 
-    # 페이지 타이틀 확인
-    title = page.title
-    print(f"    Page title: {title[:80]}")
+    # 3. 네트워크 리스닝 시작 후 리뷰 탭 클릭
+    print(f"\n[3] Starting listener, then clicking reviews tab...")
+    page.listen.start('graphql')
 
-    # 2. 네트워크 리스닝 시작 (graphql + review 관련)
-    print(f"\n[2] Starting network listener...")
-    page.listen.start()
+    # 리뷰 섹션으로 스크롤 + 탭 클릭
+    click_result = page.run_js('''
+        // 리뷰 탭 찾기 및 클릭
+        var tabs = document.querySelectorAll('a, button, [role="tab"]');
+        for (var i = 0; i < tabs.length; i++) {
+            var text = tabs[i].textContent.trim().toLowerCase();
+            if ((text.includes('customer review') || text.includes('reviews'))
+                && !text.includes('write') && text.length < 50) {
+                tabs[i].scrollIntoView({behavior: "smooth", block: "center"});
+                tabs[i].click();
+                return 'clicked: ' + tabs[i].textContent.trim().substring(0, 50);
+            }
+        }
+        // fallback: #tabbed-customerreviews 앵커로 스크롤
+        var anchor = document.getElementById('tabbed-customerreviews');
+        if (anchor) {
+            anchor.scrollIntoView({behavior: "smooth", block: "start"});
+            return 'scrolled to #tabbed-customerreviews';
+        }
+        return 'not found';
+    ''')
+    print(f"    Result: {click_result}")
+    time.sleep(5)
 
-    # 3. 스크롤하여 리뷰 섹션 트리거
-    print(f"\n[3] Scrolling page...")
-    for scroll_pct in [0.3, 0.5, 0.7, 0.85, 1.0]:
-        page.run_js(f"window.scrollTo(0, document.body.scrollHeight * {scroll_pct})")
-        time.sleep(2)
-        print(f"    Scrolled to {int(scroll_pct*100)}%")
-
-    time.sleep(3)
-
-    # 4. 패킷 수집 및 분석
-    print(f"\n[4] Analyzing captured packets...")
-    graphql_packets = []
-    review_packets = []
-    all_domains = {}
-
-    for _ in range(100):
-        packet = page.listen.wait(timeout=1)
+    # 4. GraphQL 패킷 수집
+    print(f"\n[4] Capturing GraphQL requests after tab click...")
+    captured = 0
+    for _ in range(20):
+        packet = page.listen.wait(timeout=2)
         if not packet:
             break
-        url = packet.url if packet.url else ''
-
-        # 도메인 카운트
-        match = re.search(r'https?://([^/]+)', url)
-        if match:
-            domain = match.group(1)
-            all_domains[domain] = all_domains.get(domain, 0) + 1
-
-        # GraphQL 요청
-        if 'graphql' in url.lower():
-            graphql_packets.append(packet)
-            print(f"    [GRAPHQL] {url[:120]}")
-
-        # 리뷰 관련
-        keywords = ['review', 'bazaar', 'ugc', 'rating', 'comment', 'mention', 'bv']
-        if any(kw in url.lower() for kw in keywords):
-            review_packets.append(packet)
-            if 'graphql' not in url.lower():
-                print(f"    [REVIEW] {url[:120]}")
+        captured += 1
+        analyze_packet(packet, f"GQL-{captured}")
 
     page.listen.stop()
 
-    print(f"\n    Domains accessed:")
-    for domain, count in sorted(all_domains.items(), key=lambda x: -x[1])[:15]:
-        print(f"      {domain}: {count}")
+    if captured == 0:
+        print("    No GraphQL requests after tab click")
 
-    # GraphQL 요청 상세 분석
-    if graphql_packets:
-        print(f"\n[5] GraphQL request details ({len(graphql_packets)} requests):")
-        for i, packet in enumerate(graphql_packets[:5]):
-            print(f"\n    --- GraphQL #{i+1} ---")
-            try:
-                # 요청 body 확인
-                req_body = packet.request.body
-                if req_body:
-                    if isinstance(req_body, str):
-                        try:
-                            req_data = json.loads(req_body)
-                        except:
-                            req_data = req_body
-                    else:
-                        req_data = req_body
+        # Fallback: See All Reviews 버튼 클릭 시도
+        print(f"\n[5] Trying 'See All' button...")
+        page.listen.start('graphql')
 
-                    if isinstance(req_data, dict):
-                        op_name = req_data.get('operationName', 'N/A')
-                        print(f"    operationName: {op_name}")
-                        variables = req_data.get('variables', {})
-                        print(f"    variables: {json.dumps(variables, ensure_ascii=False)[:200]}")
-                        query = req_data.get('query', '')
-                        if query:
-                            print(f"    query (first 200): {query[:200]}")
-                    elif isinstance(req_data, list):
-                        for j, item in enumerate(req_data[:3]):
-                            if isinstance(item, dict):
-                                op_name = item.get('operationName', 'N/A')
-                                print(f"    [{j}] operationName: {op_name}")
-                    else:
-                        print(f"    body: {str(req_data)[:200]}")
-            except Exception as e:
-                print(f"    [ERROR reading request] {e}")
-
-            try:
-                # 응답 body 확인
-                resp_body = packet.response.body
-                if isinstance(resp_body, dict):
-                    print(f"    response keys: {list(resp_body.keys())[:10]}")
-                    if 'data' in resp_body:
-                        data_keys = list(resp_body['data'].keys()) if isinstance(resp_body['data'], dict) else type(resp_body['data'])
-                        print(f"    data keys: {data_keys}")
-                elif isinstance(resp_body, list):
-                    print(f"    response: list of {len(resp_body)} items")
-                    if resp_body and isinstance(resp_body[0], dict):
-                        print(f"    first item keys: {list(resp_body[0].keys())[:10]}")
-            except Exception as e:
-                print(f"    [ERROR reading response] {e}")
-    else:
-        print(f"\n[5] No GraphQL requests captured during scroll")
-
-    # 6. 리뷰 탭 클릭 시도
-    if sku:
-        print(f"\n[6] Trying reviews tab navigation...")
-        reviews_url = f"{test_url}/sku/{sku}#tabbed-customerreviews"
-        print(f"    URL: {reviews_url}")
-
-        page.listen.start()
-        page.get(reviews_url)
+        btn_result = page.run_js('''
+            var btns = document.querySelectorAll('button, a');
+            for (var i = 0; i < btns.length; i++) {
+                var text = btns[i].textContent.trim().toLowerCase();
+                if (text.includes('see all') && text.includes('review')) {
+                    btns[i].scrollIntoView({behavior: "smooth", block: "center"});
+                    btns[i].click();
+                    return 'clicked: ' + btns[i].textContent.trim().substring(0, 50);
+                }
+            }
+            return 'not found';
+        ''')
+        print(f"    Result: {btn_result}")
         time.sleep(5)
 
-        # 스크롤
-        for scroll_pct in [0.3, 0.5, 0.7, 1.0]:
-            page.run_js(f"window.scrollTo(0, document.body.scrollHeight * {scroll_pct})")
-            time.sleep(1.5)
-
-        time.sleep(3)
-
-        print(f"\n[7] Packets after reviews tab:")
-        for _ in range(100):
-            packet = page.listen.wait(timeout=1)
+        for _ in range(20):
+            packet = page.listen.wait(timeout=2)
             if not packet:
                 break
-            url = packet.url if packet.url else ''
-
-            if 'graphql' in url.lower():
-                print(f"    [GRAPHQL] {url[:80]}")
-                try:
-                    req_body = packet.request.body
-                    if isinstance(req_body, str):
-                        req_data = json.loads(req_body)
-                    else:
-                        req_data = req_body
-                    if isinstance(req_data, dict):
-                        print(f"      op: {req_data.get('operationName', 'N/A')}")
-                    elif isinstance(req_data, list):
-                        for item in req_data[:3]:
-                            if isinstance(item, dict):
-                                print(f"      op: {item.get('operationName', 'N/A')}")
-                except:
-                    pass
-
-            keywords = ['review', 'bazaar', 'ugc', 'rating', 'mention', 'bv']
-            if any(kw in url.lower() for kw in keywords) and 'graphql' not in url.lower():
-                print(f"    [REVIEW] {url[:120]}")
+            analyze_packet(packet, "GQL-SeeAll")
 
         page.listen.stop()
+
+    # 6. 현재 DOM에서 리뷰 콘텐츠 확인
+    print(f"\n[6] Checking DOM for review content...")
+    dom_check = page.run_js('''
+        var result = {};
+        result.preWhiteSpace = document.querySelectorAll('p.pre-white-space').length;
+        result.reviewItem = document.querySelectorAll('li.review-item').length;
+        result.ugcReviewBody = document.querySelectorAll('.ugc-review-body').length;
+        result.reviewText = document.querySelectorAll('[class*="review"]').length;
+
+        // 리뷰 텍스트 샘플
+        var firstReview = document.querySelector('p.pre-white-space');
+        result.firstReviewText = firstReview ? firstReview.textContent.trim().substring(0, 100) : null;
+
+        // 현재 URL
+        result.currentUrl = window.location.href;
+
+        return result;
+    ''')
+    if dom_check:
+        print(f"    p.pre-white-space: {dom_check.get('preWhiteSpace', 0)}")
+        print(f"    li.review-item: {dom_check.get('reviewItem', 0)}")
+        print(f"    .ugc-review-body: {dom_check.get('ugcReviewBody', 0)}")
+        print(f"    [class*='review']: {dom_check.get('reviewText', 0)}")
+        print(f"    First review: {dom_check.get('firstReviewText', 'None')}")
+        print(f"    Current URL: {dom_check.get('currentUrl', '')[:100]}")
 
     page.quit()
     print("\nDone.")

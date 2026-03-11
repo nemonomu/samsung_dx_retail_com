@@ -352,13 +352,22 @@ class BbyTvReviewRecovery:
                 review_info = product.get('reviewInfo', {})
 
                 # AI 요약 텍스트 찾기
-                summary = (review_info.get('aiSummary') or review_info.get('summary')
-                          or review_info.get('reviewSummary'))
-                if isinstance(summary, dict):
-                    summary = summary.get('text') or summary.get('content') or summary.get('summary', '')
+                summary = None
+                for key in ['aiSummary', 'summary', 'reviewSummary']:
+                    val = review_info.get(key)
+                    if val:
+                        if isinstance(val, str) and len(val.strip()) > 5:
+                            summary = val.strip()
+                            break
+                        elif isinstance(val, dict):
+                            summary = (val.get('text') or val.get('content')
+                                      or val.get('summary') or val.get('body', ''))
+                            if summary:
+                                summary = str(summary).strip()
+                                break
                 if summary:
-                    result['summarized_review_content'] = str(summary).strip()
-                    print(f"    [OK] AI Summary: {result['summarized_review_content'][:60]}...")
+                    result['summarized_review_content'] = summary
+                    print(f"    [OK] AI Summary: {summary[:60]}...")
                 else:
                     print(f"    [DEBUG] ai reviewInfo keys: {list(review_info.keys()) if isinstance(review_info, dict) else 'N/A'}")
             except Exception as e:
@@ -383,6 +392,61 @@ class BbyTvReviewRecovery:
                 print(f"    [ERROR] Recommendation parsing failed: {e}")
 
         return result
+
+    def click_see_all_reviews(self):
+        """See All Customer Reviews 버튼 클릭 → 리뷰 페이지로 이동"""
+        try:
+            # 리뷰 섹션으로 스크롤
+            self.page.run_js("window.scrollTo(0, document.body.scrollHeight * 0.7)")
+            time.sleep(1)
+
+            # See All Customer Reviews 버튼 찾기 + 클릭
+            result = self.page.run_js('''
+                var btns = document.querySelectorAll('button, a');
+                for (var i = 0; i < btns.length; i++) {
+                    var text = btns[i].textContent.trim().toLowerCase();
+                    if (text.includes('see all') && text.includes('review')) {
+                        btns[i].scrollIntoView({behavior: "smooth", block: "center"});
+                        btns[i].click();
+                        return 'clicked: ' + btns[i].textContent.trim().substring(0, 60);
+                    }
+                }
+                return 'not found';
+            ''')
+            print(f"    [INFO] See All Reviews: {result}")
+
+            if result == 'not found':
+                # 추가 스크롤 후 재시도
+                for scroll_pct in [0.8, 0.9, 1.0]:
+                    self.page.run_js(f"window.scrollTo(0, document.body.scrollHeight * {scroll_pct})")
+                    time.sleep(1.5)
+                    result = self.page.run_js('''
+                        var btns = document.querySelectorAll('button, a');
+                        for (var i = 0; i < btns.length; i++) {
+                            var text = btns[i].textContent.trim().toLowerCase();
+                            if (text.includes('see all') && text.includes('review')) {
+                                btns[i].scrollIntoView({behavior: "smooth", block: "center"});
+                                btns[i].click();
+                                return 'clicked: ' + btns[i].textContent.trim().substring(0, 60);
+                            }
+                        }
+                        return 'not found';
+                    ''')
+                    if result != 'not found':
+                        print(f"    [INFO] See All Reviews (scroll {int(scroll_pct*100)}%): {result}")
+                        break
+
+            if result == 'not found':
+                return False
+
+            # 리뷰 페이지 로딩 대기
+            time.sleep(5)
+            print(f"    [INFO] Reviews page URL: {self.page.url[:80]}")
+            return True
+
+        except Exception as e:
+            print(f"    [ERROR] See All Reviews click failed: {e}")
+            return False
 
     def extract_reviews_from_dom(self):
         """리뷰 탭 클릭 후 DOM에서 리뷰 20개 수집 (페이지네이션 포함)
@@ -591,10 +655,12 @@ class BbyTvReviewRecovery:
                 # 4. 캡처 데이터 파싱
                 data = self.parse_graphql_reviews(captured_data)
 
-                # 5. DOM에서 리뷰 20개 수집 시도 (페이지네이션 포함)
-                dom_reviews = self.extract_reviews_from_dom()
-                if dom_reviews:
-                    data['detailed_review_content'] = dom_reviews
+                # 5. "See All Customer Reviews" 클릭 → 리뷰 페이지 → DOM에서 20개 수집
+                see_all_result = self.click_see_all_reviews()
+                if see_all_result:
+                    dom_reviews = self.extract_reviews_from_dom()
+                    if dom_reviews:
+                        data['detailed_review_content'] = dom_reviews
 
                 if not data['detailed_review_content']:
                     print(f"    [FAIL] detailed_review_content still NULL")

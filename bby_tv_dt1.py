@@ -1702,10 +1702,35 @@ class BestBuyDetailCrawler:
                     result.allP = document.querySelectorAll('p').length;
                     result.reviewsAccordion = document.querySelectorAll('#reviews-accordion').length;
                     result.tabbedReviews = document.querySelectorAll('#tabbed-customerreviews').length;
+                    // 긴 텍스트를 가진 <p> 요소 샘플 (리뷰 후보)
+                    var longPs = [];
+                    document.querySelectorAll('p').forEach(function(el) {
+                        var text = el.textContent.trim();
+                        if (text.length > 80) {
+                            longPs.push({
+                                text: text.substring(0, 100),
+                                cls: el.className || '',
+                                parentCls: el.parentElement ? (el.parentElement.className || '') : '',
+                                parentTag: el.parentElement ? el.parentElement.tagName : ''
+                            });
+                        }
+                    });
+                    result.longParagraphs = longPs.slice(0, 5);
+                    // [class*="review"] 요소 상세
+                    var revEls = [];
+                    document.querySelectorAll('[class*="review"]').forEach(function(el) {
+                        revEls.push({
+                            tag: el.tagName,
+                            cls: el.className,
+                            childCount: el.children.length,
+                            text: el.textContent.trim().substring(0, 80)
+                        });
+                    });
+                    result.reviewElements = revEls.slice(0, 5);
                     return result;
                 ''')
                 print(f"  [WARNING] Reviews not rendered in DOM after 15s wait")
-                print(f"  [DIAG] DOM state: {diag}")
+                print(f"  [DIAG] DOM state: {json.dumps(diag, ensure_ascii=False, indent=2)[:2000]}")
                 return None
 
             safe_active = json.dumps(active_selector)

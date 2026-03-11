@@ -1559,6 +1559,48 @@ class BestBuyDetailCrawler:
 
         return captured_data
 
+    def parse_graphql_reviews(self, captured_data):
+        """GraphQL CustomerReviewList_Init 응답에서 리뷰 본문 파싱 (DOM 실패 시 fallback)"""
+        reviews_data = captured_data.get('reviews')
+        if not reviews_data:
+            return None
+        try:
+            product = reviews_data.get('data', {}).get('productBySkuId', {})
+            reviews_list = product.get('reviews', {})
+
+            review_items = []
+            if isinstance(reviews_list, dict):
+                edges = reviews_list.get('edges', [])
+                if edges:
+                    review_items = [e.get('node', e) for e in edges]
+                else:
+                    # topReviews 등 다른 키 시도
+                    for key in ['topReviews', 'items', 'nodes']:
+                        items = reviews_list.get(key, [])
+                        if items:
+                            review_items = items
+                            break
+            elif isinstance(reviews_list, list):
+                review_items = reviews_list
+
+            if review_items:
+                formatted = []
+                for i, review in enumerate(review_items[:20], 1):
+                    if isinstance(review, dict):
+                        text = (review.get('reviewText') or review.get('text')
+                                or review.get('comment') or review.get('body')
+                                or review.get('content', '')).strip()
+                        if text:
+                            formatted.append(f"review{i} - {text}")
+                if formatted:
+                    result = ' ||| '.join(formatted)
+                    print(f"  [OK] GraphQL reviews: {len(formatted)} reviews, {len(result)} chars")
+                    return result
+            return None
+        except Exception as e:
+            print(f"  [ERROR] GraphQL review parsing failed: {e}")
+            return None
+
     def parse_graphql_top_mentions(self, captured_data):
         """GraphQL pros_cons 응답에서 top_mentions 파싱"""
         pros_cons_data = captured_data.get('pros_cons')
@@ -2355,11 +2397,12 @@ class BestBuyDetailCrawler:
             if is_external_reviews:
                 print(f"  [INFO] 외부 리뷰 - 리뷰 페이지 수집 스킵 (detailed_reviews, top_mentions 등 수집 안함)")
             else:
-                # 9-0. GraphQL 캡처로 top_mentions, recommendation, AI summary 획득
+                # 9-0. GraphQL 캡처로 top_mentions, recommendation, AI summary, 리뷰 본문 획득
                 gql_data = self.capture_review_data_via_graphql()
                 gql_top_mentions = self.parse_graphql_top_mentions(gql_data)
                 gql_recommendation = self.parse_graphql_recommendation(gql_data)
                 gql_ai_summary = self.parse_graphql_ai_summary(gql_data)
+                gql_reviews = self.parse_graphql_reviews(gql_data)
 
                 # 9-1. See All Customer Reviews 클릭 → 리뷰 페이지 이동
                 on_reviews_page = self.click_see_all_reviews(product_url)
@@ -2377,12 +2420,18 @@ class BestBuyDetailCrawler:
                             star_rating = star_rating_from_reviews
                             print(f"  [✓] Star_Rating (from reviews page): {star_rating}")
 
-                    # 9-2. Detailed reviews: JS DOM 우선 → lxml fallback
+                    # 9-2. Detailed reviews: JS DOM 우선 → lxml fallback → GraphQL fallback
                     detailed_reviews = self.extract_reviews_from_js_dom()
                     if not detailed_reviews:
                         print(f"  [INFO] JS DOM review extraction failed, trying lxml fallback...")
                         detailed_reviews = self.extract_reviews()
-                    print(f"  [✓] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
+
+                # DOM/lxml 모두 실패 시 GraphQL 리뷰 본문 사용 (re 파일과 동일 fallback)
+                if not detailed_reviews and gql_reviews:
+                    detailed_reviews = gql_reviews
+                    print(f"  [INFO] Using GraphQL reviews as fallback")
+
+                print(f"  [✓] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
 
                 # 9-3. Top mentions: GraphQL 우선 → lxml fallback
                 if gql_top_mentions:

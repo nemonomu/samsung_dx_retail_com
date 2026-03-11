@@ -106,7 +106,16 @@ class BbyTvReviewRecovery:
         """페이지 소스에서 numeric SKU 추출"""
         try:
             page_html = self.page.html
-            for pattern in [r'mbo-entrypoint-(\d+)', r'"skuId"\s*:\s*"(\d+)"', r'SKU[:\s]+(\d{7,})']:
+            patterns = [
+                r'mbo-entrypoint-(\d+)',
+                r'"skuId"\s*:\s*"(\d+)"',
+                r'"sku_id"\s*:\s*"(\d+)"',
+                r'data-sku-id="(\d+)"',
+                r'skuId=(\d+)',
+                r'/sku/(\d{7,})',
+                r'SKU[:\s]+(\d{7,})',
+            ]
+            for pattern in patterns:
                 match = re.search(pattern, page_html)
                 if match:
                     return match.group(1)
@@ -544,16 +553,34 @@ class BbyTvReviewRecovery:
                 # 1. 제품 페이지 접근
                 try:
                     self.page.get(url)
-                    time.sleep(4)
+                    time.sleep(3)
+                    # h1 로딩 대기
+                    try:
+                        self.page.ele('xpath://h1', timeout=10)
+                    except:
+                        print(f"    [WARNING] h1 not found, waiting extra 3s...")
+                        time.sleep(3)
                 except Exception as e:
                     print(f"    [ERROR] Page load failed: {e}")
                     fail_count += 1
                     continue
 
+                # 페이지 상태 확인
+                page_title = self.page.title or ''
+                print(f"    [INFO] Page: {page_title[:60]}")
+
                 # 2. numeric SKU 추출
                 numeric_sku = self.extract_numeric_sku(url)
                 if not numeric_sku:
-                    print("    [ERROR] Could not extract numeric SKU")
+                    # 페이지가 안 열렸을 수 있음 - 재시도
+                    print("    [WARNING] SKU not found, retrying page load...")
+                    time.sleep(3)
+                    self.page.get(url)
+                    time.sleep(5)
+                    numeric_sku = self.extract_numeric_sku(url)
+
+                if not numeric_sku:
+                    print(f"    [ERROR] Could not extract numeric SKU (title: {page_title[:40]})")
                     fail_count += 1
                     continue
                 print(f"    [OK] Numeric SKU: {numeric_sku}")

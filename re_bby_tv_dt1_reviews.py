@@ -103,48 +103,94 @@ class BbyTvReviewRecovery:
             print(f"[ERROR] Summary query failed: {e}")
             return None
 
-    def extract_bv_passkey(self):
-        """페이지 소스에서 Bazaarvoice API passkey 추출 (1회만)"""
+    def capture_bv_passkey_via_network(self):
+        """네트워크 리스닝으로 Bazaarvoice API passkey 캡처
+        제품 페이지에서 리뷰 섹션 스크롤 → BV API 요청 발생 → passkey 추출
+        """
         if self.bv_passkey:
             return self.bv_passkey
 
         try:
-            page_html = self.page.html
-            # BV 설정에서 passkey 추출 (다양한 패턴 시도)
-            patterns = [
-                r'"passkey"\s*:\s*"([a-zA-Z0-9]+)"',
-                r'passkey=([a-zA-Z0-9]+)',
-                r"'passkey'\s*:\s*'([a-zA-Z0-9]+)'",
-                r'apiKey["\']?\s*[:=]\s*["\']([a-zA-Z0-9]+)["\']',
-            ]
-            for pattern in patterns:
-                match = re.search(pattern, page_html)
-                if match:
-                    self.bv_passkey = match.group(1)
-                    print(f"    [OK] BV passkey found: {self.bv_passkey[:8]}...")
-                    return self.bv_passkey
+            # 1. bazaarvoice.com 요청 리스닝 시작
+            self.page.listen.start('bazaarvoice.com')
 
-            # JS로 BV 설정 직접 추출 시도
-            bv_key = self.page.run_js('''
-                try {
-                    if (window.$BV && window.$BV.Internal && window.$BV.Internal.config) {
-                        return window.$BV.Internal.config.passKey || null;
-                    }
-                    if (window.BV && window.BV.options) {
-                        return window.BV.options.passkey || null;
-                    }
-                } catch(e) {}
-                return null;
-            ''')
-            if bv_key:
-                self.bv_passkey = bv_key
-                print(f"    [OK] BV passkey from JS: {self.bv_passkey[:8]}...")
-                return self.bv_passkey
+            # 2. 리뷰 섹션으로 스크롤하여 BV API 트리거
+            for scroll_pct in [0.5, 0.7, 0.85, 1.0]:
+                self.page.run_js(f"window.scrollTo(0, document.body.scrollHeight * {scroll_pct})")
+                time.sleep(1.5)
 
-            print("    [WARNING] BV passkey not found in page source")
+                # 패킷 확인 (non-blocking 대기)
+                packet = self.page.listen.wait(timeout=3)
+                if packet and packet.url:
+                    url_str = packet.url
+                    print(f"    [INFO] BV request captured: {url_str[:100]}...")
+
+                    # URL에서 passkey 추출
+                    match = re.search(r'[?&]passkey=([a-zA-Z0-9]+)', url_str)
+                    if match:
+                        self.bv_passkey = match.group(1)
+                        print(f"    [OK] BV passkey captured: {self.bv_passkey[:8]}...")
+                        self.page.listen.stop()
+                        return self.bv_passkey
+
+            self.page.listen.stop()
+            print("    [WARNING] No BV API request captured during scroll")
             return None
+
         except Exception as e:
-            print(f"    [ERROR] BV passkey extraction failed: {e}")
+            print(f"    [ERROR] BV passkey capture failed: {e}")
+            try:
+                self.page.listen.stop()
+            except:
+                pass
+            return None
+
+    def capture_bv_review_data(self, sku_id):
+        """네트워크 리스닝으로 BV API 응답 직접 캡처 (passkey + 리뷰 데이터 동시)"""
+        try:
+            # 리뷰 탭 URL로 이동하여 BV API 트리거
+            self.page.listen.start('bazaarvoice.com')
+
+            # 리뷰 섹션 스크롤
+            for scroll_pct in [0.3, 0.5, 0.7, 0.85, 1.0]:
+                self.page.run_js(f"window.scrollTo(0, document.body.scrollHeight * {scroll_pct})")
+                time.sleep(1)
+
+            # BV 패킷 수집 (최대 10초 대기)
+            packets = []
+            for _ in range(5):
+                packet = self.page.listen.wait(timeout=3)
+                if packet:
+                    packets.append(packet)
+                    # passkey 추출
+                    if not self.bv_passkey and packet.url:
+                        match = re.search(r'[?&]passkey=([a-zA-Z0-9]+)', packet.url)
+                        if match:
+                            self.bv_passkey = match.group(1)
+                            print(f"    [OK] BV passkey: {self.bv_passkey[:8]}...")
+                else:
+                    break
+
+            self.page.listen.stop()
+
+            # 캡처된 패킷에서 리뷰 데이터 찾기
+            for packet in packets:
+                try:
+                    body = packet.response.body
+                    if isinstance(body, dict) and 'Results' in body:
+                        print(f"    [OK] BV review data captured from network ({len(body.get('Results', []))} reviews)")
+                        return body
+                except:
+                    continue
+
+            return None
+
+        except Exception as e:
+            print(f"    [ERROR] BV capture failed: {e}")
+            try:
+                self.page.listen.stop()
+            except:
+                pass
             return None
 
     def extract_numeric_sku(self, product_url):
@@ -470,7 +516,7 @@ class BbyTvReviewRecovery:
                 print(f"\n[{i+1}/{len(null_records)}] {rec['retailer_sku_name'][:60]}...")
                 print(f"  URL: {url[:80]}...")
 
-                # 1. 제품 페이지 접근 (SKU + BV passkey 추출용)
+                # 1. 제품 페이지 접근
                 try:
                     self.page.get(url)
                     time.sleep(3)
@@ -487,45 +533,53 @@ class BbyTvReviewRecovery:
                     continue
                 print(f"    [OK] Numeric SKU: {numeric_sku}")
 
-                # 3. BV passkey 추출 (첫 제품에서 1회만)
+                bv_data = None
+
+                # 3. 방법 A: 네트워크 캡처로 BV passkey + 리뷰 데이터 동시 획득
                 if not self.bv_passkey:
-                    self.extract_bv_passkey()
+                    print("    [INFO] Capturing BV API via network listening...")
+                    bv_data = self.capture_bv_review_data(numeric_sku)
 
-                # 4. Bazaarvoice API로 리뷰 조회
-                bv_data = self.fetch_reviews_from_bv_api(numeric_sku)
+                # 4. 방법 B: passkey가 있으면 API 직접 호출
+                if not bv_data and self.bv_passkey:
+                    bv_data = self.fetch_reviews_from_bv_api(numeric_sku)
 
-                # API 실패 시 브라우저 내 fetch로 재시도
+                # 5. 방법 C: 리뷰 탭 URL로 이동 후 네트워크 캡처 재시도
                 if not bv_data:
+                    print("    [INFO] Navigating to reviews tab for network capture...")
+                    reviews_url = f"{url}/sku/{numeric_sku}#tabbed-customerreviews"
+                    try:
+                        self.page.get(reviews_url)
+                        time.sleep(3)
+                        bv_data = self.capture_bv_review_data(numeric_sku)
+                    except:
+                        pass
+
+                # 6. 방법 D: 브라우저 내 XHR fetch
+                if not bv_data and self.bv_passkey:
                     print("    [INFO] Retrying via browser fetch...")
                     bv_data = self.fetch_reviews_via_browser(numeric_sku)
 
                 if not bv_data:
-                    print(f"    [FAIL] BV API failed for SKU {numeric_sku}")
+                    print(f"    [FAIL] All BV methods failed for SKU {numeric_sku}")
                     fail_count += 1
                     time.sleep(2)
                     continue
 
-                # 5. API 응답 파싱
+                # 7. API 응답 파싱
                 data = self.parse_bv_response(bv_data)
 
-                # 6. 페이지 DOM에서 추가 데이터 보충 (top_mentions, summarized_review 등)
+                # 8. 페이지 DOM에서 추가 데이터 보충 (top_mentions, summarized_review 등)
                 if not data['top_mentions'] or not data['summarized_review_content']:
-                    # 리뷰 탭으로 이동하여 DOM 데이터 추출 시도
-                    reviews_url = f"{url}/sku/{numeric_sku}#tabbed-customerreviews"
-                    try:
-                        self.page.get(reviews_url)
-                        time.sleep(5)
-                        page_data = self.extract_page_review_data()
-                        if not data['top_mentions'] and page_data.get('top_mentions'):
-                            data['top_mentions'] = page_data['top_mentions']
-                            print(f"    [OK] Top_Mentions from DOM: {data['top_mentions']}")
-                        if not data['summarized_review_content'] and page_data.get('summarized_review_content'):
-                            data['summarized_review_content'] = page_data['summarized_review_content']
-                            print(f"    [OK] Summarized_Review from DOM: {data['summarized_review_content'][:50]}")
-                        if not data['recommendation_intent'] and page_data.get('recommendation_intent'):
-                            data['recommendation_intent'] = page_data['recommendation_intent']
-                    except:
-                        pass
+                    page_data = self.extract_page_review_data()
+                    if not data['top_mentions'] and page_data.get('top_mentions'):
+                        data['top_mentions'] = page_data['top_mentions']
+                        print(f"    [OK] Top_Mentions from DOM: {data['top_mentions']}")
+                    if not data['summarized_review_content'] and page_data.get('summarized_review_content'):
+                        data['summarized_review_content'] = page_data['summarized_review_content']
+                        print(f"    [OK] Summarized_Review from DOM: {data['summarized_review_content'][:50]}")
+                    if not data['recommendation_intent'] and page_data.get('recommendation_intent'):
+                        data['recommendation_intent'] = page_data['recommendation_intent']
 
                 if not data['detailed_review_content']:
                     print(f"    [FAIL] detailed_review_content still NULL")

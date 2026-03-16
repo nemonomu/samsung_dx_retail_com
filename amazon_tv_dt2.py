@@ -1065,7 +1065,7 @@ class AmazonDetailCrawler:
             # 구조: [id^="customer_review-"] > ... > div[data-hook="review-collapsed"] > span
             js_code = """
             var reviews = [];
-            var containers = document.querySelectorAll('[id^="customer_review-"]');
+            var containers = document.querySelectorAll('[id^="customer_review-"], [id^="customer_review_foreign-"]');
             containers.forEach(function(container) {
                 var collapsed = container.querySelector('[data-hook="review-collapsed"]');
                 if (collapsed) {
@@ -1085,6 +1085,8 @@ class AmazonDetailCrawler:
                 fallback_xpaths = self.xpaths.get('review_body_detail') or [
                     '//*[starts-with(@id, "customer_review-")]/div[4]/span/div/div[1]/span',
                     '//*[starts-with(@id, "customer_review-")]/div[4]/span/div/div[1]',
+                    '//*[starts-with(@id, "customer_review_foreign-")]/div[4]/span/div/div[1]/span',
+                    '//*[starts-with(@id, "customer_review_foreign-")]/div[4]/span/div/div[1]',
                 ]
                 for xpath in fallback_xpaths:
                     try:

@@ -79,7 +79,7 @@ class WalmartTVCrawler:
         try:
             cursor = self.db_conn.cursor()
             cursor.execute("""
-                SELECT data_field, xpath, css_selector
+                SELECT data_field, xpath, css_selector, fallback_xpath
                 FROM xpath_selectors
                 WHERE mall_name = 'Walmart' AND page_type = 'main' AND is_active = TRUE
             """)
@@ -87,7 +87,8 @@ class WalmartTVCrawler:
             for row in cursor.fetchall():
                 self.xpaths[row[0]] = {
                     'xpath': row[1],
-                    'css': row[2]
+                    'css': row[2],
+                    'fallback_xpath': row[3]
                 }
 
             cursor.close()
@@ -135,17 +136,23 @@ class WalmartTVCrawler:
         # Mouse movements are not critical for scraping, so we skip this in Selenium
         pass
 
-    def extract_text_safe(self, element, xpath):
-        """Safely extract text from element using xpath"""
+    def extract_text_safe(self, element, xpath, fallback_xpath=None):
+        """Safely extract text from element using xpath, with optional fallback"""
         try:
             result = element.xpath(xpath)
             if result:
-                # Handle attribute extraction (e.g., @href)
                 if isinstance(result[0], str):
                     return result[0].strip()
-                # Handle element extraction
                 else:
                     return result[0].text_content().strip()
+            # Try fallback xpath if primary failed
+            if fallback_xpath:
+                result = element.xpath(fallback_xpath)
+                if result:
+                    if isinstance(result[0], str):
+                        return result[0].strip()
+                    else:
+                        return result[0].text_content().strip()
             return None
         except Exception as e:
             return None
@@ -391,11 +398,11 @@ class WalmartTVCrawler:
                 membership_discount = "Walmart Plus" if membership_discount_elem else None
 
                 # Extract Available_Quantity_for_Purchase (numbers only: "only 1 left" -> "1")
-                available_quantity_raw = self.extract_text_safe(product, self.xpaths['available_quantity']['xpath'])
+                available_quantity_raw = self.extract_text_safe(product, self.xpaths['available_quantity']['xpath'], self.xpaths['available_quantity'].get('fallback_xpath'))
                 available_quantity = self.extract_number_only(available_quantity_raw) if available_quantity_raw else None
 
                 # Extract Inventory_Status
-                inventory_status = self.extract_text_safe(product, self.xpaths['inventory_status']['xpath'])
+                inventory_status = self.extract_text_safe(product, self.xpaths['inventory_status']['xpath'], self.xpaths['inventory_status'].get('fallback_xpath'))
 
                 data = {
                     'page_type': 'main',

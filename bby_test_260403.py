@@ -170,25 +170,35 @@ def main():
             # 2) 스크롤 (리뷰 섹션 로딩 대기, 약 5초)
             scroll_down(page)
 
-            page_html = page.html
-            tree = html.fromstring(page_html)
-
-            # 3) 상세페이지에서 추출 시도
+            # 3) 상세페이지에서 추출 시도 (로딩 대기 포함 재시도)
             top_mentions = None
             source = None
 
-            # 상세페이지 구조1 (table)
-            result = extract_detail_type1(tree)
-            if result:
-                top_mentions = result
-                source = '상세페이지-구조1(table)'
+            MAX_DETAIL_RETRY = 3
+            for attempt in range(1, MAX_DETAIL_RETRY + 1):
+                page_html = page.html
+                tree = html.fromstring(page_html)
 
-            # 상세페이지 구조2 (ul/li + Advantage/Disadvantage Icon)
-            if not top_mentions:
-                result = extract_detail_type2(tree)
-                if result:
-                    top_mentions = result
-                    source = '상세페이지-구조2(icon)'
+                # 상세페이지 구조1 (table)
+                if not top_mentions:
+                    result = extract_detail_type1(tree)
+                    if result:
+                        top_mentions = result
+                        source = '상세페이지-구조1(table)'
+
+                # 상세페이지 구조2 (ul/li + Advantage/Disadvantage Icon)
+                if not top_mentions:
+                    result = extract_detail_type2(tree)
+                    if result:
+                        top_mentions = result
+                        source = '상세페이지-구조2(icon)'
+
+                if top_mentions:
+                    break
+
+                if attempt < MAX_DETAIL_RETRY:
+                    print(f"  상세페이지 추출 재시도 ({attempt}/{MAX_DETAIL_RETRY})...")
+                    time.sleep(3)
 
             # 4) 상세페이지에서 못 찾으면 → 리뷰페이지로 이동
             if not top_mentions:

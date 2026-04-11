@@ -252,6 +252,13 @@ class WalmartDetailCrawler:
             # Convert dictionary to list (maintains insertion order: main first, then bsr)
             all_urls = list(url_data_map.values())
 
+            # Reassign sequential main_rank (1,2,3,...) for main items after deduplication
+            main_seq = 1
+            for item in all_urls:
+                if item.get('main_rank') is not None:
+                    item['main_rank'] = main_seq
+                    main_seq += 1
+
             # Count duplicates from source tables
             total_loaded = 0
             if main1_batch_id:

@@ -2052,6 +2052,7 @@ class AmazonDetailCrawler:
                 self.total_collected += 1
                 print(f"  [OK] Collected: {retailer_sku_name[:50] if retailer_sku_name else '[NO NAME]'}...")
                 print(f"       Star: {star_rating or 'N/A'} | Popularity: {sku_popularity or 'N/A'}")
+                print(f"       Price: {final_sku_price or 'N/A'} | Original: {original_sku_price or 'N/A'}")
                 print(f"       Rank1: {rank_1 or 'N/A'} | Rank2: {rank_2 or 'N/A'}")
                 print(f"       Main Rank: {data['main_rank'] or 'N/A'} | BSR Rank: {data['bsr_rank'] or 'N/A'}")
                 print(f"       Screen Size: {screen_size or 'N/A'} | Reviews Count: {count_of_reviews or 'N/A'}")

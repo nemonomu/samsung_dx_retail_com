@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from DrissionPage import ChromiumPage, ChromiumOptions
 from lxml import html
 import re
+import pytz
 
 
 class Tee:
@@ -38,7 +39,7 @@ class Tee:
 from config import DB_CONFIG
 from wmart_config_loader import get_wmart_config
 import pandas as pd
-from alert_monitor import monitor_and_alert
+from alert_monitor import monitor_and_alert, send_sku_renewed_alert
 
 class WalmartDetailCrawler:
     def __init__(self):
@@ -52,6 +53,7 @@ class WalmartDetailCrawler:
         # Error tracking for alert email
         self.drv_20_error_records = []  # count_of_reviews <= 20 but collected fewer reviews
         self.screen_size_mismatch_records = []  # screen_size mismatch between extracted and tv_item_mst
+        self.sku_updated_records = []  # sku renewed in tv_item_mst
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -288,11 +290,14 @@ class WalmartDetailCrawler:
             cursor = self.db_conn.cursor()
 
             # Use main1 batch_id as session start time (main1 is always first)
+            # batch_id is KST, crawl_datetime is server local time → convert KST to local
             if main1_batch_id:
-                session_start_time = datetime.strptime(main1_batch_id, '%Y%m%d_%H%M%S')
-                session_start_str = session_start_time.strftime('%Y-%m-%d %H:%M:%S')
+                korea_tz = pytz.timezone('Asia/Seoul')
+                session_start_kst = korea_tz.localize(datetime.strptime(main1_batch_id, '%Y%m%d_%H%M%S'))
+                session_start_local = session_start_kst.astimezone().replace(tzinfo=None)
+                session_start_str = session_start_local.strftime('%Y-%m-%d %H:%M:%S')
 
-                print(f"[INFO] Session start time (from main1 batch): {session_start_str}")
+                print(f"[INFO] Session start time (from main1 batch, KST→local): {main1_batch_id} → {session_start_str}")
 
                 # Get all distinct processed URLs from current session in Walmart_tv_detail_crawled
                 cursor.execute("""
@@ -2255,15 +2260,24 @@ class WalmartDetailCrawler:
                 crawl_datetime
             ))
 
-            # Insert into tv_item_mst (update screen_size on conflict)
+            # Insert into tv_item_mst (update sku and screen_size on conflict)
             # Extract SKU from product name
             sku = self.extract_sku(data['Retailer_SKU_Name'])
 
             if data.get('item'):
+                # Check existing sku before upsert
+                cursor.execute("""
+                    SELECT sku FROM tv_item_mst WHERE item = %s
+                """, (data['item'],))
+                existing_row = cursor.fetchone()
+                existing_sku = existing_row[0] if existing_row else None
+
                 cursor.execute("""
                     INSERT INTO tv_item_mst (item, product_url, sku, account_name, screen_size)
                     VALUES (%s, %s, %s, %s, %s)
                     ON CONFLICT (item) DO UPDATE SET
+                        sku = EXCLUDED.sku,
+                        product_url = EXCLUDED.product_url,
                         screen_size = COALESCE(tv_item_mst.screen_size, EXCLUDED.screen_size)
                 """, (
                     data['item'],
@@ -2273,6 +2287,17 @@ class WalmartDetailCrawler:
                     data.get('screen_size')
                 ))
                 print(f"  [DB] ✓ tv_item_mst upsert (item: {data['item']}, sku: {sku}, screen_size: {data.get('screen_size')})")
+
+                # Track sku renewal
+                if existing_sku and sku and existing_sku != sku:
+                    self.sku_updated_records.append({
+                        'account_name': account_name,
+                        'item': data['item'],
+                        'product_url': data['product_url'],
+                        'old_sku': existing_sku,
+                        'new_sku': sku
+                    })
+                    print(f"  [INFO] SKU renewed: {existing_sku} -> {sku}")
 
             # Commit transaction
             self.db_conn.commit()
@@ -2427,6 +2452,10 @@ class WalmartDetailCrawler:
                 monitor_and_alert('walmart', len(product_urls), results_df,
                                  drv_20_error_records=self.drv_20_error_records,
                                  screen_size_mismatch_records=self.screen_size_mismatch_records)
+
+                # Send SKU renewed alert if any
+                if self.sku_updated_records:
+                    send_sku_renewed_alert('Walmart TV', self.sku_updated_records)
             except Exception as e:
                 print(f"[WARNING] Failed to send alert: {e}")
 

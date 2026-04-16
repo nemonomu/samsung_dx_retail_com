@@ -64,17 +64,21 @@ def clean_stage_results():
         print(f"[WARNING] Failed to clean stage results: {e}")
 
 
-def run_crawler(script_name, stage_name):
+def run_crawler(script_name, stage_name, extra_args=None):
     """
     Run a crawler script and return structured result
+
+    Args:
+        extra_args: 추가 커맨드라인 인자 리스트 (선택)
 
     Returns:
         dict: {"success": bool, "elapsed": float, "timeout": bool,
                "collected_count": int or None, "target_count": int or None}
     """
+    cmd = [sys.executable, '-u', script_name] + (extra_args or [])
     start_time = time.time()
     print(f"\n[INFO] Starting {stage_name}...")
-    print(f"[INFO] Command: python {script_name}")
+    print(f"[INFO] Command: {' '.join(cmd)}")
     print(f"[INFO] Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
     result = {
@@ -87,7 +91,7 @@ def run_crawler(script_name, stage_name):
 
     try:
         proc = subprocess.run(
-            [sys.executable, '-u', script_name],
+            cmd,
             stdout=None,
             stderr=None,
             text=True,
@@ -188,6 +192,8 @@ def main():
         # 6시간 타이머 시작
         timer.start()
 
+        MAIN_TOTAL_LIMIT = 300  # main1+main2 합산 수집 제한
+
         # Stage definitions
         stages = [
             ("wmart_tv_main1.py", "wmart_tv_main1"),
@@ -196,21 +202,39 @@ def main():
             ("wmart_tv_dt1.py", "wmart_tv_dt1")
         ]
 
-        # Execute main1, main2, bsr
-        for i, (script, name) in enumerate(stages[:3], 1):
-            print_stage_header(name, i, 4)
-            result = run_crawler(script, name)
-            stage_results[name] = result
+        # Execute main1
+        print_stage_header("wmart_tv_main1", 1, 4)
+        result = run_crawler("wmart_tv_main1.py", "wmart_tv_main1")
+        stage_results["wmart_tv_main1"] = result
+        if not result["success"]:
+            failed_stages.append("wmart_tv_main1")
 
-            if not result["success"]:
-                failed_stages.append(name)
+        main1_collected = result.get("collected_count") or 0
+        remaining = max(0, MAIN_TOTAL_LIMIT - main1_collected)
+        print(f"\n[INFO] main1 수집: {main1_collected}개, main2 수집 제한: {remaining}개")
 
-            if i < 3:
-                print(f"\n[INFO] Waiting 5 seconds for driver cleanup...")
-                time.sleep(5)
+        print(f"\n[INFO] Waiting 5 seconds for driver cleanup...")
+        time.sleep(5)
+
+        # Execute main2 (남은 개수만큼만 수집)
+        print_stage_header("wmart_tv_main2", 2, 4)
+        result = run_crawler("wmart_tv_main2.py", "wmart_tv_main2",
+                            extra_args=['--max-skus', str(remaining)])
+        stage_results["wmart_tv_main2"] = result
+        if not result["success"]:
+            failed_stages.append("wmart_tv_main2")
+
+        print(f"\n[INFO] Waiting 5 seconds for driver cleanup...")
+        time.sleep(5)
+
+        # Execute bsr
+        print_stage_header("wmart_tv_bsr", 3, 4)
+        result = run_crawler("wmart_tv_bsr.py", "wmart_tv_bsr")
+        stage_results["wmart_tv_bsr"] = result
+        if not result["success"]:
+            failed_stages.append("wmart_tv_bsr")
 
         # main1+main2 합산 체크
-        main1_collected = (stage_results.get("wmart_tv_main1", {}).get("collected_count") or 0)
         main2_collected = (stage_results.get("wmart_tv_main2", {}).get("collected_count") or 0)
         bsr_collected = (stage_results.get("wmart_tv_bsr", {}).get("collected_count") or 0)
 

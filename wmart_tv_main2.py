@@ -776,6 +776,16 @@ class WalmartTVCrawler:
 if __name__ == "__main__":
     try:
         crawler = WalmartTVCrawler()
+
+        # --max-skus 인자 처리 (오케스트레이터에서 main1+main2 합산 300 제한용)
+        import argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--max-skus', type=int, default=None)
+        args, _ = parser.parse_known_args()
+        if args.max_skus is not None:
+            crawler.max_skus = args.max_skus
+            print(f"[INFO] max_skus overridden to {args.max_skus} (from orchestrator)")
+
         crawler.run()
     except Exception as e:
         print(f"\n[FATAL ERROR] {e}")

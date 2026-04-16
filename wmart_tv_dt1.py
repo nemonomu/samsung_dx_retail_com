@@ -2513,7 +2513,7 @@ if __name__ == "__main__":
                     pass
 
     # 로그 파일 설정 (실행 시작 일시)
-    log_filename = "C:\\samsung_dx_retail_com\\log\\" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".txt"
+    log_filename = "C:\\samsung_dx_retail_com\\log\\" + datetime.now().strftime("%Y%m%d_%H%M%S") + "_dt1.txt"
     tee = Tee(log_filename)
     sys.stdout = tee
 

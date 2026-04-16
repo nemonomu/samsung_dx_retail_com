@@ -6,11 +6,32 @@ import pytz
 from DrissionPage import ChromiumPage
 from lxml import html
 import re
+import os
+import sys
 from urllib.parse import urlparse, parse_qs, unquote
 
 # Import database configuration
 from config import DB_CONFIG
 from wmart_config_loader import get_wmart_config
+
+
+class Tee:
+    """stdout을 콘솔과 파일 둘 다에 출력"""
+    def __init__(self, filename):
+        self.terminal = sys.stdout
+        self.log = open(filename, 'w', encoding='utf-8')
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+        self.log.flush()
+
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
+
+    def close(self):
+        self.log.close()
 
 class WalmartTVBSRCrawler:
     def __init__(self):
@@ -565,6 +586,12 @@ class WalmartTVBSRCrawler:
 
 
 if __name__ == "__main__":
+    # 로그 파일 설정 (실행 시작 일시)
+    os.makedirs("C:\\samsung_dx_retail_com\\log", exist_ok=True)
+    log_filename = "C:\\samsung_dx_retail_com\\log\\" + datetime.now().strftime("%Y%m%d_%H%M%S") + "_bsr.txt"
+    tee = Tee(log_filename)
+    sys.stdout = tee
+
     try:
         crawler = WalmartTVBSRCrawler()
         crawler.run()
@@ -574,3 +601,8 @@ if __name__ == "__main__":
         traceback.print_exc()
 
     print("\n[INFO] BSR Crawler completed.")
+    print(f"[INFO] Log saved to: {log_filename}")
+
+    # 로그 파일 닫기
+    sys.stdout = tee.terminal
+    tee.close()

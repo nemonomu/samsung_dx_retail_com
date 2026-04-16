@@ -54,7 +54,7 @@ from alert_monitor import send_review_url_error_alert
 from config import DB_CONFIG
 from bby_config_loader import get_config
 import pandas as pd
-from alert_monitor import monitor_and_alert
+from alert_monitor import monitor_and_alert, send_sku_renewed_alert
 
 
 class Tee:
@@ -99,6 +99,7 @@ class BestBuyDetailCrawler:
         # Mismatch tracking for tv_item_mst
         self.screen_size_mismatch_records = []
         self.electricity_use_mismatch_records = []
+        self.sku_updated_records = []  # sku renewed in tv_item_mst
 
         # Data validator 초기화
         session_start_time = os.environ.get('SESSION_START_TIME', datetime.now().strftime('%Y%m%d%H%M'))
@@ -2497,6 +2498,14 @@ class BestBuyDetailCrawler:
                         time.sleep(1)
                     else:
                         print(f"  [WARNING] Reviews not rendered in DOM after 15s wait")
+                        # DOM 확인용 HTML 저장 (1회만)
+                        try:
+                            dump_path = os.path.join(os.path.dirname(__file__), 'review_page_dump.html')
+                            with open(dump_path, 'w', encoding='utf-8') as f:
+                                f.write(self.page.html)
+                            print(f"  [DIAG] Page HTML saved: {dump_path}")
+                        except:
+                            pass
 
                     # 리뷰 수집 + 페이지네이션
                     while collected < 20:
@@ -2788,16 +2797,36 @@ class BestBuyDetailCrawler:
                 crawl_datetime
             ))
 
-            # Insert into tv_item_mst (update screen_size and electricity_use on conflict)
+            # Insert into tv_item_mst (update sku, screen_size and electricity_use on conflict)
             if item:
+                # Check existing sku before upsert
+                cursor.execute(f"""
+                    SELECT sku FROM {item_mst_table} WHERE item = %s
+                """, (item,))
+                existing_row = cursor.fetchone()
+                existing_sku = existing_row[0] if existing_row else None
+
                 cursor.execute(f"""
                     INSERT INTO {item_mst_table} (item, product_url, sku, account_name, screen_size, estimated_annual_electricity_use)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (item) DO UPDATE SET
+                        sku = EXCLUDED.sku,
+                        product_url = EXCLUDED.product_url,
                         screen_size = COALESCE({item_mst_table}.screen_size, EXCLUDED.screen_size),
                         estimated_annual_electricity_use = COALESCE({item_mst_table}.estimated_annual_electricity_use, EXCLUDED.estimated_annual_electricity_use)
                 """, (item, product_url, sku, account_name, screen_size, electricity_use))
                 print(f"  [DB] ✓ {item_mst_table} upsert (item: {item}, sku: {sku}, screen_size: {screen_size}, electricity: {electricity_use})")
+
+                # Track sku renewal
+                if existing_sku and sku and existing_sku != sku:
+                    self.sku_updated_records.append({
+                        'account_name': account_name,
+                        'item': item,
+                        'product_url': product_url,
+                        'old_sku': existing_sku,
+                        'new_sku': sku
+                    })
+                    print(f"  [INFO] SKU renewed: {existing_sku} -> {sku}")
 
             cursor.close()
             print(f"  [DB] ✓ Successfully saved to {detail_table} + {retail_com_table} + {item_mst_table}")
@@ -3064,6 +3093,10 @@ class BestBuyDetailCrawler:
                 monitor_and_alert('bestbuy', len(urls), results_df,
                                  screen_size_mismatch_records=self.screen_size_mismatch_records,
                                  electricity_use_mismatch_records=self.electricity_use_mismatch_records)
+
+                # Send SKU renewed alert if any
+                if self.sku_updated_records:
+                    send_sku_renewed_alert('BestBuy TV', self.sku_updated_records)
             except Exception as e:
                 print(f"[WARNING] Failed to send alert: {e}")
 

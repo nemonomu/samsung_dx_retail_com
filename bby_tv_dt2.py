@@ -37,6 +37,7 @@ setup_environment(__file__)
 
 from common.base_crawler import BaseCrawler
 from common.data_extractor import extract_numeric_value
+from alert_monitor import send_sku_renewed_alert
 
 
 
@@ -60,6 +61,7 @@ class BestBuyTVDetailCrawler(BaseCrawler):
 
         # DrissionPage 드라이버 (Selenium driver 대신 사용)
         self.page = None
+        self.sku_updated_records = []  # sku renewed in tv_item_mst
 
     def setup_drission_driver(self):
         """DrissionPage 브라우저 설정 (봇 감지 우회 강화)"""
@@ -845,16 +847,28 @@ class BestBuyTVDetailCrawler(BaseCrawler):
                     insert_info.append(f"electricity={new_electricity}")
                 print(f"  ├─ ITEM_MST: INSERT ({item}) - {', '.join(insert_info) if insert_info else '값 없음'}")
             else:
-                # 기존 값이 없는 필드만 업데이트
+                # 기존 값이 없는 필드만 업데이트 (sku는 항상 갱신)
                 existing_sku, existing_screen_size, existing_electricity = row[0], row[1], row[2]
                 updates = []
                 params = []
                 updated_info = []
 
-                if not (existing_sku or '') and new_sku:
+                # sku는 항상 최신 값으로 갱신
+                if new_sku and (existing_sku or '') != new_sku:
                     updates.append("sku = %s")
                     params.append(new_sku)
                     updated_info.append(f"sku={new_sku}")
+
+                    # Track sku renewal (기존 값이 있었을 때만)
+                    if existing_sku:
+                        self.sku_updated_records.append({
+                            'account_name': self.account_name,
+                            'item': item,
+                            'product_url': product_url,
+                            'old_sku': existing_sku,
+                            'new_sku': new_sku
+                        })
+                        print(f"  [INFO] SKU renewed: {existing_sku} -> {new_sku}")
 
                 if not existing_screen_size and new_screen_size:
                     updates.append("screen_size = %s")
@@ -1012,6 +1026,14 @@ class BestBuyTVDetailCrawler(BaseCrawler):
 
             table_name = 'test_tv_retail_com' if self.test_mode else 'tv_retail_com'
             print(f"[DONE] Processed: {len(product_list)}, Saved: {total_saved}, Table: {table_name}, batch_id: {self.batch_id}")
+
+            # Send SKU renewed alert if any
+            try:
+                if self.sku_updated_records:
+                    send_sku_renewed_alert('BestBuy TV', self.sku_updated_records)
+            except Exception as e:
+                print(f"[WARNING] Failed to send SKU renewed alert: {e}")
+
             return True
 
         except Exception as e:

@@ -2,6 +2,7 @@ import time
 import random
 import re
 import sys
+import os
 import psycopg2
 from datetime import datetime
 import pytz
@@ -25,6 +26,26 @@ from amazon_config_loader import get_amazon_config
 # Load config from DB
 _config = get_amazon_config()
 
+
+# Tee class for logging to both console and file
+class Tee:
+    def __init__(self, log_file_path):
+        self.terminal = sys.stdout
+        self.log_file = open(log_file_path, 'a', encoding='utf-8')
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log_file.write(message)
+        self.log_file.flush()
+
+    def flush(self):
+        self.terminal.flush()
+        self.log_file.flush()
+
+    def close(self):
+        self.log_file.close()
+
+
 class AmazonTVCrawler:
     def __init__(self):
         self.driver = None
@@ -37,6 +58,7 @@ class AmazonTVCrawler:
         self.sequential_id = 1  # ID counter for 1-max_skus
         self.batch_id = None  # Batch ID for this crawling session
         self.excluded_items = set()  # Items with is_product=false in tv_item_mst
+        self._exit_code = 1  # Default to failure, set to 0 on success
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -247,7 +269,7 @@ class AmazonTVCrawler:
             # Check and handle sorry page with refresh retries
             if not self.check_and_handle_sorry_page(max_retries=3):
                 print(f"[SKIP] Skipping page {page_number} due to persistent sorry/robot check page")
-                return []  # Return empty list to continue to next page
+                return True  # Continue to next page (not break)
 
             # Wait for search results to actually load
             print(f"[INFO] Waiting for search results to load...")
@@ -603,13 +625,21 @@ class AmazonTVCrawler:
 
             print("="*80)
 
+            # 0건 수집 시 실패 처리
+            if self.total_collected == 0:
+                print("[ERROR] 0 products collected - marking as FAILED")
+                self._exit_code = 1
+            else:
+                self._exit_code = 0
+
         except Exception as e:
             print(f"[ERROR] Crawler failed: {e}")
+            self._exit_code = 1
 
         finally:
             # 결과 JSON 저장
             try:
-                import json, os
+                import json
                 result_dir = r"C:\samsung_dx_retail_com\stage_results"
                 os.makedirs(result_dir, exist_ok=True)
                 with open(os.path.join(result_dir, "amazon_tv_main1.json"), "w") as f:
@@ -624,6 +654,27 @@ class AmazonTVCrawler:
 
 
 if __name__ == "__main__":
+    # Setup log file
+    _log_dir = r'C:\samsung_dx_retail_com\log'
+    os.makedirs(_log_dir, exist_ok=True)
+
+    # Delete log files older than 30 days
+    _cutoff_time = time.time() - (30 * 24 * 60 * 60)
+    for _f in os.listdir(_log_dir):
+        _fpath = os.path.join(_log_dir, _f)
+        if os.path.isfile(_fpath) and _fpath.endswith('.txt'):
+            if os.path.getmtime(_fpath) < _cutoff_time:
+                try:
+                    os.remove(_fpath)
+                except:
+                    pass
+
+    _log_filename = datetime.now().strftime('%Y%m%d_%H%M%S') + '_main1.txt'
+    _log_filepath = os.path.join(_log_dir, _log_filename)
+    _tee = Tee(_log_filepath)
+    sys.stdout = _tee
+    print(f"[INFO] Log file: {_log_filepath}")
+
     try:
         crawler = AmazonTVCrawler()
         crawler.run()
@@ -632,4 +683,6 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
 
-    print("\n[INFO] Crawler completed. Window will close automatically...")
+    print("\n[INFO] Crawler terminated.")
+    _tee.close()
+    sys.exit(getattr(crawler, '_exit_code', 1))

@@ -223,20 +223,27 @@ def main():
             failed_stages.append("amazon_tv_bsr1")
         print(f"\n[INFO] bsr1 수집: {bsr_collected}개 (기준: {BSR_MIN}개)")
 
-        # dt2는 main/bsr 성공 여부와 무관하게 항상 실행
-        print(f"\n[INFO] Proceeding to detail crawler...")
-        time.sleep(5)
+        # dt2 실행: main/bsr 중 하나라도 수집했으면 실행
+        if main1_collected == 0 and bsr_collected == 0:
+            print(f"\n[WARNING] main1, bsr1 모두 0건 수집. dt2 실행 건너뜀.")
+            stage_results["amazon_tv_dt2"] = {
+                "success": None, "elapsed": 0, "timeout": False,
+                "collected_count": None, "target_count": None
+            }
+        else:
+            print(f"\n[INFO] Proceeding to detail crawler...")
+            time.sleep(5)
 
-        print_stage_header(stages[2][1], 3, 3)
-        result = run_crawler(stages[2][0], stages[2][1])
-        stage_results["amazon_tv_dt2"] = result
+            print_stage_header(stages[2][1], 3, 3)
+            result = run_crawler(stages[2][0], stages[2][1])
+            stage_results["amazon_tv_dt2"] = result
 
-        # dt2 failed 판정
-        dt2_target = result.get("target_count") or 0
-        dt2_collected = result.get("collected_count") or 0
-        if not result["success"] or dt2_collected < dt2_target:
-            if "amazon_tv_dt2" not in failed_stages:
-                failed_stages.append("amazon_tv_dt2")
+            # dt2 failed 판정
+            dt2_target = result.get("target_count") or 0
+            dt2_collected = result.get("collected_count") or 0
+            if not result["success"] or dt2_collected < dt2_target:
+                if "amazon_tv_dt2" not in failed_stages:
+                    failed_stages.append("amazon_tv_dt2")
 
         # 6시간 타이머 취소
         timer.cancel()

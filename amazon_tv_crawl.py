@@ -225,14 +225,20 @@ def main():
             failed_stages.append("amazon_tv_bsr1")
         print(f"\n[INFO] bsr1 수집: {bsr_collected}개 (기준: {BSR_MIN}개)")
 
-        # dt1은 main/bsr 성공 여부와 무관하게 항상 실행
-        # (DB에 URL이 있으면 수집 시도, 없으면 dt1 내부에서 0건 처리)
-        print(f"\n[INFO] Proceeding to detail crawler...")
-        time.sleep(5)
+        # dt1 실행: main/bsr 중 하나라도 수집했으면 실행
+        if main1_collected == 0 and bsr_collected == 0:
+            print(f"\n[WARNING] main1, bsr1 모두 0건 수집. dt1 실행 건너뜀.")
+            stage_results["amazon_tv_dt1"] = {
+                "success": None, "elapsed": 0, "timeout": False,
+                "collected_count": None, "target_count": None
+            }
+        else:
+            print(f"\n[INFO] Proceeding to detail crawler...")
+            time.sleep(5)
 
-        print_stage_header(stages[2][1], 3, 3)
-        result = run_crawler(stages[2][0], stages[2][1])
-        stage_results["amazon_tv_dt1"] = result
+            print_stage_header(stages[2][1], 3, 3)
+            result = run_crawler(stages[2][0], stages[2][1])
+            stage_results["amazon_tv_dt1"] = result
 
             # dt1 failed 판정
             dt1_target = result.get("target_count") or 0

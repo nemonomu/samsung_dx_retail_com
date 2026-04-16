@@ -203,13 +203,13 @@ def main():
             ("wmart_tv_dt1.py", "wmart_tv_dt1")
         ]
 
+        MAIN_MIN = 300   # main1+main2 합산 최소 수집 기준
+        BSR_MIN = 100    # bsr 최소 수집 기준
+
         # Execute main1
         print_stage_header("wmart_tv_main1", 1, 4)
         result = run_crawler("wmart_tv_main1.py", "wmart_tv_main1")
         stage_results["wmart_tv_main1"] = result
-        if not result["success"]:
-            failed_stages.append("wmart_tv_main1")
-
         main1_collected = result.get("collected_count") or 0
         remaining = max(0, MAIN_TOTAL_LIMIT - main1_collected)
         print(f"\n[INFO] main1 수집: {main1_collected}개, main2 수집 제한: {remaining}개")
@@ -222,8 +222,7 @@ def main():
         result = run_crawler("wmart_tv_main2.py", "wmart_tv_main2",
                             extra_args=['--max-skus', str(remaining)])
         stage_results["wmart_tv_main2"] = result
-        if not result["success"]:
-            failed_stages.append("wmart_tv_main2")
+        main2_collected = result.get("collected_count") or 0
 
         print(f"\n[INFO] Waiting 5 seconds for driver cleanup...")
         time.sleep(5)
@@ -232,26 +231,39 @@ def main():
         print_stage_header("wmart_tv_bsr", 3, 4)
         result = run_crawler("wmart_tv_bsr.py", "wmart_tv_bsr")
         stage_results["wmart_tv_bsr"] = result
-        if not result["success"]:
-            failed_stages.append("wmart_tv_bsr")
+        bsr_collected = result.get("collected_count") or 0
 
-        # main1+main2 합산 체크
-        main2_collected = (stage_results.get("wmart_tv_main2", {}).get("collected_count") or 0)
-        bsr_collected = (stage_results.get("wmart_tv_bsr", {}).get("collected_count") or 0)
-
+        # main1+main2 합산 성공 판정
         main_total = main1_collected + main2_collected
-        print(f"\n[INFO] main1+main2 합산: {main_total} url, bsr: {bsr_collected} url")
+        if main_total >= MAIN_MIN:
+            stage_results["wmart_tv_main1"]["success"] = True
+            stage_results["wmart_tv_main2"]["success"] = True
+        else:
+            stage_results["wmart_tv_main1"]["success"] = False
+            stage_results["wmart_tv_main2"]["success"] = False
+            if "wmart_tv_main1" not in failed_stages:
+                failed_stages.append("wmart_tv_main1")
+        print(f"\n[INFO] main1+main2 합산: {main_total} url (기준: {MAIN_MIN}개)")
 
-        # Check if at least one of main1/main2/bsr succeeded
-        main_stages_success = any([
-            stage_results["wmart_tv_main1"]["success"],
-            stage_results["wmart_tv_main2"]["success"],
-            stage_results["wmart_tv_bsr"]["success"]
-        ])
+        # bsr 성공 판정
+        if bsr_collected >= BSR_MIN:
+            stage_results["wmart_tv_bsr"]["success"] = True
+        else:
+            stage_results["wmart_tv_bsr"]["success"] = False
+            if "wmart_tv_bsr" not in failed_stages:
+                failed_stages.append("wmart_tv_bsr")
+        print(f"[INFO] bsr 수집: {bsr_collected}개 (기준: {BSR_MIN}개)")
 
-        # Execute dt1 only if at least one main stage succeeded
-        if main_stages_success:
-            print(f"\n[INFO] At least one main stage succeeded. Proceeding to detail crawler...")
+        # dt1 실행: main/bsr 중 하나라도 수집했으면 실행
+        total_collected = main_total + bsr_collected
+        if total_collected == 0:
+            print(f"\n[WARNING] main1, main2, bsr 모두 0건 수집. dt1 실행 건너뜀.")
+            stage_results["wmart_tv_dt1"] = {
+                "success": None, "elapsed": 0, "timeout": False,
+                "collected_count": None, "target_count": None
+            }
+        else:
+            print(f"\n[INFO] Proceeding to detail crawler...")
             time.sleep(5)
 
             print_stage_header(stages[3][1], 4, 4)
@@ -264,12 +276,6 @@ def main():
             if not result["success"] or dt1_collected < dt1_target:
                 if "wmart_tv_dt1" not in failed_stages:
                     failed_stages.append("wmart_tv_dt1")
-        else:
-            print(f"\n[WARNING] All main stages (main1, main2, bsr) failed. Skipping detail crawler.")
-            stage_results["wmart_tv_dt1"] = {
-                "success": None, "elapsed": 0, "timeout": False,
-                "collected_count": None, "target_count": None
-            }
 
         # 6시간 타이머 취소
         timer.cancel()

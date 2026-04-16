@@ -78,7 +78,7 @@ class AmazonDetailCrawler:
         self.fsp_null_records = []  # final_sku_price is null
         self.cosr_null_records = []  # count_of_star_ratings is null but star_rating exists
         self.screen_size_mismatch_records = []  # screen_size mismatch between extracted and tv_item_mst
-        self.sku_updated_records = []  # sku renewed in tv_item_mst
+        # self.sku_updated_records = []  # sku renewed in tv_item_mst (temporarily disabled)
         self.current_account = ACCOUNT_1  # Current Amazon account (starts with first)
         self.processed_asins = set()  # Real-time duplicate check for ASINs (after redirect)
 
@@ -2208,20 +2208,18 @@ class AmazonDetailCrawler:
 
             # Insert into tv_item_mst (with duplicate check on item, update sku and screen_size on conflict)
             if data.get('item'):
-                # Check existing sku before upsert
-                cursor.execute("""
-                    SELECT sku FROM tv_item_mst WHERE item = %s
-                """, (data['item'],))
-                existing_row = cursor.fetchone()
-                existing_sku = existing_row[0] if existing_row else None
+                # # Check existing sku before upsert (temporarily disabled)
+                # cursor.execute("""
+                #     SELECT sku FROM tv_item_mst WHERE item = %s
+                # """, (data['item'],))
+                # existing_row = cursor.fetchone()
+                # existing_sku = existing_row[0] if existing_row else None
 
                 new_sku = data.get('sku', 'no sku')
                 cursor.execute("""
                     INSERT INTO tv_item_mst (item, product_url, sku, account_name, screen_size)
                     VALUES (%s, %s, %s, %s, %s)
                     ON CONFLICT (item) DO UPDATE SET
-                        sku = EXCLUDED.sku,
-                        product_url = EXCLUDED.product_url,
                         screen_size = COALESCE(tv_item_mst.screen_size, EXCLUDED.screen_size)
                 """, (
                     data['item'],
@@ -2232,16 +2230,16 @@ class AmazonDetailCrawler:
                 ))
                 print(f"  [DB] ✓ tv_item_mst upsert (item: {data['item']}, sku: {new_sku}, screen_size: {data.get('screen_size')})")
 
-                # Track sku renewal
-                if existing_sku and new_sku and existing_sku != new_sku:
-                    self.sku_updated_records.append({
-                        'account_name': 'Amazon',
-                        'item': data['item'],
-                        'product_url': data['product_url'],
-                        'old_sku': existing_sku,
-                        'new_sku': new_sku
-                    })
-                    print(f"  [INFO] SKU renewed: {existing_sku} -> {new_sku}")
+                # # Track sku renewal (temporarily disabled)
+                # if existing_sku and new_sku and existing_sku != new_sku:
+                #     self.sku_updated_records.append({
+                #         'account_name': 'Amazon',
+                #         'item': data['item'],
+                #         'product_url': data['product_url'],
+                #         'old_sku': existing_sku,
+                #         'new_sku': new_sku
+                #     })
+                #     print(f"  [INFO] SKU renewed: {existing_sku} -> {new_sku}")
 
             # Commit transaction
             self.db_conn.commit()
@@ -2399,9 +2397,9 @@ class AmazonDetailCrawler:
                 results_df = pd.DataFrame(rows, columns=columns)
                 cursor.close()
 
-                # Send SKU renewed alert if any
-                if self.sku_updated_records:
-                    send_sku_renewed_alert('Amazon TV', self.sku_updated_records)
+                # # Send SKU renewed alert if any (temporarily disabled)
+                # if self.sku_updated_records:
+                #     send_sku_renewed_alert('Amazon TV', self.sku_updated_records)
             except Exception as e:
                 print(f"[WARNING] Failed to send alert: {e}")
 

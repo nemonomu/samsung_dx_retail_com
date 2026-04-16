@@ -53,7 +53,7 @@ class WalmartDetailCrawler:
         # Error tracking for alert email
         self.drv_20_error_records = []  # count_of_reviews <= 20 but collected fewer reviews
         self.screen_size_mismatch_records = []  # screen_size mismatch between extracted and tv_item_mst
-        self.sku_updated_records = []  # sku renewed in tv_item_mst
+        # self.sku_updated_records = []  # sku renewed in tv_item_mst (temporarily disabled)
 
     def connect_db(self):
         """Connect to PostgreSQL database"""
@@ -2276,19 +2276,17 @@ class WalmartDetailCrawler:
             sku = self.extract_sku(data['Retailer_SKU_Name'])
 
             if data.get('item'):
-                # Check existing sku before upsert
-                cursor.execute("""
-                    SELECT sku FROM tv_item_mst WHERE item = %s
-                """, (data['item'],))
-                existing_row = cursor.fetchone()
-                existing_sku = existing_row[0] if existing_row else None
+                # # Check existing sku before upsert (temporarily disabled)
+                # cursor.execute("""
+                #     SELECT sku FROM tv_item_mst WHERE item = %s
+                # """, (data['item'],))
+                # existing_row = cursor.fetchone()
+                # existing_sku = existing_row[0] if existing_row else None
 
                 cursor.execute("""
                     INSERT INTO tv_item_mst (item, product_url, sku, account_name, screen_size)
                     VALUES (%s, %s, %s, %s, %s)
                     ON CONFLICT (item) DO UPDATE SET
-                        sku = EXCLUDED.sku,
-                        product_url = EXCLUDED.product_url,
                         screen_size = COALESCE(tv_item_mst.screen_size, EXCLUDED.screen_size)
                 """, (
                     data['item'],
@@ -2299,16 +2297,16 @@ class WalmartDetailCrawler:
                 ))
                 print(f"  [DB] ✓ tv_item_mst upsert (item: {data['item']}, sku: {sku}, screen_size: {data.get('screen_size')})")
 
-                # Track sku renewal
-                if existing_sku and sku and existing_sku != sku:
-                    self.sku_updated_records.append({
-                        'account_name': account_name,
-                        'item': data['item'],
-                        'product_url': data['product_url'],
-                        'old_sku': existing_sku,
-                        'new_sku': sku
-                    })
-                    print(f"  [INFO] SKU renewed: {existing_sku} -> {sku}")
+                # # Track sku renewal (temporarily disabled)
+                # if existing_sku and sku and existing_sku != sku:
+                #     self.sku_updated_records.append({
+                #         'account_name': account_name,
+                #         'item': data['item'],
+                #         'product_url': data['product_url'],
+                #         'old_sku': existing_sku,
+                #         'new_sku': sku
+                #     })
+                #     print(f"  [INFO] SKU renewed: {existing_sku} -> {sku}")
 
             # Commit transaction
             self.db_conn.commit()
@@ -2484,12 +2482,12 @@ class WalmartDetailCrawler:
             except Exception as e:
                 print(f"[WARNING] Failed to write result JSON: {e}")
 
-            # Send SKU renewed alert if any
-            try:
-                if self.sku_updated_records:
-                    send_sku_renewed_alert('Walmart TV', self.sku_updated_records)
-            except Exception as e:
-                print(f"[WARNING] Failed to send SKU renewed alert: {e}")
+            # # Send SKU renewed alert if any (temporarily disabled)
+            # try:
+            #     if self.sku_updated_records:
+            #         send_sku_renewed_alert('Walmart TV', self.sku_updated_records)
+            # except Exception as e:
+            #     print(f"[WARNING] Failed to send SKU renewed alert: {e}")
 
             if self.page:
                 self.page.quit()

@@ -115,10 +115,6 @@ def run_crawler(script_name, stage_name):
         result["collected_count"] = stage_data.get("collected_count")
         result["target_count"] = stage_data.get("target_count")
 
-        # returncode 비정상이라도 수집 결과가 있으면 성공으로 재판정
-        if not result["success"] and result["collected_count"] and result["collected_count"] > 0:
-            print(f"[INFO] {stage_name}: returncode 비정상이지만 {result['collected_count']}개 수집됨 → 성공 처리")
-            result["success"] = True
 
     return result
 
@@ -195,23 +191,39 @@ def main():
             ("amazon_tv_dt1.py", "amazon_tv_dt1")
         ]
 
-        # Execute main1, bsr1
-        for i, (script, name) in enumerate(stages[:2], 1):
-            print_stage_header(name, i, 3)
-            result = run_crawler(script, name)
-            stage_results[name] = result
+        MAIN1_MIN = 300  # main1 최소 수집 기준
+        BSR_MIN = 100    # bsr 최소 수집 기준
 
-            if not result["success"]:
-                failed_stages.append(name)
+        # Execute main1
+        print_stage_header("amazon_tv_main1", 1, 3)
+        result = run_crawler("amazon_tv_main1.py", "amazon_tv_main1")
+        stage_results["amazon_tv_main1"] = result
+        main1_collected = result.get("collected_count") or 0
 
-            if i < 2:
-                print(f"\n[INFO] Waiting 5 seconds for driver cleanup...")
-                time.sleep(5)
+        # main1 성공 판정: 300개 이상 수집
+        if main1_collected >= MAIN1_MIN:
+            result["success"] = True
+        else:
+            result["success"] = False
+            failed_stages.append("amazon_tv_main1")
+        print(f"\n[INFO] main1 수집: {main1_collected}개 (기준: {MAIN1_MIN}개)")
 
-        # main1 수집 수 체크
-        main1_collected = (stage_results.get("amazon_tv_main1", {}).get("collected_count") or 0)
-        bsr_collected = (stage_results.get("amazon_tv_bsr1", {}).get("collected_count") or 0)
-        print(f"\n[INFO] main1: {main1_collected} url, bsr1: {bsr_collected} url")
+        print(f"\n[INFO] Waiting 5 seconds for driver cleanup...")
+        time.sleep(5)
+
+        # Execute bsr1
+        print_stage_header("amazon_tv_bsr1", 2, 3)
+        result = run_crawler("amazon_tv_bsr1.py", "amazon_tv_bsr1")
+        stage_results["amazon_tv_bsr1"] = result
+        bsr_collected = result.get("collected_count") or 0
+
+        # bsr 성공 판정: 100개 이상 수집
+        if bsr_collected >= BSR_MIN:
+            result["success"] = True
+        else:
+            result["success"] = False
+            failed_stages.append("amazon_tv_bsr1")
+        print(f"\n[INFO] bsr1 수집: {bsr_collected}개 (기준: {BSR_MIN}개)")
 
         # Check if at least one of main1/bsr1 succeeded
         main_stages_success = any([

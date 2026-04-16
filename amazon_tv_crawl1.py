@@ -113,6 +113,11 @@ def run_crawler(script_name, stage_name):
         result["collected_count"] = stage_data.get("collected_count")
         result["target_count"] = stage_data.get("target_count")
 
+        # returncode 비정상이라도 수집 결과가 있으면 성공으로 재판정
+        if not result["success"] and result["collected_count"] and result["collected_count"] > 0:
+            print(f"[INFO] {stage_name}: returncode 비정상이지만 {result['collected_count']}개 수집됨 → 성공 처리")
+            result["success"] = True
+
     return result
 
 

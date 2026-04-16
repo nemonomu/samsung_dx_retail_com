@@ -150,22 +150,48 @@ class AmazonTVCrawler:
 
     def setup_driver(self):
         """Setup Chrome WebDriver"""
-        user_agent = _config.get_browser('user_agent', 'amazon_tv_main1') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        user_agent = _config.get_browser('user_agent', 'amazon_tv_main1') or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
         chrome_options = Options()
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.add_argument(f'--user-agent={user_agent}')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument('--start-maximized')
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
 
+        # Add more realistic browser settings
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--lang=en-US,en;q=0.9')
+
+        # Add preferences to appear more like a real browser
+        prefs = {
+            "profile.default_content_setting_values.notifications": 2,
+            "credentials_enable_service": False,
+            "profile.password_manager_enabled": False
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+
         service = Service(ChromeDriverManager().install())
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
-        self.wait = WebDriverWait(self.driver, 10)
+        self.wait = WebDriverWait(self.driver, 20)
 
+        # More comprehensive webdriver property masking
         self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
             'source': '''
                 Object.defineProperty(navigator, 'webdriver', {
                     get: () => undefined
-                })
+                });
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5]
+                });
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en']
+                });
+                window.chrome = {
+                    runtime: {}
+                };
             '''
         })
 

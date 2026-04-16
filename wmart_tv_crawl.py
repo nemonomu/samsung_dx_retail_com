@@ -14,7 +14,7 @@ import os
 import json
 import threading
 from datetime import datetime
-from alert_monitor import send_wmart_crawl_report
+from alert_monitor import send_tv_crawl_report
 
 
 RESULT_DIR = r"C:\samsung_dx_retail_com\stage_results"
@@ -56,7 +56,7 @@ def clean_stage_results():
     try:
         if os.path.exists(RESULT_DIR):
             for f in os.listdir(RESULT_DIR):
-                if f.endswith('.json'):
+                if f.endswith('.json') and 'wmart_tv' in f:
                     os.remove(os.path.join(RESULT_DIR, f))
         else:
             os.makedirs(RESULT_DIR, exist_ok=True)
@@ -159,7 +159,7 @@ def main():
             interim_sent = True
             print(f"\n[INFO] 6시간 경과 - 중간 보고 발송")
             try:
-                send_wmart_crawl_report(
+                send_tv_crawl_report('Walmart',
                     stage_results=stage_results,
                     failed_stages=failed_stages,
                     overall_elapsed=time.time() - overall_start_time,
@@ -300,7 +300,7 @@ def main():
         print_separator()
 
         # 최종 리포트 발송
-        send_wmart_crawl_report(
+        send_tv_crawl_report('Walmart',
             stage_results=stage_results,
             failed_stages=failed_stages,
             overall_elapsed=overall_elapsed,
@@ -313,7 +313,7 @@ def main():
         print("\n[!] Interrupted by user")
         timer.cancel()
         overall_elapsed = time.time() - overall_start_time
-        send_wmart_crawl_report(
+        send_tv_crawl_report('Walmart',
             stage_results=stage_results,
             failed_stages=['Interrupted by user'],
             overall_elapsed=overall_elapsed,
@@ -328,7 +328,7 @@ def main():
         traceback.print_exc()
         timer.cancel()
         overall_elapsed = time.time() - overall_start_time
-        send_wmart_crawl_report(
+        send_tv_crawl_report('Walmart',
             stage_results=stage_results,
             failed_stages=['Fatal error'],
             overall_elapsed=overall_elapsed,

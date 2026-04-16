@@ -1179,13 +1179,14 @@ def send_sku_renewed_alert(retailer_name, sku_updated_records):
         return False
 
 
-def _get_prev_session_data(db_conn, current_session_min):
+def _get_prev_session_data(db_conn, current_session_min, account_name='Walmart'):
     """
     DB에서 직전 세션 데이터 조회
 
     Args:
         db_conn: psycopg2 connection
         current_session_min: 현재 세션의 MIN(crawl_datetime) 문자열
+        account_name: 'Walmart' 또는 'Amazon'
 
     Returns:
         (prev_df, prev_session_start): DataFrame과 직전 세션 시작시간, 없으면 (None, None)
@@ -1196,9 +1197,9 @@ def _get_prev_session_data(db_conn, current_session_min):
         # 1) 현재 세션 이전의 가장 최근 crawl_datetime
         cursor.execute("""
             SELECT MAX(crawl_datetime) FROM tv_retail_com
-            WHERE account_name = 'Walmart'
+            WHERE account_name = %s
             AND crawl_datetime::timestamp < %s::timestamp
-        """, (current_session_min,))
+        """, (account_name, current_session_min,))
         row = cursor.fetchone()
         if not row or not row[0]:
             cursor.close()
@@ -1208,9 +1209,9 @@ def _get_prev_session_data(db_conn, current_session_min):
         # 2) 직전 세션 시작시간 (prev_max 기준 12시간 이내)
         cursor.execute("""
             SELECT MIN(crawl_datetime) FROM tv_retail_com
-            WHERE account_name = 'Walmart'
+            WHERE account_name = %s
             AND crawl_datetime::timestamp BETWEEN (%s::timestamp - INTERVAL '12 hours') AND %s::timestamp
-        """, (prev_max, prev_max))
+        """, (account_name, prev_max, prev_max))
         row = cursor.fetchone()
         prev_session_start = row[0] if row and row[0] else prev_max
 
@@ -1224,9 +1225,9 @@ def _get_prev_session_data(db_conn, current_session_min):
                    retailer_membership_discounts, detailed_review_content, main_rank, bsr_rank,
                    model_year
             FROM tv_retail_com
-            WHERE account_name = 'Walmart'
+            WHERE account_name = %s
             AND crawl_datetime::timestamp BETWEEN %s::timestamp AND %s::timestamp
-        """, (prev_session_start, prev_max))
+        """, (account_name, prev_session_start, prev_max))
 
         rows = cursor.fetchall()
         columns = [
@@ -1249,7 +1250,7 @@ def _get_prev_session_data(db_conn, current_session_min):
         return None, None
 
 
-def _get_current_session_data(db_conn):
+def _get_current_session_data(db_conn, account_name='Walmart'):
     """
     DB에서 현재 세션 데이터 조회
 
@@ -1262,9 +1263,9 @@ def _get_current_session_data(db_conn):
         # 현재 세션 시작시간 판별 (최근 12시간 이내)
         cursor.execute("""
             SELECT MIN(crawl_datetime) FROM tv_retail_com
-            WHERE account_name = 'Walmart'
+            WHERE account_name = %s
             AND crawl_datetime::timestamp >= NOW() - INTERVAL '12 hours'
-        """)
+        """, (account_name,))
         row = cursor.fetchone()
         if not row or not row[0]:
             cursor.close()
@@ -1280,9 +1281,9 @@ def _get_current_session_data(db_conn):
                    retailer_membership_discounts, detailed_review_content, main_rank, bsr_rank,
                    model_year
             FROM tv_retail_com
-            WHERE account_name = 'Walmart'
+            WHERE account_name = %s
             AND crawl_datetime::timestamp >= %s::timestamp
-        """, (session_min,))
+        """, (account_name, session_min,))
 
         rows = cursor.fetchall()
         columns = [
@@ -1394,15 +1395,17 @@ def _compare_sessions(curr_df, prev_df):
     return result
 
 
-def send_wmart_crawl_report(stage_results, failed_stages, overall_elapsed,
-                            is_interim=False, error_message=None):
+def send_tv_crawl_report(retailer, stage_results, failed_stages, overall_elapsed,
+                         stage_order=None, is_interim=False, error_message=None):
     """
-    Walmart TV 크롤링 리포트 이메일 발송
+    TV 크롤링 리포트 이메일 발송 (Walmart/Amazon 공용)
 
     Args:
+        retailer: 'Walmart' 또는 'Amazon'
         stage_results: {stage_name: {success, elapsed, timeout, collected_count, target_count}}
         failed_stages: 실패 스테이지 이름 리스트
         overall_elapsed: 총 소요시간 (초)
+        stage_order: 스테이지 표시 순서 리스트 (선택)
         is_interim: True이면 6시간 중간보고
         error_message: 추가 에러 메시지 (선택)
     """
@@ -1417,13 +1420,25 @@ def send_wmart_crawl_report(stage_results, failed_stages, overall_elapsed,
         comparison = None
         prev_session_start = None
 
+        # retailer별 설정
+        account_name = retailer  # DB의 account_name과 동일 ('Walmart', 'Amazon')
+        if not stage_order:
+            if retailer == 'Walmart':
+                stage_order = ['wmart_tv_main1', 'wmart_tv_main2', 'wmart_tv_bsr', 'wmart_tv_dt1']
+            else:
+                stage_order = ['amazon_tv_main1', 'amazon_tv_bsr1', 'amazon_tv_dt1']
+
+        # dt 스테이지 이름 찾기 (dt1 또는 dt2)
+        dt_stage = [s for s in stage_order if '_dt' in s]
+        dt_stage_name = dt_stage[0] if dt_stage else None
+
         if not is_interim:
             try:
                 db_conn = psycopg2.connect(**DB_CONFIG)
                 db_conn.autocommit = True
-                curr_df, session_min = _get_current_session_data(db_conn)
+                curr_df, session_min = _get_current_session_data(db_conn, account_name)
                 if curr_df is not None and session_min:
-                    prev_df, prev_session_start = _get_prev_session_data(db_conn, session_min)
+                    prev_df, prev_session_start = _get_prev_session_data(db_conn, session_min, account_name)
                     comparison = _compare_sessions(curr_df, prev_df)
             except Exception as e:
                 logger.error(f"DB 세션 비교 실패: {e}")
@@ -1434,45 +1449,44 @@ def send_wmart_crawl_report(stage_results, failed_stages, overall_elapsed,
         # 제목 생성
         failed_parts = []
         for stage in failed_stages:
-            if stage == 'wmart_tv_dt1':
-                dt1 = stage_results.get('wmart_tv_dt1', {})
-                dt1_target = dt1.get('target_count') or 0
-                dt1_collected = dt1.get('collected_count') or 0
-                if dt1.get('timeout'):
-                    failed_parts.append('dt1 타임아웃')
-                elif dt1_target > 0:
-                    failed_parts.append(f'dt1 {dt1_target - dt1_collected} sku')
+            if dt_stage_name and stage == dt_stage_name:
+                dt_short = dt_stage_name.replace('wmart_tv_', '').replace('amazon_tv_', '')
+                dt_result = stage_results.get(dt_stage_name, {})
+                dt_target = dt_result.get('target_count') or 0
+                dt_collected = dt_result.get('collected_count') or 0
+                if dt_result.get('timeout'):
+                    failed_parts.append(f'{dt_short} 타임아웃')
+                elif dt_target > 0:
+                    failed_parts.append(f'{dt_short} {dt_target - dt_collected} sku')
                 else:
-                    failed_parts.append('dt1')
-            elif stage in ('wmart_tv_main1', 'wmart_tv_main2'):
-                failed_parts.append(stage.replace('wmart_tv_', ''))
-            elif stage == 'wmart_tv_bsr':
-                failed_parts.append('bsr')
+                    failed_parts.append(dt_short)
             else:
-                failed_parts.append(stage)
+                # 스테이지 이름에서 접두사 제거하여 간결하게 표시
+                short = stage.replace('wmart_tv_', '').replace('amazon_tv_', '')
+                failed_parts.append(short)
 
-        # main1+main2 합산 미달 체크
-        main1_c = (stage_results.get('wmart_tv_main1', {}).get('collected_count') or 0)
-        main2_c = (stage_results.get('wmart_tv_main2', {}).get('collected_count') or 0)
-        bsr_c = (stage_results.get('wmart_tv_bsr', {}).get('collected_count') or 0)
-        main_total = main1_c + main2_c
+        # main/bsr 수집 수 집계 (스테이지 이름에서 동적으로 찾기)
+        main_stages = [s for s in stage_order if 'main' in s]
+        bsr_stages = [s for s in stage_order if 'bsr' in s]
+        main_total = sum((stage_results.get(s, {}).get('collected_count') or 0) for s in main_stages)
+        bsr_c = sum((stage_results.get(s, {}).get('collected_count') or 0) for s in bsr_stages)
 
         alerts = []
         if main_total < 300 and main_total > 0:
-            alerts.append(f'main1+main2 합산 {main_total}개 (300 미만)')
+            alerts.append(f'main 합산 {main_total}개 (300 미만)')
         if 0 < bsr_c < 100:
             alerts.append(f'bsr {bsr_c}개 (100 미만)')
-        dt1_result = stage_results.get('wmart_tv_dt1', {})
+        dt1_result = stage_results.get(dt_stage_name, {}) if dt_stage_name else {}
         dt1_target = dt1_result.get('target_count') or 0
         if 0 < dt1_target < 300:
-            alerts.append(f'dt1 대상 {dt1_target}개 (300 미만)')
+            alerts.append(f'dt 대상 {dt1_target}개 (300 미만)')
 
         failed_prefix = f"Failed {' '.join(failed_parts)} " if failed_parts else ""
 
         if is_interim:
-            subject = f"[DX_SEA] 진행중 Walmart TV Crawler - 6시간 경과"
+            subject = f"[DX_SEA] 진행중 {retailer} TV Crawler - 6시간 경과"
         else:
-            subject = f"[DX_SEA] {failed_prefix}Walmart TV Crawler {'완료' if not failed_parts else ''}"
+            subject = f"[DX_SEA] {failed_prefix}{retailer} TV Crawler {'완료' if not failed_parts else ''}"
             subject = subject.rstrip()
 
         # HTML 본문
@@ -1496,7 +1510,7 @@ def send_wmart_crawl_report(stage_results, failed_stages, overall_elapsed,
         </head>
         <body>
             <div class="header">
-                <h2>Walmart TV {report_type}</h2>
+                <h2>{retailer} TV {report_type}</h2>
                 <p>시간: {now.strftime('%Y-%m-%d %H:%M:%S')} (KST)</p>
             </div>
 
@@ -1514,7 +1528,6 @@ def send_wmart_crawl_report(stage_results, failed_stages, overall_elapsed,
                     <tr><th>스테이지</th><th>상태</th><th>수집 현황</th><th>소요시간</th></tr>
         """
 
-        stage_order = ['wmart_tv_main1', 'wmart_tv_main2', 'wmart_tv_bsr', 'wmart_tv_dt1']
         for name in stage_order:
             sr = stage_results.get(name, {})
             if not sr and is_interim:
@@ -1550,11 +1563,14 @@ def send_wmart_crawl_report(stage_results, failed_stages, overall_elapsed,
 
             html_content += f"<tr><td>{name}</td><td>{status}</td><td>{collected_str}</td><td>{elapsed_str}</td></tr>"
 
-        # main1+main2 합산 행
-        html_content += f"""
+        # main 합산 행 (main 스테이지가 2개 이상일 때만)
+        if len(main_stages) >= 2:
+            main_label = '+'.join(s.split('_')[-1] for s in main_stages)
+            html_content += f"""
                     <tr style="background-color: #e9ecef; font-weight: bold;">
-                        <td>main1+main2 합산</td><td></td><td>{main_total} url {'<span class="critical">(300 미만)</span>' if 0 < main_total < 300 else ''}</td><td></td>
-                    </tr>
+                        <td>{main_label} 합산</td><td></td><td>{main_total} url {'<span class="critical">(300 미만)</span>' if 0 < main_total < 300 else ''}</td><td></td>
+                    </tr>"""
+        html_content += """
                 </table>
             </div>
         """
@@ -1592,7 +1608,7 @@ def send_wmart_crawl_report(stage_results, failed_stages, overall_elapsed,
 
                 html_content += f"""
                 <div class="section">
-                    <h3>필드별 빈 값 현황 (wmart_tv_dt1)</h3>
+                    <h3>필드별 빈 값 현황 ({dt_stage_name or 'dt'})</h3>
                     <table>
                         <tr><th>필드명</th><th>빈 값 개수</th><th>{prev_label}</th><th>차이</th><th>총 개수</th><th>빈 값 비율</th><th>상태</th></tr>
                 """
@@ -1677,9 +1693,9 @@ def send_wmart_crawl_report(stage_results, failed_stages, overall_elapsed,
                 msg.as_string()
             )
 
-        logger.info(f"Walmart TV 크롤링 리포트 발송: {subject}")
+        logger.info(f"{retailer} TV 크롤링 리포트 발송: {subject}")
         return True
 
     except Exception as e:
-        logger.error(f"Walmart TV 크롤링 리포트 발송 실패: {e}")
+        logger.error(f"{retailer} TV 크롤링 리포트 발송 실패: {e}")
         return False

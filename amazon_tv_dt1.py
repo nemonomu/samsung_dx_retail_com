@@ -48,7 +48,7 @@ COOKIE_FILE = AMAZON_ACCOUNTS[ACCOUNT_NAME]['cookie_file']
 AMAZON_EMAIL = AMAZON_ACCOUNTS[ACCOUNT_NAME]['email']
 AMAZON_PASSWORD = AMAZON_ACCOUNTS[ACCOUNT_NAME]['password']
 import pandas as pd
-from alert_monitor import monitor_and_alert
+from alert_monitor import send_sku_renewed_alert
 
 class AmazonDetailCrawler:
     def __init__(self):
@@ -70,6 +70,7 @@ class AmazonDetailCrawler:
         self.fsp_null_records = []  # final_sku_price is null
         self.cosr_null_records = []  # count_of_star_ratings is null but star_rating exists
         self.screen_size_mismatch_records = []  # screen_size mismatch between extracted and tv_item_mst
+        self.sku_updated_records = []  # sku renewed in tv_item_mst
         self.current_account = _config.get_account('primary', 'amazon_tv_dt1') or 'unsandev0004'
         self.processed_asins = set()  # Real-time duplicate check for ASINs (after redirect)
 
@@ -2165,21 +2166,42 @@ class AmazonDetailCrawler:
                 crawl_datetime
             ))
 
-            # Insert into tv_item_mst (with duplicate check on item, update screen_size on conflict)
+            # Insert into tv_item_mst (with duplicate check on item, update sku and screen_size on conflict)
             if data.get('item'):
+                # Check existing sku before upsert
+                cursor.execute("""
+                    SELECT sku FROM tv_item_mst WHERE item = %s
+                """, (data['item'],))
+                existing_row = cursor.fetchone()
+                existing_sku = existing_row[0] if existing_row else None
+
+                new_sku = data.get('sku', 'no sku')
                 cursor.execute("""
                     INSERT INTO tv_item_mst (item, product_url, sku, account_name, screen_size)
                     VALUES (%s, %s, %s, %s, %s)
                     ON CONFLICT (item) DO UPDATE SET
+                        sku = EXCLUDED.sku,
+                        product_url = EXCLUDED.product_url,
                         screen_size = COALESCE(tv_item_mst.screen_size, EXCLUDED.screen_size)
                 """, (
                     data['item'],
                     data['product_url'],
-                    data.get('sku', 'no sku'),
+                    new_sku,
                     'Amazon',
                     data.get('screen_size')
                 ))
-                print(f"  [DB] ✓ tv_item_mst upsert (item: {data['item']}, sku: {data.get('sku', 'no sku')}, screen_size: {data.get('screen_size')})")
+                print(f"  [DB] ✓ tv_item_mst upsert (item: {data['item']}, sku: {new_sku}, screen_size: {data.get('screen_size')})")
+
+                # Track sku renewal
+                if existing_sku and new_sku and existing_sku != new_sku:
+                    self.sku_updated_records.append({
+                        'account_name': 'Amazon',
+                        'item': data['item'],
+                        'product_url': data['product_url'],
+                        'old_sku': existing_sku,
+                        'new_sku': new_sku
+                    })
+                    print(f"  [INFO] SKU renewed: {existing_sku} -> {new_sku}")
 
             # Commit transaction
             self.db_conn.commit()
@@ -2363,12 +2385,9 @@ class AmazonDetailCrawler:
                 results_df = pd.DataFrame(rows, columns=columns)
                 cursor.close()
 
-                monitor_and_alert('amazon', len(product_urls), results_df,
-                                 rv_detail_null_records=self.rv_detail_null_records,
-                                 reviews_equals_ratings_records=self.reviews_equals_ratings_records,
-                                 fsp_null_records=self.fsp_null_records,
-                                 cosr_null_records=self.cosr_null_records,
-                                 screen_size_mismatch_records=self.screen_size_mismatch_records)
+                # Send SKU renewed alert if any
+                if self.sku_updated_records:
+                    send_sku_renewed_alert('Amazon TV', self.sku_updated_records)
             except Exception as e:
                 print(f"[WARNING] Failed to send alert: {e}")
 
@@ -2378,6 +2397,20 @@ class AmazonDetailCrawler:
             traceback.print_exc()
 
         finally:
+            # 결과 JSON 저장
+            try:
+                import json
+                result_dir = r"C:\samsung_dx_retail_com\stage_results"
+                os.makedirs(result_dir, exist_ok=True)
+                target = len(product_urls) if 'product_urls' in locals() else 0
+                with open(os.path.join(result_dir, "amazon_tv_dt1.json"), "w") as f:
+                    json.dump({
+                        "target_count": target,
+                        "collected_count": self.total_collected
+                    }, f)
+            except Exception as e:
+                print(f"[WARNING] Failed to write result JSON: {e}")
+
             print("\n[INFO] Cleaning up...")
             if self.page:
                 try:

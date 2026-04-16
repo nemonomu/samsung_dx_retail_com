@@ -11,13 +11,20 @@ import subprocess
 import sys
 import time
 import os
+import json
+import threading
 from datetime import datetime
-from alert_monitor import send_crawl_alert
+from alert_monitor import send_tv_crawl_report
 from amazon_config_loader import get_amazon_config
 
 # Load config from DB
 _config = get_amazon_config()
-SCRIPT_TIMEOUT = _config.get_int('timing', 'script_timeout', 'amazon_tv_crawl', 21600)
+SCRIPT_TIMEOUT = _config.get_int('timing', 'script_timeout', 'amazon_tv_crawl', 39600)
+
+RESULT_DIR = r"C:\samsung_dx_retail_com\stage_results"
+INTERIM_REPORT_SECONDS = 21600  # 6 hours
+
+STAGE_ORDER = ['amazon_tv_main1', 'amazon_tv_bsr1', 'amazon_tv_dt1']
 
 
 def print_separator():
@@ -32,75 +39,94 @@ def print_stage_header(stage_name, stage_num, total_stages):
     print_separator()
 
 
+def read_stage_result(script_name):
+    """Read stage result JSON file"""
+    try:
+        result_file = os.path.join(RESULT_DIR, script_name.replace('.py', '.json'))
+        if os.path.exists(result_file):
+            with open(result_file, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"[WARNING] Failed to read result JSON for {script_name}: {e}")
+    return None
+
+
+def clean_stage_results():
+    """Clean up previous stage result JSON files"""
+    try:
+        if os.path.exists(RESULT_DIR):
+            for f in os.listdir(RESULT_DIR):
+                if f.endswith('.json') and 'amazon_tv' in f:
+                    os.remove(os.path.join(RESULT_DIR, f))
+        else:
+            os.makedirs(RESULT_DIR, exist_ok=True)
+    except Exception as e:
+        print(f"[WARNING] Failed to clean stage results: {e}")
+
+
 def run_crawler(script_name, stage_name):
-    """
-    Run a crawler script and return success status
-
-    Args:
-        script_name: Python script filename (e.g., 'amazon_tv_main1.py')
-        stage_name: Display name for the stage
-
-    Returns:
-        bool: True if successful, False if failed
-    """
+    """Run a crawler script and return structured result"""
     start_time = time.time()
     print(f"\n[INFO] Starting {stage_name}...")
     print(f"[INFO] Command: python {script_name}")
     print(f"[INFO] Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
+    result = {
+        "success": False,
+        "elapsed": 0,
+        "timeout": False,
+        "collected_count": None,
+        "target_count": None
+    }
+
     try:
-        # Run the script with real-time output (no buffering)
-        result = subprocess.run(
-            [sys.executable, '-u', script_name],  # -u: unbuffered output
-            # Remove capture_output to enable real-time streaming
-            stdout=None,  # Inherit parent's stdout
-            stderr=None,  # Inherit parent's stderr
+        proc = subprocess.run(
+            [sys.executable, '-u', script_name],
+            stdout=None,
+            stderr=None,
             text=True,
             encoding='utf-8',
             errors='replace',
             timeout=SCRIPT_TIMEOUT
         )
 
-        elapsed_time = time.time() - start_time
+        result["elapsed"] = time.time() - start_time
+        result["success"] = proc.returncode == 0
 
-        if result.returncode == 0:
+        if result["success"]:
             print(f"\n[OK] {stage_name} completed successfully")
-            print(f"[INFO] Elapsed time: {elapsed_time:.1f} seconds")
-            return True
         else:
-            print(f"\n[ERROR] {stage_name} failed with return code {result.returncode}")
-            print(f"[INFO] Elapsed time: {elapsed_time:.1f} seconds")
-            return False
+            print(f"\n[ERROR] {stage_name} failed with return code {proc.returncode}")
+        print(f"[INFO] Elapsed time: {result['elapsed']:.1f} seconds")
 
     except subprocess.TimeoutExpired:
-        elapsed_time = time.time() - start_time
-        print(f"\n[ERROR] {stage_name} timed out after {SCRIPT_TIMEOUT // 3600} hours")
-        print(f"[INFO] Elapsed time: {elapsed_time:.1f} seconds")
-        return False
+        result["elapsed"] = time.time() - start_time
+        result["timeout"] = True
+        print(f"\n[ERROR] {stage_name} timed out after {SCRIPT_TIMEOUT/3600:.0f} hours")
+        print(f"[INFO] Elapsed time: {result['elapsed']:.1f} seconds")
     except Exception as e:
-        elapsed_time = time.time() - start_time
+        result["elapsed"] = time.time() - start_time
         print(f"\n[ERROR] {stage_name} failed with exception: {e}")
-        print(f"[INFO] Elapsed time: {elapsed_time:.1f} seconds")
-        return False
+        print(f"[INFO] Elapsed time: {result['elapsed']:.1f} seconds")
+
+    # Read result JSON from subprocess
+    stage_data = read_stage_result(script_name)
+    if stage_data:
+        result["collected_count"] = stage_data.get("collected_count")
+        result["target_count"] = stage_data.get("target_count")
+
+    return result
 
 
 def create_failure_log(failed_stages):
-    """
-    Create failure log file in C:\\samsung_dx_retail_com\\failed_amazon\\
-
-    Args:
-        failed_stages: List of failed script names
-    """
+    """Create failure log file"""
     try:
-        # Create directory if not exists
         log_dir = r"C:\samsung_dx_retail_com\failed_amazon"
         os.makedirs(log_dir, exist_ok=True)
 
-        # Create filename with current time (YYYYMMDDHHmm)
         timestamp = datetime.now().strftime("%Y%m%d%H%M")
         log_file = os.path.join(log_dir, f"{timestamp}.txt")
 
-        # Write failed stages
         with open(log_file, 'w', encoding='utf-8') as f:
             for stage in failed_stages:
                 f.write(f"{stage}\n")
@@ -115,13 +141,32 @@ def create_failure_log(failed_stages):
 
 def main():
     """Main execution function"""
-    # Initialize variables for exception handling
-    results = {}
+    stage_results = {}
     failed_stages = []
     overall_start_time = time.time()
+    interim_sent = False
+
+    # 6시간 중간보고 타이머
+    def send_interim():
+        nonlocal interim_sent
+        if not interim_sent:
+            interim_sent = True
+            print(f"\n[INFO] 6시간 경과 - 중간 보고 발송")
+            try:
+                send_tv_crawl_report('Amazon',
+                    stage_results=stage_results,
+                    failed_stages=failed_stages,
+                    overall_elapsed=time.time() - overall_start_time,
+                    stage_order=STAGE_ORDER,
+                    is_interim=True
+                )
+            except Exception as e:
+                print(f"[WARNING] 중간 보고 발송 실패: {e}")
+
+    timer = threading.Timer(INTERIM_REPORT_SECONDS, send_interim)
+    timer.daemon = True
 
     try:
-        # Generate batch_id and session_start_time for consistency
         batch_id = datetime.now().strftime('%Y%m%d_%H%M%S')
         session_start_time = datetime.now().strftime('%Y%m%d%H%M')
 
@@ -132,30 +177,42 @@ def main():
         print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print_separator()
 
-        # Stage definitions: (script_name, display_name)
+        # 이전 결과 파일 정리
+        clean_stage_results()
+
+        # 6시간 타이머 시작
+        timer.start()
+
+        # Stage definitions
         stages = [
-            ("amazon_tv_main1.py", "Main Crawler (No Price Collection)"),
-            ("amazon_tv_bsr1.py", "BSR Crawler (No Price Collection)"),
-            ("amazon_tv_dt1.py", "Detail Crawler (Price Collection from Detail Pages)")
+            ("amazon_tv_main1.py", "amazon_tv_main1"),
+            ("amazon_tv_bsr1.py", "amazon_tv_bsr1"),
+            ("amazon_tv_dt1.py", "amazon_tv_dt1")
         ]
 
         # Execute main1, bsr1
         for i, (script, name) in enumerate(stages[:2], 1):
             print_stage_header(name, i, 3)
-            success = run_crawler(script, name)
-            results[script] = success
+            result = run_crawler(script, name)
+            stage_results[name] = result
 
-            if not success:
-                failed_stages.append(script)
+            if not result["success"]:
+                failed_stages.append(name)
 
-            # Wait 5 seconds between stages for driver cleanup
             if i < 2:
                 print(f"\n[INFO] Waiting 5 seconds for driver cleanup...")
                 time.sleep(5)
 
+        # main1 수집 수 체크
+        main1_collected = (stage_results.get("amazon_tv_main1", {}).get("collected_count") or 0)
+        bsr_collected = (stage_results.get("amazon_tv_bsr1", {}).get("collected_count") or 0)
+        print(f"\n[INFO] main1: {main1_collected} url, bsr1: {bsr_collected} url")
+
         # Check if at least one of main1/bsr1 succeeded
-        main_stages_success = any([results["amazon_tv_main1.py"],
-                                    results["amazon_tv_bsr1.py"]])
+        main_stages_success = any([
+            stage_results["amazon_tv_main1"]["success"],
+            stage_results["amazon_tv_bsr1"]["success"]
+        ])
 
         # Execute dt1 only if at least one main stage succeeded
         if main_stages_success:
@@ -163,14 +220,24 @@ def main():
             time.sleep(5)
 
             print_stage_header(stages[2][1], 3, 3)
-            success = run_crawler(stages[2][0], stages[2][1])
-            results[stages[2][0]] = success
+            result = run_crawler(stages[2][0], stages[2][1])
+            stage_results["amazon_tv_dt1"] = result
 
-            if not success:
-                failed_stages.append(stages[2][0])
+            # dt1 failed 판정
+            dt1_target = result.get("target_count") or 0
+            dt1_collected = result.get("collected_count") or 0
+            if not result["success"] or dt1_collected < dt1_target:
+                if "amazon_tv_dt1" not in failed_stages:
+                    failed_stages.append("amazon_tv_dt1")
         else:
             print(f"\n[WARNING] All main stages (main1, bsr1) failed. Skipping detail crawler.")
-            results["amazon_tv_dt1.py"] = None  # Not executed
+            stage_results["amazon_tv_dt1"] = {
+                "success": None, "elapsed": 0, "timeout": False,
+                "collected_count": None, "target_count": None
+            }
+
+        # 6시간 타이머 취소
+        timer.cancel()
 
         # Create failure log if any stage failed
         if failed_stages:
@@ -181,51 +248,34 @@ def main():
         print_separator()
         print("EXECUTION SUMMARY")
         print_separator()
-        print(f"{'Stage':<50} {'Status':<15}")
-        print("-" * 80)
 
         for script, name in stages:
-            status = results.get(script)
-            if status is True:
-                status_str = "SUCCESS"
-            elif status is False:
-                status_str = "FAILED"
-            else:
-                status_str = "SKIPPED"
+            sr = stage_results.get(name, {})
+            status_str = "성공" if sr.get("success") is True else ("실패" if sr.get("success") is False else "미실행")
+            print(f"  {name}: {status_str}")
 
-            print(f"{name:<50} {status_str:<15}")
-
-        print("-" * 80)
-        print(f"Total elapsed time: {overall_elapsed:.1f} seconds ({overall_elapsed/60:.1f} minutes)")
-        print(f"End time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-        if failed_stages:
-            print(f"\n[WARNING] {len(failed_stages)} stage(s) failed")
-            print(f"Failed stages: {', '.join(failed_stages)}")
-        else:
-            print(f"\n[OK] All executed stages completed successfully!")
-
+        print(f"\nTotal elapsed: {overall_elapsed:.1f}s ({overall_elapsed/60:.1f}min)")
         print_separator()
 
-        # Send email notification
-        send_crawl_alert(
-            retailer='Amazon',
-            results=results,
+        # 최종 리포트 발송
+        send_tv_crawl_report('Amazon',
+            stage_results=stage_results,
             failed_stages=failed_stages,
-            elapsed_time=overall_elapsed
+            overall_elapsed=overall_elapsed,
+            stage_order=STAGE_ORDER
         )
 
-        # Return exit code
         return 0 if not failed_stages else 1
 
     except KeyboardInterrupt:
         print("\n[!] Interrupted by user")
+        timer.cancel()
         overall_elapsed = time.time() - overall_start_time
-        send_crawl_alert(
-            retailer='Amazon',
-            results=results,
+        send_tv_crawl_report('Amazon',
+            stage_results=stage_results,
             failed_stages=['Interrupted by user'],
-            elapsed_time=overall_elapsed,
+            overall_elapsed=overall_elapsed,
+            stage_order=STAGE_ORDER,
             error_message='Crawler interrupted by user'
         )
         return 1
@@ -234,12 +284,13 @@ def main():
         print(f"\n[!] Fatal error: {e}")
         import traceback
         traceback.print_exc()
+        timer.cancel()
         overall_elapsed = time.time() - overall_start_time
-        send_crawl_alert(
-            retailer='Amazon',
-            results=results,
+        send_tv_crawl_report('Amazon',
+            stage_results=stage_results,
             failed_stages=['Fatal error'],
-            elapsed_time=overall_elapsed,
+            overall_elapsed=overall_elapsed,
+            stage_order=STAGE_ORDER,
             error_message=str(e)
         )
         return 1

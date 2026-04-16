@@ -741,6 +741,16 @@ class WalmartTVCrawler:
             traceback.print_exc()
 
         finally:
+            # 결과 JSON 저장
+            try:
+                import json
+                result_dir = r"C:\samsung_dx_retail_com\stage_results"
+                os.makedirs(result_dir, exist_ok=True)
+                with open(os.path.join(result_dir, "wmart_tv_main1.json"), "w") as f:
+                    json.dump({"collected_count": self.total_collected}, f)
+            except Exception as e:
+                print(f"[WARNING] Failed to write result JSON: {e}")
+
             if self.page:
                 try:
                     self.page.quit()

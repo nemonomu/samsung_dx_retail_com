@@ -5,8 +5,12 @@ TV Crawling Monitoring and Alert Module
 """
 
 import smtplib
+import csv
+import io
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from datetime import datetime
 import pytz
 import logging
@@ -1047,4 +1051,635 @@ def send_crawl_alert(retailer, results, failed_stages, elapsed_time, error_messa
 
     except Exception as e:
         logger.error(f"Failed to send crawl alert email: {e}")
+        return False
+
+
+def send_sku_renewed_alert(retailer_name, sku_updated_records):
+    """
+    Send SKU renewed alert email with CSV attachment.
+
+    Args:
+        retailer_name: Retailer display name (e.g., 'Amazon TV', 'Walmart TV', 'BestBuy TV')
+        sku_updated_records: List of dicts with account_name, item, product_url, old_sku, new_sku
+
+    Returns:
+        bool: Email send success status
+    """
+    if not sku_updated_records:
+        return False
+
+    try:
+        korea_tz = pytz.timezone('Asia/Seoul')
+        now = datetime.now(korea_tz)
+
+        renewed_count = len(sku_updated_records)
+        subject = f"[sku_renewed] {retailer_name} {renewed_count} - {now.strftime('%Y-%m-%d %H:%M')}"
+
+        # Build HTML table
+        table_rows = ""
+        for record in sku_updated_records:
+            table_rows += f"""
+                <tr>
+                    <td>{record.get('account_name', 'N/A')}</td>
+                    <td>{record.get('item', 'N/A')}</td>
+                    <td><a href="{record.get('product_url', '#')}">{(record.get('product_url', 'N/A'))[:80]}...</a></td>
+                    <td>{record.get('old_sku', 'N/A')}</td>
+                    <td>{record.get('new_sku', 'N/A')}</td>
+                </tr>
+            """
+
+        html_content = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: 'Malgun Gothic', Arial, sans-serif; }}
+                table {{ border-collapse: collapse; width: 100%; margin: 10px 0; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                th {{ background-color: #4CAF50; color: white; }}
+                tr:nth-child(even) {{ background-color: #f2f2f2; }}
+                .header {{ background-color: #333; color: white; padding: 15px; }}
+                .section {{ margin: 20px 0; }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h2>{retailer_name} SKU Renewed Report</h2>
+                <p>Time: {now.strftime('%Y-%m-%d %H:%M:%S')} (KST)</p>
+            </div>
+
+            <div class="section">
+                <h3>SKU Renewed: {renewed_count} items</h3>
+                <table>
+                    <tr>
+                        <th>Account</th>
+                        <th>Item</th>
+                        <th>Product URL</th>
+                        <th>Old SKU</th>
+                        <th>New SKU</th>
+                    </tr>
+                    {table_rows}
+                </table>
+            </div>
+
+            <div class="section">
+                <p style="color: #666; font-size: 12px;">
+                    This email was sent automatically. CSV file is attached.
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+
+        # Generate CSV in memory
+        csv_buffer = io.StringIO()
+        writer = csv.DictWriter(csv_buffer, fieldnames=['account_name', 'item', 'product_url', 'old_sku', 'new_sku'])
+        writer.writeheader()
+        for record in sku_updated_records:
+            writer.writerow({
+                'account_name': record.get('account_name', ''),
+                'item': record.get('item', ''),
+                'product_url': record.get('product_url', ''),
+                'old_sku': record.get('old_sku', ''),
+                'new_sku': record.get('new_sku', '')
+            })
+        csv_data = csv_buffer.getvalue()
+        csv_buffer.close()
+
+        # Create email (mixed: HTML + attachment)
+        msg = MIMEMultipart('mixed')
+        msg['Subject'] = subject
+        msg['From'] = EMAIL_CONFIG['sender_email']
+        msg['To'] = EMAIL_CONFIG['receiver_email']
+
+        msg.attach(MIMEText(html_content, 'html'))
+
+        # Attach CSV file
+        csv_filename = f"sku_renewed_{retailer_name.replace(' ', '_')}_{now.strftime('%Y%m%d_%H%M%S')}.csv"
+        csv_part = MIMEBase('text', 'csv')
+        csv_part.set_payload(csv_data.encode('utf-8-sig'))
+        encoders.encode_base64(csv_part)
+        csv_part.add_header('Content-Disposition', f'attachment; filename="{csv_filename}"')
+        msg.attach(csv_part)
+
+        # Send email
+        with smtplib.SMTP(EMAIL_CONFIG['smtp_server'], EMAIL_CONFIG['smtp_port']) as server:
+            server.starttls()
+            server.login(EMAIL_CONFIG['sender_email'], EMAIL_CONFIG['sender_password'])
+            server.sendmail(
+                EMAIL_CONFIG['sender_email'],
+                EMAIL_CONFIG['receiver_email'],
+                msg.as_string()
+            )
+
+        logger.info(f"SKU renewed alert sent: {subject}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to send SKU renewed alert: {e}")
+        return False
+
+
+def _get_prev_session_data(db_conn, current_session_min):
+    """
+    DB에서 직전 세션 데이터 조회
+
+    Args:
+        db_conn: psycopg2 connection
+        current_session_min: 현재 세션의 MIN(crawl_datetime) 문자열
+
+    Returns:
+        (prev_df, prev_session_start): DataFrame과 직전 세션 시작시간, 없으면 (None, None)
+    """
+    try:
+        cursor = db_conn.cursor()
+
+        # 1) 현재 세션 이전의 가장 최근 crawl_datetime
+        cursor.execute("""
+            SELECT MAX(crawl_datetime) FROM tv_retail_com
+            WHERE account_name = 'Walmart'
+            AND crawl_datetime::timestamp < %s::timestamp
+        """, (current_session_min,))
+        row = cursor.fetchone()
+        if not row or not row[0]:
+            cursor.close()
+            return None, None
+        prev_max = row[0]
+
+        # 2) 직전 세션 시작시간 (prev_max 기준 12시간 이내)
+        cursor.execute("""
+            SELECT MIN(crawl_datetime) FROM tv_retail_com
+            WHERE account_name = 'Walmart'
+            AND crawl_datetime::timestamp BETWEEN (%s::timestamp - INTERVAL '12 hours') AND %s::timestamp
+        """, (prev_max, prev_max))
+        row = cursor.fetchone()
+        prev_session_start = row[0] if row and row[0] else prev_max
+
+        # 3) 직전 세션 전체 데이터
+        cursor.execute("""
+            SELECT product_url, retailer_sku_name, star_rating, count_of_star_ratings, count_of_reviews,
+                   screen_size, sku_popularity, final_sku_price, original_sku_price,
+                   savings, discount_type, offer, pick_up_availability,
+                   shipping_availability, delivery_availability, shipping_info,
+                   available_quantity_for_purchase, inventory_status, sku_status,
+                   retailer_membership_discounts, detailed_review_content, main_rank, bsr_rank,
+                   model_year
+            FROM tv_retail_com
+            WHERE account_name = 'Walmart'
+            AND crawl_datetime::timestamp BETWEEN %s::timestamp AND %s::timestamp
+        """, (prev_session_start, prev_max))
+
+        rows = cursor.fetchall()
+        columns = [
+            'product_url', 'retailer_sku_name', 'star_rating', 'count_of_star_ratings', 'count_of_reviews',
+            'screen_size', 'sku_popularity', 'final_sku_price', 'original_sku_price',
+            'savings', 'discount_type', 'offer', 'pick_up_availability',
+            'shipping_availability', 'delivery_availability', 'shipping_info',
+            'available_quantity_for_purchase', 'inventory_status', 'sku_status',
+            'retailer_membership_discounts', 'detailed_review_content', 'main_rank', 'bsr_rank',
+            'model_year'
+        ]
+        cursor.close()
+
+        if rows:
+            return pd.DataFrame(rows, columns=columns), prev_session_start
+        return None, None
+
+    except Exception as e:
+        logger.error(f"직전 세션 데이터 조회 실패: {e}")
+        return None, None
+
+
+def _get_current_session_data(db_conn):
+    """
+    DB에서 현재 세션 데이터 조회
+
+    Returns:
+        (curr_df, session_min): DataFrame과 현재 세션 MIN(crawl_datetime), 없으면 (None, None)
+    """
+    try:
+        cursor = db_conn.cursor()
+
+        # 현재 세션 시작시간 판별 (최근 12시간 이내)
+        cursor.execute("""
+            SELECT MIN(crawl_datetime) FROM tv_retail_com
+            WHERE account_name = 'Walmart'
+            AND crawl_datetime::timestamp >= NOW() - INTERVAL '12 hours'
+        """)
+        row = cursor.fetchone()
+        if not row or not row[0]:
+            cursor.close()
+            return None, None
+        session_min = row[0]
+
+        cursor.execute("""
+            SELECT product_url, retailer_sku_name, star_rating, count_of_star_ratings, count_of_reviews,
+                   screen_size, sku_popularity, final_sku_price, original_sku_price,
+                   savings, discount_type, offer, pick_up_availability,
+                   shipping_availability, delivery_availability, shipping_info,
+                   available_quantity_for_purchase, inventory_status, sku_status,
+                   retailer_membership_discounts, detailed_review_content, main_rank, bsr_rank,
+                   model_year
+            FROM tv_retail_com
+            WHERE account_name = 'Walmart'
+            AND crawl_datetime::timestamp >= %s::timestamp
+        """, (session_min,))
+
+        rows = cursor.fetchall()
+        columns = [
+            'product_url', 'retailer_sku_name', 'star_rating', 'count_of_star_ratings', 'count_of_reviews',
+            'screen_size', 'sku_popularity', 'final_sku_price', 'original_sku_price',
+            'savings', 'discount_type', 'offer', 'pick_up_availability',
+            'shipping_availability', 'delivery_availability', 'shipping_info',
+            'available_quantity_for_purchase', 'inventory_status', 'sku_status',
+            'retailer_membership_discounts', 'detailed_review_content', 'main_rank', 'bsr_rank',
+            'model_year'
+        ]
+        cursor.close()
+
+        if rows:
+            return pd.DataFrame(rows, columns=columns), session_min
+        return None, None
+
+    except Exception as e:
+        logger.error(f"현재 세션 데이터 조회 실패: {e}")
+        return None, None
+
+
+def _compare_sessions(curr_df, prev_df):
+    """
+    현재 세션 vs 직전 세션 필드별 비교
+
+    Returns:
+        dict: {
+            'field_stats': {field: {empty_count, prev_empty_count, total}},
+            'newly_empty': [{url, product_name, field}],
+            'recovered': [{url, product_name, field}],
+            'all_null_fields': [field_name, ...]  # 빈 값 비율 100%인 필드
+        }
+    """
+    fields_to_check = [
+        'retailer_sku_name', 'star_rating', 'count_of_star_ratings', 'count_of_reviews',
+        'screen_size', 'final_sku_price', 'original_sku_price',
+        'pick_up_availability', 'shipping_availability', 'delivery_availability',
+        'detailed_review_content', 'main_rank', 'bsr_rank'
+    ]
+
+    result = {
+        'field_stats': {},
+        'newly_empty': [],
+        'recovered': [],
+        'all_null_fields': []  # 빈 값 비율 100%인 필드 목록
+    }
+
+    if curr_df is None or curr_df.empty:
+        return result
+
+    total = len(curr_df)
+
+    # 필드별 빈 값 통계 + 세션 비교
+    for field in fields_to_check:
+        if field not in curr_df.columns:
+            continue
+
+        # 현재 빈 값
+        curr_empty = curr_df[field].isna() | (curr_df[field].astype(str).isin(['', 'None', 'nan']))
+        curr_empty_count = int(curr_empty.sum())
+        empty_rate = round((curr_empty_count / total) * 100, 1) if total > 0 else 0
+
+        stat = {
+            'empty_count': curr_empty_count,
+            'prev_empty_count': '-',
+            'total': total,
+            'empty_rate': empty_rate
+        }
+
+        # 빈 값 비율 100%인 필드 경고
+        if curr_empty_count == total and total > 0:
+            result['all_null_fields'].append(field)
+
+        # 직전 세션 비교
+        if prev_df is not None and not prev_df.empty and field in prev_df.columns:
+            prev_empty = prev_df[field].isna() | (prev_df[field].astype(str).isin(['', 'None', 'nan']))
+            stat['prev_empty_count'] = int(prev_empty.sum())
+
+            # URL 기반 비교
+            if 'product_url' in curr_df.columns and 'product_url' in prev_df.columns:
+                curr_empty_urls = set(curr_df.loc[curr_empty, 'product_url'])
+                prev_empty_urls = set(prev_df.loc[prev_empty, 'product_url'])
+                prev_all_urls = set(prev_df['product_url'])
+                curr_all_urls = set(curr_df['product_url'])
+
+                # 신규 빈 값: 직전에 값 있었는데 지금 빈 값 (양쪽 모두 존재하는 URL만)
+                newly_empty_urls = (curr_empty_urls - prev_empty_urls) & prev_all_urls
+                for url in sorted(newly_empty_urls):
+                    row = curr_df[curr_df['product_url'] == url].iloc[0]
+                    name = row.get('retailer_sku_name', '')
+                    name = str(name)[:50] if name and not pd.isna(name) else '(빈 값)'
+                    result['newly_empty'].append({
+                        'url': url, 'product_name': name, 'field': field
+                    })
+
+                # 값 복구: 직전에 빈 값이었는데 지금 값 있음
+                recovered_urls = (prev_empty_urls - curr_empty_urls) & curr_all_urls
+                for url in sorted(recovered_urls):
+                    row = curr_df[curr_df['product_url'] == url].iloc[0]
+                    name = row.get('retailer_sku_name', '')
+                    name = str(name)[:50] if name and not pd.isna(name) else '(빈 값)'
+                    result['recovered'].append({
+                        'url': url, 'product_name': name, 'field': field
+                    })
+
+        result['field_stats'][field] = stat
+
+    return result
+
+
+def send_wmart_crawl_report(stage_results, failed_stages, overall_elapsed,
+                            is_interim=False, error_message=None):
+    """
+    Walmart TV 크롤링 리포트 이메일 발송
+
+    Args:
+        stage_results: {stage_name: {success, elapsed, timeout, collected_count, target_count}}
+        failed_stages: 실패 스테이지 이름 리스트
+        overall_elapsed: 총 소요시간 (초)
+        is_interim: True이면 6시간 중간보고
+        error_message: 추가 에러 메시지 (선택)
+    """
+    try:
+        korea_tz = pytz.timezone('Asia/Seoul')
+        now = datetime.now(korea_tz)
+
+        # DB 연결 (dt1 결과 비교용)
+        import psycopg2
+        from config import DB_CONFIG
+        db_conn = None
+        comparison = None
+        prev_session_start = None
+
+        if not is_interim:
+            try:
+                db_conn = psycopg2.connect(**DB_CONFIG)
+                db_conn.autocommit = True
+                curr_df, session_min = _get_current_session_data(db_conn)
+                if curr_df is not None and session_min:
+                    prev_df, prev_session_start = _get_prev_session_data(db_conn, session_min)
+                    comparison = _compare_sessions(curr_df, prev_df)
+            except Exception as e:
+                logger.error(f"DB 세션 비교 실패: {e}")
+            finally:
+                if db_conn:
+                    db_conn.close()
+
+        # 제목 생성
+        failed_parts = []
+        for stage in failed_stages:
+            if stage == 'wmart_tv_dt1':
+                dt1 = stage_results.get('wmart_tv_dt1', {})
+                dt1_target = dt1.get('target_count') or 0
+                dt1_collected = dt1.get('collected_count') or 0
+                if dt1.get('timeout'):
+                    failed_parts.append('dt1 타임아웃')
+                elif dt1_target > 0:
+                    failed_parts.append(f'dt1 {dt1_target - dt1_collected} sku')
+                else:
+                    failed_parts.append('dt1')
+            elif stage in ('wmart_tv_main1', 'wmart_tv_main2'):
+                failed_parts.append(stage.replace('wmart_tv_', ''))
+            elif stage == 'wmart_tv_bsr':
+                failed_parts.append('bsr')
+            else:
+                failed_parts.append(stage)
+
+        # main1+main2 합산 미달 체크
+        main1_c = (stage_results.get('wmart_tv_main1', {}).get('collected_count') or 0)
+        main2_c = (stage_results.get('wmart_tv_main2', {}).get('collected_count') or 0)
+        bsr_c = (stage_results.get('wmart_tv_bsr', {}).get('collected_count') or 0)
+        main_total = main1_c + main2_c
+
+        alerts = []
+        if main_total < 300 and main_total > 0:
+            alerts.append(f'main1+main2 합산 {main_total}개 (300 미만)')
+        if 0 < bsr_c < 100:
+            alerts.append(f'bsr {bsr_c}개 (100 미만)')
+        dt1_result = stage_results.get('wmart_tv_dt1', {})
+        dt1_target = dt1_result.get('target_count') or 0
+        if 0 < dt1_target < 300:
+            alerts.append(f'dt1 대상 {dt1_target}개 (300 미만)')
+
+        failed_prefix = f"Failed {' '.join(failed_parts)} " if failed_parts else ""
+
+        if is_interim:
+            subject = f"[DX_SEA] 진행중 Walmart TV Crawler - 6시간 경과"
+        else:
+            subject = f"[DX_SEA] {failed_prefix}Walmart TV Crawler {'완료' if not failed_parts else ''}"
+            subject = subject.rstrip()
+
+        # HTML 본문
+        report_type = "중간 리포트" if is_interim else "크롤링 리포트"
+        html_content = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: 'Malgun Gothic', Arial, sans-serif; }}
+                .critical {{ color: #dc3545; font-weight: bold; }}
+                .warning {{ color: #ffc107; font-weight: bold; }}
+                .success {{ color: #28a745; font-weight: bold; }}
+                .notice {{ color: #17a2b8; font-weight: bold; }}
+                table {{ border-collapse: collapse; width: 100%; margin: 10px 0; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                th {{ background-color: #4CAF50; color: white; }}
+                tr:nth-child(even) {{ background-color: #f2f2f2; }}
+                .header {{ background-color: #333; color: white; padding: 15px; }}
+                .section {{ margin: 20px 0; }}
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h2>Walmart TV {report_type}</h2>
+                <p>시간: {now.strftime('%Y-%m-%d %H:%M:%S')} (KST)</p>
+            </div>
+
+            <div class="section">
+                <h3>실행 요약</h3>
+                <table>
+                    <tr><th>항목</th><th>값</th></tr>
+                    <tr><td>총 소요시간</td><td>{overall_elapsed:.1f}초 ({overall_elapsed/60:.1f}분)</td></tr>
+                </table>
+            </div>
+
+            <div class="section">
+                <h3>스테이지별 결과</h3>
+                <table>
+                    <tr><th>스테이지</th><th>상태</th><th>수집 현황</th><th>소요시간</th></tr>
+        """
+
+        stage_order = ['wmart_tv_main1', 'wmart_tv_main2', 'wmart_tv_bsr', 'wmart_tv_dt1']
+        for name in stage_order:
+            sr = stage_results.get(name, {})
+            if not sr and is_interim:
+                # 중간보고 시 결과 없음 = 진행중 또는 대기중
+                status = '<span class="notice">진행중</span>'
+                sr = {}
+            else:
+                success = sr.get('success')
+                if success is True:
+                    status = '<span class="success">성공</span>'
+                elif success is False:
+                    status = '<span class="critical">실패</span>'
+                elif success is None:
+                    status = '<span style="color: #6c757d;">미실행</span>'
+                else:
+                    status = '<span class="notice">진행중</span>'
+
+            collected = sr.get('collected_count')
+            target = sr.get('target_count')
+            if collected is not None and target is not None:
+                collected_str = f"{collected} sku / {target} sku"
+            elif collected is not None:
+                collected_str = f"{collected} url"
+            else:
+                collected_str = '-'
+
+            if sr.get('timeout'):
+                elapsed_str = '타임아웃'
+            elif sr.get('elapsed', 0) > 0:
+                elapsed_str = f"{sr['elapsed']:.1f}초"
+            else:
+                elapsed_str = '-'
+
+            html_content += f"<tr><td>{name}</td><td>{status}</td><td>{collected_str}</td><td>{elapsed_str}</td></tr>"
+
+        # main1+main2 합산 행
+        html_content += f"""
+                    <tr style="background-color: #e9ecef; font-weight: bold;">
+                        <td>main1+main2 합산</td><td></td><td>{main_total} url {'<span class="critical">(300 미만)</span>' if 0 < main_total < 300 else ''}</td><td></td>
+                    </tr>
+                </table>
+            </div>
+        """
+
+        # 알림 내용
+        if alerts or error_message:
+            html_content += '<div class="section"><h3>알림 내용</h3><ul>'
+            if error_message:
+                html_content += f'<li class="critical">[CRITICAL] {error_message}</li>'
+            for alert in alerts:
+                html_content += f'<li class="warning">[WARNING] {alert}</li>'
+            html_content += '</ul></div>'
+
+        # 이하 dt1 완료 후 최종 보고에서만 표시
+        if not is_interim and comparison:
+            # 전필드 NULL 경고 (빈 값 비율 100%인 필드)
+            all_null_fields = comparison.get('all_null_fields', [])
+            if all_null_fields:
+                html_content += f"""
+                <div class="section">
+                    <h3 class="warning">전필드 NULL 경고 ({len(all_null_fields)}개 필드)</h3>
+                    <p style="font-size: 12px; color: #666;">아래 필드는 전체 row에서 빈 값 비율이 100%입니다</p>
+                    <ul>
+                """
+                for field in all_null_fields:
+                    html_content += f"<li class='warning'>{field}</li>"
+                html_content += "</ul></div>"
+
+            # 필드별 빈 값 현황
+            field_stats = comparison.get('field_stats', {})
+            if field_stats:
+                prev_label = f"직전 세션"
+                if prev_session_start:
+                    prev_label = f"직전 세션 ({prev_session_start})"
+
+                html_content += f"""
+                <div class="section">
+                    <h3>필드별 빈 값 현황 (wmart_tv_dt1)</h3>
+                    <table>
+                        <tr><th>필드명</th><th>빈 값 개수</th><th>{prev_label}</th><th>차이</th><th>총 개수</th><th>빈 값 비율</th><th>상태</th></tr>
+                """
+                for field, stat in field_stats.items():
+                    prev_empty = stat['prev_empty_count']
+                    if prev_empty != '-':
+                        diff = stat['empty_count'] - prev_empty
+                        if diff > 0:
+                            diff_str = f'<span class="critical">+{diff}</span>'
+                        elif diff < 0:
+                            diff_str = f'<span class="success">{diff}</span>'
+                        else:
+                            diff_str = '0'
+                    else:
+                        diff_str = '-'
+
+                    if stat['empty_rate'] >= 20:
+                        status = '<span class="critical">do check</span>'
+                    else:
+                        status = '<span class="success">정상</span>'
+
+                    html_content += f"""
+                        <tr><td>{field}</td><td>{stat['empty_count']}</td><td>{prev_empty}</td>
+                        <td>{diff_str}</td><td>{stat['total']}</td><td>{stat['empty_rate']}%</td><td>{status}</td></tr>
+                    """
+                html_content += "</table></div>"
+
+            # 신규 빈 값
+            newly_empty = comparison.get('newly_empty', [])
+            if newly_empty:
+                html_content += f"""
+                <div class="section">
+                    <h3 class="critical">신규 빈 값 ({len(newly_empty)}건) - 직전 세션에는 값이 있었으나 금회 빈 값으로 변경</h3>
+                    <table><tr><th>#</th><th>제품명</th><th>변동 필드</th><th>URL</th></tr>
+                """
+                for i, rec in enumerate(newly_empty[:30], 1):
+                    html_content += f"<tr><td>{i}</td><td>{rec['product_name']}</td><td>{rec['field']}</td><td><a href=\"{rec['url']}\">{rec['url'][-40:]}</a></td></tr>"
+                if len(newly_empty) > 30:
+                    html_content += f"<tr><td colspan='4'>... 외 {len(newly_empty)-30}건</td></tr>"
+                html_content += "</table></div>"
+
+            # 값 복구
+            recovered = comparison.get('recovered', [])
+            if recovered:
+                html_content += f"""
+                <div class="section">
+                    <h3 class="success">값 복구 ({len(recovered)}건) - 직전 세션에는 빈 값이었으나 금회 값이 채워짐</h3>
+                    <table><tr><th>#</th><th>제품명</th><th>변동 필드</th><th>URL</th></tr>
+                """
+                for i, rec in enumerate(recovered[:30], 1):
+                    html_content += f"<tr><td>{i}</td><td>{rec['product_name']}</td><td>{rec['field']}</td><td><a href=\"{rec['url']}\">{rec['url'][-40:]}</a></td></tr>"
+                if len(recovered) > 30:
+                    html_content += f"<tr><td colspan='4'>... 외 {len(recovered)-30}건</td></tr>"
+                html_content += "</table></div>"
+
+            if not newly_empty:
+                html_content += '<div class="section"><h3 class="success">신규 빈 값 없음</h3></div>'
+            if not recovered:
+                html_content += '<div class="section"><h3 class="success">값 복구 없음</h3></div>'
+
+        html_content += """
+            <div class="section">
+                <p style="color: #666; font-size: 12px;">이 메일은 자동 발송되었습니다.</p>
+            </div>
+        </body>
+        </html>
+        """
+
+        # 이메일 발송
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = EMAIL_CONFIG['sender_email']
+        msg['To'] = EMAIL_CONFIG['receiver_email']
+        msg.attach(MIMEText(html_content, 'html'))
+
+        with smtplib.SMTP(EMAIL_CONFIG['smtp_server'], EMAIL_CONFIG['smtp_port']) as server:
+            server.starttls()
+            server.login(EMAIL_CONFIG['sender_email'], EMAIL_CONFIG['sender_password'])
+            server.sendmail(
+                EMAIL_CONFIG['sender_email'],
+                EMAIL_CONFIG['receiver_email'],
+                msg.as_string()
+            )
+
+        logger.info(f"Walmart TV 크롤링 리포트 발송: {subject}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Walmart TV 크롤링 리포트 발송 실패: {e}")
         return False

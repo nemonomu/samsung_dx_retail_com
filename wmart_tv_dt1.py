@@ -39,7 +39,7 @@ class Tee:
 from config import DB_CONFIG
 from wmart_config_loader import get_wmart_config
 import pandas as pd
-from alert_monitor import monitor_and_alert
+# monitor_and_alert는 wmart_tv_crawl.py 오케스트레이터에서 통합 발송
 
 class WalmartDetailCrawler:
     def __init__(self):
@@ -2394,52 +2394,26 @@ class WalmartDetailCrawler:
             print(f"Detail Crawling completed! Total collected: {self.total_collected}/{len(product_urls)}")
             print("="*80)
 
-            # Send alert email
-            try:
-                cursor = self.db_conn.cursor()
-                cursor.execute("""
-                    SELECT retailer_sku_name, star_rating, count_of_star_ratings, count_of_reviews,
-                           screen_size, sku_popularity, final_sku_price, original_sku_price,
-                           savings, discount_type, offer, pick_up_availability,
-                           shipping_availability, delivery_availability, shipping_info,
-                           available_quantity_for_purchase, inventory_status, sku_status,
-                           retailer_membership_discounts, detailed_review_content, summarized_review_content,
-                           top_mentions, recommendation_intent, main_rank, bsr_rank, trend_rank,
-                           rank_1, rank_2, promotion_position, number_of_ppl_purchased_yesterday,
-                           number_of_ppl_added_to_carts, number_of_units_purchased_past_month,
-                           retailer_sku_name_similar, estimated_annual_electricity_use, promotion_type, model_year
-                    FROM tv_retail_com
-                    WHERE account_name = 'Walmart'
-                    AND crawl_datetime::timestamp >= NOW() - INTERVAL '4 hours'
-                """)
-                rows = cursor.fetchall()
-                columns = [
-                    'retailer_sku_name', 'star_rating', 'count_of_star_ratings', 'count_of_reviews',
-                    'screen_size', 'sku_popularity', 'final_sku_price', 'original_sku_price',
-                    'savings', 'discount_type', 'offer', 'pick_up_availability',
-                    'shipping_availability', 'delivery_availability', 'shipping_info',
-                    'available_quantity_for_purchase', 'inventory_status', 'sku_status',
-                    'retailer_membership_discounts', 'detailed_review_content', 'summarized_review_content',
-                    'top_mentions', 'recommendation_intent', 'main_rank', 'bsr_rank', 'trend_rank',
-                    'rank_1', 'rank_2', 'promotion_position', 'number_of_ppl_purchased_yesterday',
-                    'number_of_ppl_added_to_carts', 'number_of_units_purchased_past_month',
-                    'retailer_sku_name_similar', 'estimated_annual_electricity_use', 'promotion_type', 'model_year'
-                ]
-                results_df = pd.DataFrame(rows, columns=columns)
-                cursor.close()
-
-                monitor_and_alert('walmart', len(product_urls), results_df,
-                                 drv_20_error_records=self.drv_20_error_records,
-                                 screen_size_mismatch_records=self.screen_size_mismatch_records)
-            except Exception as e:
-                print(f"[WARNING] Failed to send alert: {e}")
-
         except Exception as e:
             print(f"[ERROR] Crawler failed: {e}")
             import traceback
             traceback.print_exc()
 
         finally:
+            # 결과 JSON 저장
+            try:
+                import json
+                result_dir = r"C:\samsung_dx_retail_com\stage_results"
+                os.makedirs(result_dir, exist_ok=True)
+                target = len(product_urls) if 'product_urls' in locals() else 0
+                with open(os.path.join(result_dir, "wmart_tv_dt1.json"), "w") as f:
+                    json.dump({
+                        "target_count": target,
+                        "collected_count": self.total_collected
+                    }, f)
+            except Exception as e:
+                print(f"[WARNING] Failed to write result JSON: {e}")
+
             if self.page:
                 self.page.quit()
             if self.db_conn:

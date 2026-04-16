@@ -11,8 +11,15 @@ import subprocess
 import sys
 import time
 import os
+import json
+import threading
 from datetime import datetime
-from alert_monitor import send_crawl_alert
+from alert_monitor import send_wmart_crawl_report
+
+
+RESULT_DIR = r"C:\samsung_dx_retail_com\stage_results"
+STAGE_TIMEOUT = 39600  # 11 hours
+INTERIM_REPORT_SECONDS = 21600  # 6 hours
 
 
 def print_separator():
@@ -27,75 +34,105 @@ def print_stage_header(stage_name, stage_num, total_stages):
     print_separator()
 
 
-def run_crawler(script_name, stage_name):
+def read_stage_result(script_name):
     """
-    Run a crawler script and return success status
-
-    Args:
-        script_name: Python script filename (e.g., 'wmart_tv_main1.py')
-        stage_name: Display name for the stage
+    Read stage result JSON file
 
     Returns:
-        bool: True if successful, False if failed
+        dict: {"collected_count": N, "target_count": M (dt1 only)} or None
+    """
+    try:
+        result_file = os.path.join(RESULT_DIR, script_name.replace('.py', '.json'))
+        if os.path.exists(result_file):
+            with open(result_file, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"[WARNING] Failed to read result JSON for {script_name}: {e}")
+    return None
+
+
+def clean_stage_results():
+    """Clean up previous stage result JSON files"""
+    try:
+        if os.path.exists(RESULT_DIR):
+            for f in os.listdir(RESULT_DIR):
+                if f.endswith('.json'):
+                    os.remove(os.path.join(RESULT_DIR, f))
+        else:
+            os.makedirs(RESULT_DIR, exist_ok=True)
+    except Exception as e:
+        print(f"[WARNING] Failed to clean stage results: {e}")
+
+
+def run_crawler(script_name, stage_name):
+    """
+    Run a crawler script and return structured result
+
+    Returns:
+        dict: {"success": bool, "elapsed": float, "timeout": bool,
+               "collected_count": int or None, "target_count": int or None}
     """
     start_time = time.time()
     print(f"\n[INFO] Starting {stage_name}...")
     print(f"[INFO] Command: python {script_name}")
     print(f"[INFO] Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
+    result = {
+        "success": False,
+        "elapsed": 0,
+        "timeout": False,
+        "collected_count": None,
+        "target_count": None
+    }
+
     try:
-        # Run the script with real-time output (no buffering)
-        result = subprocess.run(
-            [sys.executable, '-u', script_name],  # -u: unbuffered output
-            # Remove capture_output to enable real-time streaming
-            stdout=None,  # Inherit parent's stdout
-            stderr=None,  # Inherit parent's stderr
+        proc = subprocess.run(
+            [sys.executable, '-u', script_name],
+            stdout=None,
+            stderr=None,
             text=True,
             encoding='utf-8',
             errors='replace',
-            timeout=21600  # 6 hours timeout
+            timeout=STAGE_TIMEOUT
         )
 
-        elapsed_time = time.time() - start_time
+        result["elapsed"] = time.time() - start_time
+        result["success"] = proc.returncode == 0
 
-        if result.returncode == 0:
+        if result["success"]:
             print(f"\n[OK] {stage_name} completed successfully")
-            print(f"[INFO] Elapsed time: {elapsed_time:.1f} seconds")
-            return True
         else:
-            print(f"\n[ERROR] {stage_name} failed with return code {result.returncode}")
-            print(f"[INFO] Elapsed time: {elapsed_time:.1f} seconds")
-            return False
+            print(f"\n[ERROR] {stage_name} failed with return code {proc.returncode}")
+        print(f"[INFO] Elapsed time: {result['elapsed']:.1f} seconds")
 
     except subprocess.TimeoutExpired:
-        elapsed_time = time.time() - start_time
-        print(f"\n[ERROR] {stage_name} timed out after 6 hours")
-        print(f"[INFO] Elapsed time: {elapsed_time:.1f} seconds")
-        return False
+        result["elapsed"] = time.time() - start_time
+        result["timeout"] = True
+        print(f"\n[ERROR] {stage_name} timed out after {STAGE_TIMEOUT/3600:.0f} hours")
+        print(f"[INFO] Elapsed time: {result['elapsed']:.1f} seconds")
     except Exception as e:
-        elapsed_time = time.time() - start_time
+        result["elapsed"] = time.time() - start_time
         print(f"\n[ERROR] {stage_name} failed with exception: {e}")
-        print(f"[INFO] Elapsed time: {elapsed_time:.1f} seconds")
-        return False
+        print(f"[INFO] Elapsed time: {result['elapsed']:.1f} seconds")
+
+    # Read result JSON from subprocess
+    stage_data = read_stage_result(script_name)
+    if stage_data:
+        result["collected_count"] = stage_data.get("collected_count")
+        result["target_count"] = stage_data.get("target_count")
+
+    return result
 
 
 def create_failure_log(failed_stages):
-    """
-    Create failure log file in C:\\samsung_dx_retail_com\\failed_wmart\\
-
-    Args:
-        failed_stages: List of failed script names
-    """
+    """Create failure log file"""
     try:
-        # Create directory if not exists
         log_dir = r"C:\samsung_dx_retail_com\failed_wmart"
         os.makedirs(log_dir, exist_ok=True)
 
-        # Create filename with current time (YYYYMMDDHHmm)
         timestamp = datetime.now().strftime("%Y%m%d%H%M")
         log_file = os.path.join(log_dir, f"{timestamp}.txt")
 
-        # Write failed stages
         with open(log_file, 'w', encoding='utf-8') as f:
             for stage in failed_stages:
                 f.write(f"{stage}\n")
@@ -110,13 +147,31 @@ def create_failure_log(failed_stages):
 
 def main():
     """Main execution function"""
-    # Initialize variables for exception handling
-    results = {}
+    stage_results = {}
     failed_stages = []
     overall_start_time = time.time()
+    interim_sent = False
+
+    # 6시간 중간보고 타이머
+    def send_interim():
+        nonlocal interim_sent
+        if not interim_sent:
+            interim_sent = True
+            print(f"\n[INFO] 6시간 경과 - 중간 보고 발송")
+            try:
+                send_wmart_crawl_report(
+                    stage_results=stage_results,
+                    failed_stages=failed_stages,
+                    overall_elapsed=time.time() - overall_start_time,
+                    is_interim=True
+                )
+            except Exception as e:
+                print(f"[WARNING] 중간 보고 발송 실패: {e}")
+
+    timer = threading.Timer(INTERIM_REPORT_SECONDS, send_interim)
+    timer.daemon = True
 
     try:
-        # Generate batch_id and session_start_time for consistency
         batch_id = datetime.now().strftime('%Y%m%d_%H%M%S')
         session_start_time = datetime.now().strftime('%Y%m%d%H%M')
 
@@ -127,32 +182,47 @@ def main():
         print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print_separator()
 
-        # Stage definitions: (script_name, display_name)
+        # 이전 결과 파일 정리
+        clean_stage_results()
+
+        # 6시간 타이머 시작
+        timer.start()
+
+        # Stage definitions
         stages = [
-            ("wmart_tv_main1.py", "Main Crawler Part 1 (Pages 1-5)"),
-            ("wmart_tv_main2.py", "Main Crawler Part 2 (Pages 6-10)"),
-            ("wmart_tv_bsr.py", "BSR Crawler"),
-            ("wmart_tv_dt1.py", "Detail Crawler")
+            ("wmart_tv_main1.py", "wmart_tv_main1"),
+            ("wmart_tv_main2.py", "wmart_tv_main2"),
+            ("wmart_tv_bsr.py", "wmart_tv_bsr"),
+            ("wmart_tv_dt1.py", "wmart_tv_dt1")
         ]
 
         # Execute main1, main2, bsr
         for i, (script, name) in enumerate(stages[:3], 1):
             print_stage_header(name, i, 4)
-            success = run_crawler(script, name)
-            results[script] = success
+            result = run_crawler(script, name)
+            stage_results[name] = result
 
-            if not success:
-                failed_stages.append(script)
+            if not result["success"]:
+                failed_stages.append(name)
 
-            # Wait 5 seconds between stages for driver cleanup
             if i < 3:
                 print(f"\n[INFO] Waiting 5 seconds for driver cleanup...")
                 time.sleep(5)
 
+        # main1+main2 합산 체크
+        main1_collected = (stage_results.get("wmart_tv_main1", {}).get("collected_count") or 0)
+        main2_collected = (stage_results.get("wmart_tv_main2", {}).get("collected_count") or 0)
+        bsr_collected = (stage_results.get("wmart_tv_bsr", {}).get("collected_count") or 0)
+
+        main_total = main1_collected + main2_collected
+        print(f"\n[INFO] main1+main2 합산: {main_total} url, bsr: {bsr_collected} url")
+
         # Check if at least one of main1/main2/bsr succeeded
-        main_stages_success = any([results["wmart_tv_main1.py"],
-                                    results["wmart_tv_main2.py"],
-                                    results["wmart_tv_bsr.py"]])
+        main_stages_success = any([
+            stage_results["wmart_tv_main1"]["success"],
+            stage_results["wmart_tv_main2"]["success"],
+            stage_results["wmart_tv_bsr"]["success"]
+        ])
 
         # Execute dt1 only if at least one main stage succeeded
         if main_stages_success:
@@ -160,14 +230,24 @@ def main():
             time.sleep(5)
 
             print_stage_header(stages[3][1], 4, 4)
-            success = run_crawler(stages[3][0], stages[3][1])
-            results[stages[3][0]] = success
+            result = run_crawler(stages[3][0], stages[3][1])
+            stage_results["wmart_tv_dt1"] = result
 
-            if not success:
-                failed_stages.append(stages[3][0])
+            # dt1 failed 판정: collected < target 또는 프로세스 실패
+            dt1_target = result.get("target_count") or 0
+            dt1_collected = result.get("collected_count") or 0
+            if not result["success"] or dt1_collected < dt1_target:
+                if "wmart_tv_dt1" not in failed_stages:
+                    failed_stages.append("wmart_tv_dt1")
         else:
             print(f"\n[WARNING] All main stages (main1, main2, bsr) failed. Skipping detail crawler.")
-            results["wmart_tv_dt1.py"] = None  # Not executed
+            stage_results["wmart_tv_dt1"] = {
+                "success": None, "elapsed": 0, "timeout": False,
+                "collected_count": None, "target_count": None
+            }
+
+        # 6시간 타이머 취소
+        timer.cancel()
 
         # Create failure log if any stage failed
         if failed_stages:
@@ -178,51 +258,66 @@ def main():
         print_separator()
         print("EXECUTION SUMMARY")
         print_separator()
-        print(f"{'Stage':<40} {'Status':<15}")
+        print(f"{'Stage':<25} {'Status':<10} {'Collected':<20} {'Elapsed':<15}")
         print("-" * 80)
 
         for script, name in stages:
-            status = results.get(script)
-            if status is True:
-                status_str = "SUCCESS"
-            elif status is False:
-                status_str = "FAILED"
+            sr = stage_results.get(name, {})
+            success = sr.get("success")
+            if success is True:
+                status_str = "성공"
+            elif success is False:
+                status_str = "실패"
             else:
-                status_str = "SKIPPED"
+                status_str = "미실행"
 
-            print(f"{name:<40} {status_str:<15}")
+            collected = sr.get("collected_count")
+            target = sr.get("target_count")
+            if collected is not None and target is not None:
+                collected_str = f"{collected} / {target} sku"
+            elif collected is not None:
+                collected_str = f"{collected} url"
+            else:
+                collected_str = "-"
+
+            elapsed = sr.get("elapsed", 0)
+            if sr.get("timeout"):
+                elapsed_str = "타임아웃"
+            else:
+                elapsed_str = f"{elapsed:.1f}s"
+
+            print(f"{name:<25} {status_str:<10} {collected_str:<20} {elapsed_str:<15}")
 
         print("-" * 80)
         print(f"Total elapsed time: {overall_elapsed:.1f} seconds ({overall_elapsed/60:.1f} minutes)")
         print(f"End time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
         if failed_stages:
-            print(f"\n[WARNING] {len(failed_stages)} stage(s) failed")
-            print(f"Failed stages: {', '.join(failed_stages)}")
+            print(f"\n[WARNING] {len(failed_stages)} stage(s) failed: {', '.join(failed_stages)}")
         else:
             print(f"\n[OK] All executed stages completed successfully!")
 
         print_separator()
 
-        # Send email notification
-        send_crawl_alert(
-            retailer='Walmart',
-            results=results,
+        # 최종 리포트 발송
+        send_wmart_crawl_report(
+            stage_results=stage_results,
             failed_stages=failed_stages,
-            elapsed_time=overall_elapsed
+            overall_elapsed=overall_elapsed,
+            is_interim=False
         )
 
-        # Return exit code
         return 0 if not failed_stages else 1
 
     except KeyboardInterrupt:
         print("\n[!] Interrupted by user")
+        timer.cancel()
         overall_elapsed = time.time() - overall_start_time
-        send_crawl_alert(
-            retailer='Walmart',
-            results=results,
+        send_wmart_crawl_report(
+            stage_results=stage_results,
             failed_stages=['Interrupted by user'],
-            elapsed_time=overall_elapsed,
+            overall_elapsed=overall_elapsed,
+            is_interim=False,
             error_message='Crawler interrupted by user'
         )
         return 1
@@ -231,12 +326,13 @@ def main():
         print(f"\n[!] Fatal error: {e}")
         import traceback
         traceback.print_exc()
+        timer.cancel()
         overall_elapsed = time.time() - overall_start_time
-        send_crawl_alert(
-            retailer='Walmart',
-            results=results,
+        send_wmart_crawl_report(
+            stage_results=stage_results,
             failed_stages=['Fatal error'],
-            elapsed_time=overall_elapsed,
+            overall_elapsed=overall_elapsed,
+            is_interim=False,
             error_message=str(e)
         )
         return 1

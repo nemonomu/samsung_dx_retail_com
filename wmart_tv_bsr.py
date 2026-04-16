@@ -535,6 +535,16 @@ class WalmartTVBSRCrawler:
             traceback.print_exc()
 
         finally:
+            # 결과 JSON 저장
+            try:
+                import json, os
+                result_dir = r"C:\samsung_dx_retail_com\stage_results"
+                os.makedirs(result_dir, exist_ok=True)
+                with open(os.path.join(result_dir, "wmart_tv_bsr.json"), "w") as f:
+                    json.dump({"collected_count": self.total_collected}, f)
+            except Exception as e:
+                print(f"[WARNING] Failed to write result JSON: {e}")
+
             if self.page:
                 try:
                     self.page.quit()
@@ -542,9 +552,9 @@ class WalmartTVBSRCrawler:
                     print(f"[WARNING] Error closing driver: {e}")
                     try:
                         # Force kill chrome processes
-                        import os
-                        os.system("taskkill /F /IM chrome.exe /T 2>nul")
-                        os.system("taskkill /F /IM chromedriver.exe /T 2>nul")
+                        import os as _os
+                        _os.system("taskkill /F /IM chrome.exe /T 2>nul")
+                        _os.system("taskkill /F /IM chromedriver.exe /T 2>nul")
                     except:
                         pass
             if self.db_conn:

@@ -2116,6 +2116,17 @@ class WalmartDetailCrawler:
             print(f"  [ERROR] Failed to scrape detail page: {e}")
             import traceback
             traceback.print_exc()
+
+            # ContextLostError 발생 시 브라우저 즉시 재시작
+            if 'ContextLost' in type(e).__name__ or 'The page is refreshed' in str(e):
+                print(f"  [WARNING] ContextLostError detected, restarting browser...")
+                try:
+                    self.page.quit()
+                except:
+                    pass
+                self.setup_driver()
+                print(f"  [OK] Browser restarted after ContextLostError")
+
             return False
 
     def save_to_db(self, data):
@@ -2351,6 +2362,7 @@ class WalmartDetailCrawler:
             # BSR 고유 URL 개수 미리 계산 (max_skus 제한에서 제외)
             bsr_only_count = sum(1 for u in product_urls if u.get('page_type') == 'bsr' and u.get('main_rank') is None)
             max_skus_logged = False
+            failed_urls = []  # 수집 실패 URL 목록
 
             # Scrape each detail page
             for idx, url_data in enumerate(product_urls, 1):
@@ -2385,13 +2397,50 @@ class WalmartDetailCrawler:
                             time.sleep(random.uniform(*api_retry_wait))  # Wait before retry
                         else:
                             print(f"  [FAILED] All {max_retries} attempts failed for this URL")
+                            failed_urls.append(url_data)
 
                 # Random delay between requests
                 captcha_after_wait = self.config.get_timing_range('captcha_after_wait') or (3, 5)
                 time.sleep(random.uniform(*captcha_after_wait))
 
+            # 실패 URL 재시도 (최대 2라운드)
+            for retry_round in range(1, 3):
+                if not failed_urls:
+                    break
+                print(f"\n{'='*80}")
+                print(f"[RECOVERY] 실패 URL 재시도 라운드 {retry_round} - {len(failed_urls)}개")
+                print(f"{'='*80}")
+
+                # 브라우저 재시작 후 재시도
+                print(f"[RECOVERY] 브라우저 재시작...")
+                try:
+                    self.page.quit()
+                except:
+                    pass
+                self.setup_driver()
+                if not self.initialize_session():
+                    print("[WARNING] Session initialization had issues, continuing anyway...")
+
+                still_failed = []
+                for idx, url_data in enumerate(failed_urls, 1):
+                    print(f"\n[RECOVERY {retry_round}] {idx}/{len(failed_urls)} - {url_data['url'][:60]}...")
+
+                    result = self.scrape_detail_page(url_data)
+                    if result:
+                        print(f"  [RECOVERY OK] 재시도 성공")
+                    else:
+                        print(f"  [RECOVERY FAILED] 재시도 실패")
+                        still_failed.append(url_data)
+
+                    time.sleep(random.uniform(*captcha_after_wait))
+
+                print(f"[RECOVERY] 라운드 {retry_round} 완료: {len(failed_urls) - len(still_failed)}개 복구, {len(still_failed)}개 여전히 실패")
+                failed_urls = still_failed
+
             print("\n" + "="*80)
             print(f"Detail Crawling completed! Total collected: {self.total_collected}/{len(product_urls)}")
+            if failed_urls:
+                print(f"[WARNING] 최종 실패 URL: {len(failed_urls)}개")
             print("="*80)
 
         except Exception as e:

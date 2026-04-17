@@ -2294,6 +2294,7 @@ class AmazonDetailCrawler:
                 print(f"[INFO] Skipped first {start_from} URLs, remaining: {len(product_urls)}")
 
             consecutive_failures = 0
+            failed_urls = []  # 수집 실패 URL 목록
 
             # BSR 고유 URL 개수 미리 계산 (max_skus 제한에서 제외)
             bsr_only_count = sum(1 for u in product_urls if u.get('page_type') == 'bsr' and u.get('main_rank') is None)
@@ -2322,6 +2323,7 @@ class AmazonDetailCrawler:
                     consecutive_failures = 0
                 else:
                     consecutive_failures += 1
+                    failed_urls.append(url_data)
                     if consecutive_failures >= self.browser_restart_after_fail:
                         print(f"\n[WARNING] {consecutive_failures} consecutive failures detected - restarting browser...")
                         try:
@@ -2343,10 +2345,41 @@ class AmazonDetailCrawler:
                 print(f"[INFO] Waiting {delay:.1f} seconds before next request...")
                 time.sleep(delay)
 
+            # 실패 URL 재시도 (최대 2라운드)
+            for retry_round in range(1, 3):
+                if not failed_urls:
+                    break
+                print(f"\n{'='*80}")
+                print(f"[RECOVERY] 실패 URL 재시도 라운드 {retry_round} - {len(failed_urls)}개")
+                print(f"{'='*80}")
+
+                print(f"[RECOVERY] 브라우저 재시작...")
+                try:
+                    self.page.quit()
+                except:
+                    pass
+                time.sleep(5)
+                self.setup_driver()
+
+                still_failed = []
+                for i, url_data in enumerate(failed_urls, 1):
+                    print(f"\n[RECOVERY {retry_round}] {i}/{len(failed_urls)} - {url_data.get('url', '')[:60]}...")
+                    success = self.scrape_detail_page(url_data)
+                    if success:
+                        print(f"  [RECOVERY OK] 재시도 성공")
+                    else:
+                        print(f"  [RECOVERY FAILED] 재시도 실패")
+                        still_failed.append(url_data)
+                    time.sleep(random.uniform(2, 4))
+
+                print(f"[RECOVERY] 라운드 {retry_round} 완료: {len(failed_urls) - len(still_failed)}개 복구, {len(still_failed)}개 여전히 실패")
+                failed_urls = still_failed
+
             print("\n" + "="*80)
             print(f"Detail Crawling completed!")
             print(f"Total collected: {self.total_collected} (max limit: {self.max_skus})")
-            print(f"URLs processed: {min(idx, len(product_urls))}/{len(product_urls)}")
+            if failed_urls:
+                print(f"[WARNING] 최종 실패 URL: {len(failed_urls)}개")
             print("="*80)
 
             # Send alert email

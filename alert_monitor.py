@@ -1306,7 +1306,7 @@ def _get_current_session_data(db_conn, account_name='Walmart'):
         return None, None
 
 
-def _compare_sessions(curr_df, prev_df):
+def _compare_sessions(curr_df, prev_df, retailer='Walmart'):
     """
     현재 세션 vs 직전 세션 필드별 비교
 
@@ -1321,9 +1321,11 @@ def _compare_sessions(curr_df, prev_df):
     fields_to_check = [
         'retailer_sku_name', 'star_rating', 'count_of_star_ratings', 'count_of_reviews',
         'screen_size', 'final_sku_price', 'original_sku_price',
-        'pick_up_availability', 'shipping_availability', 'delivery_availability',
         'detailed_review_content', 'main_rank', 'bsr_rank'
     ]
+    # Walmart 전용 필드 (Amazon에서는 항상 NULL이므로 제외)
+    if retailer == 'Walmart':
+        fields_to_check.extend(['pick_up_availability', 'shipping_availability', 'delivery_availability'])
 
     result = {
         'field_stats': {},
@@ -1439,7 +1441,7 @@ def send_tv_crawl_report(retailer, stage_results, failed_stages, overall_elapsed
                 curr_df, session_min = _get_current_session_data(db_conn, account_name)
                 if curr_df is not None and session_min:
                     prev_df, prev_session_start = _get_prev_session_data(db_conn, session_min, account_name)
-                    comparison = _compare_sessions(curr_df, prev_df)
+                    comparison = _compare_sessions(curr_df, prev_df, retailer)
             except Exception as e:
                 logger.error(f"DB 세션 비교 실패: {e}")
             finally:
@@ -1478,8 +1480,9 @@ def send_tv_crawl_report(retailer, stage_results, failed_stages, overall_elapsed
             alerts.append(f'bsr {bsr_c}개 (100 미만)')
         dt1_result = stage_results.get(dt_stage_name, {}) if dt_stage_name else {}
         dt1_target = dt1_result.get('target_count') or 0
-        if 0 < dt1_target < 300:
-            alerts.append(f'dt 대상 {dt1_target}개 (300 미만)')
+        dt_min = 250 if retailer == 'Amazon' else 300
+        if 0 < dt1_target < dt_min:
+            alerts.append(f'dt 대상 {dt1_target}개 ({dt_min} 미만)')
 
         failed_prefix = f"Failed {' '.join(failed_parts)} " if failed_parts else ""
 

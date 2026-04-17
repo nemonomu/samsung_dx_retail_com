@@ -200,7 +200,7 @@ def main():
         stage_results["amazon_tv_main1"] = result
         main1_collected = result.get("collected_count") or 0
 
-        # main1 성공 판정: 300개 이상 수집
+        # main1 성공 판정: 250개 이상 수집
         if main1_collected >= MAIN1_MIN:
             result["success"] = True
         else:

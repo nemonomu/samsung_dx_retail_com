@@ -198,7 +198,7 @@ def main():
         stage_results["amazon_tv_main1"] = result
         main1_collected = result.get("collected_count") or 0
 
-        # main1 성공 판정: 300개 이상 수집
+        # main1 성공 판정: 250개 이상 수집
         if main1_collected >= MAIN1_MIN:
             result["success"] = True
         else:
@@ -238,8 +238,6 @@ def main():
             result = run_crawler(stages[2][0], stages[2][1])
             stage_results["amazon_tv_dt2"] = result
 
-            # dt2 failed 판정
-            dt2_target = result.get("target_count") or 0
             # dt2 failed 판정: 200개 이하면 실패
             dt2_collected = result.get("collected_count") or 0
             if dt2_collected <= 200:

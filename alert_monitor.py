@@ -1474,15 +1474,16 @@ def send_tv_crawl_report(retailer, stage_results, failed_stages, overall_elapsed
         bsr_c = sum((stage_results.get(s, {}).get('collected_count') or 0) for s in bsr_stages)
 
         alerts = []
-        if main_total < 300 and main_total > 0:
-            alerts.append(f'main 합산 {main_total}개 (300 미만)')
+        main_min = 250 if retailer == 'Amazon' else 300
+        if 0 < main_total < main_min:
+            alerts.append(f'main 합산 {main_total}개 ({main_min} 미만)')
         if 0 < bsr_c < 100:
             alerts.append(f'bsr {bsr_c}개 (100 미만)')
         dt1_result = stage_results.get(dt_stage_name, {}) if dt_stage_name else {}
         dt1_target = dt1_result.get('target_count') or 0
-        dt_min = 250 if retailer == 'Amazon' else 300
-        if 0 < dt1_target < dt_min:
-            alerts.append(f'dt 대상 {dt1_target}개 ({dt_min} 미만)')
+        dt_target_min = 250 if retailer == 'Amazon' else 300
+        if 0 < dt1_target < dt_target_min:
+            alerts.append(f'dt 대상 {dt1_target}개 ({dt_target_min} 미만)')
 
         failed_prefix = f"Failed {' '.join(failed_parts)} " if failed_parts else ""
 
@@ -1534,19 +1535,37 @@ def send_tv_crawl_report(retailer, stage_results, failed_stages, overall_elapsed
         for name in stage_order:
             sr = stage_results.get(name, {})
             if not sr and is_interim:
-                # 중간보고 시 결과 없음 = 진행중 또는 대기중
                 status = '<span class="notice">진행중</span>'
                 sr = {}
+            elif sr.get('success') is None:
+                status = '<span style="color: #6c757d;">미실행</span>'
             else:
-                success = sr.get('success')
-                if success is True:
-                    status = '<span class="success">성공</span>'
-                elif success is False:
-                    status = '<span class="critical">실패</span>'
-                elif success is None:
-                    status = '<span style="color: #6c757d;">미실행</span>'
-                else:
-                    status = '<span class="notice">진행중</span>'
+                collected = sr.get('collected_count') or 0
+                is_dt = '_dt' in name
+                is_main = 'main' in name
+
+                if retailer == 'Amazon':
+                    if is_main:
+                        if collected >= 250:
+                            status = '<span class="success">성공</span>'
+                        elif collected > 0:
+                            status = '<span class="warning">부족</span>'
+                        else:
+                            status = '<span class="critical">실패</span>'
+                    elif is_dt:
+                        if collected >= 201:
+                            status = '<span class="success">성공</span>'
+                        elif collected > 0:
+                            status = '<span class="warning">부족</span>'
+                        else:
+                            status = '<span class="critical">실패</span>'
+                    else:  # bsr
+                        status = '<span class="success">성공</span>' if collected >= 100 else '<span class="critical">실패</span>'
+                else:  # Walmart
+                    if sr.get('success'):
+                        status = '<span class="success">성공</span>'
+                    else:
+                        status = '<span class="critical">실패</span>'
 
             collected = sr.get('collected_count')
             target = sr.get('target_count')
@@ -1584,7 +1603,7 @@ def send_tv_crawl_report(retailer, stage_results, failed_stages, overall_elapsed
             if error_message:
                 html_content += f'<li class="critical">[CRITICAL] {error_message}</li>'
             for alert in alerts:
-                html_content += f'<li class="warning">[WARNING] {alert}</li>'
+                html_content += f'<li class="warning">{alert}</li>'
             html_content += '</ul></div>'
 
         # 이하 dt1 완료 후 최종 보고에서만 표시

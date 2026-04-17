@@ -189,7 +189,7 @@ def main():
             ("amazon_tv_dt2.py", "amazon_tv_dt2")
         ]
 
-        MAIN1_MIN = 300  # main1 최소 수집 기준
+        MAIN1_MIN = 250  # main1 최소 수집 기준
         BSR_MIN = 100    # bsr 최소 수집 기준
 
         # Execute main1
@@ -240,8 +240,9 @@ def main():
 
             # dt2 failed 판정
             dt2_target = result.get("target_count") or 0
+            # dt2 failed 판정: 200개 이하면 실패
             dt2_collected = result.get("collected_count") or 0
-            if not result["success"] or dt2_collected < dt2_target:
+            if dt2_collected <= 200:
                 if "amazon_tv_dt2" not in failed_stages:
                     failed_stages.append("amazon_tv_dt2")
 

@@ -191,7 +191,7 @@ def main():
             ("amazon_tv_dt1.py", "amazon_tv_dt1")
         ]
 
-        MAIN1_MIN = 300  # main1 최소 수집 기준
+        MAIN1_MIN = 250  # main1 최소 수집 기준
         BSR_MIN = 100    # bsr 최소 수집 기준
 
         # Execute main1
@@ -240,10 +240,9 @@ def main():
             result = run_crawler(stages[2][0], stages[2][1])
             stage_results["amazon_tv_dt1"] = result
 
-            # dt1 failed 판정
-            dt1_target = result.get("target_count") or 0
+            # dt1 failed 판정: 200개 이하면 실패
             dt1_collected = result.get("collected_count") or 0
-            if not result["success"] or dt1_collected < dt1_target:
+            if dt1_collected <= 200:
                 if "amazon_tv_dt1" not in failed_stages:
                     failed_stages.append("amazon_tv_dt1")
 

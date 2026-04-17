@@ -211,8 +211,8 @@ def main():
         result = run_crawler("wmart_tv_main1.py", "wmart_tv_main1")
         stage_results["wmart_tv_main1"] = result
         main1_collected = result.get("collected_count") or 0
-        remaining = max(0, MAIN_TOTAL_LIMIT - main1_collected)
-        print(f"\n[INFO] main1 수집: {main1_collected}개, main2 수집 제한: {remaining}개")
+        remaining = max(0, MAIN_TOTAL_LIMIT - main1_collected + 30)  # +30: main1/main2 URL 중복 여유분
+        print(f"\n[INFO] main1 수집: {main1_collected}개, main2 수집 제한: {remaining}개 (중복 여유분 +30 포함)")
 
         print(f"\n[INFO] Waiting 5 seconds for driver cleanup...")
         time.sleep(5)

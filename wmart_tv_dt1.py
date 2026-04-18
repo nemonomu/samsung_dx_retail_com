@@ -2378,20 +2378,20 @@ class WalmartDetailCrawler:
             if not self.initialize_session():
                 print("[WARNING] Session initialization had issues, continuing anyway...")
 
-            # BSR 고유 URL 개수 미리 계산 (max_skus 제한에서 제외)
-            bsr_only_count = sum(1 for u in product_urls if u.get('page_type') == 'bsr' and u.get('main_rank') is None)
+            # BSR rank 있는 URL 개수 미리 계산 (max_skus 제한에서 제외)
+            bsr_rank_count = sum(1 for u in product_urls if u.get('bsr_rank') is not None)
             max_skus_logged = False
             failed_urls = []  # 수집 실패 URL 목록
 
             # Scrape each detail page
             for idx, url_data in enumerate(product_urls, 1):
                 # Check if we've reached the maximum SKU limit
-                is_bsr_only = url_data.get('page_type') == 'bsr' and url_data.get('main_rank') is None
-                if self.total_collected >= self.max_skus and not is_bsr_only:
+                has_bsr_rank = url_data.get('bsr_rank') is not None
+                if self.total_collected >= self.max_skus and not has_bsr_rank:
                     if not max_skus_logged:
-                        print(f"[INFO] max_skus({self.max_skus}) 도달, main URL 스킵 → BSR 고유 URL {bsr_only_count}개 계속 수집")
+                        print(f"[INFO] max_skus({self.max_skus}) 도달, BSR rank 없는 main URL 스킵 → BSR rank 있는 URL {bsr_rank_count}개 계속 수집")
                         max_skus_logged = True
-                    if bsr_only_count > 0:
+                    if bsr_rank_count > 0:
                         continue
                     print(f"\n{'='*80}")
                     print(f"[INFO] Reached maximum SKU limit ({self.max_skus})")

@@ -1954,8 +1954,8 @@ class WalmartDetailCrawler:
 
             final_discount_type = ', '.join(discount_type_list) if discount_type_list else discount_type
 
-            # Extract shipping info (combine 2 parts)
-            shipping_info = self.extract_shipping_info(tree)
+            # shipping_info 수집 비활성화 - 항상 None 저장 (DB NULL)
+            shipping_info = None
 
             # Extract offer info
             offer = self.extract_offer(tree)

@@ -68,16 +68,32 @@ def insert_walmart_detail_xpath():
                 'mall_name': 'Walmart',
                 'page_type': 'detail_page',
                 'data_field': 'savings',
-                'xpath': '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/div[1]/div[2]/span[2]',
-                'description': 'Savings amount (e.g., "$700.00")'
+                'xpath': '//*[@id="maincontent"]/main/section/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/div[1]/section/div/div[2]/span[2]',
+                'description': 'Savings amount (e.g., "$31.99")'
             },
             # Discount_Type
             {
                 'mall_name': 'Walmart',
                 'page_type': 'detail_page',
                 'data_field': 'discount_type',
-                'xpath': '//*[@id="maincontent"]/section/main/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/div[2]/span[1]',
+                'xpath': '//*[@id="maincontent"]/main/section/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/div[2]/span[1]',
                 'description': 'Type of discount (Price when purchased online, etc.)'
+            },
+            # Original_Price (strike-through price)
+            {
+                'mall_name': 'Walmart',
+                'page_type': 'detail_page',
+                'data_field': 'original_price',
+                'xpath': '//*[@id="maincontent"]/main/section/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/div[1]/section/div/div[1]/span[2]',
+                'description': 'Original/strike-through price (e.g., "$159.99")'
+            },
+            # Offer
+            {
+                'mall_name': 'Walmart',
+                'page_type': 'detail_page',
+                'data_field': 'offer',
+                'xpath': '//*[@id="maincontent"]/main/section/div[2]/div[2]/div/div[3]/div/div[1]/div/div[2]/div/div/section[1]/div/div',
+                'description': 'Free offers text (e.g., "5 free offers, including Apple TV up to 3 months free")'
             },
             # Shipping_Info (first part)
             {

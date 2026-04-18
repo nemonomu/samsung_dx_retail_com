@@ -2473,7 +2473,13 @@ class WalmartDetailCrawler:
                 import json
                 result_dir = r"C:\samsung_dx_retail_com\stage_results"
                 os.makedirs(result_dir, exist_ok=True)
-                target = len(product_urls) if 'product_urls' in locals() else 0
+                if 'product_urls' in locals():
+                    # 실제 처리 대상: main URL은 max_skus까지 + bsr-only URL 전부
+                    # (main과 겹치는 bsr_rank URL은 이미 max_skus 한도 안에 포함됨)
+                    bsr_only_count = sum(1 for u in product_urls if u.get('page_type') == 'bsr' and u.get('main_rank') is None)
+                    target = min(len(product_urls), self.max_skus + bsr_only_count)
+                else:
+                    target = 0
                 with open(os.path.join(result_dir, "wmart_tv_dt1.json"), "w") as f:
                     json.dump({
                         "target_count": target,

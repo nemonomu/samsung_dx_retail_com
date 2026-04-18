@@ -9,6 +9,7 @@ import time
 import random
 import sys
 import os
+import subprocess
 import psycopg2
 from datetime import datetime, timedelta
 from DrissionPage import ChromiumPage, ChromiumOptions
@@ -339,18 +340,47 @@ class WalmartDetailCrawler:
             return []
 
     def setup_driver(self):
-        """Setup DrissionPage browser with image loading disabled"""
+        """Setup DrissionPage browser with image loading disabled + autoplay blocked"""
         try:
             co = ChromiumOptions()
             co.no_imgs(True)  # Disable image loading for faster page load
+            # 동영상 자동재생 차단 (CDP DOM 타임아웃 방지)
+            co.set_argument('--autoplay-policy=document-user-activation-required')
             self.page = ChromiumPage(co)
-            print("[OK] Browser setup complete (DrissionPage, images disabled)")
+            print("[OK] Browser setup complete (DrissionPage, images disabled, autoplay blocked)")
             return True
         except Exception as e:
             print(f"[ERROR] Browser setup failed: {e}")
             import traceback
             traceback.print_exc()
             return False
+
+    def restart_browser(self):
+        """브라우저 재시작 (메모리 정리 + 좀비 Chrome 프로세스 강제 종료)
+        wmart_hhp_dt.py 패턴: page.quit() 만으로 안 죽는 좀비 Chrome 을 taskkill 로 정리
+        """
+        try:
+            if self.page:
+                try:
+                    self.page.quit()
+                except Exception:
+                    pass
+            subprocess.run(['taskkill', '/F', '/IM', 'chrome.exe'], capture_output=True)
+            time.sleep(2)
+            ok = self.setup_driver()
+            if ok:
+                print("[OK] Browser restarted (with taskkill)")
+            return ok
+        except Exception as e:
+            print(f"[ERROR] Browser restart failed: {e}")
+            return False
+
+    def _get_page_html(self):
+        """페이지 HTML 획득 (CDP DOM.getOuterHTML timeout 우회)
+        wmart_hhp_dt.py 패턴: DrissionPage 의 html 속성(내부 CDP DOM.getOuterHTML) 대신
+        run_js 로 직접 DOM.outerHTML 획득 → TV 상세 페이지의 반복되는 timeout 회피
+        """
+        return self.page.run_js('return document.documentElement.outerHTML')
 
     def check_robot_page(self, page_source):
         """Check if page is showing 'Robot or human?' challenge"""
@@ -364,7 +394,7 @@ class WalmartDetailCrawler:
         """Handle 'PRESS & HOLD' CAPTCHA if present"""
         try:
             print("[INFO] Checking for CAPTCHA...")
-            page_content = self.page.html.lower()
+            page_content = self._get_page_html().lower()
             captcha_keywords = self.config.get_captcha_keywords()
             if any(keyword in page_content for keyword in captcha_keywords):
                 print("[WARNING] CAPTCHA keywords found in page")
@@ -398,13 +428,13 @@ class WalmartDetailCrawler:
             time.sleep(random.uniform(*homepage_wait))
 
             # Check for robot detection
-            if self.check_robot_page(self.page.html):
+            if self.check_robot_page(self._get_page_html()):
                 print("[WARNING] Robot detection on homepage. Handling CAPTCHA...")
                 self.handle_captcha()
                 captcha_after_wait = self.config.get_timing_range('captcha_after_wait') or (3, 5)
                 time.sleep(random.uniform(*captcha_after_wait))
 
-                if self.check_robot_page(self.page.html):
+                if self.check_robot_page(self._get_page_html()):
                     print("[WARNING] Still showing robot detection, trying recovery...")
                     # Slow scroll down
                     scroll_between_wait = self.config.get_timing_range('scroll_between_wait') or (1.5, 2.5)
@@ -422,7 +452,7 @@ class WalmartDetailCrawler:
                 self.page.refresh()
                 time.sleep(random.uniform(*browse_wait))
 
-                if self.check_robot_page(self.page.html):
+                if self.check_robot_page(self._get_page_html()):
                     print("[ERROR] Still getting robot detection after recovery")
                     print("[INFO] Attempting to continue anyway...")
 
@@ -1464,7 +1494,7 @@ class WalmartDetailCrawler:
     def extract_sku_from_specifications(self):
         """Extract SKU from Specifications dialog - Model field (from DB)"""
         try:
-            page_source = self.page.html
+            page_source = self._get_page_html()
             tree = html.fromstring(page_source)
 
             # Try multiple XPaths for Model field (from DB)
@@ -1516,7 +1546,7 @@ class WalmartDetailCrawler:
     def extract_sku_from_lg_xpath(self):
         """Extract SKU using LG-specific XPath (from main page, from DB)"""
         try:
-            page_source = self.page.html
+            page_source = self._get_page_html()
             tree = html.fromstring(page_source)
 
             # Try multiple LG-specific XPaths (from DB)
@@ -1736,7 +1766,7 @@ class WalmartDetailCrawler:
                     except Exception as e:
                         print(f"  [WARNING] DrissionPage method failed: {e}")
                         # Fallback: Try lxml parsing with priority xpaths
-                        page_source = self.page.html
+                        page_source = self._get_page_html()
                         tree = html.fromstring(page_source)
 
                         review_spans_lxml = None
@@ -1875,7 +1905,7 @@ class WalmartDetailCrawler:
 
             print(f"  [INFO] Page loaded, extracting data...")
 
-            page_source = self.page.html
+            page_source = self._get_page_html()
             tree = html.fromstring(page_source)
 
             # Extract basic data using XPaths (from initial page load)
@@ -1941,7 +1971,7 @@ class WalmartDetailCrawler:
                 self.page.run_js("window.scrollTo(0, document.body.scrollHeight * 0.5);")
                 time.sleep(2)
                 # Update page_source and tree after scroll
-                page_source = self.page.html
+                page_source = self._get_page_html()
                 tree = html.fromstring(page_source)
             except:
                 pass
@@ -1959,7 +1989,7 @@ class WalmartDetailCrawler:
                     # Wait for review section element with DrissionPage
                     review_elem = self.page.ele("xpath://*[@id='item-review-section']/div[7]/h3 | //button[contains(text(), 'View all reviews')] | //span[contains(text(), 'No ratings yet')]", timeout=5)
                     # Element loaded - re-parse and extract
-                    page_source = self.page.html
+                    page_source = self._get_page_html()
                     tree = html.fromstring(page_source)
                     count_of_reviews = self.extract_count_of_reviews(tree, star_rating, page_source, count_of_star_ratings)
                 except:
@@ -1973,7 +2003,7 @@ class WalmartDetailCrawler:
                     self.page.refresh()
                     captcha_after_wait = self.config.get_timing_range('captcha_after_wait') or (3, 5)
                     time.sleep(random.uniform(*captcha_after_wait))
-                    page_source = self.page.html
+                    page_source = self._get_page_html()
                     tree = html.fromstring(page_source)
 
             # Click Specifications and get Model (after static content extraction)
@@ -2382,9 +2412,19 @@ class WalmartDetailCrawler:
             bsr_rank_count = sum(1 for u in product_urls if u.get('bsr_rank') is not None)
             max_skus_logged = False
             failed_urls = []  # 수집 실패 URL 목록
+            BROWSER_RESTART_INTERVAL = 30  # N URL마다 브라우저 재시작 (메모리/CDP 안정성)
 
             # Scrape each detail page
             for idx, url_data in enumerate(product_urls, 1):
+                # 주기적 브라우저 재시작 (메모리 누적으로 인한 CDP timeout 방지)
+                if idx > 1 and (idx - 1) % BROWSER_RESTART_INTERVAL == 0:
+                    print(f"\n{'='*80}")
+                    print(f"[INFO] {idx - 1} URL 처리 완료, 브라우저 메모리 정리 위해 재시작...")
+                    print(f"{'='*80}")
+                    self.restart_browser()
+                    if not self.initialize_session():
+                        print("[WARNING] Session init failed after restart, continuing anyway...")
+
                 # Check if we've reached the maximum SKU limit
                 has_bsr_rank = url_data.get('bsr_rank') is not None
                 if self.total_collected >= self.max_skus and not has_bsr_rank:

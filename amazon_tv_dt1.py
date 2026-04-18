@@ -1619,12 +1619,9 @@ class AmazonDetailCrawler:
                 print(f"  [WARNING] Could not extract valid ASIN from URL: {final_url}")
                 item = None
 
-            # Ranks - extract using DB xpaths
-            rank_1_raw = self.extract_with_xpaths(tree, 'rank1')
-            rank_1 = self.clean_rank(rank_1_raw)
-
-            rank_2_raw = self.extract_with_xpaths(tree, 'rank2')
-            rank_2 = self.clean_rank(rank_2_raw)
+            # Ranks - 수집 안 함 (항상 NULL)
+            rank_1 = None
+            rank_2 = None
 
             # Extract screen_size with tv_item_mst fallback
             extracted_screen_size = self.extract_screen_size(tree, retailer_sku_name)
@@ -2014,7 +2011,6 @@ class AmazonDetailCrawler:
                 print(f"  [OK] Collected: {retailer_sku_name[:50] if retailer_sku_name else '[NO NAME]'}...")
                 print(f"       Star: {star_rating or 'N/A'} | Popularity: {sku_popularity or 'N/A'}")
                 print(f"       Price: {final_sku_price or 'N/A'} | Original: {original_sku_price or 'N/A'}")
-                print(f"       Rank1: {rank_1 or 'N/A'} | Rank2: {rank_2 or 'N/A'}")
                 print(f"       Main Rank: {data['main_rank'] or 'N/A'} | BSR Rank: {data['bsr_rank'] or 'N/A'}")
                 print(f"       Screen Size: {screen_size or 'N/A'} | Reviews Count: {count_of_reviews or 'N/A'}")
                 print(f"       Star Counts: {count_of_star_ratings or 'N/A'}")

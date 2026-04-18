@@ -1398,7 +1398,8 @@ def _compare_sessions(curr_df, prev_df, retailer='Walmart'):
 
 
 def send_tv_crawl_report(retailer, stage_results, failed_stages, overall_elapsed,
-                         stage_order=None, is_interim=False, error_message=None):
+                         stage_order=None, is_interim=False, error_message=None,
+                         main_dedup=None):
     """
     TV 크롤링 리포트 이메일 발송 (Walmart/Amazon 공용)
 
@@ -1410,6 +1411,7 @@ def send_tv_crawl_report(retailer, stage_results, failed_stages, overall_elapsed
         stage_order: 스테이지 표시 순서 리스트 (선택)
         is_interim: True이면 6시간 중간보고
         error_message: 추가 에러 메시지 (선택)
+        main_dedup: main1+main2 중복제거 URL 수 (Walmart에서만 사용, 없으면 표시 안 함)
     """
     try:
         korea_tz = pytz.timezone('Asia/Seoul')
@@ -1570,7 +1572,10 @@ def send_tv_crawl_report(retailer, stage_results, failed_stages, overall_elapsed
             collected = sr.get('collected_count')
             target = sr.get('target_count')
             if collected is not None and target is not None:
-                collected_str = f"{collected} sku / {target} sku"
+                if collected >= target:
+                    collected_str = f"{collected} sku (목표 {target} 달성)"
+                else:
+                    collected_str = f"{collected} sku / {target} sku"
             elif collected is not None:
                 collected_str = f"{collected} url"
             else:
@@ -1591,6 +1596,12 @@ def send_tv_crawl_report(retailer, stage_results, failed_stages, overall_elapsed
             html_content += f"""
                     <tr style="background-color: #e9ecef; font-weight: bold;">
                         <td>{main_label} 합산</td><td></td><td>{main_total} url {'<span class="critical">(300 미만)</span>' if 0 < main_total < 300 else ''}</td><td></td>
+                    </tr>"""
+            # main 중복제거 행 (Walmart에서만, main_dedup 전달된 경우)
+            if main_dedup is not None and main_dedup >= 0:
+                html_content += f"""
+                    <tr style="background-color: #e9ecef; font-weight: bold;">
+                        <td>{main_label} 중복제거</td><td></td><td>{main_dedup} url {'<span class="critical">(300 미만)</span>' if 0 < main_dedup < 300 else ''}</td><td></td>
                     </tr>"""
         html_content += """
                 </table>

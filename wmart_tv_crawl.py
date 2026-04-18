@@ -14,7 +14,9 @@ import os
 import json
 import threading
 from datetime import datetime
+import psycopg2
 from alert_monitor import send_tv_crawl_report
+from config import DB_CONFIG
 
 
 RESULT_DIR = r"C:\samsung_dx_retail_com\stage_results"
@@ -150,10 +152,48 @@ def create_failure_log(failed_stages):
         return None
 
 
+def get_main_dedup_count():
+    """main1 + main2 최신 batch의 중복 제거 URL 개수 조회"""
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cur = conn.cursor()
+
+        cur.execute("SELECT batch_id FROM wmart_tv_main_1 WHERE batch_id IS NOT NULL ORDER BY batch_id DESC LIMIT 1")
+        m1 = cur.fetchone()
+        cur.execute("SELECT batch_id FROM wmart_tv_main_2 WHERE batch_id IS NOT NULL ORDER BY batch_id DESC LIMIT 1")
+        m2 = cur.fetchone()
+
+        parts = []
+        params = []
+        if m1:
+            parts.append("SELECT Product_url FROM wmart_tv_main_1 WHERE batch_id = %s AND Product_url IS NOT NULL AND Product_url != ''")
+            params.append(m1[0])
+        if m2:
+            parts.append("SELECT Product_url FROM wmart_tv_main_2 WHERE batch_id = %s AND Product_url IS NOT NULL AND Product_url != ''")
+            params.append(m2[0])
+
+        if not parts:
+            cur.close()
+            conn.close()
+            return 0
+
+        query = f"SELECT COUNT(*) FROM ({' UNION '.join(parts)}) t"
+        cur.execute(query, params)
+        count = cur.fetchone()[0]
+
+        cur.close()
+        conn.close()
+        return count
+    except Exception as e:
+        print(f"[ERROR] main dedup count query failed: {e}")
+        return -1
+
+
 def main():
     """Main execution function"""
     stage_results = {}
     failed_stages = []
+    main_dedup = None  # main1+main2 중복제거 URL 수 (main2 완료 후 세팅)
     overall_start_time = time.time()
     interim_sent = False
 
@@ -168,7 +208,8 @@ def main():
                     stage_results=stage_results,
                     failed_stages=failed_stages,
                     overall_elapsed=time.time() - overall_start_time,
-                    is_interim=True
+                    is_interim=True,
+                    main_dedup=main_dedup
                 )
             except Exception as e:
                 print(f"[WARNING] 중간 보고 발송 실패: {e}")
@@ -233,9 +274,11 @@ def main():
         stage_results["wmart_tv_bsr"] = result
         bsr_collected = result.get("collected_count") or 0
 
-        # main1+main2 합산 성공 판정
+        # main1+main2 합산 + 중복제거 성공 판정 (둘 다 >= MAIN_MIN)
         main_total = main1_collected + main2_collected
-        if main_total >= MAIN_MIN:
+        main_dedup = get_main_dedup_count()
+
+        if main_total >= MAIN_MIN and main_dedup >= MAIN_MIN:
             stage_results["wmart_tv_main1"]["success"] = True
             stage_results["wmart_tv_main2"]["success"] = True
         else:
@@ -244,6 +287,7 @@ def main():
             if "wmart_tv_main1" not in failed_stages:
                 failed_stages.append("wmart_tv_main1")
         print(f"\n[INFO] main1+main2 합산: {main_total} url (기준: {MAIN_MIN}개)")
+        print(f"[INFO] main1+main2 중복제거: {main_dedup} url (기준: {MAIN_MIN}개)")
 
         # bsr 성공 판정
         if bsr_collected >= BSR_MIN:
@@ -270,10 +314,8 @@ def main():
             result = run_crawler(stages[3][0], stages[3][1])
             stage_results["wmart_tv_dt1"] = result
 
-            # dt1 failed 판정: collected < target 또는 프로세스 실패
-            dt1_target = result.get("target_count") or 0
-            dt1_collected = result.get("collected_count") or 0
-            if not result["success"] or dt1_collected < dt1_target:
+            # dt1 failed 판정: 프로세스 실행 실패만 (수집 건수 기준은 main/bsr에서만)
+            if not result["success"]:
                 if "wmart_tv_dt1" not in failed_stages:
                     failed_stages.append("wmart_tv_dt1")
 
@@ -335,7 +377,8 @@ def main():
             stage_results=stage_results,
             failed_stages=failed_stages,
             overall_elapsed=overall_elapsed,
-            is_interim=False
+            is_interim=False,
+            main_dedup=main_dedup
         )
 
         return 0 if not failed_stages else 1
@@ -349,7 +392,8 @@ def main():
             failed_stages=['Interrupted by user'],
             overall_elapsed=overall_elapsed,
             is_interim=False,
-            error_message='Crawler interrupted by user'
+            error_message='Crawler interrupted by user',
+            main_dedup=main_dedup
         )
         return 1
 
@@ -364,7 +408,8 @@ def main():
             failed_stages=['Fatal error'],
             overall_elapsed=overall_elapsed,
             is_interim=False,
-            error_message=str(e)
+            error_message=str(e),
+            main_dedup=main_dedup
         )
         return 1
 

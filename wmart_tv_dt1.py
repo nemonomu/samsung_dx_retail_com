@@ -1153,13 +1153,15 @@ class WalmartDetailCrawler:
             count_of_star_ratings: Star ratings count for validation (skip if extracted value equals this and >= 10)
         """
         def is_likely_ratings_count(value):
-            """Check if extracted value is likely the ratings count (not actual reviews)"""
+            """count_of_reviews == count_of_star_ratings 는 정상 케이스 가능
+            (예: Samsung QN85QN90F 는 실제 493 ratings = 493 reviews).
+            기존 휴리스틱은 false positive 발생 + 연쇄 refresh → ContextLostError 유발.
+            경고만 남기고 값은 신뢰 (항상 False)
+            """
             if count_of_star_ratings is None:
                 return False
-            # If value equals count_of_star_ratings and >= 10, it's likely wrong
             if value == count_of_star_ratings and count_of_star_ratings >= 10:
-                print(f"  [WARNING] Extracted count_of_reviews ({value}) equals count_of_star_ratings - skipping this source")
-                return True
+                print(f"  [INFO] count_of_reviews ({value}) equals count_of_star_ratings (정상 가능, 수용)")
             return False
 
         try:

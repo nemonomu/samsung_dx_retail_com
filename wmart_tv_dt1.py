@@ -340,14 +340,20 @@ class WalmartDetailCrawler:
             return []
 
     def setup_driver(self):
-        """Setup DrissionPage browser with image loading disabled + autoplay blocked"""
+        """Setup DrissionPage browser (wmart_hhp_dt.py 동일 설정)
+        - 이미지 허용 (disable 시 Walmart JS 가 image 이벤트 대기하며 run_js hang 발생)
+        - 미디어 스트림/플러그인 비활성
+        - 동영상 자동재생 차단
+        """
         try:
             co = ChromiumOptions()
-            co.no_imgs(True)  # Disable image loading for faster page load
-            # 동영상 자동재생 차단 (CDP DOM 타임아웃 방지)
+            # HHP 스타일: 이미지 허용, 동영상/플러그인 비활성
+            co.set_pref('profile.managed_default_content_settings.images', 1)
+            co.set_pref('profile.managed_default_content_settings.media_stream', 2)
+            co.set_pref('profile.managed_default_content_settings.plugins', 2)
             co.set_argument('--autoplay-policy=document-user-activation-required')
             self.page = ChromiumPage(co)
-            print("[OK] Browser setup complete (DrissionPage, images disabled, autoplay blocked)")
+            print("[OK] Browser setup complete (images enabled, media/plugins disabled, autoplay blocked)")
             return True
         except Exception as e:
             print(f"[ERROR] Browser setup failed: {e}")
@@ -379,9 +385,9 @@ class WalmartDetailCrawler:
         """페이지 HTML 획득 (CDP DOM.getOuterHTML timeout 우회)
         wmart_hhp_dt.py 패턴: DrissionPage 의 html 속성(내부 CDP DOM.getOuterHTML) 대신
         run_js 로 직접 DOM.outerHTML 획득 → TV 상세 페이지의 반복되는 timeout 회피
-        timeout=60s 로 무거운 JS (인기 상품 대량 리뷰 등) 에도 여유 확보
+        timeout=30s: 확정 실패 URL (JS hang) 은 어차피 풀리지 않음 → 빠른 포기
         """
-        return self.page.run_js('return document.documentElement.outerHTML', timeout=60)
+        return self.page.run_js('return document.documentElement.outerHTML', timeout=30)
 
     def check_robot_page(self, page_source):
         """Check if page is showing 'Robot or human?' challenge"""
@@ -2442,22 +2448,13 @@ class WalmartDetailCrawler:
                 print(f"\n{'='*80}")
                 print(f"Processing {idx}/{len(product_urls)}")
 
-                # Retry logic: try up to 3 times
-                max_retries = 3
-                success = False
-                for attempt in range(max_retries):
-                    result = self.scrape_detail_page(url_data)
-                    if result:  # Success
-                        success = True
-                        break
-                    else:  # Failed
-                        if attempt < max_retries - 1:  # Not the last attempt
-                            print(f"  [RETRY] Attempt {attempt + 1} failed, retrying... ({attempt + 2}/{max_retries})")
-                            api_retry_wait = self.config.get_timing_range('api_retry_wait', 'wmart_tv_dt1') or (5, 8)
-                            time.sleep(random.uniform(*api_retry_wait))  # Wait before retry
-                        else:
-                            print(f"  [FAILED] All {max_retries} attempts failed for this URL")
-                            failed_urls.append(url_data)
+                # Retry logic: 1회만 시도 (fast fail)
+                # 재시도는 orchestrator 의 BSR retry 루프에서 담당 → 동일 URL 을 한 프로세스에서
+                # 3회 반복해도 같은 JS hang 반복될 뿐, 새 프로세스/브라우저가 필요함
+                result = self.scrape_detail_page(url_data)
+                if not result:
+                    print(f"  [FAILED] 1 attempt failed for this URL (fast-fail, orchestrator retry 에서 재처리)")
+                    failed_urls.append(url_data)
 
                 # Random delay between requests
                 captcha_after_wait = self.config.get_timing_range('captcha_after_wait') or (3, 5)

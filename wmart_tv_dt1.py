@@ -1864,7 +1864,7 @@ class WalmartDetailCrawler:
             shipping_availability = url_data.get('shipping_availability')
             delivery_availability = url_data.get('delivery_availability')
             sku_status_from_main = url_data.get('sku_status')  # May contain Rollback
-            retailer_membership_discounts = url_data.get('retailer_membership_discounts')
+            retailer_membership_discounts = None  # 수집 비활성화 - 항상 NULL 저장
             available_quantity_for_purchase = url_data.get('available_quantity_for_purchase')
             inventory_status = url_data.get('inventory_status')
 

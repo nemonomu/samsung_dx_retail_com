@@ -1639,9 +1639,8 @@ class AmazonDetailCrawler:
             sku_popularity_raw = self.extract_with_xpaths(tree, 'sku_popularity')
             sku_popularity = sku_popularity_raw if sku_popularity_raw and "Amazon's" in sku_popularity_raw and "Choice" in sku_popularity_raw else None
 
-            # Retailer_Membership_Discounts - clean Prime text
-            membership_discount_raw = self.extract_with_xpaths(tree, 'membership_discount')
-            membership_discount = self.clean_membership_discount(membership_discount_raw)
+            # Retailer_Membership_Discounts - 수집 안 함 (항상 NULL)
+            membership_discount = None
 
             # Item - Extract ASIN from final URL (after redirect)
             # sspa/click URL redirects to actual product page with /dp/ASIN/

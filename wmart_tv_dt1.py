@@ -379,8 +379,9 @@ class WalmartDetailCrawler:
         """페이지 HTML 획득 (CDP DOM.getOuterHTML timeout 우회)
         wmart_hhp_dt.py 패턴: DrissionPage 의 html 속성(내부 CDP DOM.getOuterHTML) 대신
         run_js 로 직접 DOM.outerHTML 획득 → TV 상세 페이지의 반복되는 timeout 회피
+        timeout=60s 로 무거운 JS (인기 상품 대량 리뷰 등) 에도 여유 확보
         """
-        return self.page.run_js('return document.documentElement.outerHTML')
+        return self.page.run_js('return document.documentElement.outerHTML', timeout=60)
 
     def check_robot_page(self, page_source):
         """Check if page is showing 'Robot or human?' challenge"""
@@ -2462,39 +2463,9 @@ class WalmartDetailCrawler:
                 captcha_after_wait = self.config.get_timing_range('captcha_after_wait') or (3, 5)
                 time.sleep(random.uniform(*captcha_after_wait))
 
-            # 실패 URL 재시도 (최대 2라운드)
-            for retry_round in range(1, 3):
-                if not failed_urls:
-                    break
-                print(f"\n{'='*80}")
-                print(f"[RECOVERY] 실패 URL 재시도 라운드 {retry_round} - {len(failed_urls)}개")
-                print(f"{'='*80}")
-
-                # 브라우저 재시작 후 재시도
-                print(f"[RECOVERY] 브라우저 재시작...")
-                try:
-                    self.page.quit()
-                except:
-                    pass
-                self.setup_driver()
-                if not self.initialize_session():
-                    print("[WARNING] Session initialization had issues, continuing anyway...")
-
-                still_failed = []
-                for idx, url_data in enumerate(failed_urls, 1):
-                    print(f"\n[RECOVERY {retry_round}] {idx}/{len(failed_urls)} - {url_data['url'][:60]}...")
-
-                    result = self.scrape_detail_page(url_data)
-                    if result:
-                        print(f"  [RECOVERY OK] 재시도 성공")
-                    else:
-                        print(f"  [RECOVERY FAILED] 재시도 실패")
-                        still_failed.append(url_data)
-
-                    time.sleep(random.uniform(*captcha_after_wait))
-
-                print(f"[RECOVERY] 라운드 {retry_round} 완료: {len(failed_urls) - len(still_failed)}개 복구, {len(still_failed)}개 여전히 실패")
-                failed_urls = still_failed
+            # Recovery 라운드 제거 (orchestrator 의 dt1 재실행으로 대체)
+            # → 실패 URL 은 tv_retail_com 에 미저장 상태로 남음 → orchestrator 의 already_processed
+            # 필터가 성공분만 스킵하므로 dt1 재실행 시 자동으로 실패 URL 만 재처리됨
 
             print("\n" + "="*80)
             print(f"Detail Crawling completed! Total collected: {self.total_collected}/{len(product_urls)}")

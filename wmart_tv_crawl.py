@@ -152,6 +152,32 @@ def create_failure_log(failed_stages):
         return None
 
 
+def get_missing_bsr_ranks(session_start_str):
+    """현재 세션 tv_retail_com 에서 누락된 bsr_rank (1~100) 반환
+    Args:
+        session_start_str: 세션 시작 시각 (crawl_datetime varchar 비교용)
+    Returns:
+        list[int]: 누락 bsr_rank 리스트 (빈 리스트면 완비). DB 에러 시 None.
+    """
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT DISTINCT bsr_rank
+            FROM tv_retail_com
+            WHERE account_name = 'Walmart'
+              AND crawl_datetime >= %s
+              AND bsr_rank IS NOT NULL
+        """, (session_start_str,))
+        found = set(r[0] for r in cur.fetchall())
+        cur.close()
+        conn.close()
+        return sorted(set(range(1, 101)) - found)
+    except Exception as e:
+        print(f"[ERROR] BSR completeness 쿼리 실패: {e}")
+        return None
+
+
 def get_main_dedup_count():
     """main1 + main2 최신 batch의 중복 제거 URL 개수 조회"""
     try:
@@ -316,6 +342,33 @@ def main():
 
             # dt1 failed 판정: 프로세스 실행 실패만 (수집 건수 기준은 main/bsr에서만)
             if not result["success"]:
+                if "wmart_tv_dt1" not in failed_stages:
+                    failed_stages.append("wmart_tv_dt1")
+
+            # BSR 1~100 완비 체크 + dt1 재실행 (최대 2회)
+            # dt1 프로세스는 성공했지만 일부 URL 이 실패해 BSR rank 누락된 경우 자동 복구
+            orchestrator_start_str = datetime.fromtimestamp(overall_start_time).strftime('%Y-%m-%d %H:%M:%S')
+            MAX_BSR_RETRIES = 2
+            for retry_attempt in range(1, MAX_BSR_RETRIES + 1):
+                missing = get_missing_bsr_ranks(orchestrator_start_str)
+                if missing is None:
+                    print(f"\n[WARNING] BSR 완비 체크 실패 (DB 에러), 재시도 건너뜀")
+                    break
+                if not missing:
+                    print(f"\n[OK] BSR 1~100 완비 ✓")
+                    break
+                print(f"\n{'='*80}")
+                print(f"[BSR RETRY {retry_attempt}/{MAX_BSR_RETRIES}] BSR 누락 {len(missing)}개: {missing}")
+                print(f"[BSR RETRY] dt1 재실행 (already_processed 필터로 누락 URL 만 재처리)")
+                print(f"{'='*80}")
+                time.sleep(5)
+                retry_result = run_crawler(stages[3][0], stages[3][1])
+                print(f"[BSR RETRY {retry_attempt}] 결과: success={retry_result['success']}, collected={retry_result.get('collected_count')}")
+
+            # 최종 BSR 완비 체크 → 누락 남으면 failed_stages 추가
+            final_missing = get_missing_bsr_ranks(orchestrator_start_str)
+            if final_missing:
+                print(f"\n[CRITICAL] BSR {len(final_missing)}개 최종 누락: {final_missing}")
                 if "wmart_tv_dt1" not in failed_stages:
                     failed_stages.append("wmart_tv_dt1")
 

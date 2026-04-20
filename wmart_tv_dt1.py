@@ -1198,6 +1198,24 @@ class WalmartDetailCrawler:
                         print(f"  [INFO] Found 'No ratings yet' on page, setting count_of_reviews to 0")
                         return 0
 
+            # Priority 0: <a link-identifier="seeAllReviewsStarRating">N reviews</a> 링크
+            # 속성 기반 semantic 추출 → lazy-load 영향 적고 A/B 변동 최소
+            # 기존 "Showing X of Y" / "View all reviews (N)" 가 놓치는 단순 "N reviews" 형식 커버
+            try:
+                sr_link = tree.xpath('//a[@link-identifier="seeAllReviewsStarRating"]')
+                if sr_link:
+                    text = sr_link[0].text_content().strip() if hasattr(sr_link[0], 'text_content') else str(sr_link[0]).strip()
+                    # Pattern: "46 reviews" or "4,686 reviews"
+                    match = re.match(r'^([\d,]+)\s+reviews?', text, re.IGNORECASE)
+                    if match:
+                        count_str = match.group(1).replace(',', '')
+                        count = int(count_str)
+                        if not is_likely_ratings_count(count):
+                            print(f"  [INFO] Extracted count_of_reviews from link-identifier='seeAllReviewsStarRating': {count}")
+                            return count
+            except Exception:
+                pass
+
             # Priority 1: Extract from "Showing 1-3 of 18,552 reviews" pattern (most accurate, from DB)
             showing_xpaths = [
                 self.xpaths.get('showing_reviews_1'),

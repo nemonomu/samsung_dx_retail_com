@@ -382,12 +382,22 @@ class WalmartDetailCrawler:
             return False
 
     def _get_page_html(self):
-        """페이지 HTML 획득 (CDP DOM.getOuterHTML timeout 우회)
-        wmart_hhp_dt.py 패턴: DrissionPage 의 html 속성(내부 CDP DOM.getOuterHTML) 대신
-        run_js 로 직접 DOM.outerHTML 획득 → TV 상세 페이지의 반복되는 timeout 회피
-        timeout=30s: 확정 실패 URL (JS hang) 은 어차피 풀리지 않음 → 빠른 포기
+        """페이지 HTML 획득
+        - stop_loading() 으로 pending XHR/fetch 끊어 JS resolve 유도
+          (특정 TV 상세 페이지가 run_js 30초 hang → BSR 누락 주원인)
+        - run_js 우선, 실패 시 네이티브 page.html (CDP DOM.getOuterHTML) 폴백
         """
-        return self.page.run_js('return document.documentElement.outerHTML', timeout=30)
+        try:
+            self.page.stop_loading()
+        except Exception:
+            pass
+        try:
+            return self.page.run_js('return document.documentElement.outerHTML', timeout=15)
+        except Exception as e:
+            try:
+                return self.page.html
+            except Exception:
+                raise e
 
     def check_robot_page(self, page_source):
         """Check if page is showing 'Robot or human?' challenge"""

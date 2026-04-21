@@ -1623,13 +1623,17 @@ class AmazonDetailCrawler:
                                    SET bsr_rank  = COALESCE(bsr_rank,  %s),
                                        main_rank = COALESCE(main_rank, %s)
                                  WHERE item = %s AND batch_id = %s
+                                 RETURNING crawl_datetime
                             """, (new_bsr, new_main, item, self.batch_id))
-                            _cur.execute("""
-                                UPDATE tv_retail_com
-                                   SET bsr_rank  = COALESCE(bsr_rank,  %s),
-                                       main_rank = COALESCE(main_rank, %s)
-                                 WHERE item = %s AND batch_id = %s
-                            """, (new_bsr, new_main, item, self.batch_id))
+                            _row = _cur.fetchone()
+                            if _row:
+                                _existing_dt = _row[0]
+                                _cur.execute("""
+                                    UPDATE tv_retail_com
+                                       SET bsr_rank  = COALESCE(bsr_rank,  %s),
+                                           main_rank = COALESCE(main_rank, %s)
+                                     WHERE item = %s AND crawl_datetime = %s AND account_name = 'Amazon'
+                                """, (new_bsr, new_main, item, _existing_dt))
                             self.db_conn.commit()
                             print(f"  [DEDUP] merged bsr_rank={new_bsr}, main_rank={new_main}")
                         except Exception as _e:

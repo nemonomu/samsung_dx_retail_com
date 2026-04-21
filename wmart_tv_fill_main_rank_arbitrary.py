@@ -36,9 +36,12 @@ def main():
                         help='부여할 row 개수 (default 7)')
     parser.add_argument('--max-rank', type=int, default=307,
                         help='main_rank 범위 상한, gap 탐색용 (default 307)')
+    parser.add_argument('--account', default='Walmart',
+                        help='account_name 필터 — tv_retail_com 이 통합 테이블이므로 필수 (default: Walmart)')
     args = parser.parse_args()
 
     print(f"[INFO] narrow window : [{args.narrow_start} ~ {args.narrow_end}]")
+    print(f"[INFO] account_name  : {args.account}")
     print(f"[INFO] count to fill : {args.count}")
     print(f"[INFO] rank range    : 1 ~ {args.max_rank}")
 
@@ -52,7 +55,8 @@ def main():
              WHERE crawl_datetime >= %s AND crawl_datetime <= %s
                AND main_rank IS NOT NULL
                AND main_rank BETWEEN 1 AND %s
-        """, (args.narrow_start, args.narrow_end, args.max_rank))
+               AND account_name = %s
+        """, (args.narrow_start, args.narrow_end, args.max_rank, args.account))
         used_ranks = {row[0] for row in cur.fetchall()}
         gap_ranks = sorted(r for r in range(1, args.max_rank + 1) if r not in used_ranks)
 
@@ -72,9 +76,10 @@ def main():
              WHERE crawl_datetime >= %s AND crawl_datetime <= %s
                AND main_rank IS NULL
                AND bsr_rank IS NOT NULL
+               AND account_name = %s
              ORDER BY crawl_datetime, bsr_rank
              LIMIT %s
-        """, (args.narrow_start, args.narrow_end, args.count))
+        """, (args.narrow_start, args.narrow_end, args.account, args.count))
         target_rows = cur.fetchall()
         print(f"\n[INFO] target rows (main_rank=NULL AND bsr_rank NOT NULL, narrow): {len(target_rows)}")
 

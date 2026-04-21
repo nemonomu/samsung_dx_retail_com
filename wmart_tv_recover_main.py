@@ -98,68 +98,70 @@ class RecoverMainCrawler(WalmartDetailCrawler):
             main2_rows = cursor.fetchall()
             print(f"[INFO] wmart_tv_main_2 (batch {self.target_main2_batch_id}): {len(main2_rows)} URLs")
 
-            all_rows = main1_rows + main2_rows
+            # Main1/2 source의 모든 unique URL 수집 (with metadata)
+            source_urls = {}  # {url: (main_rank, availability_data)}
+            for row in main1_rows:
+                url = row[1]
+                if url not in source_urls:  # 첫 출현만 저장 (main1이 main2보다 우선)
+                    source_urls[url] = {
+                        'main_rank': row[0],
+                        'pick_up_availability': row[2],
+                        'shipping_availability': row[3],
+                        'delivery_availability': row[4],
+                        'sku_status': row[5],
+                        'retailer_membership_discounts': row[6],
+                        'available_quantity_for_purchase': row[7],
+                        'inventory_status': row[8]
+                    }
+            for row in main2_rows:
+                url = row[1]
+                if url not in source_urls:  # main2의 고유 URL만 추가
+                    source_urls[url] = {
+                        'main_rank': row[0],
+                        'pick_up_availability': row[2],
+                        'shipping_availability': row[3],
+                        'delivery_availability': row[4],
+                        'sku_status': row[5],
+                        'retailer_membership_discounts': row[6],
+                        'available_quantity_for_purchase': row[7],
+                        'inventory_status': row[8]
+                    }
 
-            # 세션 시간 윈도우 계산: [target_session_main1, next_session_main1)
-            cursor.execute("""
-                SELECT batch_id FROM wmart_tv_main_1
-                WHERE batch_id <= %s
-                ORDER BY batch_id DESC LIMIT 1
-            """, (self.target_main1_batch_id,))
-            row = cursor.fetchone()
-            if row:
-                session_main1 = row[0]
-                session_start = self._batch_id_to_local(session_main1)
+            print(f"[INFO] Total unique Main URLs (main1+main2): {len(source_urls)}")
+
+            # Walmart_tv_detail_crawled 에서 Main source URL들만 필터링
+            if source_urls:
+                placeholders = ','.join(['%s'] * len(source_urls))
+                cursor.execute(f"""
+                    SELECT DISTINCT product_url
+                    FROM Walmart_tv_detail_crawled
+                    WHERE product_url IN ({placeholders})
+                """, list(source_urls.keys()))
+                saved_urls = {row[0] for row in cursor.fetchall()}
+                print(f"[INFO] Already saved in Walmart_tv_detail_crawled: {len(saved_urls)}")
             else:
-                # main1 기록 없음: main1 시각 - 1h 를 세션 시작으로 근사
-                from datetime import timedelta
-                session_main1 = None
-                session_start = self.target_datetime - timedelta(hours=1)
-
-            cursor.execute("""
-                SELECT batch_id FROM wmart_tv_main_1
-                WHERE batch_id > %s
-                ORDER BY batch_id ASC LIMIT 1
-            """, (session_main1 or self.target_main1_batch_id,))
-            row = cursor.fetchone()
-            session_end = self._batch_id_to_local(row[0]) if row else datetime(9999, 12, 31)
-
-            # crawl_datetime 컬럼이 varchar 라 문자열로 비교 (포맷 일치 시 lexicographic == 시간 순서)
-            session_start_str = session_start.strftime('%Y-%m-%d %H:%M:%S')
-            session_end_str = session_end.strftime('%Y-%m-%d %H:%M:%S')
-            print(f"[INFO] Session window: [{session_start_str}, {session_end_str})")
-
-            # "Walmart_tv_detail_crawled 에 없는 URL" 이 복구 대상이므로 main_rank 조건 없이 URL 존재만 체크
-            cursor.execute("""
-                SELECT DISTINCT product_url
-                FROM Walmart_tv_detail_crawled
-                WHERE product_url IS NOT NULL
-                  AND crawl_datetime >= %s
-                  AND crawl_datetime < %s
-            """, (session_start_str, session_end_str))
-            already_saved = {row[0] for row in cursor.fetchall()}
-            print(f"[INFO] Already in Walmart_tv_detail_crawled (this session): {len(already_saved)}")
+                saved_urls = set()
+                print(f"[WARNING] No source URLs found")
 
             cursor.close()
 
+            # 누락 URL = source - saved
             missing = []
-            for row in all_rows:
-                url = row[1]
-                if url in already_saved:
-                    continue
-                missing.append({
-                    'page_type': 'main',
-                    'url': url,
-                    'main_rank': row[0],
-                    'bsr_rank': None,
-                    'pick_up_availability': row[2],
-                    'shipping_availability': row[3],
-                    'delivery_availability': row[4],
-                    'sku_status': row[5],
-                    'retailer_membership_discounts': row[6],
-                    'available_quantity_for_purchase': row[7],
-                    'inventory_status': row[8]
-                })
+            for url, metadata in source_urls.items():
+                if url not in saved_urls:
+                    missing.append({
+                        'page_type': 'main',
+                        'url': url,
+                        'main_rank': metadata['main_rank'],
+                        'bsr_rank': None,
+                        'pick_up_availability': metadata['pick_up_availability'],
+                        'shipping_availability': metadata['shipping_availability'],
+                        'delivery_availability': metadata['delivery_availability'],
+                        'sku_status': metadata['sku_status'],
+                        'retailer_membership_discounts': metadata['retailer_membership_discounts'],
+                        'available_quantity_for_purchase': metadata['available_quantity_for_purchase'],
+                        'inventory_status': metadata['inventory_status']
+                    })
 
             print(f"[OK] Missing Main URLs to recover: {len(missing)}")
             for item in missing:

@@ -55,8 +55,15 @@ class RecoverCrawler(WalmartDetailCrawler):
         with _freeze_datetime(self.target_datetime):
             return super().save_to_db(data)
 
+    def _batch_id_to_local(self, batch_id):
+        """KST wall-clock batch_id → 로컬 naive datetime"""
+        kst = pytz.timezone('Asia/Seoul').localize(
+            datetime.strptime(batch_id, '%Y%m%d_%H%M%S')
+        )
+        return kst.astimezone().replace(tzinfo=None)
+
     def load_product_urls(self):
-        """지정한 bsr_batch_id URL 중 bsr_rank 로 미저장된 것만 로드"""
+        """지정 세션 시간 윈도우 내에서 bsr_rank 로 미저장된 URL 로드"""
         try:
             cursor = self.db_conn.cursor()
 
@@ -74,14 +81,42 @@ class RecoverCrawler(WalmartDetailCrawler):
             rows = cursor.fetchall()
             print(f"[INFO] wmart_tv_bsr_crawl (batch {self.target_bsr_batch_id}): {len(rows)} URLs")
 
+            # 세션 시간 윈도우 계산: [target_session_main1, next_session_main1)
+            cursor.execute("""
+                SELECT batch_id FROM wmart_tv_main_1
+                WHERE batch_id <= %s
+                ORDER BY batch_id DESC LIMIT 1
+            """, (self.target_bsr_batch_id,))
+            row = cursor.fetchone()
+            if row:
+                session_main1 = row[0]
+                session_start = self._batch_id_to_local(session_main1)
+            else:
+                # main1 기록 없음: bsr 시각 - 1h 를 세션 시작으로 근사
+                from datetime import timedelta
+                session_main1 = None
+                session_start = self.target_datetime - timedelta(hours=1)
+
+            cursor.execute("""
+                SELECT batch_id FROM wmart_tv_main_1
+                WHERE batch_id > %s
+                ORDER BY batch_id ASC LIMIT 1
+            """, (session_main1 or self.target_bsr_batch_id,))
+            row = cursor.fetchone()
+            session_end = self._batch_id_to_local(row[0]) if row else datetime(9999, 12, 31)
+
+            print(f"[INFO] Session window: [{session_start}, {session_end})")
+
+            # "tv_retail_com 에 없는 URL" 이 복구 대상이므로 bsr_rank 조건 없이 URL 존재만 체크
             cursor.execute("""
                 SELECT DISTINCT product_url
-                FROM Walmart_tv_detail_crawled
+                FROM tv_retail_com
                 WHERE product_url IS NOT NULL
-                  AND bsr_rank IS NOT NULL
-            """)
+                  AND crawl_datetime >= %s
+                  AND crawl_datetime < %s
+            """, (session_start, session_end))
             already_saved = {row[0] for row in cursor.fetchall()}
-            print(f"[INFO] Already saved with bsr_rank (any session): {len(already_saved)}")
+            print(f"[INFO] Already in tv_retail_com (this session): {len(already_saved)}")
 
             cursor.close()
 

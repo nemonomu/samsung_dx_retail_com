@@ -1,0 +1,112 @@
+"""
+특정 BSR batch 의 누락 URL 복구 전용 스크립트
+사용: python wmart_tv_dt1_recover.py <bsr_batch_id>
+예:  python wmart_tv_dt1_recover.py 20260420_131233
+
+wmart_tv_bsr_crawl 의 해당 batch URL 중, Walmart_tv_detail_crawled 에
+bsr_rank 로 아직 저장되지 않은 것만 재스크래핑한다.
+WalmartDetailCrawler 를 상속하고 load_product_urls 만 교체.
+"""
+import sys
+import os
+from datetime import datetime
+from wmart_tv_dt1 import WalmartDetailCrawler, Tee
+
+
+class RecoverCrawler(WalmartDetailCrawler):
+    def __init__(self, bsr_batch_id):
+        super().__init__()
+        self.target_bsr_batch_id = bsr_batch_id
+        # max_skus 제한 회피: 복구는 모든 누락분 처리해야 함
+        self.max_skus = 10 ** 9
+
+    def load_product_urls(self):
+        """지정한 bsr_batch_id URL 중 bsr_rank 로 미저장된 것만 로드"""
+        try:
+            cursor = self.db_conn.cursor()
+
+            cursor.execute("""
+                SELECT bsr_rank, Product_url,
+                       Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
+                       SKU_Status, Retailer_Membership_Discounts, Available_Quantity_for_Purchase,
+                       Inventory_Status
+                FROM wmart_tv_bsr_crawl
+                WHERE batch_id = %s
+                  AND Product_url IS NOT NULL
+                  AND Product_url != ''
+                ORDER BY bsr_rank
+            """, (self.target_bsr_batch_id,))
+            rows = cursor.fetchall()
+            print(f"[INFO] wmart_tv_bsr_crawl (batch {self.target_bsr_batch_id}): {len(rows)} URLs")
+
+            cursor.execute("""
+                SELECT DISTINCT product_url
+                FROM Walmart_tv_detail_crawled
+                WHERE product_url IS NOT NULL
+                  AND bsr_rank IS NOT NULL
+            """)
+            already_saved = {row[0] for row in cursor.fetchall()}
+            print(f"[INFO] Already saved with bsr_rank (any session): {len(already_saved)}")
+
+            cursor.close()
+
+            missing = []
+            for row in rows:
+                url = row[1]
+                if url in already_saved:
+                    continue
+                missing.append({
+                    'page_type': 'bsr',
+                    'url': url,
+                    'main_rank': None,
+                    'bsr_rank': row[0],
+                    'pick_up_availability': row[2],
+                    'shipping_availability': row[3],
+                    'delivery_availability': row[4],
+                    'sku_status': row[5],
+                    'retailer_membership_discounts': row[6],
+                    'available_quantity_for_purchase': row[7],
+                    'inventory_status': row[8]
+                })
+
+            print(f"[OK] Missing BSR URLs to recover: {len(missing)}")
+            for item in missing:
+                print(f"     BSR {item['bsr_rank']}: {item['url'][:80]}...")
+            return missing
+
+        except Exception as e:
+            print(f"[ERROR] Failed to load missing URLs: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage: python wmart_tv_dt1_recover.py <bsr_batch_id>")
+        print("Example: python wmart_tv_dt1_recover.py 20260420_131233")
+        sys.exit(1)
+
+    batch_id = sys.argv[1]
+
+    log_dir = "C:\\samsung_dx_retail_com\\log"
+    os.makedirs(log_dir, exist_ok=True)
+    log_filename = os.path.join(
+        log_dir,
+        datetime.now().strftime("%Y%m%d_%H%M%S") + f"_dt1_recover_{batch_id}.txt"
+    )
+    tee = Tee(log_filename)
+    sys.stdout = tee
+
+    try:
+        print(f"[INFO] Recovery target BSR batch_id: {batch_id}")
+        crawler = RecoverCrawler(batch_id)
+        crawler.run()
+    except Exception as e:
+        print(f"\n[FATAL ERROR] {e}")
+        import traceback
+        traceback.print_exc()
+
+    print(f"\n[INFO] Recovery finished. Log: {log_filename}")
+    sys.stdout = tee.terminal
+    tee.close()

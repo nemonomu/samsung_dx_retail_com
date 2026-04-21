@@ -105,7 +105,10 @@ class RecoverCrawler(WalmartDetailCrawler):
             row = cursor.fetchone()
             session_end = self._batch_id_to_local(row[0]) if row else datetime(9999, 12, 31)
 
-            print(f"[INFO] Session window: [{session_start}, {session_end})")
+            # crawl_datetime 컬럼이 varchar 라 문자열로 비교 (포맷 일치 시 lexicographic == 시간 순서)
+            session_start_str = session_start.strftime('%Y-%m-%d %H:%M:%S')
+            session_end_str = session_end.strftime('%Y-%m-%d %H:%M:%S')
+            print(f"[INFO] Session window: [{session_start_str}, {session_end_str})")
 
             # "tv_retail_com 에 없는 URL" 이 복구 대상이므로 bsr_rank 조건 없이 URL 존재만 체크
             cursor.execute("""
@@ -114,7 +117,7 @@ class RecoverCrawler(WalmartDetailCrawler):
                 WHERE product_url IS NOT NULL
                   AND crawl_datetime >= %s
                   AND crawl_datetime < %s
-            """, (session_start, session_end))
+            """, (session_start_str, session_end_str))
             already_saved = {row[0] for row in cursor.fetchall()}
             print(f"[INFO] Already in tv_retail_com (this session): {len(already_saved)}")
 

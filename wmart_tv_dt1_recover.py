@@ -6,11 +6,35 @@
 wmart_tv_bsr_crawl 의 해당 batch URL 중, Walmart_tv_detail_crawled 에
 bsr_rank 로 아직 저장되지 않은 것만 재스크래핑한다.
 WalmartDetailCrawler 를 상속하고 load_product_urls 만 교체.
+
+crawl_datetime/calendar_week 은 bsr_batch_id (KST) → 로컬 시각으로
+변환한 값을 쓰도록 datetime.now() 를 세션별로 frozen 한다.
+세션 기준 집계 쿼리에서 복구 레코드가 원본 세션 시각 범위에 포함됨.
 """
 import sys
 import os
+from contextlib import contextmanager
 from datetime import datetime
+import pytz
+import wmart_tv_dt1 as _dt1_module
 from wmart_tv_dt1 import WalmartDetailCrawler, Tee
+
+
+@contextmanager
+def _freeze_datetime(target):
+    """wmart_tv_dt1 모듈 내 datetime.now() 를 target 으로 고정"""
+    original = _dt1_module.datetime
+
+    class _FrozenDatetime(original):
+        @classmethod
+        def now(cls, tz=None):
+            return target
+
+    _dt1_module.datetime = _FrozenDatetime
+    try:
+        yield
+    finally:
+        _dt1_module.datetime = original
 
 
 class RecoverCrawler(WalmartDetailCrawler):
@@ -19,6 +43,17 @@ class RecoverCrawler(WalmartDetailCrawler):
         self.target_bsr_batch_id = bsr_batch_id
         # max_skus 제한 회피: 복구는 모든 누락분 처리해야 함
         self.max_skus = 10 ** 9
+        # batch_id (KST) → 로컬 naive datetime 변환
+        kst = pytz.timezone('Asia/Seoul').localize(
+            datetime.strptime(bsr_batch_id, '%Y%m%d_%H%M%S')
+        )
+        self.target_datetime = kst.astimezone().replace(tzinfo=None)
+        print(f"[INFO] crawl_datetime/calendar_week 을 {self.target_datetime} 로 고정")
+
+    def save_to_db(self, data):
+        """부모 save_to_db 를 호출하되 datetime.now() 만 원본 세션 시각으로 치환"""
+        with _freeze_datetime(self.target_datetime):
+            return super().save_to_db(data)
 
     def load_product_urls(self):
         """지정한 bsr_batch_id URL 중 bsr_rank 로 미저장된 것만 로드"""

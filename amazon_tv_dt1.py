@@ -1611,7 +1611,33 @@ class AmazonDetailCrawler:
                 print(f"  [OK] Extracted item from URL (ASIN): {item}")
                 # Real-time duplicate check (for sspa/click redirects)
                 if item in self.processed_asins:
-                    print(f"  [SKIP] Already processed ASIN in this session: {item}")
+                    print(f"  [DEDUP] Already processed ASIN {item} - merging rank info only")
+                    new_bsr = url_data.get('bsr_rank')
+                    new_main = url_data.get('main_rank')
+                    if new_bsr is not None or new_main is not None:
+                        self.db_conn.autocommit = False
+                        _cur = self.db_conn.cursor()
+                        try:
+                            _cur.execute("""
+                                UPDATE amazon_tv_detail_crawled
+                                   SET bsr_rank  = COALESCE(bsr_rank,  %s),
+                                       main_rank = COALESCE(main_rank, %s)
+                                 WHERE item = %s AND batch_id = %s
+                            """, (new_bsr, new_main, item, self.batch_id))
+                            _cur.execute("""
+                                UPDATE tv_retail_com
+                                   SET bsr_rank  = COALESCE(bsr_rank,  %s),
+                                       main_rank = COALESCE(main_rank, %s)
+                                 WHERE item = %s AND batch_id = %s
+                            """, (new_bsr, new_main, item, self.batch_id))
+                            self.db_conn.commit()
+                            print(f"  [DEDUP] merged bsr_rank={new_bsr}, main_rank={new_main}")
+                        except Exception as _e:
+                            self.db_conn.rollback()
+                            print(f"  [ERROR] DEDUP update failed: {_e}")
+                        finally:
+                            _cur.close()
+                            self.db_conn.autocommit = True
                     return False
                 self.processed_asins.add(item)
             else:
@@ -2114,8 +2140,8 @@ class AmazonDetailCrawler:
                  main_rank, bsr_rank, rank_1, rank_2, promotion_position, trend_rank,
                  number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, retailer_sku_name_similar,
                  estimated_annual_electricity_use, promotion_type, number_of_units_purchased_past_month, model_year,
-                 calendar_week, crawl_datetime)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 calendar_week, crawl_datetime, batch_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 data['item'],
                 'Amazon',  # account_name
@@ -2158,7 +2184,8 @@ class AmazonDetailCrawler:
                 data.get('number_of_units_purchased_past_month'),  # From main_crawled
                 data.get('model_year'),  # From item details dialog
                 calendar_week,
-                crawl_datetime
+                crawl_datetime,
+                self.batch_id
             ))
 
             # Insert into tv_item_mst (with duplicate check on item, update sku and screen_size on conflict)

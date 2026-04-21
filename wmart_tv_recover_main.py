@@ -129,16 +129,44 @@ class RecoverMainCrawler(WalmartDetailCrawler):
 
             print(f"[INFO] Total unique Main URLs (main1+main2): {len(source_urls)}")
 
-            # Walmart_tv_detail_crawled 에서 Main source URL들만 필터링
+            # 세션 시간 윈도우 계산: [target_session_main1, next_session_main1)
+            # (afa3ffa 스타일; tv_retail_com 이 canonical target, crawl_datetime 은 varchar)
+            cursor.execute("""
+                SELECT batch_id FROM wmart_tv_main_1
+                WHERE batch_id <= %s
+                ORDER BY batch_id DESC LIMIT 1
+            """, (self.target_main1_batch_id,))
+            row = cursor.fetchone()
+            session_main1 = row[0] if row else None
+            session_start = self._batch_id_to_local(session_main1) if session_main1 else self.target_datetime
+
+            cursor.execute("""
+                SELECT batch_id FROM wmart_tv_main_1
+                WHERE batch_id > %s
+                ORDER BY batch_id ASC LIMIT 1
+            """, (session_main1 or self.target_main1_batch_id,))
+            row = cursor.fetchone()
+            session_end = self._batch_id_to_local(row[0]) if row else datetime(9999, 12, 31)
+
+            fmt = '%Y-%m-%d %H:%M:%S'
+            session_start_str = session_start.strftime(fmt)
+            session_end_str = session_end.strftime(fmt)
+            print(f"[INFO] Session window: [{session_start_str}, {session_end_str})")
+
+            # tv_retail_com (canonical target; unified 이므로 account_name='Walmart' 필수)
             if source_urls:
                 placeholders = ','.join(['%s'] * len(source_urls))
+                params = list(source_urls.keys()) + [session_start_str, session_end_str]
                 cursor.execute(f"""
                     SELECT DISTINCT product_url
-                    FROM Walmart_tv_detail_crawled
+                    FROM tv_retail_com
                     WHERE product_url IN ({placeholders})
-                """, list(source_urls.keys()))
+                      AND account_name = 'Walmart'
+                      AND crawl_datetime >= %s
+                      AND crawl_datetime < %s
+                """, params)
                 saved_urls = {row[0] for row in cursor.fetchall()}
-                print(f"[INFO] Already saved in Walmart_tv_detail_crawled: {len(saved_urls)}")
+                print(f"[INFO] Already saved in tv_retail_com (this session, Walmart): {len(saved_urls)}")
             else:
                 saved_urls = set()
                 print(f"[WARNING] No source URLs found")

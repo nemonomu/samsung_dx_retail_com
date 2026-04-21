@@ -2479,20 +2479,44 @@ class WalmartDetailCrawler:
                 print(f"Processing {idx}/{len(product_urls)}")
 
                 # Retry logic: 1회만 시도 (fast fail)
-                # 재시도는 orchestrator 의 BSR retry 루프에서 담당 → 동일 URL 을 한 프로세스에서
-                # 3회 반복해도 같은 JS hang 반복될 뿐, 새 프로세스/브라우저가 필요함
+                # 재시도는 2차 Recovery 라운드 (1차 루프 완료 후) 에서 새 browser/session 으로 일괄 처리
                 result = self.scrape_detail_page(url_data)
                 if not result:
-                    print(f"  [FAILED] 1 attempt failed for this URL (fast-fail, orchestrator retry 에서 재처리)")
+                    print(f"  [FAILED] 1 attempt failed (2차 라운드에서 재처리 예정)")
                     failed_urls.append(url_data)
 
                 # Random delay between requests
                 captcha_after_wait = self.config.get_timing_range('captcha_after_wait') or (3, 5)
                 time.sleep(random.uniform(*captcha_after_wait))
 
-            # Recovery 라운드 제거 (orchestrator 의 dt1 재실행으로 대체)
-            # → 실패 URL 은 tv_retail_com 에 미저장 상태로 남음 → orchestrator 의 already_processed
-            # 필터가 성공분만 스킵하므로 dt1 재실행 시 자동으로 실패 URL 만 재처리됨
+            # 2차 Recovery 라운드: 1차 실패 URL 만 새 browser/session 으로 재시도
+            # 1회 fast-fail 보완. CAPTCHA/CDP timeout/JS hang 등 일시 장애의 대부분을 복구.
+            # 2차에서도 실패하는 영구 실패는 wmart_tv_recover_main.py (session-scoped) 로 처리
+            if failed_urls:
+                print("\n" + "="*80)
+                print(f"[INFO] 2nd Recovery round for {len(failed_urls)} failed URL(s)")
+                print("="*80)
+                self.restart_browser()
+                if not self.initialize_session():
+                    print("[WARNING] Session init failed for 2nd round, continuing anyway...")
+
+                retry_list = failed_urls.copy()
+                failed_urls.clear()
+                captcha_after_wait = self.config.get_timing_range('captcha_after_wait') or (3, 5)
+
+                for idx2, url_data in enumerate(retry_list, 1):
+                    print(f"\n{'='*80}")
+                    print(f"2nd round {idx2}/{len(retry_list)}")
+                    result = self.scrape_detail_page(url_data)
+                    if result:
+                        print(f"  [RECOVERED on 2nd round]")
+                    else:
+                        print(f"  [FAILED] 2nd round also failed")
+                        failed_urls.append(url_data)
+                    time.sleep(random.uniform(*captcha_after_wait))
+
+                print("\n" + "="*80)
+                print(f"[INFO] 2nd round done. Recovered: {len(retry_list) - len(failed_urls)}, Still failed: {len(failed_urls)}")
 
             print("\n" + "="*80)
             print(f"Detail Crawling completed! Total collected: {self.total_collected}/{len(product_urls)}")

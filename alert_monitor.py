@@ -1574,8 +1574,11 @@ def send_tv_crawl_report(retailer, stage_results, failed_stages, overall_elapsed
                             status = '<span class="warning">부족</span>'
                         else:
                             status = '<span class="critical">실패</span>'
-                    else:  # bsr
-                        status = '<span class="success">성공</span>' if collected >= 100 else '<span class="critical">실패</span>'
+                    else:  # bsr — 오케스트레이터 판정(sr['success']) 우선, 없으면 collected>=100 fallback
+                        if 'success' in sr and sr.get('success') is not None:
+                            status = '<span class="success">성공</span>' if sr.get('success') else '<span class="critical">실패</span>'
+                        else:
+                            status = '<span class="success">성공</span>' if collected >= 100 else '<span class="critical">실패</span>'
                 else:  # Walmart
                     if sr.get('success'):
                         status = '<span class="success">성공</span>'

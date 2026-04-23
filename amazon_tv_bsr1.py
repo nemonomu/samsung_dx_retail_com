@@ -53,6 +53,8 @@ class AmazonBSRCrawler:
         self.db_conn = None
         self.xpaths = {}
         self.total_collected = 0
+        self.total_expected = 0  # 페이지별 container 총합 (Amazon이 실제 노출한 개수)
+        self.total_excluded = 0  # is_product=false 로 의도적으로 제외한 개수
         self.error_messages = []
         self.batch_id = None  # Batch ID for this crawling session
         self.sorry_page_max_retry = _config.get_retry('sorry_page_max', 'amazon_tv_bsr1', 20)
@@ -442,6 +444,9 @@ class AmazonBSRCrawler:
             containers = tree.xpath(base_container_xpath)
             print(f"[INFO] Found {len(containers)} BSR product containers")
 
+            # Amazon이 실제 노출한 개수로 expected 누적 (페이지 단위)
+            self.total_expected += len(containers)
+
             collected_count = 0
 
             # Extract data from each container
@@ -478,6 +483,7 @@ class AmazonBSRCrawler:
                     asin = self.extract_asin(product_url)
                     if asin and asin in self.excluded_items:
                         print(f"  [SKIP {idx}] Rank #{bsr_rank}: Excluded item (is_product=false) - ASIN: {asin}")
+                        self.total_excluded += 1
                         continue
 
                     # Extract final_sku_price (disabled - will be collected in detail crawler)
@@ -610,7 +616,11 @@ class AmazonBSRCrawler:
                 result_dir = r"C:\samsung_dx_retail_com\stage_results"
                 os.makedirs(result_dir, exist_ok=True)
                 with open(os.path.join(result_dir, "amazon_tv_bsr1.json"), "w") as f:
-                    json.dump({"collected_count": self.total_collected}, f)
+                    json.dump({
+                        "collected_count": self.total_collected,
+                        "expected_count": self.total_expected,
+                        "excluded_count": self.total_excluded,
+                    }, f)
             except Exception as e:
                 print(f"[WARNING] Failed to write result JSON: {e}")
 

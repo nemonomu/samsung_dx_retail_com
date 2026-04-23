@@ -14,10 +14,8 @@ import os
 import json
 import threading
 from datetime import datetime
-import psycopg2
 from alert_monitor import send_tv_crawl_report
 from amazon_config_loader import get_amazon_config
-from config import DB_CONFIG
 
 # Load config from DB
 _config = get_amazon_config()
@@ -27,44 +25,6 @@ RESULT_DIR = r"C:\samsung_dx_retail_com\stage_results"
 INTERIM_REPORT_SECONDS = 21600  # 6 hours
 
 STAGE_ORDER = ['amazon_tv_main1', 'amazon_tv_bsr1', 'amazon_tv_dt1']
-
-
-def check_bsr_rank_continuity():
-    """최근 amazon_tv_bsr 배치의 rank 연속성 확인 (read-only).
-
-    returns (is_ok, count, max_rank, missing_ranks)
-      - is_ok=True : ranks 1..max_rank 연속 (gap 없음) -> Amazon 노출 한도 자체가 그만큼
-      - is_ok=False: gap 존재 또는 배치 없음 -> 실제 유실
-    """
-    try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT batch_id FROM public.amazon_tv_bsr
-            WHERE batch_id IS NOT NULL
-            ORDER BY batch_id DESC LIMIT 1
-        """)
-        row = cur.fetchone()
-        if not row:
-            cur.close(); conn.close()
-            return (False, 0, 0, [])
-        latest = row[0]
-        cur.execute("""
-            SELECT bsr_rank FROM public.amazon_tv_bsr
-            WHERE batch_id=%s AND bsr_rank IS NOT NULL
-            ORDER BY bsr_rank
-        """, (latest,))
-        ranks = [r[0] for r in cur.fetchall()]
-        cur.close(); conn.close()
-        if not ranks:
-            return (False, 0, 0, [])
-        count = len(ranks)
-        max_r = max(ranks)
-        missing = [i for i in range(1, max_r + 1) if i not in ranks]
-        return (len(missing) == 0, count, max_r, missing)
-    except Exception as e:
-        print(f"[WARNING] BSR rank continuity check failed: {e}")
-        return (False, 0, 0, [])
 
 
 def print_separator():
@@ -257,22 +217,30 @@ def main():
         stage_results["amazon_tv_bsr1"] = result
         bsr_collected = result.get("collected_count") or 0
 
-        # bsr 성공 판정: rank 연속성(gap 없음) 기준
-        # - bsr_collected > 0 (이번 세션 실제 수집) AND DB ranks 연속 -> 성공
-        # - gap 존재 또는 미수집 -> 실패 (실제 유실)
-        is_ok, bsr_count_db, max_rank, missing = check_bsr_rank_continuity()
-        if bsr_collected > 0 and is_ok:
-            result["success"] = True
-            print(f"\n[INFO] bsr1 성공: 세션 수집 {bsr_collected}개, DB {bsr_count_db}개 ranks 1..{max_rank} 연속 (gap 없음)")
-        else:
-            result["success"] = False
-            failed_stages.append("amazon_tv_bsr1")
-            if bsr_collected == 0:
-                print(f"\n[INFO] bsr1 실패: 이번 세션 수집 0건 (stage_result 기준)")
-            elif missing:
-                print(f"\n[INFO] bsr1 실패: {bsr_count_db}개 수집, GAP 존재 - missing ranks: {missing}")
+        # bsr 성공 판정: collected + excluded(is_product=false) == expected(Amazon 노출) 여부
+        # - expected > 0 AND missed == 0 AND collected > 0 -> 성공 (의도 제외 반영)
+        # - missed > 0 -> 실제 유실 (실패)
+        # - expected 필드 없음(구 JSON) -> fallback: collected > 0 만 확인
+        bsr_expected = result.get("expected_count")
+        bsr_excluded = result.get("excluded_count") or 0
+        if bsr_expected is not None and bsr_expected > 0:
+            bsr_missed = bsr_expected - bsr_collected - bsr_excluded
+            if bsr_collected > 0 and bsr_missed == 0:
+                result["success"] = True
+                print(f"\n[INFO] bsr1 성공: expected={bsr_expected}, collected={bsr_collected}, excluded={bsr_excluded}")
             else:
-                print(f"\n[INFO] bsr1 실패: batch 없음 또는 DB 조회 오류")
+                result["success"] = False
+                failed_stages.append("amazon_tv_bsr1")
+                print(f"\n[INFO] bsr1 실패: expected={bsr_expected}, collected={bsr_collected}, excluded={bsr_excluded}, missed={bsr_missed}")
+        else:
+            # 구 JSON (expected 필드 없음)
+            if bsr_collected > 0:
+                result["success"] = True
+                print(f"\n[INFO] bsr1 성공(fallback): collected={bsr_collected}, expected 정보 없음")
+            else:
+                result["success"] = False
+                failed_stages.append("amazon_tv_bsr1")
+                print(f"\n[INFO] bsr1 실패: 세션 수집 0건")
 
         # dt1 실행: main/bsr 중 하나라도 수집했으면 실행
         if main1_collected == 0 and bsr_collected == 0:

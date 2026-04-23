@@ -1479,8 +1479,21 @@ def send_tv_crawl_report(retailer, stage_results, failed_stages, overall_elapsed
         main_min = 250 if retailer == 'Amazon' else 300
         if 0 < main_total < main_min:
             alerts.append(f'main 합산 {main_total}개 ({main_min} 미만)')
-        if 0 < bsr_c < 100:
-            alerts.append(f'bsr {bsr_c}개 (100 미만)')
+
+        # bsr 유실 판정: expected/excluded 필드 있으면 정식, 없으면 기존 100 미만 fallback
+        # - expected: Amazon 노출한 실제 container 개수
+        # - excluded: tv_item_mst.is_product=false 로 의도적으로 제외한 개수
+        # - missed: expected - collected - excluded (실제 유실)
+        bsr_expected = sum((stage_results.get(s, {}).get('expected_count') or 0) for s in bsr_stages)
+        bsr_excluded = sum((stage_results.get(s, {}).get('excluded_count') or 0) for s in bsr_stages)
+        if bsr_expected > 0:
+            bsr_missed = bsr_expected - bsr_c - bsr_excluded
+            if bsr_missed > 0:
+                alerts.append(f'bsr 유실 {bsr_missed}개 (expected {bsr_expected}, collected {bsr_c}, excluded {bsr_excluded})')
+        else:
+            # expected 정보 없는 구 JSON (다른 retailer 등) — fallback: 기존 100 미만 기준
+            if 0 < bsr_c < 100:
+                alerts.append(f'bsr {bsr_c}개 (100 미만)')
         dt1_result = stage_results.get(dt_stage_name, {}) if dt_stage_name else {}
         dt1_target = dt1_result.get('target_count') or 0
         dt_target_min = 250 if retailer == 'Amazon' else 300

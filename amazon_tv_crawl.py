@@ -114,6 +114,8 @@ def run_crawler(script_name, stage_name):
     if stage_data:
         result["collected_count"] = stage_data.get("collected_count")
         result["target_count"] = stage_data.get("target_count")
+        result["expected_count"] = stage_data.get("expected_count")
+        result["excluded_count"] = stage_data.get("excluded_count")
 
 
     return result

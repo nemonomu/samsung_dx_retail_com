@@ -755,12 +755,60 @@ class WalmartDetailCrawler:
         except Exception as e:
             return None
 
+    def _extract_count_from_rating_aria(self, tree):
+        """K 단축 표기일 때 정확한 ratings 수치를 별점 컨테이너 div 의 aria-label 에서 추출.
+        aria-label 예: "4.3 out of 5 stars rating, 13144 ratings" -> 13144
+        """
+        aria_xpath = self.xpaths.get('rating_aria_container')
+        if not aria_xpath:
+            return None
+        try:
+            elements = tree.xpath(aria_xpath)
+            if not elements:
+                return None
+            for elem in elements:
+                arias = []
+                self_aria = elem.get('aria-label')
+                if self_aria:
+                    arias.append(self_aria)
+                arias.extend(elem.xpath('.//*[@aria-label]/@aria-label'))
+                for aria in arias:
+                    m = re.search(r',\s*([\d,]+)\s*ratings?', aria, re.IGNORECASE)
+                    if m:
+                        return int(m.group(1).replace(',', ''))
+            return None
+        except Exception:
+            return None
+
     def extract_count_of_star_ratings(self, tree):
         """Extract total star rating count from star rating span
         New method: Extract from "4.4 stars out of 50630 reviews" text
         Returns: integer (e.g., 50630) or None
         """
         try:
+            # ===== K 단축 표기 감지: aria-label 에서 정확한 수치 추출 =====
+            # "13.1K ratings" 같은 표시는 기존 정규식 [\d,]+ 가 매치하지 못하므로,
+            # 별점 컨테이너 div 의 aria-label("...rating, 13144 ratings") 에서 정확값을 가져온다.
+            abbreviated_pattern = re.compile(r'\d+(?:\.\d+)?\s*K\s*ratings?', re.IGNORECASE)
+            abbreviated_check_xpaths = [
+                self.xpaths.get('reviews_link_1'),
+                self.xpaths.get('reviews_link_2'),
+                self.xpaths.get('reviews_link_3'),
+                self.xpaths.get('total_ratings_1'),
+                self.xpaths.get('total_ratings_2'),
+            ]
+            for xp in [x for x in abbreviated_check_xpaths if x]:
+                try:
+                    els = tree.xpath(xp)
+                    if els and abbreviated_pattern.search(els[0].text_content().strip()):
+                        count = self._extract_count_from_rating_aria(tree)
+                        if count is not None:
+                            print(f"  [INFO] Extracted count_of_star_ratings from aria-label (K case): {count}")
+                            return count
+                        break
+                except Exception:
+                    continue
+
             # ===== NEW METHOD: Extract from w_iUH7 span (from DB) =====
             # <span class="w_iUH7">4.4 stars out of 50630 reviews</span>
             count_star_xpaths = [

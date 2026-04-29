@@ -381,16 +381,37 @@ class AmazonDetailCrawler:
             return []
 
     def setup_driver(self):
-        """Setup DrissionPage ChromiumPage"""
+        """Setup DrissionPage ChromiumPage with retry on launch failure.
+
+        Why retry: 직전에 종료한 Chromium의 자식 프로세스/디버그 포트 점유가
+        OS에서 정리되기 전 재호출되면 'browser connection failed'로 실패. 짧은 대기
+        후 재시도하면 대개 회복됨.
+        """
         try:
             print("[INFO] Setting up DrissionPage browser...")
             co = ChromiumOptions()
             co.set_argument('--lang=en-US')
 
-            self.page = ChromiumPage(co)
-            self.page.set.window.max()
+            max_attempts = 3
+            last_error = None
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    self.page = ChromiumPage(co)
+                    self.page.set.window.max()
+                    print(f"[OK] DrissionPage browser setup complete (attempt {attempt}/{max_attempts})")
+                    last_error = None
+                    break
+                except Exception as e:
+                    last_error = e
+                    err_msg = str(e) or e.__class__.__name__
+                    print(f"[ERROR] Browser launch failed (attempt {attempt}/{max_attempts}): {err_msg[:200]}")
+                    if attempt < max_attempts:
+                        wait_s = 5 * attempt  # 5s, 10s
+                        print(f"[INFO] Retrying in {wait_s}s — 잔존 chrome.exe / 디버그 포트 점유 가능")
+                        time.sleep(wait_s)
 
-            print("[OK] DrissionPage browser setup complete")
+            if last_error is not None:
+                raise last_error
 
             # Load cookies for login
             self.load_cookies()

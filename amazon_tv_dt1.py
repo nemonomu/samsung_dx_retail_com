@@ -810,28 +810,19 @@ class AmazonDetailCrawler:
         Returns: integer (e.g., 2449) or None
         """
         try:
-            # Use DB XPaths if available, otherwise use hardcoded fallback
-            xpaths = self.xpaths.get('count_of_star_ratings') or [
-                '//*[@id="cm_cr_dp_d_rating_histogram"]/div[3]',
-                '//*[@id="acrCustomerReviewText"]',
-                '//span[@id="acrCustomerReviewText"]',
-                '//a[@id="acrCustomerReviewLink"]//span'
-            ]
+            xpaths = self.xpaths.get('count_of_star_ratings', [])
 
             for xpath in xpaths:
                 total_text = self.extract_text_safe(tree, xpath)
                 if total_text:
-                    # Try "2,449 global ratings" pattern first
                     total_match = re.search(r'([\d,]+)\s*global ratings?', total_text)
                     if total_match:
                         return int(total_match.group(1).replace(',', ''))
 
-                    # Fallback: "2,414 ratings" pattern
                     total_match = re.search(r'([\d,]+)\s*ratings?', total_text)
                     if total_match:
                         return int(total_match.group(1).replace(',', ''))
 
-                    # Fallback: "(102)" or "102 Reviews" (new Amazon layout 2026-03)
                     total_match = re.search(r'([\d,]+)', total_text)
                     if total_match:
                         return int(total_match.group(1).replace(',', ''))

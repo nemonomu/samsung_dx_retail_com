@@ -1014,13 +1014,36 @@ class AmazonDetailCrawler:
     def extract_detailed_reviews(self, product_url):
         """Extract detailed reviews from product detail page (JavaScript 직접 추출)"""
         try:
-            # 페이지 하단까지 점진적 스크롤 → lazy loading 트리거
+            # reviewsMedley 영역 lazy load 트리거 (3단계 anchor 우선순위)
+            # 1순위: reviews-medley-footer (리뷰 8건 이상일 때 'See more reviews' 포함)
+            # 2순위: 'Customers who bought this item also bought' carousel heading (리뷰 1~7건일 때 footer 부재)
+            # 3순위: viewport 누적 스크롤 (두 anchor 모두 없는 페이지)
             try:
-                for _ in range(5):
-                    self.page.run_js("window.scrollBy(0, window.innerHeight)")
-                    time.sleep(0.5)
+                scrolled_via = None
+
+                footer = self.page.ele('xpath://*[@id="reviews-medley-footer"]', timeout=5)
+                if footer:
+                    footer.scroll.to_see()
+                    scrolled_via = 'reviews-medley-footer'
+
+                if not scrolled_via:
+                    carousel_h2 = self.page.ele(
+                        'xpath://h2[contains(@class, "a-carousel-heading") '
+                        'and contains(text(), "Customers who bought this item also bought")]',
+                        timeout=5
+                    )
+                    if carousel_h2:
+                        carousel_h2.scroll.to_see()
+                        scrolled_via = 'bought-also-bought carousel'
+
+                if not scrolled_via:
+                    for _ in range(5):
+                        self.page.run_js("window.scrollBy(0, window.innerHeight)")
+                        time.sleep(0.5)
+                    scrolled_via = 'viewport-fallback'
+
                 time.sleep(2)
-                print(f"  [DEBUG] scrolled to bottom for lazy loading")
+                print(f"  [DEBUG] scrolled via {scrolled_via} for lazy loading")
             except Exception as e:
                 print(f"  [DEBUG] scroll failed: {e}")
 

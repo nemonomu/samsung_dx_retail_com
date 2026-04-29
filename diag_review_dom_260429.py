@@ -2,14 +2,17 @@
 Quick diagnostic — open a single Amazon URL and report which review DOM pattern is used.
 
 Usage:
-  python diag_review_dom_260429.py [URL]
+  python diag_review_dom_260429.py [URL] [--cookies <pkl_path>]
 
 기본 URL: B001U3Y8MM (cards=0 케이스 진단용).
+--cookies 가 주어지면 해당 .pkl 쿠키로 로그인 상태 진단.
 """
 
 import sys
 import time
 import json
+import pickle
+import os
 
 from DrissionPage import ChromiumPage, ChromiumOptions
 
@@ -20,9 +23,57 @@ DEFAULT_URL = (
 )
 
 
+def parse_args():
+    url = DEFAULT_URL
+    cookies_path = None
+    args = sys.argv[1:]
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == '--cookies' and i + 1 < len(args):
+            cookies_path = args[i + 1]
+            i += 2
+        elif a.startswith('--cookies='):
+            cookies_path = a.split('=', 1)[1]
+            i += 1
+        else:
+            url = a
+            i += 1
+    return url, cookies_path
+
+
+def load_cookies(page, cookies_path):
+    """홈페이지 접속 후 기존 쿠키 클리어, pkl 로드, refresh."""
+    print(f'[INFO] Loading cookies from {cookies_path}')
+    if not os.path.exists(cookies_path):
+        print(f'[ERROR] cookie file not found: {cookies_path}')
+        sys.exit(1)
+
+    page.get('https://www.amazon.com')
+    time.sleep(2)
+    try:
+        page.set.cookies.clear()
+    except Exception:
+        pass
+
+    with open(cookies_path, 'rb') as f:
+        cookies = pickle.load(f)
+    loaded = 0
+    for cookie in cookies:
+        try:
+            page.set.cookies(cookie)
+            loaded += 1
+        except Exception:
+            pass
+    print(f'[INFO] loaded {loaded}/{len(cookies)} cookies')
+    page.refresh()
+    time.sleep(3)
+
+
 def main():
-    url = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_URL
+    url, cookies_path = parse_args()
     print(f'[INFO] URL: {url[:120]}')
+    print(f'[INFO] mode: {"LOGGED-IN (" + cookies_path + ")" if cookies_path else "ANONYMOUS"}')
 
     co = ChromiumOptions()
     co.set_argument('--lang=en-US')
@@ -30,6 +81,9 @@ def main():
     page.set.window.max()
 
     try:
+        if cookies_path:
+            load_cookies(page, cookies_path)
+
         page.get(url)
         time.sleep(5)
         print(f'[INFO] page title: {page.title}')
@@ -38,7 +92,6 @@ def main():
         time.sleep(8)
 
         js = '''
-        function safeText(el) { return el ? (el.innerText || '').slice(0, 100) : null; }
         var allReviewIds = Array.from(document.querySelectorAll('[id]'))
             .map(function(el) { return el.id; })
             .filter(function(id) { return id.toLowerCase().indexOf('review') !== -1; })
@@ -49,26 +102,39 @@ def main():
         var dataHookCounts = {};
         dataHookValues.forEach(function(h) { dataHookCounts[h] = (dataHookCounts[h] || 0) + 1; });
 
-        // sample one review-body to see body text path
         var sampleBody = document.querySelector('[data-hook="review-body"]') ||
-                         document.querySelector('[data-hook="review-collapsed"]');
+                         document.querySelector('[data-hook="review-collapsed"]') ||
+                         document.querySelector('[data-hook="reviewText"]');
         var sampleBodyHTML = sampleBody ? sampleBody.outerHTML.slice(0, 400) : null;
+
+        // first review container outerHTML preview (modern OR legacy)
+        var firstContainer = document.querySelector('[id^="customer_review-"]') ||
+                             document.querySelector('[id^="customer_review_foreign-"]') ||
+                             document.querySelector('[data-hook="review"]');
+        var sampleContainerHTML = firstContainer ? firstContainer.outerHTML.slice(0, 600) : null;
+
+        // is logged in? check for sign-in element
+        var signInEl = document.querySelector('#nav-link-accountList-nav-line-1');
+        var signedIn = signInEl ? !signInEl.innerText.toLowerCase().includes('sign in') : null;
 
         return {
             page_title: document.title,
             url: location.href,
+            signed_in_hint: signedIn,
             count_customer_review: document.querySelectorAll('[id^="customer_review-"]').length,
             count_customer_review_foreign: document.querySelectorAll('[id^="customer_review_foreign-"]').length,
             count_data_hook_review: document.querySelectorAll('[data-hook="review"]').length,
             count_data_hook_review_body: document.querySelectorAll('[data-hook="review-body"]').length,
             count_data_hook_review_collapsed: document.querySelectorAll('[data-hook="review-collapsed"]').length,
+            count_data_hook_review_text: document.querySelectorAll('[data-hook="reviewText"]').length,
             has_reviewsMedley: !!document.getElementById('reviewsMedley'),
             has_cm_cr_dp_review_list: !!document.getElementById('cm-cr-dp-review-list'),
             has_cr_product_insights: document.querySelectorAll('[id^="cr-product"]').length,
             iframes: document.querySelectorAll('iframe').length,
             sample_id_with_review: allReviewIds,
             data_hook_review_counts: dataHookCounts,
-            sample_review_body_html: sampleBodyHTML
+            sample_review_body_html: sampleBodyHTML,
+            sample_container_html: sampleContainerHTML
         };
         '''
         result = page.run_js(js)

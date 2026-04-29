@@ -1040,81 +1040,73 @@ class AmazonDetailCrawler:
         except Exception as e:
             return None
 
-    def extract_detailed_reviews(self, product_url):
-        """Extract detailed reviews from product detail page (JavaScript 직접 추출)"""
+    def _lazy_load_reviews(self):
+        """Scroll to bottom and wait for review cards to stabilize.
+
+        Triggers Amazon's lazy-load of customer review cards on the detail page.
+        Waits up to ~8s for cardCount to remain unchanged across 2 consecutive 1s checks.
+        """
         try:
-            # 페이지 하단까지 점진적 스크롤 → lazy loading 트리거
-            try:
-                for _ in range(5):
-                    self.page.run_js("window.scrollBy(0, window.innerHeight)")
-                    time.sleep(0.5)
-                time.sleep(2)
-                print(f"  [DEBUG] scrolled to bottom for lazy loading")
-            except Exception as e:
-                print(f"  [DEBUG] scroll failed: {e}")
+            self.page.scroll.to_bottom()
+            prev_cards = -1
+            stable_count = 0
+            for _ in range(8):
+                time.sleep(1)
+                cards = self.page.run_js(
+                    'return document.querySelectorAll(\'[id^="customer_review-"], [id^="customer_review_foreign-"]\').length'
+                ) or 0
+                if cards == prev_cards and cards > 0:
+                    stable_count += 1
+                    if stable_count >= 2:
+                        break
+                else:
+                    stable_count = 0
+                    prev_cards = cards
+            print(f"  [DEBUG] lazy-load: {prev_cards if prev_cards >= 0 else 0} review cards loaded")
+        except Exception as e:
+            print(f"  [WARNING] lazy-load scroll failed: {e}")
 
-            # JavaScript로 리뷰 텍스트 직접 추출
-            # 구조: [id^="customer_review-"] > ... > div[data-hook="review-collapsed"] > span
-            js_code = """
-            var reviews = [];
-            var containers = document.querySelectorAll('[id^="customer_review-"], [id^="customer_review_foreign-"]');
-            containers.forEach(function(container) {
-                var collapsed = container.querySelector('[data-hook="review-collapsed"]');
-                if (collapsed) {
-                    var span = collapsed.querySelector('span');
-                    if (span && span.innerText.trim().length > 5) {
-                        reviews.push(span.innerText.trim());
-                    }
-                }
-            });
-            return reviews;
-            """
-            review_texts = self.page.run_js(js_code)
-            print(f"  [DEBUG] JS extracted reviews: {len(review_texts) if review_texts else 0}")
+    def extract_detailed_reviews(self, tree):
+        """Extract detailed reviews from already-scrolled detail page.
 
-            # JS 실패 시 fallback: DrissionPage XPath (DB 로드)
-            if not review_texts:
-                fallback_xpaths = self.xpaths.get('review_body_detail') or [
-                    '//*[starts-with(@id, "customer_review-")]/div[4]/span/div/div[1]/span',
-                    '//*[starts-with(@id, "customer_review-")]/div[4]/span/div/div[1]',
-                    '//*[starts-with(@id, "customer_review_foreign-")]/div[4]/span/div/div[1]/span',
-                    '//*[starts-with(@id, "customer_review_foreign-")]/div[4]/span/div/div[1]',
-                ]
-                for xpath in fallback_xpaths:
-                    try:
-                        first_elem = self.page.ele(f'xpath:{xpath}', timeout=10)
-                        if first_elem:
-                            elems = self.page.eles(f'xpath:{xpath}')
-                            review_texts = []
-                            for e in elems:
-                                t = ' '.join((e.text or '').split())
-                                if t and len(t) > 5:
-                                    review_texts.append(t)
-                            if review_texts:
-                                print(f"  [DEBUG] Fallback XPath found: {len(review_texts)} reviews")
-                                break
-                    except Exception:
-                        continue
-
-            if not review_texts:
-                print(f"  [DEBUG] No review elements found on detail page")
+        Tree must be parsed AFTER scroll-triggered lazy load (call site responsibility).
+        Uses self.xpaths['review_body_detail'] DB priority list; first XPath that yields
+        results wins (no hardcoded fallback).
+        """
+        try:
+            body_xpaths = self.xpaths.get('review_body_detail') or []
+            if not body_xpaths:
+                print(f"  [WARNING] review_body_detail XPath not in DB")
                 return None
 
-            all_reviews = []
-            collected_reviews = set()
-            for text in review_texts:
-                review_text = ' '.join(text.split())
-                review_text = re.sub(r'\s*Read more\s*$', '', review_text, flags=re.IGNORECASE)
-                if review_text and len(review_text) > 5 and review_text not in collected_reviews:
-                    all_reviews.append(review_text)
-                    collected_reviews.add(review_text)
+            review_texts = []
+            for xpath in body_xpaths:
+                elements = tree.xpath(xpath)
+                if not elements:
+                    continue
+                for el in elements:
+                    text = el.text_content() if hasattr(el, 'text_content') else str(el)
+                    text = ' '.join(text.split())
+                    text = re.sub(r'\s*Read more\s*$', '', text, flags=re.IGNORECASE)
+                    if text and len(text) > 5:
+                        review_texts.append(text)
+                if review_texts:
+                    break
 
-            print(f"  [DEBUG] extracted reviews: {len(all_reviews)}")
-            if all_reviews:
-                formatted_reviews = [f"review{idx} - {review}" for idx, review in enumerate(all_reviews, 1)]
-                return ' ||| '.join(formatted_reviews)
-            else:
+            if not review_texts:
+                print(f"  [DEBUG] No reviews extracted")
                 return None
+
+            seen = set()
+            deduped = []
+            for t in review_texts:
+                if t not in seen:
+                    seen.add(t)
+                    deduped.append(t)
+
+            print(f"  [DEBUG] extracted reviews: {len(deduped)}")
+            formatted = [f"review{i} - {r}" for i, r in enumerate(deduped, 1)]
+            return ' ||| '.join(formatted)
 
         except Exception as e:
             print(f"  [WARNING] Failed to extract detailed reviews: {e}")
@@ -1604,6 +1596,7 @@ class AmazonDetailCrawler:
             except Exception as e:
                 print(f"  [WARNING] Could not find/click 'Item details': {e}")
 
+            self._lazy_load_reviews()
             page_source = self.page.html
             tree = html.fromstring(page_source)
 
@@ -1717,17 +1710,10 @@ class AmazonDetailCrawler:
             # Extract count of star ratings
             count_of_star_ratings = self.extract_count_of_star_ratings(tree)
 
-            # Extract summarized review content (dynamically loaded by JavaScript)
-            summarized_review_content = None
-            try:
-                # Wait for the summarized review element to load (up to 10 seconds)
-                summary_element = self.page.ele('xpath://div[@data-testid="overall-summary"]//span[contains(@class, "__SAR2l0zNyyuZ")]', timeout=10)
-                if summary_element:
-                    summarized_review_content = summary_element.text.strip() if summary_element.text else None
-                if summarized_review_content:
-                    print(f"  [INFO] Found summarized review: {summarized_review_content[:50]}...")
-            except Exception as e:
-                print(f"  [WARNING] Summarized review not found (may not exist for this product): {str(e)[:100]}")
+            # Extract summarized review content (DB priority list via extract_summarized_review)
+            summarized_review_content = self.extract_summarized_review(tree)
+            if summarized_review_content:
+                print(f"  [INFO] Found summarized review: {summarized_review_content[:50]}...")
 
             # Extract prices from detail page BEFORE navigating to review page
             # This ensures price extraction happens on the fully loaded detail page
@@ -1799,7 +1785,7 @@ class AmazonDetailCrawler:
             # count_of_reviews: None (DB에 NULL 저장)
             count_of_reviews = None
             # detailed_review_content: 상세페이지에서 수집 (기존 extract_detailed_reviews 함수 활용)
-            detailed_review_content = self.extract_detailed_reviews(url)
+            detailed_review_content = self.extract_detailed_reviews(tree)
 
             data = {
                 'page_type': page_type,
@@ -1872,6 +1858,7 @@ class AmazonDetailCrawler:
                 print(f"  [INFO] All element waits complete, re-extracting data...")
 
                 # Re-parse page
+                self._lazy_load_reviews()
                 page_source = self.page.html
                 tree = html.fromstring(page_source)
 
@@ -1883,7 +1870,7 @@ class AmazonDetailCrawler:
 
                 # [주석처리] 리뷰페이지 접속 중단 - 상세페이지에서 리뷰 수집
                 count_of_reviews = None
-                detailed_review_content = self.extract_detailed_reviews(url)
+                detailed_review_content = self.extract_detailed_reviews(tree)
 
                 # Update data dict
                 data['Retailer_SKU_Name'] = retailer_sku_name
@@ -1952,16 +1939,6 @@ class AmazonDetailCrawler:
                             errors['has_rv_detail_null'] or errors['has_rv_insufficient'] or
                             errors['has_src_null'])
 
-                def re_extract_summarized_review():
-                    """Re-extract summarized review content"""
-                    try:
-                        summary_element = self.page.ele('xpath://div[@data-testid="overall-summary"]//span[contains(@class, "__SAR2l0zNyyuZ")]', timeout=10)
-                        if summary_element:
-                            return summary_element.text.strip() if summary_element.text else None
-                        return None
-                    except:
-                        return None
-
                 def re_extract_fields(errors, url, data):
                     """Re-extract fields based on error type"""
                     tree = html.fromstring(self.page.html)
@@ -1982,14 +1959,16 @@ class AmazonDetailCrawler:
                         print(f"    - final_sku_price: {fsp}")
 
                     if errors['has_src_null']:
-                        src = re_extract_summarized_review()
+                        src = self.extract_summarized_review(tree)
                         data['Summarized_Review_Content'] = src
                         print(f"    - summarized_review: {'OK' if src else 'NULL'}")
 
                     if errors['has_rv_detail_null'] or errors['has_rv_insufficient']:
                         # [주석처리] 리뷰페이지 접속 중단 - 상세페이지에서 리뷰 수집
+                        self._lazy_load_reviews()
+                        rv_tree = html.fromstring(self.page.html)
                         data['count_of_reviews'] = None
-                        data['Detailed_Review_Content'] = self.extract_detailed_reviews(url)
+                        data['Detailed_Review_Content'] = self.extract_detailed_reviews(rv_tree)
                         new_collected = len((data['Detailed_Review_Content'] or '').split(' ||| ')) if data['Detailed_Review_Content'] else 0
                         print(f"    - count_of_reviews: None, detailed_review: {new_collected} collected (from detail page)")
 

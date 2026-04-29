@@ -1015,7 +1015,7 @@ class AmazonDetailCrawler:
             for _ in range(8):
                 time.sleep(1)
                 cards = self.page.run_js(
-                    'return document.querySelectorAll(\'[id^="customer_review-"], [id^="customer_review_foreign-"]\').length'
+                    'return document.querySelectorAll(\'[id^="customer_review-"], [id^="customer_review_foreign-"], [data-hook="review"]\').length'
                 ) or 0
                 if cards == prev_cards and cards > 0:
                     stable_count += 1

@@ -139,12 +139,18 @@ class AmazonTVCrawler:
             return False
 
     def extract_asin(self, url):
-        """Extract ASIN from Amazon URL"""
+        """Extract ASIN from Amazon URL.
+
+        sspa/click 스폰서드 URL은 redirect_url 파라미터 안에 ASIN이 URL-encoded
+        (`%2Fdp%2FXXXX`) 또는 이중 인코딩(`%252Fdp%252FXXXX`)으로 들어있어
+        일반 /dp/ 매칭으로는 못 잡음. unquote를 두 번 적용하면 두 깊이 모두 평탄화.
+        """
         if not url:
             return None
         try:
-            # Match /dp/ASIN/ or /dp/ASIN? pattern
-            match = re.search(r'/dp/([A-Z0-9]{10})', url)
+            from urllib.parse import unquote
+            decoded = unquote(unquote(url))
+            match = re.search(r'/dp/([A-Z0-9]{10})', decoded)
             if match:
                 return match.group(1)
             return None

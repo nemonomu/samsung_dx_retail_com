@@ -1015,16 +1015,20 @@ class AmazonDetailCrawler:
         """Extract detailed reviews from product detail page (JavaScript 직접 추출)"""
         try:
             # 점진 스크롤로 reviewsMedley 영역까지 lazy load 트리거
-            # anchor (footer / 'bought also bought' h2) 자체도 lazy element 라 viewport 도달 후에만 부착
-            # → 매 단계마다 0.7 viewport 씩 내려가며 anchor 부착 여부 + page height 동시 체크
+            # - 매 step 1.0 viewport 씩 (충분한 스크롤 양), step 후 1.0초 대기 (lazy 부착 시간)
+            # - 페이지 끝 도달 판정은 scrollY+innerHeight >= scrollHeight (height 자체는 lazy 적재로 안 변할 수 있음)
+            # - anchor/끝 도달 후 cardCount 안정화 wait 추가 (리뷰 카드 부착 완료까지 대기)
             try:
                 scrolled_via = None
-                last_height = 0
-                stable_count = 0
-                max_steps = 30  # 약 ≤ 20초 상한
+                end_reached_count = 0
+                max_steps = 25  # 1 viewport × 25 ≈ 페이지 대부분 커버
+                last_state = None
 
                 state_js = """
-                var height = document.body.scrollHeight;
+                var scrollY = window.scrollY;
+                var innerHeight = window.innerHeight;
+                var scrollHeight = document.body.scrollHeight;
+                var atEnd = (scrollY + innerHeight) >= (scrollHeight - 200);
                 var hasFooter = !!document.getElementById('reviews-medley-footer');
                 var hasCarousel = false;
                 var hs = document.querySelectorAll('h2.a-carousel-heading');
@@ -1034,14 +1038,20 @@ class AmazonDetailCrawler:
                         break;
                     }
                 }
-                return {height: height, hasFooter: hasFooter, hasCarousel: hasCarousel};
+                var medley = !!document.getElementById('reviewsMedley');
+                var cardCount = document.querySelectorAll('[id^="customer_review-"], [id^="customer_review_foreign-"]').length;
+                var iframes = document.querySelectorAll('iframe').length;
+                return {scrollY: scrollY, scrollHeight: scrollHeight, atEnd: atEnd,
+                        hasFooter: hasFooter, hasCarousel: hasCarousel,
+                        medley: medley, cardCount: cardCount, iframes: iframes};
                 """
 
                 for step in range(max_steps):
-                    self.page.run_js("window.scrollBy(0, window.innerHeight * 0.7)")
-                    time.sleep(0.6)
+                    self.page.run_js("window.scrollBy(0, window.innerHeight)")
+                    time.sleep(1.0)
 
                     state = self.page.run_js(state_js) or {}
+                    last_state = state
 
                     if state.get('hasFooter'):
                         self.page.run_js(
@@ -1063,21 +1073,40 @@ class AmazonDetailCrawler:
                         scrolled_via = f'bought-also-bought carousel (step {step + 1})'
                         break
 
-                    cur_height = state.get('height', 0)
-                    if cur_height == last_height:
-                        stable_count += 1
-                        if stable_count >= 3:
-                            scrolled_via = f'page-end stable (step {step + 1})'
+                    if state.get('atEnd'):
+                        end_reached_count += 1
+                        if end_reached_count >= 2:
+                            scrolled_via = f'page-end (step {step + 1})'
                             break
                     else:
-                        stable_count = 0
-                        last_height = cur_height
+                        end_reached_count = 0
 
                 if not scrolled_via:
                     scrolled_via = f'max-steps reached ({max_steps})'
 
-                time.sleep(2)
+                # cardCount 안정화 wait — review 카드가 더 안 늘어날 때까지 (최대 ~6초)
+                stable_card_count = 0
+                prev_cards = -1
+                for wait_step in range(6):
+                    time.sleep(1.0)
+                    cur_state = self.page.run_js(state_js) or {}
+                    last_state = cur_state
+                    cur_cards = cur_state.get('cardCount', 0)
+                    if cur_cards == prev_cards and cur_cards > 0:
+                        stable_card_count += 1
+                        if stable_card_count >= 2:
+                            break
+                    else:
+                        stable_card_count = 0
+                        prev_cards = cur_cards
+
                 print(f"  [DEBUG] scrolled via {scrolled_via} for lazy loading")
+                if last_state:
+                    print(f"  [DEBUG] page diag: scrollY={last_state.get('scrollY')}, "
+                          f"scrollHeight={last_state.get('scrollHeight')}, "
+                          f"medley={last_state.get('medley')}, "
+                          f"cards={last_state.get('cardCount')}, "
+                          f"iframes={last_state.get('iframes')}")
             except Exception as e:
                 print(f"  [DEBUG] scroll failed: {e}")
 

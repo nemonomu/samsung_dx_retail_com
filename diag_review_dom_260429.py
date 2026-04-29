@@ -105,13 +105,41 @@ def main():
         var sampleBody = document.querySelector('[data-hook="review-body"]') ||
                          document.querySelector('[data-hook="review-collapsed"]') ||
                          document.querySelector('[data-hook="reviewText"]');
-        var sampleBodyHTML = sampleBody ? sampleBody.outerHTML.slice(0, 400) : null;
+        // 전체 outerHTML — XPath 결정용 (잘리지 않게 length 표기 + 일부 dump)
+        var sampleBodyHTML = sampleBody ? sampleBody.outerHTML : null;
+        var sampleBodyTextRaw = sampleBody ? (sampleBody.innerText || '').slice(0, 600) : null;
 
         // first review container outerHTML preview (modern OR legacy)
         var firstContainer = document.querySelector('[id^="customer_review-"]') ||
                              document.querySelector('[id^="customer_review_foreign-"]') ||
                              document.querySelector('[data-hook="review"]');
         var sampleContainerHTML = firstContainer ? firstContainer.outerHTML.slice(0, 600) : null;
+
+        // XPath candidates — 어느 path가 teaser 없이 본문만 추출하는지 비교
+        function evalXPath(xpath) {
+            var snap = document.evaluate(xpath, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+            var out = [];
+            for (var i = 0; i < snap.snapshotLength && i < 3; i++) {
+                var n = snap.snapshotItem(i);
+                var t = (n.innerText || n.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 200);
+                out.push(t);
+            }
+            return {count: snap.snapshotLength, samples: out};
+        }
+        var xpathTests = {
+            'A1_current_reviewText':
+                evalXPath('//div[@id="reviewsMedley"]//*[@data-hook="reviewText"]'),
+            'A2_card_content_span':
+                evalXPath('//div[@id="reviewsMedley"]//*[@data-hook="reviewText"]//span[contains(@class, "cardui-deck-card-content")]'),
+            'A3_expand_div':
+                evalXPath('//div[@id="reviewsMedley"]//*[@data-hook="reviewText"]/div[contains(@class, "a-teaser-describedby-expand")]'),
+            'A4_not_collapsed':
+                evalXPath('//div[@id="reviewsMedley"]//*[@data-hook="reviewText"]/div[not(contains(@class, "a-teaser-describedby-collapsed")) and not(contains(@class, "a-expander-prompt"))]'),
+            'A5_a_cardui_content':
+                evalXPath('//div[@id="reviewsMedley"]//*[@data-hook="reviewText"]//div[contains(@class, "a-cardui-content")]'),
+            'A6_visible_text_only':
+                evalXPath('//div[@id="reviewsMedley"]//*[@data-hook="reviewText"]//span[not(ancestor::*[contains(@class, "a-hidden")]) and not(contains(@class, "a-expander-prompt-text")) and not(contains(@class, "describedby"))]'),
+        };
 
         // is logged in? check for sign-in element
         var signInEl = document.querySelector('#nav-link-accountList-nav-line-1');
@@ -133,8 +161,11 @@ def main():
             iframes: document.querySelectorAll('iframe').length,
             sample_id_with_review: allReviewIds,
             data_hook_review_counts: dataHookCounts,
+            sample_review_body_html_len: sampleBodyHTML ? sampleBodyHTML.length : 0,
             sample_review_body_html: sampleBodyHTML,
-            sample_container_html: sampleContainerHTML
+            sample_review_body_innertext: sampleBodyTextRaw,
+            sample_container_html: sampleContainerHTML,
+            xpath_tests: xpathTests
         };
         '''
         result = page.run_js(js)

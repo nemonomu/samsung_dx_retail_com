@@ -1650,7 +1650,9 @@ class AmazonDetailCrawler:
                         finally:
                             _cur.close()
                             self.db_conn.autocommit = True
-                    return False
+                    # DEDUP은 정상 처리(새 row INSERT 없이 rank 병합 또는 skip).
+                    # caller에 success로 신호해야 recovery 재시도 큐에 안 들어감.
+                    return True
                 self.processed_asins.add(item)
             else:
                 print(f"  [WARNING] Could not extract valid ASIN from URL: {final_url}")

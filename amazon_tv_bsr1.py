@@ -35,15 +35,18 @@ class Tee:
 
     def write(self, message):
         self.terminal.write(message)
-        self.log_file.write(message)
-        self.log_file.flush()
+        if not self.log_file.closed:
+            self.log_file.write(message)
+            self.log_file.flush()
 
     def flush(self):
         self.terminal.flush()
-        self.log_file.flush()
+        if not self.log_file.closed:
+            self.log_file.flush()
 
     def close(self):
-        self.log_file.close()
+        if not self.log_file.closed:
+            self.log_file.close()
 
 
 class AmazonBSRCrawler:
@@ -661,4 +664,5 @@ if __name__ == "__main__":
         traceback.print_exc()
 
     print("\n[INFO] Crawler terminated.")
+    sys.stdout = sys.__stdout__   # interpreter shutdown 시 closed file flush 방지
     _tee.close()

@@ -1140,16 +1140,25 @@ class AmazonDetailCrawler:
                 print(f"  [DEBUG] scroll failed: {e}")
 
             # JavaScript로 리뷰 텍스트 직접 추출
-            # 구조: [id^="customer_review-"] > ... > div[data-hook="review-collapsed"] > span
+            # detail 페이지 변경: review 카드가 reviewsMedley 외부로 이동, ID 대신 data-hook="review" 로 식별
+            # 1순위: [data-hook="review"] (현재 detail 페이지 표준)
+            # 2순위: [id^="customer_review-"] (별도 review subpage 또는 구버전 fallback)
+            # 텍스트는 review-collapsed > review-body 우선순위로 추출
             js_code = """
             var reviews = [];
-            var containers = document.querySelectorAll('[id^="customer_review-"], [id^="customer_review_foreign-"]');
+            var containers = document.querySelectorAll('[data-hook="review"]');
+            if (containers.length === 0) {
+                containers = document.querySelectorAll('[id^="customer_review-"], [id^="customer_review_foreign-"]');
+            }
             containers.forEach(function(container) {
-                var collapsed = container.querySelector('[data-hook="review-collapsed"]');
-                if (collapsed) {
-                    var span = collapsed.querySelector('span');
-                    if (span && span.innerText.trim().length > 5) {
-                        reviews.push(span.innerText.trim());
+                var textNode = container.querySelector('[data-hook="review-collapsed"] span')
+                    || container.querySelector('[data-hook="review-body"] span')
+                    || container.querySelector('[data-hook="review-collapsed"]')
+                    || container.querySelector('[data-hook="review-body"]');
+                if (textNode) {
+                    var t = (textNode.innerText || '').trim();
+                    if (t.length > 5) {
+                        reviews.push(t);
                     }
                 }
             });

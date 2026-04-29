@@ -35,15 +35,18 @@ class Tee:
 
     def write(self, message):
         self.terminal.write(message)
-        self.log_file.write(message)
-        self.log_file.flush()
+        if not self.log_file.closed:
+            self.log_file.write(message)
+            self.log_file.flush()
 
     def flush(self):
         self.terminal.flush()
-        self.log_file.flush()
+        if not self.log_file.closed:
+            self.log_file.flush()
 
     def close(self):
-        self.log_file.close()
+        if not self.log_file.closed:
+            self.log_file.close()
 
 
 class AmazonTVCrawler:
@@ -439,19 +442,22 @@ class AmazonTVCrawler:
                     print(f"  [{idx}] SKIP: Book product - {product_name[:60]}...")
                     continue
 
-                # Initialize _seen_urls if not exists (check by URL instead of ASIN)
-                if not hasattr(self, '_seen_urls'):
-                    self._seen_urls = {}
+                # ASIN 단위 dedup (sspa/click 등 URL 변형으로 같은 SKU가 새지 않게).
+                # ASIN 추출 불가한 URL은 URL 자체를 fallback 키로 사용.
+                if not hasattr(self, '_seen_asins'):
+                    self._seen_asins = {}
 
-                # Check if we've seen this URL before (skip duplicates)
-                if product_url and product_url in self._seen_urls:
-                    prev_page = self._seen_urls[product_url]
-                    print(f"  [{idx}] SKIP: Duplicate URL (already collected from page {prev_page})")
+                asin = self.extract_asin(product_url)
+                dedup_key = asin or product_url
+
+                if dedup_key and dedup_key in self._seen_asins:
+                    prev_page = self._seen_asins[dedup_key]
+                    key_kind = 'ASIN' if asin else 'URL'
+                    print(f"  [{idx}] SKIP: Duplicate {key_kind} (already collected from page {prev_page})")
                     print(f"         Product: {product_name[:60]}...")
                     continue
 
                 # Check if this item is excluded (is_product=false in tv_item_mst)
-                asin = self.extract_asin(product_url)
                 if asin and asin in self.excluded_items:
                     print(f"  [{idx}] SKIP: Excluded item (is_product=false) - ASIN: {asin}")
                     print(f"         Product: {product_name[:60]}...")
@@ -483,9 +489,9 @@ class AmazonTVCrawler:
                     collected_count += 1
                     self.total_collected += 1
 
-                    # Track this URL
-                    if product_url:
-                        self._seen_urls[product_url] = page_number
+                    # Track this dedup key (ASIN preferred, URL fallback)
+                    if dedup_key:
+                        self._seen_asins[dedup_key] = page_number
 
                     # DEBUG: Show detailed saved data
                     print(f"  [{idx}] ✓ SAVED (main_rank #{self.sequential_id - 1}):")
@@ -642,11 +648,11 @@ class AmazonTVCrawler:
             print("\n" + "="*80)
             print(f"Crawling completed! Total collected: {self.total_collected} SKUs")
 
-            # DEBUG: Show duplicate statistics
-            if hasattr(self, '_seen_urls'):
-                print(f"[DEBUG] Unique URLs collected: {len(self._seen_urls)}")
-                if len(self._seen_urls) != self.total_collected:
-                    print(f"[WARNING] Mismatch! Total collected ({self.total_collected}) != Unique URLs ({len(self._seen_urls)})")
+            # DEBUG: Show duplicate statistics (ASIN-keyed)
+            if hasattr(self, '_seen_asins'):
+                print(f"[DEBUG] Unique ASINs/URLs collected: {len(self._seen_asins)}")
+                if len(self._seen_asins) != self.total_collected:
+                    print(f"[WARNING] Mismatch! Total collected ({self.total_collected}) != Unique keys ({len(self._seen_asins)})")
                     print(f"[WARNING] This suggests duplicate products were collected!")
 
             print("="*80)
@@ -710,5 +716,6 @@ if __name__ == "__main__":
         traceback.print_exc()
 
     print("\n[INFO] Crawler terminated.")
+    sys.stdout = sys.__stdout__   # interpreter shutdown 시 closed file flush 방지
     _tee.close()
     sys.exit(getattr(crawler, '_exit_code', 1))

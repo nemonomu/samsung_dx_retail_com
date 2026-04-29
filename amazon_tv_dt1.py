@@ -1107,6 +1107,35 @@ class AmazonDetailCrawler:
                           f"medley={last_state.get('medley')}, "
                           f"cards={last_state.get('cardCount')}, "
                           f"iframes={last_state.get('iframes')}")
+
+                # 임시 진단(DIAG2) — cards=0 인 원인 격리
+                # 결과 확인 후 제거 예정
+                try:
+                    diag2 = self.page.run_js("""
+                    var medley = document.getElementById('reviewsMedley');
+                    var iframes = [];
+                    document.querySelectorAll('iframe').forEach(function(f) {
+                        iframes.push({id: f.id || '', name: f.name || '', src: (f.src || '').substring(0, 100)});
+                    });
+                    return {
+                        medleyHTMLHead: medley ? medley.outerHTML.substring(0, 800) : null,
+                        iframeMeta: iframes,
+                        crTokenInHTML: (document.body.innerHTML.match(/customer_review-/g) || []).length,
+                        crInMedley: medley ? medley.querySelectorAll('[id^="customer_review-"]').length : -1,
+                        seeMoreReviewsLink: !!document.querySelector('#reviews-medley-footer a'),
+                        dataHookReviewCount: document.querySelectorAll('[data-hook="review"]').length
+                    };
+                    """) or {}
+                    print(f"  [DIAG2] crTokenInHTML={diag2.get('crTokenInHTML')}, "
+                          f"crInMedley={diag2.get('crInMedley')}, "
+                          f"dataHookReview={diag2.get('dataHookReviewCount')}, "
+                          f"seeMore={diag2.get('seeMoreReviewsLink')}, "
+                          f"iframes={diag2.get('iframeMeta')}")
+                    head = diag2.get('medleyHTMLHead')
+                    if head:
+                        print(f"  [DIAG2] medleyHTMLHead: {head}")
+                except Exception as e:
+                    print(f"  [DIAG2] failed: {e}")
             except Exception as e:
                 print(f"  [DEBUG] scroll failed: {e}")
 

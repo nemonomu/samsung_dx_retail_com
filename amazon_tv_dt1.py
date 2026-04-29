@@ -1108,47 +1108,18 @@ class AmazonDetailCrawler:
                           f"cards={last_state.get('cardCount')}, "
                           f"iframes={last_state.get('iframes')}")
 
-                # 임시 진단(DIAG2) — cards=0 인 원인 격리
-                # 결과 확인 후 제거 예정
-                try:
-                    diag2 = self.page.run_js("""
-                    var medley = document.getElementById('reviewsMedley');
-                    var iframes = [];
-                    document.querySelectorAll('iframe').forEach(function(f) {
-                        iframes.push({id: f.id || '', name: f.name || '', src: (f.src || '').substring(0, 100)});
-                    });
-                    return {
-                        medleyHTMLHead: medley ? medley.outerHTML.substring(0, 800) : null,
-                        iframeMeta: iframes,
-                        crTokenInHTML: (document.body.innerHTML.match(/customer_review-/g) || []).length,
-                        crInMedley: medley ? medley.querySelectorAll('[id^="customer_review-"]').length : -1,
-                        seeMoreReviewsLink: !!document.querySelector('#reviews-medley-footer a'),
-                        dataHookReviewCount: document.querySelectorAll('[data-hook="review"]').length
-                    };
-                    """) or {}
-                    print(f"  [DIAG2] crTokenInHTML={diag2.get('crTokenInHTML')}, "
-                          f"crInMedley={diag2.get('crInMedley')}, "
-                          f"dataHookReview={diag2.get('dataHookReviewCount')}, "
-                          f"seeMore={diag2.get('seeMoreReviewsLink')}, "
-                          f"iframes={diag2.get('iframeMeta')}")
-                    head = diag2.get('medleyHTMLHead')
-                    if head:
-                        print(f"  [DIAG2] medleyHTMLHead: {head}")
-                except Exception as e:
-                    print(f"  [DIAG2] failed: {e}")
             except Exception as e:
                 print(f"  [DEBUG] scroll failed: {e}")
 
             # JavaScript로 리뷰 텍스트 직접 추출
-            # detail 페이지 변경: review 카드가 reviewsMedley 외부로 이동, ID 대신 data-hook="review" 로 식별
-            # 1순위: [data-hook="review"] (현재 detail 페이지 표준)
-            # 2순위: [id^="customer_review-"] (별도 review subpage 또는 구버전 fallback)
-            # 텍스트는 review-collapsed > review-body 우선순위로 추출
+            # 컨테이너 1순위: [id^="customer_review-"] (사용자 확인: customer_review-RD55MEU3RQS6B 형태로 detail 페이지에 부착)
+            # 컨테이너 2순위: [data-hook="review"] (별도 review subpage 등 다른 페이지 패턴 fallback)
+            # 텍스트: 컨테이너 안의 [data-hook="review-collapsed"] > span (사용자 확인 위치)
             js_code = """
             var reviews = [];
-            var containers = document.querySelectorAll('[data-hook="review"]');
+            var containers = document.querySelectorAll('[id^="customer_review-"], [id^="customer_review_foreign-"]');
             if (containers.length === 0) {
-                containers = document.querySelectorAll('[id^="customer_review-"], [id^="customer_review_foreign-"]');
+                containers = document.querySelectorAll('[data-hook="review"]');
             }
             containers.forEach(function(container) {
                 var textNode = container.querySelector('[data-hook="review-collapsed"] span')

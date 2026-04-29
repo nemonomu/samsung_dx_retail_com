@@ -1014,33 +1014,67 @@ class AmazonDetailCrawler:
     def extract_detailed_reviews(self, product_url):
         """Extract detailed reviews from product detail page (JavaScript 직접 추출)"""
         try:
-            # reviewsMedley 영역 lazy load 트리거 (3단계 anchor 우선순위)
-            # 1순위: reviews-medley-footer (리뷰 8건 이상일 때 'See more reviews' 포함)
-            # 2순위: 'Customers who bought this item also bought' carousel heading (리뷰 1~7건일 때 footer 부재)
-            # 3순위: viewport 누적 스크롤 (두 anchor 모두 없는 페이지)
+            # 점진 스크롤로 reviewsMedley 영역까지 lazy load 트리거
+            # anchor (footer / 'bought also bought' h2) 자체도 lazy element 라 viewport 도달 후에만 부착
+            # → 매 단계마다 0.7 viewport 씩 내려가며 anchor 부착 여부 + page height 동시 체크
             try:
                 scrolled_via = None
+                last_height = 0
+                stable_count = 0
+                max_steps = 30  # 약 ≤ 20초 상한
 
-                footer = self.page.ele('xpath://*[@id="reviews-medley-footer"]', timeout=5)
-                if footer:
-                    footer.scroll.to_see()
-                    scrolled_via = 'reviews-medley-footer'
+                state_js = """
+                var height = document.body.scrollHeight;
+                var hasFooter = !!document.getElementById('reviews-medley-footer');
+                var hasCarousel = false;
+                var hs = document.querySelectorAll('h2.a-carousel-heading');
+                for (var i = 0; i < hs.length; i++) {
+                    if (hs[i].innerText.indexOf('Customers who bought this item also bought') !== -1) {
+                        hasCarousel = true;
+                        break;
+                    }
+                }
+                return {height: height, hasFooter: hasFooter, hasCarousel: hasCarousel};
+                """
+
+                for step in range(max_steps):
+                    self.page.run_js("window.scrollBy(0, window.innerHeight * 0.7)")
+                    time.sleep(0.6)
+
+                    state = self.page.run_js(state_js) or {}
+
+                    if state.get('hasFooter'):
+                        self.page.run_js(
+                            "document.getElementById('reviews-medley-footer').scrollIntoView({block:'center'})"
+                        )
+                        scrolled_via = f'reviews-medley-footer (step {step + 1})'
+                        break
+
+                    if state.get('hasCarousel'):
+                        self.page.run_js("""
+                        var hs = document.querySelectorAll('h2.a-carousel-heading');
+                        for (var i = 0; i < hs.length; i++) {
+                            if (hs[i].innerText.indexOf('Customers who bought this item also bought') !== -1) {
+                                hs[i].scrollIntoView({block:'center'});
+                                break;
+                            }
+                        }
+                        """)
+                        scrolled_via = f'bought-also-bought carousel (step {step + 1})'
+                        break
+
+                    cur_height = state.get('height', 0)
+                    if cur_height == last_height:
+                        stable_count += 1
+                        if stable_count >= 3:
+                            scrolled_via = f'page-end stable (step {step + 1})'
+                            break
+                    else:
+                        stable_count = 0
+                        last_height = cur_height
 
                 if not scrolled_via:
-                    carousel_h2 = self.page.ele(
-                        'xpath://h2[contains(@class, "a-carousel-heading") '
-                        'and contains(text(), "Customers who bought this item also bought")]',
-                        timeout=5
-                    )
-                    if carousel_h2:
-                        carousel_h2.scroll.to_see()
-                        scrolled_via = 'bought-also-bought carousel'
-
-                if not scrolled_via:
-                    for _ in range(5):
-                        self.page.run_js("window.scrollBy(0, window.innerHeight)")
-                        time.sleep(0.5)
-                    scrolled_via = 'viewport-fallback'
+                    scrolled_via = f'max-steps reached ({max_steps})'
 
                 time.sleep(2)
                 print(f"  [DEBUG] scrolled via {scrolled_via} for lazy loading")

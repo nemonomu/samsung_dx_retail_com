@@ -1,20 +1,23 @@
 """
-SEA TV Amazon Detail Review Test (260429)
+SEA TV Amazon Detail Review Test (260429) — self-contained, no login
 
-amazon_tv_dt1.AmazonDetailCrawler의 새 추출 경로 검증:
-  - _lazy_load_reviews() (scroll.to_bottom + cardCount 안정화)
-  - extract_summarized_review(tree) (DB priority list)
-  - extract_detailed_reviews(tree) (DB priority list, lxml 기반)
+amazon_tv_dt1.py의 새 추출 로직(_lazy_load_reviews, extract_detailed_reviews,
+extract_summarized_review)과 동일한 코드를 인라인 사본으로 사용.
+계정/쿠키 의존을 없애 익명 브라우저로만 테스트.
 
-로그에는 리뷰요약본(summarized) + 리뷰본문(detailed) 두 가지만 출력.
+로그에는 Summarized_Review_Content, Detailed_Review_Content 두 필드만 출력.
 """
 
+import re
 import time
 import random
 import traceback
-from lxml import html
 
-from amazon_tv_dt1 import AmazonDetailCrawler
+import psycopg2
+from lxml import html
+from DrissionPage import ChromiumPage, ChromiumOptions
+
+from config import DB_CONFIG
 
 
 TEST_URLS = [
@@ -25,29 +28,138 @@ TEST_URLS = [
 ]
 
 
-def test_one(crawler, idx, total, url):
+def load_xpaths_from_db():
+    """amazon_tv_config (category='xpath', is_active=TRUE)을 prefix별 priority list로 로드.
+
+    dt1.py:load_xpaths()와 동일 로직을 인라인 복제.
+    """
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT config_key, config_value, priority
+        FROM amazon_tv_config
+        WHERE category = 'xpath' AND is_active = TRUE
+        ORDER BY config_key, priority
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    groups = {}
+    for config_key, config_value, priority in rows:
+        m = re.match(r'^(.+?)_(\d+)$', config_key)
+        prefix = m.group(1) if m else config_key
+        groups.setdefault(prefix, []).append((priority, config_value))
+
+    xpaths = {}
+    for prefix, entries in groups.items():
+        entries.sort(key=lambda x: x[0])
+        xpaths[prefix] = [v for _, v in entries]
+
+    print(f"[INFO] Loaded {sum(len(v) for v in xpaths.values())} XPaths in {len(xpaths)} groups")
+    return xpaths
+
+
+def lazy_load_reviews(page):
+    """dt1._lazy_load_reviews 인라인 사본."""
+    try:
+        page.scroll.to_bottom()
+        prev_cards = -1
+        stable_count = 0
+        for _ in range(8):
+            time.sleep(1)
+            cards = page.run_js(
+                'return document.querySelectorAll(\'[id^="customer_review-"], [id^="customer_review_foreign-"]\').length'
+            ) or 0
+            if cards == prev_cards and cards > 0:
+                stable_count += 1
+                if stable_count >= 2:
+                    break
+            else:
+                stable_count = 0
+                prev_cards = cards
+        print(f"  [DEBUG] lazy-load: {prev_cards if prev_cards >= 0 else 0} review cards loaded")
+    except Exception as e:
+        print(f"  [WARNING] lazy-load scroll failed: {e}")
+
+
+def extract_summarized_review(tree, xpaths):
+    """dt1.extract_summarized_review 인라인 사본."""
+    try:
+        paths = xpaths.get('summarized_review') or [
+            '//div[@data-testid="overall-summary"]//span[contains(@class, "__SAR2l0zNyyuZ")]',
+            '//*[@id="product-summary"]/p[1]/span',
+            '//div[@data-testid="overall-summary"]//span',
+        ]
+        for xpath in paths:
+            elements = tree.xpath(xpath)
+            for el in elements:
+                text = el.text_content() if hasattr(el, 'text_content') else str(el)
+                text = ' '.join(text.split())
+                if text:
+                    return text
+        return None
+    except Exception:
+        return None
+
+
+def extract_detailed_reviews(tree, xpaths):
+    """dt1.extract_detailed_reviews 인라인 사본 (DB priority list, lxml 기반)."""
+    try:
+        body_xpaths = xpaths.get('review_body_detail') or []
+        if not body_xpaths:
+            print(f"  [WARNING] review_body_detail XPath not in DB")
+            return None
+
+        review_texts = []
+        for xpath in body_xpaths:
+            elements = tree.xpath(xpath)
+            if not elements:
+                continue
+            for el in elements:
+                text = el.text_content() if hasattr(el, 'text_content') else str(el)
+                text = ' '.join(text.split())
+                text = re.sub(r'\s*Read more\s*$', '', text, flags=re.IGNORECASE)
+                if text and len(text) > 5:
+                    review_texts.append(text)
+            if review_texts:
+                break
+
+        if not review_texts:
+            print(f"  [DEBUG] No reviews extracted")
+            return None
+
+        seen = set()
+        deduped = []
+        for t in review_texts:
+            if t not in seen:
+                seen.add(t)
+                deduped.append(t)
+
+        print(f"  [DEBUG] extracted reviews: {len(deduped)}")
+        formatted = [f"review{i} - {r}" for i, r in enumerate(deduped, 1)]
+        return ' ||| '.join(formatted)
+
+    except Exception as e:
+        print(f"  [WARNING] Failed to extract detailed reviews: {e}")
+        return None
+
+
+def test_one(page, xpaths, idx, total, url):
     print()
     print('=' * 80)
     print(f'[TEST {idx}/{total}] {url[:100]}...')
     print('=' * 80)
 
     try:
-        crawler.page.get(url)
+        page.get(url)
         time.sleep(random.uniform(3, 5))
 
-        # Sorry/Robot/Captcha 간이 체크 (실패하면 그냥 진행 - 결과로 판단)
-        try:
-            if hasattr(crawler, 'check_and_handle_sorry_page'):
-                crawler.check_and_handle_sorry_page(max_retries=2)
-        except Exception:
-            pass
+        lazy_load_reviews(page)
+        tree = html.fromstring(page.html)
 
-        # 새 경로 그대로 호출
-        crawler._lazy_load_reviews()
-        tree = html.fromstring(crawler.page.html)
-
-        summary = crawler.extract_summarized_review(tree)
-        detailed = crawler.extract_detailed_reviews(tree)
+        summary = extract_summarized_review(tree, xpaths)
+        detailed = extract_detailed_reviews(tree, xpaths)
 
         print()
         print('--- Summarized_Review_Content ---')
@@ -68,25 +180,21 @@ def test_one(crawler, idx, total, url):
 
 
 def main():
-    crawler = AmazonDetailCrawler()
-    if not crawler.connect_db():
-        return
-    if not crawler.load_xpaths():
-        return
-    crawler.setup_driver()
+    xpaths = load_xpaths_from_db()
+
+    print('[INFO] Setting up DrissionPage browser (anonymous, no cookies)...')
+    co = ChromiumOptions()
+    co.set_argument('--lang=en-US')
+    page = ChromiumPage(co)
+    page.set.window.max()
+    print('[OK] Browser ready')
 
     try:
         for idx, url in enumerate(TEST_URLS, 1):
-            test_one(crawler, idx, len(TEST_URLS), url)
+            test_one(page, xpaths, idx, len(TEST_URLS), url)
     finally:
         try:
-            if crawler.page:
-                crawler.page.quit()
-        except Exception:
-            pass
-        try:
-            if crawler.db_conn:
-                crawler.db_conn.close()
+            page.quit()
         except Exception:
             pass
 

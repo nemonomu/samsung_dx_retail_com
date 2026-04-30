@@ -37,6 +37,33 @@ NEW_MAIN_BATCH_ID = '20260430_162428'
 BACKUP_TABLE = 'tv_retail_com_backup_20260430_131024'
 
 
+def precheck_source_uniqueness(conn):
+    """162428 소스의 (ASIN, main_rank) 가 1:1 unique 인지 사전 검증.
+    중복 있으면 abort — 부주의한 main_rank 중복 INSERT 차단.
+    """
+    cur = conn.cursor()
+    cur.execute("""
+        WITH valid AS (
+            SELECT main_rank, substring(product_url FROM '/dp/([A-Z0-9]{10})') AS asin
+              FROM amazon_tv_main_crawled
+             WHERE batch_id = %s AND product_url IS NOT NULL
+        )
+        SELECT
+            (SELECT COUNT(*) FROM valid WHERE asin IS NOT NULL)                     AS rows,
+            (SELECT COUNT(DISTINCT asin) FROM valid WHERE asin IS NOT NULL)         AS distinct_asin,
+            (SELECT COUNT(DISTINCT main_rank) FROM valid WHERE asin IS NOT NULL)    AS distinct_rank
+    """, (NEW_MAIN_BATCH_ID,))
+    rows, d_asin, d_rank = cur.fetchone()
+    cur.close()
+    print(f"[PRECHECK] source {NEW_MAIN_BATCH_ID}: rows={rows}, distinct_asin={d_asin}, distinct_rank={d_rank}")
+    if not (rows == d_asin == d_rank):
+        raise RuntimeError(
+            f"source 162428 has duplicates (rows={rows}, distinct_asin={d_asin}, distinct_rank={d_rank}) "
+            f"— main_rank 중복 발생 위험으로 ABORT"
+        )
+    print(f"[PRECHECK] OK — 1:1 unique mapping")
+
+
 def ensure_backup(conn):
     """131024 batch 행만 별도 테이블로 백업 (idempotent — 이미 있으면 통과)."""
     cur = conn.cursor()
@@ -246,22 +273,36 @@ def report_final(conn):
     for r in cur.fetchall():
         print(r)
 
-    # main_rank 충돌 검증 (같은 batch_id+page_type 내에서 main_rank 중복 있는지)
+    # main_rank 충돌 검증 — page_type 무관, batch_id 내에서 main_rank 중복 발생하는지 (사용자 요구)
     cur.execute("""
-        SELECT page_type, main_rank, COUNT(*)
+        SELECT main_rank, COUNT(*) AS cnt,
+               array_agg(item ORDER BY item)        AS items,
+               array_agg(page_type ORDER BY item)   AS page_types
           FROM tv_retail_com
          WHERE batch_id = %s AND account_name = 'Amazon' AND main_rank IS NOT NULL
-         GROUP BY page_type, main_rank
+         GROUP BY main_rank
         HAVING COUNT(*) > 1
-         ORDER BY page_type, main_rank
+         ORDER BY main_rank
     """, (TARGET_BATCH_ID,))
     dups = cur.fetchall()
     if dups:
-        print(f"\n[WARN] main_rank 중복 발견 ({len(dups)} 건):")
-        for r in dups[:10]:
-            print(f"  {r}")
+        print(f"\n[FATAL] main_rank 중복 발견 ({len(dups)} 건) — 사용자 요구사항 위배:")
+        for r in dups[:20]:
+            print(f"  main_rank={r[0]}  count={r[1]}  items={r[2]}  page_types={r[3]}")
     else:
-        print("\n[OK] main_rank 중복 없음")
+        print("\n[OK] main_rank 중복 0건 (page_type 무관, batch_id 전체)")
+
+    # 추가 검증: 200 ASIN x 200 unique main_rank 보장 확인
+    cur.execute("""
+        SELECT COUNT(*) FILTER (WHERE main_rank IS NOT NULL)         AS rows_with_rank,
+               COUNT(DISTINCT main_rank)                              AS distinct_rank,
+               COUNT(DISTINCT item) FILTER (WHERE main_rank IS NOT NULL) AS distinct_item_with_rank
+          FROM tv_retail_com
+         WHERE batch_id = %s AND account_name = 'Amazon'
+    """, (TARGET_BATCH_ID,))
+    r = cur.fetchone()
+    print(f"[VERIFY] rows_with_rank={r[0]}, distinct_rank={r[1]}, distinct_item={r[2]} "
+          f"({'OK — 1:1 unique' if r[0]==r[1]==r[2] else 'MISMATCH — 점검 필요'})")
 
     cur.close()
 
@@ -272,6 +313,14 @@ def main():
     print(f"  target batch_id : {TARGET_BATCH_ID}")
     print(f"  source main batch: {NEW_MAIN_BATCH_ID}")
     print("=" * 80)
+
+    # 0) Pre-check: 소스 162428 의 (ASIN, main_rank) unique 보장 (안 되면 abort)
+    pre_conn = psycopg2.connect(**DB_CONFIG)
+    pre_conn.autocommit = True
+    try:
+        precheck_source_uniqueness(pre_conn)
+    finally:
+        pre_conn.close()
 
     # 1) Backup
     backup_conn = psycopg2.connect(**DB_CONFIG)

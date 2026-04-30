@@ -179,35 +179,17 @@ def main():
                 cosr = 0
                 no_review += 1
 
-            # FALLBACK 1: 신규 컨테이너 cr-top-reviews 검사 (dt1.py / DB no_reviews_* 모두 미커버)
-            # 사용자 보고: //*[@id="cr-top-reviews"]/div[2]/div/div/div 에 "No customer reviews" 텍스트가 위치
+            # FALLBACK: 사용자 제공 xpath 단일 위치에서만 "No customer reviews" 검출
+            # 위치: //*[@id="cr-top-reviews"]/div[2]/div/div/div (Amazon 신규 레이아웃)
             if sr is None and cosr is None:
-                cr_top_text = ''.join(tree.xpath('//*[@id="cr-top-reviews"]//text()'))
-                if 'No customer reviews' in cr_top_text or 'Be the first to review' in cr_top_text:
+                no_rev_text = crawler.extract_text_safe(
+                    tree, '//*[@id="cr-top-reviews"]/div[2]/div/div/div'
+                )
+                if no_rev_text and 'No customer reviews' in no_rev_text:
                     sr = "No customer reviews"
                     cosr = 0
                     no_review += 1
-                    print("  [FALLBACK-1] cr-top-reviews 컨테이너에 no-review 텍스트 검출 → 'No customer reviews'")
-
-            # FALLBACK 2: 추출 실패 + 페이지에 평점 컨테이너 자체가 전혀 없음 → "No customer reviews"로 간주
-            # (Amazon이 'No customer reviews' 텍스트조차 안 띄우는 신상품/번들 레이아웃 대응)
-            if sr is None and cosr is None:
-                rating_containers = [
-                    '//*[@id="acrPopover"]',
-                    '//*[@id="averageCustomerReviews"]',
-                    '//*[@id="cm_cr_dp_d_rating_histogram"]',
-                    '//*[@id="acrCustomerReviewText"]',
-                    '//*[@id="reviewsMedley"]',
-                    '//*[@id="cr-top-reviews"]',
-                ]
-                any_rating_block = any(tree.xpath(xp) for xp in rating_containers)
-                title_present = bool(tree.xpath('//*[@id="productTitle"]'))
-
-                if title_present and not any_rating_block:
-                    sr = "No customer reviews"
-                    cosr = 0
-                    no_review += 1
-                    print("  [FALLBACK-2] no rating container in DOM (productTitle OK) → treat as 'No customer reviews'")
+                    print("  [FALLBACK] cr-top-reviews/div[2]/div/div/div = 'No customer reviews' → 보정")
 
             print(f"  [EXTRACT] star_rating={sr!r} cosr={cosr!r}")
 

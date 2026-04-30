@@ -519,6 +519,14 @@ class AmazonTVCrawler:
                     print(f"  [{idx}] SKIP: Book product - {product_name[:60]}...")
                     continue
 
+                # 비-상품 placement 필터: product_url 이 없으면 스킵.
+                # 사례: Prime Video TV 프로그램/영화 타일 ('Fallout', 'Beast Games' 등) —
+                #       검색결과에 노출되지만 구매 가능한 상품이 아니라 url 이 NULL.
+                # NULL 이 들어가면 dedup_key=None 으로 dedup 이 우회되어 페이지마다 중복 누적되는 결함.
+                if not product_url or not str(product_url).strip():
+                    print(f"  [{idx}] SKIP: No product URL (likely Prime Video / non-product placement) - {product_name[:60] if product_name else '[NO NAME]'}")
+                    continue
+
                 # ASIN 단위 dedup (sspa/click 등 URL 변형으로 같은 SKU가 새지 않게).
                 # ASIN 추출 불가한 URL은 URL 자체를 fallback 키로 사용.
                 if not hasattr(self, '_seen_asins'):

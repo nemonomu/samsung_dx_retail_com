@@ -1408,251 +1408,193 @@ class WalmartDetailCrawler:
 
         return False
 
-    def extract_sku_from_url(self, url):
-        """Extract SKU from product URL"""
-        try:
-            # URL pattern: https://www.walmart.com/ip/{product-name}/{model}/{id}
-            # Or: https://www.walmart.com/ip/{model}-{suffix}/{id}
+    def extract_sku(self, retailer_sku_name, product_url):
+        """Extract SKU using brand-specific regex patterns.
 
-            # Extract path from URL
-            from urllib.parse import urlparse
-            parsed = urlparse(url)
-            path_parts = parsed.path.strip('/').split('/')
+        Mirrors the PostgreSQL CASE definition: branch by brand keyword in
+        retailer_sku_name, then try patterns against name first, URL second.
 
-            if len(path_parts) < 2 or path_parts[0] != 'ip':
-                return None
-
-            # Get the second part (product name/model part)
-            product_part = path_parts[1]
-
-            # Pattern 1: Simple model at end (e.g., "55UA7500ZUA-AUS")
-            if len(path_parts) == 2:
-                # This is the model itself
-                # Remove "-AUS" or similar suffix
-                model = product_part.replace('-AUS', '')
-                if model and len(model) > 3:
-                    return model
-
-            # Pattern 2: Model within product name (e.g., "TCL-43-Class-S3-43S310R-1080p-...")
-            # Look for pattern: capital letters + numbers (like 43S310R, UN55U7900FFXZA)
-            parts = product_part.split('-')
-
-            # Check if last part is pure numeric model (8+ digits, like 100012589)
-            if parts and parts[-1].isdigit() and len(parts[-1]) >= 8:
-                return parts[-1]
-
-            # Find parts that look like model numbers (contain both letters and numbers)
-            potential_models = []
-            for i, part in enumerate(parts):
-                # Skip pure numbers, pure letters, or common words
-                if not part or part.isdigit() or part.isalpha():
-                    continue
-                if part.lower() in ['class', 'inch', 'hd', 'uhd', 'led', 'lcd', 'smart', 'tv', 'new', 'with']:
-                    continue
-
-                # Check if it contains both letters and numbers
-                has_letter = any(c.isalpha() for c in part)
-                has_number = any(c.isdigit() for c in part)
-
-                if has_letter and has_number and len(part) >= 5:
-                    # Check if next part is a short number suffix (like "08", "84", "0809")
-                    model = part
-                    if i + 1 < len(parts):
-                        next_part = parts[i + 1]
-                        # If next part is 2-4 digit number, append it
-                        if next_part.isdigit() and 2 <= len(next_part) <= 4:
-                            model = f"{part}-{next_part}"
-
-                    potential_models.append(model)
-
-            # Return the longest potential model (usually the most specific)
-            if potential_models:
-                return max(potential_models, key=len)
-
-            return None
-
-        except Exception as e:
-            print(f"  [DEBUG] Failed to extract SKU from URL: {e}")
-            return None
-
-    def extract_sku_from_product_name(self, product_name):
-        """Extract SKU (model number) from retailer_sku_name
-
-        Priority:
-        1. Parentheses pattern: (VQD50M-08), (70PUL7553/F7), (43Q651G)
-        2. After dash at end: - OLED55C4PUA, - 43QNED80TUC
-        3. After comma (model only): K-50S30, 2024 Model -> K-50S30
-        4. Last word if looks like model: QN50LS03BAFXZA, 58R6E3
-        5. Series name fallback: QLED Q7F, Select Series 4K
+        Returns the matched SKU string, or "no sku" if no brand/pattern matches.
         """
         try:
-            if not product_name:
-                return None
+            name = retailer_sku_name or ""
+            url = product_url or ""
+            if not name and not url:
+                return "no sku"
 
-            import re
+            name_lower = name.lower()
 
-            # Exclude words that are NOT model numbers
-            exclude_words = ['HD', 'UHD', 'LED', 'LCD', 'OLED', 'QLED', '4K', '8K', 'TV',
-                           'Model', 'Series', 'Class', 'Smart', 'NEW', 'Inch', 'Refurbished',
-                           '2024', '2025', '2023', '2022', '2021', '2020']
+            def _m(pattern, text):
+                if not text:
+                    return None
+                match = re.search(pattern, text)
+                if not match:
+                    return None
+                try:
+                    return match.group(1) or None
+                except IndexError:
+                    return None
 
-            def is_valid_model(text):
-                """Check if text looks like a valid model number"""
-                if not text or len(text) < 4:
-                    return False
-                # Should not be in exclude list
-                if text.upper() in [w.upper() for w in exclude_words]:
-                    return False
-                # Should contain both letters and numbers OR be alphanumeric with special chars
-                has_letter = any(c.isalpha() for c in text)
-                has_number = any(c.isdigit() for c in text)
-                # Model numbers typically have letters+numbers or just numbers (8+ digits)
-                if has_letter and has_number:
-                    return True
-                if text.isdigit() and len(text) >= 8:  # Pure numeric like 100150805
-                    return True
-                return False
+            sku = None
 
-            # Pattern 1: In parentheses (highest priority)
-            # e.g., (VQD50M-08), (70PUL7553/F7), (43Q651G), (100150805)
-            paren_matches = re.findall(r'\(([A-Za-z0-9/_-]+)\)', product_name)
-            for match in paren_matches:
-                # Skip year patterns like (NEW 2024)
-                if match.upper() in exclude_words or re.match(r'^NEW\s*\d{4}$', match, re.IGNORECASE):
-                    continue
-                if is_valid_model(match):
-                    return match
+            if 'samsung' in name_lower:
+                sku = (
+                    _m(r'([UQS][A-Z0-9]{8,15})', name)
+                    or _m(r'-([UQS][A-Z0-9]{8,15})-', url)
+                    or _m(r'(\d{2,3}[UQS]\d{4,5}[A-Z]?)', name)
+                    or _m(r'-(\d{2,3}[UQS]\d{4,5}[A-Z]?)-', url)
+                )
+            elif re.search(r'\bLG\b', name, re.IGNORECASE):
+                sku = (
+                    _m(r'(\d{2}[A-Z]+\d{2,4}[A-Z]*\d?[A-Z]+(?:-[A-Z]{2,4})?|OLED\d{2,3}[A-Z]\d[A-Z]+)', name)
+                    or _m(r'[-/](\d{2}[A-Z]+\d{2,4}[A-Z]*\d?[A-Z]*(?:-[A-Z]{2,4})?|OLED\d{2,3}[A-Z]\d[A-Z]+)[-/]', url)
+                )
+            elif re.search(r'\bonn\b', name, re.IGNORECASE):
+                sku = (
+                    _m(r'(TV[A-Z]+\d+|\d{9}|\d{2}[A-Z]\d[A-Z]\d|[A-Z]{2,3}\d{2,3}[A-Z]?-\d{3,5})', name)
+                    or _m(r'-(TV[A-Z]+\d+|\d{9}|\d{2}[A-Z]\d[A-Z]\d|[A-Z]{2,3}\d{2,3}[A-Z]?-\d{3,5})-', url)
+                )
+            elif 'vizio' in name_lower:
+                sku = (
+                    _m(r'((?:[VDMPO]\d|OLED)[A-Za-z0-9]+-[A-Z]?\d{1,4}|[VDMPO][A-Za-z]+\d+[A-Za-z]*-\d{1,4}|(?:[VDMPO]\d|OLED)\d*[A-Za-z]+\d+[A-Z]*)', name)
+                    or _m(r'[-/]((?:[VDMPO]\d|OLED)[A-Za-z0-9]+-[A-Z]?\d{1,4}|[VDMPO][A-Za-z]+\d+[A-Za-z]*-\d{1,4}|(?:[VDMPO]\d|OLED)\d*[A-Za-z]+\d+[A-Z]*)[-/]', url)
+                )
+            elif 'westinghouse' in name_lower:
+                sku = (
+                    _m(r'(W[A-Z]\d+[A-Z]+\d+)', name)
+                    or _m(r'-(W[A-Z]\d+[A-Z]+\d+)-', url)
+                )
+            elif 'tcl' in name_lower:
+                sku = (
+                    _m(r'(\d{2,3}[A-Z]{1,2}\d{1,3}[A-Z0-9]{1,5})', name)
+                    or _m(r'-(\d{2,3}[A-Z]{1,2}\d{1,3}[A-Z0-9]{1,5})-', url)
+                )
+            elif 'naxa' in name_lower:
+                sku = (
+                    _m(r'(N[A-Z]{1,2}-\d{3,5})', name)
+                    or _m(r'-(N[A-Z]{1,2}-\d{3,5})-', url)
+                )
+            elif 'philips' in name_lower:
+                sku = (
+                    _m(r'(\d{0,3}[A-Z]+\d+[A-Z]?/[A-Z]?\d+)', name)
+                    or _m(r'-(\d{0,3}[A-Z]+\d+[A-Z]?/[A-Z]?\d+)-', url)
+                )
+            elif 'hiro' in name_lower:
+                sku = (
+                    _m(r'(H\d{2}[A-Z0-9]{3,5})', name)
+                    or _m(r'-(H\d{2}[A-Z0-9]{3,5})-', url)
+                )
+            elif 'hisense' in name_lower:
+                sku = (
+                    _m(r'(\d{2,3}[A-Z]{1,2}\d[A-Z0-9]{1,5}|\d{2,3}[A-Z]{2})', name)
+                    or _m(r'-(\d{2,3}[A-Z]{1,2}\d[A-Z0-9]{1,5}|\d{2,3}[A-Z]{2})-', url)
+                )
+            elif 'jvc' in name_lower:
+                sku = (
+                    _m(r'(LT-\d{2,3}[A-Z]+\d+)', name)
+                    or _m(r'-(LT-\d{2,3}[A-Z]+\d+)-', url)
+                )
+            elif 'element' in name_lower:
+                sku = (
+                    _m(r'(E[A-Z]?\d+[A-Z]+\d+[A-Z]+)', name)
+                    or _m(r'-(E[A-Z]?\d+[A-Z]+\d+[A-Z]+)-', url)
+                )
+            elif 'supersonic' in name_lower:
+                sku = (
+                    _m(r'(S[Cc]-\d{3,5}[A-Za-z]*)', name)
+                    or _m(r'[-/](S[Cc]-\d{3,5}[A-Za-z]*)[-/]', url)
+                )
+            elif 'sansui' in name_lower:
+                sku = (
+                    _m(r'(S\d{2,3}[A-Z]+)', name)
+                    or _m(r'-(S\d{2,3}[A-Z]+)[-/]', url)
+                )
+            elif re.search(r'\bRCA\b', name, re.IGNORECASE):
+                sku = (
+                    _m(r'(TC-[A-Z]+\d+[A-Z]?-[A-Z]+\d+)', name)
+                    or _m(r'[-/](TC-[A-Z]+\d+[A-Z]?-[A-Z]+\d+)[-/]', url)
+                    or _m(r'(J\d{2}[A-Z]+\d+[A-Z]?)', name)
+                    or _m(r'[-/](J\d{2}[A-Z]+\d+[A-Z]?)[-/]', url)
+                    or _m(r'(DHT\d{3,5}[A-Z]?)', name)
+                    or _m(r'[-/](DHT\d{3,5}[A-Z]?)[-/]', url)
+                    or _m(r'(R[A-Z]{2,4}\d{3,5}[A-Z]?(?:-[A-Z]{1,3})?)', name)
+                    or _m(r'[-/](R[A-Z]{2,4}\d{3,5}[A-Z]?(?:-[A-Z]{1,3})?)[-/]', url)
+                )
+            elif 'sharp' in name_lower:
+                sku = (
+                    _m(r'([\dA-Z][TCMPB]-?[A-Z\d]{6,12})', name)
+                    or _m(r'[-/]([\dA-Z][TCMPB]-?[A-Z\d]{6,12})[-/]', url)
+                )
+            elif 'emerson' in name_lower:
+                sku = (
+                    _m(r'(E[A-Z]{1,3}-\d{3,5})', name)
+                    or _m(r'-(E[A-Z]{1,3}-\d{3,5})-', url)
+                )
+            elif 'navatv' in name_lower:
+                sku = (
+                    _m(r'(NVTV\d{2,4}[A-Z]+)', name)
+                    or _m(r'-(NVTV\d{2,4}[A-Z]+)-', url)
+                )
+            elif 'sony' in name_lower:
+                sku = (
+                    _m(r'([KX][A-Z]{1,2}-?\d{2,3}[A-Z]+\d*[A-Z]?\d?|[KX]-\d{2,3}[A-Z]+\d*[A-Z]?\d?|[KX]\d{2,3}[A-Z]+\d+[A-Z]?\d?)', name)
+                    or _m(r'[-/]([KX][A-Z]{1,2}-?\d{2,3}[A-Z]+\d*[A-Z]?\d?|[KX]-\d{2,3}[A-Z]+\d*[A-Z]?\d?|[KX]\d{2,3}[A-Z]+\d+[A-Z]?\d?)[-/]', url)
+                )
+            elif re.search(r'\bGPX\b', name, re.IGNORECASE):
+                sku = (
+                    _m(r'(T[A-Z]{1,2}\d{3,5}[A-Z]{0,2})', name)
+                    or _m(r'[-/](T[A-Z]{1,2}\d{3,5}[A-Z]{0,2})[-/]', url)
+                )
+            elif 'tyler' in name_lower:
+                sku = (
+                    _m(r'(TTV\d{3}-\d{1,2})', name)
+                    or _m(r'-(TTV\d{3}-\d{1,2})-', url)
+                )
+            elif 'trexonic' in name_lower:
+                sku = (
+                    _m(r'(\d{8,10}[A-Z]?)', name)
+                    or _m(r'-(\d{8,10}[A-Z]?)-', url)
+                )
+            elif 'elecsung' in name_lower:
+                sku = (
+                    _m(r'(ELE[A-Z]+\d{2,3}[A-Z]+)', name)
+                    or _m(r'-(ELE[A-Z]+\d{2,3}[A-Z]+)-', url)
+                )
+            elif 'jensen' in name_lower:
+                sku = (
+                    _m(r'(JTV\d{4}[A-Z]*)', name)
+                    or _m(r'-(JTV\d{4}[A-Z]*)-', url)
+                )
+            elif 'sylvox' in name_lower:
+                sku = (
+                    _m(r'([A-Z]{2}\d{2,3}[A-Z]\d[A-Z]+)', name)
+                    or _m(r'[-/]([A-Z]{2}\d{2,3}[A-Z]\d[A-Z]+)[-/]', url)
+                )
+            elif 'ilive' in name_lower:
+                sku = (
+                    _m(r'(IT[A-Z]+\d{3,5}[A-Z]?)', name)
+                    or _m(r'[-/](IT[A-Z]+\d{3,5}[A-Z]?)[-/]', url)
+                )
+            elif 'sceptre' in name_lower:
+                sku = (
+                    _m(r'([A-Z]\d{3,4}[A-Z]{1,3}-[A-Z]{1,5})', name)
+                    or _m(r'[-/]([A-Z]\d{3,4}[A-Z]{1,3}-[A-Z]{1,5})[-/]', url)
+                )
+            elif re.search(r'\broku\s+\d', name, re.IGNORECASE):
+                sku = (
+                    _m(r'(\d{2,3}R\d[A-Z]\d)', name)
+                    or _m(r'-(\d{2,3}R\d[A-Z]\d)-', url)
+                )
 
-            # Pattern 2: After " - " at the end
-            # e.g., "... - OLED55C4PUA", "... - 43QNED80TUC"
-            if ' - ' in product_name:
-                after_dash = product_name.split(' - ')[-1].strip()
-                # Get first word after dash (model is usually first)
-                first_word = after_dash.split()[0] if after_dash.split() else after_dash
-                first_word = first_word.strip('.,;:')
-                if is_valid_model(first_word):
-                    return first_word
+            if sku:
+                print(f"  [INFO] Extracted SKU by brand regex: {sku}")
+                return sku
 
-            # Pattern 3: After comma (check if it's a model, not "2024 Model")
-            # e.g., "Sony 50" ... K-50S30, 2024 Model" -> K-50S30
-            if ',' in product_name:
-                parts = product_name.split(',')
-                # Check second-to-last part if last part contains "Model" or year
-                for i in range(len(parts) - 1, -1, -1):
-                    part = parts[i].strip()
-                    # Skip if contains "Model" or is just a year
-                    if 'Model' in part or re.match(r'^\d{4}$', part):
-                        continue
-                    # Get first word of this part
-                    first_word = part.split()[0] if part.split() else part
-                    first_word = first_word.strip('.,;:')
-                    if is_valid_model(first_word):
-                        return first_word
-
-            # Pattern 4: Last word if looks like model number
-            # e.g., "SAMSUNG 50" ... QN50LS03BAFXZA"
-            words = product_name.split()
-            if words:
-                last_word = words[-1].strip('.,;:')
-                if is_valid_model(last_word):
-                    return last_word
-
-            # Pattern 5: Series name fallback (when no model number found)
-            # e.g., "Samsung 43" Class QLED Q7F 4K..." -> "QLED Q7F"
-            # Look for patterns like "Q7F", "S3", "C4", "R6" etc.
-            series_match = re.search(r'\b([A-Z]\d+[A-Z]?)\b', product_name)
-            if series_match:
-                series = series_match.group(1)
-                # Check if there's a prefix like QLED, OLED
-                prefix_match = re.search(r'(QLED|OLED|LED|UHD)\s+' + re.escape(series), product_name)
-                if prefix_match:
-                    return f"{prefix_match.group(1)} {series}"
-                return series
-
-            # No SKU found
             return "no sku"
 
         except Exception as e:
-            print(f"  [DEBUG] Failed to extract SKU from product name: {e}")
-            return None
-
-    def extract_sku_from_specifications(self):
-        """Extract SKU from Specifications dialog - Model field (from DB)"""
-        try:
-            page_source = self._get_page_html()
-            tree = html.fromstring(page_source)
-
-            # Try multiple XPaths for Model field (from DB)
-            model_xpaths = [
-                self.xpaths.get('specifications_model_1'),
-                self.xpaths.get('specifications_model_2'),
-                self.xpaths.get('specifications_model_3'),
-                self.xpaths.get('specifications_model_4'),
-            ]
-            model_xpaths = [x for x in model_xpaths if x]
-
-            for xpath in model_xpaths:
-                result = tree.xpath(xpath)
-                if result:
-                    model = result[0].text_content().strip() if hasattr(result[0], 'text_content') else str(result[0]).strip()
-                    if model and len(model) >= 4:
-                        print(f"  [INFO] Extracted SKU from Specifications: {model}")
-                        return model
-
-            return None
-
-        except Exception as e:
-            print(f"  [DEBUG] Failed to extract SKU from Specifications: {e}")
-            return None
-
-    def extract_sku(self, product_name):
-        """Extract SKU - try product name first, then Specifications dialog
-
-        Args:
-            product_name: Retailer SKU Name (product title)
-
-        Returns:
-            SKU string or "no sku" if not found
-        """
-        # Priority 1: Extract from product name
-        sku = self.extract_sku_from_product_name(product_name)
-        if sku and sku != "no sku":
-            print(f"  [INFO] Extracted SKU from product name: {sku}")
-            return sku
-
-        # Priority 2: Extract from Specifications dialog
-        sku = self.extract_sku_from_specifications()
-        if sku:
-            return sku
-
-        # No SKU found
-        return "no sku"
-
-    def extract_sku_from_lg_xpath(self):
-        """Extract SKU using LG-specific XPath (from main page, from DB)"""
-        try:
-            page_source = self._get_page_html()
-            tree = html.fromstring(page_source)
-
-            # Try multiple LG-specific XPaths (from DB)
-            lg_xpaths = [
-                self.xpaths.get('model_name_1'),
-                self.xpaths.get('model_name_2'),
-                self.xpaths.get('model_name_3'),
-            ]
-            lg_xpaths = [x for x in lg_xpaths if x]
-
-            for xpath in lg_xpaths:
-                sku = self.extract_text_safe(tree, xpath)
-                if sku and 5 <= len(sku) <= 20:
-                    print(f"  [INFO] Extracted SKU from LG XPath: {sku}")
-                    return sku
-
-            return None
-
-        except Exception as e:
-            print(f"  [DEBUG] Failed to extract SKU from LG XPath: {e}")
-            return None
+            print(f"  [DEBUG] Failed to extract SKU: {e}")
+            return "no sku"
 
     def calculate_similarity(self, text1, text2):
         """Calculate similarity between two texts based on common words
@@ -2387,8 +2329,8 @@ class WalmartDetailCrawler:
             ))
 
             # Insert into tv_item_mst (update sku and screen_size on conflict)
-            # Extract SKU from product name
-            sku = self.extract_sku(data['Retailer_SKU_Name'])
+            # Extract SKU using brand-specific regex on retailer_sku_name + product_url
+            sku = self.extract_sku(data['Retailer_SKU_Name'], data['product_url'])
 
             if data.get('item'):
                 # # Check existing sku before upsert (temporarily disabled)
@@ -2402,6 +2344,7 @@ class WalmartDetailCrawler:
                     INSERT INTO tv_item_mst (item, product_url, sku, account_name, screen_size)
                     VALUES (%s, %s, %s, %s, %s)
                     ON CONFLICT (item) DO UPDATE SET
+                        sku = EXCLUDED.sku,
                         screen_size = COALESCE(tv_item_mst.screen_size, EXCLUDED.screen_size)
                 """, (
                     data['item'],

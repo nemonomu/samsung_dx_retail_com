@@ -753,17 +753,15 @@ class AmazonDetailCrawler:
                 if star_rating_text and "No customer reviews" in star_rating_text:
                     return "No customer reviews"
 
-            # Fallback: Check for "No customer reviews" at specific locations (narrowed scope)
-            no_reviews_xpaths = self.xpaths.get('no_reviews') or [
-                '//*[@id="cm-cr-dp-review-header"]/h3/span',
-                '//span[@data-hook="top-customer-reviews-title"]',
-                '//div[@id="cm-cr-dp-review-header"]//span[contains(text(), "No customer reviews")]'
-                # Removed broad '//span[contains(text(), "No customer reviews")]' - causes false positives
-            ]
+            # Fallback: no_reviews xpath group (DB-driven).
+            # 정책: sr/cosr 추출 실패 시 이 xpath 위치에 텍스트가 있으면 "No customer reviews"로 확정,
+            #       텍스트가 없으면 NULL 그대로. 이 xpath 자체가 no-review 레이아웃의 식별 마커이므로
+            #       특정 substring 매칭 대신 텍스트 존재 여부만 확인.
+            no_reviews_xpaths = self.xpaths.get('no_reviews', [])
 
             for xpath in no_reviews_xpaths:
                 text = self.extract_text_safe(tree, xpath)
-                if text and "No customer reviews" in text:
+                if text and text.strip():
                     return "No customer reviews"
 
             return None
@@ -810,17 +808,14 @@ class AmazonDetailCrawler:
                     if match:
                         return match.group(1)
 
-            # Fallback: Check for "No customer reviews" at specific location -> return 0
-            no_reviews_xpaths = [
-                '//*[@id="cm-cr-dp-review-header"]/h3/span',
-                '//span[@data-hook="top-customer-reviews-title"]',
-                '//div[@id="cm-cr-dp-review-header"]//span[contains(text(), "No customer reviews")]',
-                '//span[contains(text(), "No customer reviews")]'
-            ]
+            # Fallback: no_reviews xpath group (DB-driven).
+            # 정책: 추출 실패 시 이 xpath 위치에 텍스트가 있으면 "0" 으로 확정.
+            # (xpath 자체가 no-review 레이아웃 식별 마커이므로 substring 매칭 대신 존재 여부만 확인)
+            no_reviews_xpaths = self.xpaths.get('no_reviews', [])
 
             for xpath in no_reviews_xpaths:
                 text = self.extract_text_safe(tree, xpath)
-                if text and "No customer reviews" in text:
+                if text and text.strip():
                     return "0"
 
             return None

@@ -3,6 +3,7 @@ import random
 import re
 import sys
 import os
+import pickle
 import psycopg2
 from datetime import datetime
 import pytz
@@ -19,12 +20,19 @@ from lxml import html
 if sys.stdout.encoding != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 
-# Import database configuration
-from config import DB_CONFIG
+# Import database / account configuration
+from config import DB_CONFIG, AMAZON_ACCOUNTS
 from amazon_config_loader import get_amazon_config
 
 # Load config from DB
 _config = get_amazon_config()
+
+# Cookie file (DB primary account, fallback to dt1's account if absent)
+_ACCOUNT_NAME = (_config.get_account('primary', 'amazon_tv_main1')
+                 or _config.get_account('primary', 'amazon_tv_dt1')
+                 or 'ltyinvestmentl')
+_account_cfg = AMAZON_ACCOUNTS.get(_ACCOUNT_NAME, {})
+COOKIE_FILE = _account_cfg.get('cookie_file') or f'amazon_cookies_{_ACCOUNT_NAME}.pkl'
 
 
 # Tee class for logging to both console and file
@@ -258,41 +266,104 @@ class AmazonTVCrawler:
 
         return None
 
-    def check_and_handle_sorry_page(self, max_retries=3):
-        """Check for sorry/robot check page and refresh if needed
-
-        Returns:
-            bool: True if page is OK, False if still sorry page after retries
-        """
-        for attempt in range(max_retries):
+    def _is_sorry_page(self):
+        """Detect Amazon sorry/robot check page from current driver state."""
+        try:
             page_source = self.driver.page_source.lower()
             title = self.driver.title.lower()
-
-            # Check for sorry/robot check page (check first 2000 chars for performance)
-            is_sorry_page = (
+            return (
                 'sorry' in title or
                 'robot check' in title or
                 'sorry' in page_source[:2000] or
                 'robot check' in page_source[:2000]
             )
+        except Exception:
+            return False
 
-            if is_sorry_page:
-                print(f"  [WARNING] Sorry/Robot check page detected (attempt {attempt + 1}/{max_retries})")
-                if attempt < max_retries - 1:
-                    print(f"  [INFO] Refreshing page in 3-5 seconds...")
-                    time.sleep(random.uniform(3, 5))  # Wait before refresh
-                    self.driver.refresh()
-                    print(f"  [INFO] Page refreshed, waiting for load...")
-                    time.sleep(random.uniform(4, 6))  # Wait after refresh
-                    continue
-                else:
-                    print(f"  [ERROR] Still sorry page after {max_retries} retries, skipping this page...")
-                    return False
-            else:
+    def load_cookies(self):
+        """Load cookies from pickle file for authenticated Amazon session.
+        Returns True on success, False otherwise.
+        Selenium 호환: amazon.com 으로 먼저 이동 후 add_cookie 로 주입.
+        """
+        if not os.path.exists(COOKIE_FILE):
+            print(f"  [WARNING] Cookie file not found: {COOKIE_FILE}")
+            return False
+        try:
+            print(f"  [INFO] Loading cookies from {COOKIE_FILE}...")
+            self.driver.get('https://www.amazon.com')
+            time.sleep(2)
+            try:
+                self.driver.delete_all_cookies()
+            except Exception:
+                pass
+
+            with open(COOKIE_FILE, 'rb') as f:
+                cookies = pickle.load(f)
+
+            loaded = 0
+            for cookie in cookies:
+                ck = dict(cookie) if isinstance(cookie, dict) else cookie
+                # Selenium 은 sameSite 값이 Strict/Lax/None 만 허용 — 그 외엔 제거
+                if isinstance(ck, dict) and 'sameSite' in ck and ck['sameSite'] not in ('Strict', 'Lax', 'None'):
+                    ck.pop('sameSite', None)
+                # expiry 가 float 면 int 변환
+                if isinstance(ck, dict) and 'expiry' in ck and isinstance(ck['expiry'], float):
+                    ck['expiry'] = int(ck['expiry'])
+                try:
+                    self.driver.add_cookie(ck)
+                    loaded += 1
+                except Exception:
+                    pass
+
+            print(f"  [DEBUG] Loaded {loaded}/{len(cookies)} cookies")
+            self.driver.refresh()
+            time.sleep(random.uniform(3, 5))
+            print(f"  [OK] Cookies loaded")
+            return True
+        except Exception as e:
+            print(f"  [WARNING] Failed to load cookies: {e}")
+            return False
+
+    def check_and_handle_sorry_page(self, url, max_retries=3):
+        """Check for sorry/robot check page; recover via refresh, then via cookie reload.
+
+        Layer 1: refresh up to max_retries times.
+        Layer 2: 모든 refresh 실패 시 쿠키 재로드 + URL 재접속 1회.
+        Returns:
+            bool: True if page is OK, False if still sorry after all attempts.
+        """
+        # Layer 1: refresh 기반 retry
+        for attempt in range(max_retries):
+            if not self._is_sorry_page():
                 if attempt > 0:
                     print(f"  [OK] Page loaded successfully after {attempt} refresh(es)")
-                return True  # Page is OK
+                return True
 
+            print(f"  [WARNING] Sorry/Robot check page detected (attempt {attempt + 1}/{max_retries})")
+            if attempt < max_retries - 1:
+                print(f"  [INFO] Refreshing page in 3-5 seconds...")
+                time.sleep(random.uniform(3, 5))
+                self.driver.refresh()
+                print(f"  [INFO] Page refreshed, waiting for load...")
+                time.sleep(random.uniform(4, 6))
+
+        # Layer 2: 쿠키 재로드 retry
+        print(f"  [RETRY] All {max_retries} refreshes failed - trying cookie reload + URL re-access...")
+        if self.load_cookies():
+            print(f"  [INFO] Re-accessing URL after cookie reload: {url[:80]}...")
+            try:
+                self.driver.get(url)
+                time.sleep(random.uniform(4, 6))
+                if not self._is_sorry_page():
+                    print(f"  [OK] Page loaded after cookie reload retry")
+                    return True
+                print(f"  [ERROR] Still sorry page after cookie reload")
+            except Exception as e:
+                print(f"  [ERROR] URL re-access after cookie reload failed: {e}")
+        else:
+            print(f"  [ERROR] Cookie reload failed (no cookie file or load error)")
+
+        print(f"  [ERROR] Sorry page persists after refresh + cookie reload, skipping this page...")
         return False
 
     def scrape_page(self, url, page_number):
@@ -301,8 +372,8 @@ class AmazonTVCrawler:
             print(f"\n[PAGE {page_number}] Accessing: {url[:80]}...")
             self.driver.get(url)
 
-            # Check and handle sorry page with refresh retries
-            if not self.check_and_handle_sorry_page(max_retries=3):
+            # Check and handle sorry page: refresh retries → cookie reload retry
+            if not self.check_and_handle_sorry_page(url, max_retries=self.sorry_page_max_retry):
                 print(f"[SKIP] Skipping page {page_number} due to persistent sorry/robot check page")
                 return True  # Continue to next page (not break)
 

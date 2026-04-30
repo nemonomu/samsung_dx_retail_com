@@ -1,5 +1,6 @@
 """
-Amazon TV — star_rating / count_of_star_ratings / count_of_reviews 복구 스크립트
+Amazon TV — star_rating / count_of_star_ratings 복구 스크립트
+(count_of_reviews 는 본 스크립트에서 절대 건드리지 않음 — 지시사항)
 
 대상:
   - tv_retail_com에서 account_name='Amazon', page_type='main',
@@ -11,9 +12,10 @@ Amazon TV — star_rating / count_of_star_ratings / count_of_reviews 복구 스�
   2) 88개 NULL 행 로드 (id, item, product_url).
   3) AmazonDetailCrawler 인스턴스로 driver/cookies/xpaths 셋업.
   4) 각 URL: page.get → verify_page_loaded → _lazy_load_reviews →
-     extract_star_rating / extract_count_of_star_ratings / extract_count_of_reviews.
-  5) 결과를 UPDATE만 수행 (INSERT 없음 — 중복 방지). 3개 컬럼만 갱신.
-     amazon_tv_dt1.py:2085 로직 동일: star_rating == "No customer reviews"이면 cosr=0, cor=0.
+     extract_star_rating / extract_count_of_star_ratings.
+  5) 결과를 UPDATE만 수행 (INSERT 없음 — 중복 방지).
+     star_rating, count_of_star_ratings 2개 컬럼만 갱신.
+     star_rating == "No customer reviews"이면 cosr=0 으로만 보정 (cor 은 그대로 NULL).
   6) 1회만 시도 — 그래도 NULL이면 그대로 둠.
   7) 종료 시 batch_id별 잔여 NULL 카운트 출력.
 
@@ -77,16 +79,15 @@ def load_null_rows(conn):
     return rows
 
 
-def update_row(conn, row_id, star_rating, count_of_star_ratings, count_of_reviews):
-    """3개 컬럼만 UPDATE."""
+def update_row(conn, row_id, star_rating, count_of_star_ratings):
+    """star_rating, count_of_star_ratings 2개 컬럼만 UPDATE (count_of_reviews는 건드리지 않음)."""
     cur = conn.cursor()
     cur.execute("""
         UPDATE tv_retail_com
            SET star_rating = %s,
-               count_of_star_ratings = %s,
-               count_of_reviews = %s
+               count_of_star_ratings = %s
          WHERE id = %s
-    """, (star_rating, count_of_star_ratings, count_of_reviews, row_id))
+    """, (star_rating, count_of_star_ratings, row_id))
     cur.close()
 
 
@@ -161,7 +162,6 @@ def main():
 
         sr = None
         cosr = None
-        cor = None
 
         try:
             crawler.page.get(product_url)
@@ -183,29 +183,20 @@ def main():
 
             sr = crawler.extract_star_rating(tree)
             cosr = crawler.extract_count_of_star_ratings(tree)
-            cor = crawler.extract_count_of_reviews(tree)
 
-            # amazon_tv_dt1.py:2085 동일 로직
+            # amazon_tv_dt1.py:2085 의 "No customer reviews" 케이스: cosr=0 으로 보정
+            # (count_of_reviews 는 사용자 지시에 따라 본 스크립트에서는 절대 건드리지 않음)
             if sr == "No customer reviews":
                 cosr = 0
-                cor = "0"
                 no_review += 1
 
-            print(f"  [EXTRACT] star_rating={sr!r} cosr={cosr!r} cor={cor!r}")
-
-            # cor int 변환 (tv_retail_com.count_of_reviews 컬럼은 text지만 amazon_tv_dt1.py는 int로 넣음)
-            cor_int = None
-            if cor is not None:
-                try:
-                    cor_int = int(str(cor).replace(',', ''))
-                except Exception:
-                    cor_int = None
+            print(f"  [EXTRACT] star_rating={sr!r} cosr={cosr!r}")
 
             if sr is None and cosr is None:
                 still_null += 1
                 print("  [RESULT] still NULL — leaving row as-is per spec")
             else:
-                update_row(work_conn, row_id, sr, cosr, cor_int)
+                update_row(work_conn, row_id, sr, cosr)
                 success += 1
                 print(f"  [RESULT] UPDATED id={row_id}")
 

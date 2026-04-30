@@ -179,17 +179,19 @@ def main():
                 cosr = 0
                 no_review += 1
 
-            # FALLBACK: 사용자 제공 xpath 단일 위치에서만 "No customer reviews" 검출
+            # FALLBACK: 사용자 제공 xpath 단일 위치에서 "There are 0 customer reviews" 검출
             # 위치: //*[@id="cr-top-reviews"]/div[2]/div/div/div (Amazon 신규 레이아웃)
+            # 검출 텍스트: "There are 0 customer reviews."
+            # 입력값: star_rating="No customer reviews", count_of_star_ratings=0
             if sr is None and cosr is None:
                 no_rev_text = crawler.extract_text_safe(
                     tree, '//*[@id="cr-top-reviews"]/div[2]/div/div/div'
                 )
-                if no_rev_text and 'No customer reviews' in no_rev_text:
+                if no_rev_text and 'There are 0 customer reviews' in no_rev_text:
                     sr = "No customer reviews"
                     cosr = 0
                     no_review += 1
-                    print("  [FALLBACK] cr-top-reviews/div[2]/div/div/div = 'No customer reviews' → 보정")
+                    print("  [FALLBACK] cr-top-reviews에 'There are 0 customer reviews' 검출 → sr='No customer reviews', cosr=0")
 
             print(f"  [EXTRACT] star_rating={sr!r} cosr={cosr!r}")
 

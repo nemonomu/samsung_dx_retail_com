@@ -40,24 +40,13 @@ SOURCE_TABLE = 'tv_retail_com'
 
 
 def ensure_backup(conn):
-    """백업 테이블이 없으면 CREATE TABLE AS SELECT로 전체 복제."""
+    """백업 테이블이 없을 때만 생성 (CREATE TABLE IF NOT EXISTS — 원자적, 충돌 없음)."""
     cur = conn.cursor()
-    cur.execute("""
-        SELECT 1 FROM information_schema.tables
-         WHERE table_schema='public' AND table_name=%s
-    """, (BACKUP_TABLE,))
-    exists = cur.fetchone() is not None
-
-    if exists:
-        cur.execute(f'SELECT COUNT(*) FROM "{BACKUP_TABLE}"')
-        cnt = cur.fetchone()[0]
-        print(f"[BACKUP] '{BACKUP_TABLE}' already exists ({cnt} rows) — skip create")
-    else:
-        print(f"[BACKUP] creating '{BACKUP_TABLE}' from '{SOURCE_TABLE}' ...")
-        cur.execute(f'CREATE TABLE "{BACKUP_TABLE}" AS SELECT * FROM "{SOURCE_TABLE}"')
-        cur.execute(f'SELECT COUNT(*) FROM "{BACKUP_TABLE}"')
-        cnt = cur.fetchone()[0]
-        print(f"[BACKUP] created ({cnt} rows)")
+    print(f"[BACKUP] ensuring '{BACKUP_TABLE}' (IF NOT EXISTS) ...")
+    cur.execute(f'CREATE TABLE IF NOT EXISTS "{BACKUP_TABLE}" AS SELECT * FROM "{SOURCE_TABLE}"')
+    cur.execute(f'SELECT COUNT(*) FROM "{BACKUP_TABLE}"')
+    cnt = cur.fetchone()[0]
+    print(f"[BACKUP] '{BACKUP_TABLE}' OK ({cnt} rows)")
     cur.close()
 
 

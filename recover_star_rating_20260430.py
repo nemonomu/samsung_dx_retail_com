@@ -179,6 +179,25 @@ def main():
                 cosr = 0
                 no_review += 1
 
+            # FALLBACK: 추출 실패 + 페이지에 평점 컨테이너 자체가 없음 → "No customer reviews"로 간주
+            # (Amazon이 'No customer reviews' 텍스트조차 안 띄우는 신상품/번들 레이아웃 대응)
+            if sr is None and cosr is None:
+                rating_containers = [
+                    '//*[@id="acrPopover"]',
+                    '//*[@id="averageCustomerReviews"]',
+                    '//*[@id="cm_cr_dp_d_rating_histogram"]',
+                    '//*[@id="acrCustomerReviewText"]',
+                    '//*[@id="reviewsMedley"]',
+                ]
+                any_rating_block = any(tree.xpath(xp) for xp in rating_containers)
+                title_present = bool(tree.xpath('//*[@id="productTitle"]'))
+
+                if title_present and not any_rating_block:
+                    sr = "No customer reviews"
+                    cosr = 0
+                    no_review += 1
+                    print("  [FALLBACK] no rating container in DOM (productTitle OK) → treat as 'No customer reviews'")
+
             print(f"  [EXTRACT] star_rating={sr!r} cosr={cosr!r}")
 
             if sr is None and cosr is None:

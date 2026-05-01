@@ -185,7 +185,32 @@ class AmazonBSRCrawler:
         chrome_options.add_experimental_option("prefs", prefs)
 
         service = Service(ChromeDriverManager().install())
-        self.driver = webdriver.Chrome(service=service, options=chrome_options)
+
+        # Browser launch with 3-attempt retry (dt1 패턴 이식)
+        # Why retry: 직전에 종료한 Chromium 의 자식 프로세스/디버그 포트 점유가 OS 에서 정리되기
+        # 전 재호출되면 'session not created: Chrome instance exited' 로 실패. 짧은 대기 후
+        # 재시도하면 대개 회복됨.
+        max_attempts = 3
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                last_error = None
+                if attempt > 1:
+                    print(f"[OK] Browser launch succeeded on attempt {attempt}/{max_attempts}")
+                break
+            except Exception as e:
+                last_error = e
+                err_msg = str(e) or e.__class__.__name__
+                print(f"[ERROR] Browser launch failed (attempt {attempt}/{max_attempts}): {err_msg[:200]}")
+                if attempt < max_attempts:
+                    wait_s = 5 * attempt  # 5s, 10s
+                    print(f"[INFO] Retrying in {wait_s}s — 잔존 chrome.exe / 디버그 포트 점유 가능")
+                    time.sleep(wait_s)
+
+        if last_error is not None:
+            raise last_error
+
         self.wait = WebDriverWait(self.driver, 20)
 
         # More comprehensive webdriver property masking

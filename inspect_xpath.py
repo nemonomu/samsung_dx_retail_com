@@ -8,13 +8,13 @@ dt1 와 동일한 인증된 세션으로 페이지를 가져와서:
   4) 인터랙티브 xpath 입력 모드
 
 사용:
-  python inspect.py <URL>
+  python inspect_xpath.py <URL>
       → 모든 xpath 그룹 결과 + HTML 저장
 
-  python inspect.py <URL> <xpath_group>
-      → 해당 그룹만 (예: original_price, price, star_rating, ...)
+  python inspect_xpath.py <URL> <group1> [group2 ...]
+      → 지정한 그룹들만 검사 (예: delivery_primary delivery_secondary delivery_holiday)
 
-  python inspect.py <URL> --interactive
+  python inspect_xpath.py <URL> --interactive
       → 페이지 fetch 후 stdin 으로 xpath 받아 실시간 테스트
 
 저장 위치:
@@ -116,7 +116,7 @@ def interactive_loop(tree):
             print(f"  total matched: {cnt}")
 
 
-def inspect(url, xpath_group=None, interactive=False):
+def inspect(url, xpath_groups=None, interactive=False):
     print(f"[URL] {url}")
     crawler = AmazonDetailCrawler()
 
@@ -171,9 +171,11 @@ def inspect(url, xpath_group=None, interactive=False):
 
         if interactive:
             interactive_loop(tree)
-        elif xpath_group:
-            xpaths = crawler.xpaths.get(xpath_group, [])
-            test_group(tree, xpath_group, xpaths, out_lines)
+        elif xpath_groups:
+            # 다중 그룹 지원 — 사용자 지정 순서대로 검사
+            for group_name in xpath_groups:
+                xpaths = crawler.xpaths.get(group_name, [])
+                test_group(tree, group_name, xpaths, out_lines)
         else:
             # 전체 그룹 — alphabetical
             for group_name in sorted(crawler.xpaths.keys()):
@@ -203,12 +205,12 @@ def main():
         sys.exit(1)
 
     url = sys.argv[1]
-    arg2 = sys.argv[2] if len(sys.argv) > 2 else None
+    rest = sys.argv[2:]  # 그룹 이름들 (또는 --interactive)
 
-    interactive = arg2 == '--interactive'
-    xpath_group = None if interactive else arg2
+    interactive = (len(rest) == 1 and rest[0] == '--interactive')
+    xpath_groups = None if interactive else (rest or None)
 
-    inspect(url, xpath_group=xpath_group, interactive=interactive)
+    inspect(url, xpath_groups=xpath_groups, interactive=interactive)
 
 
 if __name__ == '__main__':

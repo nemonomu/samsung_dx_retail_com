@@ -968,8 +968,13 @@ class AmazonDetailCrawler:
             for xpath in xpaths:
                 price_text = self.extract_text_safe(tree, xpath)
                 if price_text:
-                    # Extract "$149.99" format
-                    return price_text.strip()
+                    # Extract only "$XXX.XX" or "$X,XXX.XX" format
+                    # 빈 컨테이너의 구분자 "." 만 잡히는 케이스 방어 (final_sku_price 와 동일 패턴)
+                    match = re.search(r'\$[\d,]+\.?\d*', price_text)
+                    if match:
+                        return match.group()
+                    # No price pattern found, try next xpath
+                    continue
 
             return None
 

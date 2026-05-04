@@ -1397,39 +1397,24 @@ class AmazonDetailCrawler:
 
         return text.strip() if text.strip() else None
 
-    def extract_shipping_info(self, tree):
-        """Extract shipping info from up to 3 locations, concatenated with comma"""
+    def extract_delivery_availability(self, tree):
+        """Extract primary delivery message (e.g., 'FREE delivery Tomorrow, Apr 18')"""
         try:
-            shipping_parts = []
-
-            # Use DB XPaths if available, otherwise use hardcoded fallback
-            # Location 1: Primary delivery message
             xpath1 = (self.xpaths.get('delivery_primary') or ['//*[@id="mir-layout-DELIVERY_BLOCK-slot-PRIMARY_DELIVERY_MESSAGE_LARGE"]/span'])[0]
             text1 = self.extract_text_safe(tree, xpath1)
-            text1 = self.clean_shipping_text(text1)
-            if text1:
-                shipping_parts.append(text1)
-
-            # Location 2: Secondary delivery message
-            xpath2 = (self.xpaths.get('delivery_secondary') or ['//*[@id="mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE"]/span'])[0]
-            text2 = self.extract_text_safe(tree, xpath2)
-            text2 = self.clean_shipping_text(text2)
-            if text2:
-                shipping_parts.append(text2)
-
-            # Location 3: Holiday delivery message
-            xpath3 = (self.xpaths.get('delivery_holiday') or ['//*[@id="mir-layout-DELIVERY_BLOCK-slot-HOLIDAY_DELIVERY_MESSAGE"]/b/font'])[0]
-            text3 = self.extract_text_safe(tree, xpath3)
-            text3 = self.clean_shipping_text(text3)
-            if text3:
-                shipping_parts.append(text3)
-
-            if shipping_parts:
-                return ', '.join(shipping_parts)
+            return self.clean_shipping_text(text1)
+        except Exception as e:
+            print(f"  [WARNING] Failed to extract delivery availability: {e}")
             return None
 
+    def extract_fastest_delivery(self, tree):
+        """Extract secondary delivery message (e.g., 'Or fastest delivery Today, 11AM')"""
+        try:
+            xpath2 = (self.xpaths.get('delivery_secondary') or ['//*[@id="mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE"]/span'])[0]
+            text2 = self.extract_text_safe(tree, xpath2)
+            return self.clean_shipping_text(text2)
         except Exception as e:
-            print(f"  [WARNING] Failed to extract shipping info: {e}")
+            print(f"  [WARNING] Failed to extract fastest delivery: {e}")
             return None
 
     def extract_available_quantity_for_purchase(self, tree):
@@ -1733,8 +1718,9 @@ class AmazonDetailCrawler:
 
             savings = self.calculate_savings(final_sku_price, original_sku_price)
 
-            # Extract shipping info, available quantity, and discount type
-            shipping_info = self.extract_shipping_info(tree)
+            # Extract delivery availability, fastest delivery, available quantity, and discount type
+            delivery_availability = self.extract_delivery_availability(tree)
+            fastest_delivery = self.extract_fastest_delivery(tree)
             available_quantity = self.extract_available_quantity_for_purchase(tree)
             discount_type = self.extract_discount_type(tree)
             number_of_units_purchased = self.extract_number_of_units_purchased_past_month(tree)
@@ -1796,7 +1782,8 @@ class AmazonDetailCrawler:
                 'final_sku_price': final_sku_price,  # Extracted from detail page
                 'original_sku_price': original_sku_price,  # Extracted from detail page
                 'savings': savings,  # Calculated from prices
-                'shipping_info': shipping_info,
+                'delivery_availability': delivery_availability,
+                'fastest_delivery': fastest_delivery,
                 'available_quantity_for_purchase': available_quantity,
                 'discount_type': discount_type
             }
@@ -2134,14 +2121,14 @@ class AmazonDetailCrawler:
                 (item, account_name, page_type, count_of_reviews, retailer_sku_name, product_url,
                  star_rating, count_of_star_ratings, screen_size, sku_popularity,
                  final_sku_price, original_sku_price, savings, discount_type, offer,
-                 pick_up_availability, shipping_availability, delivery_availability, shipping_info,
+                 pick_up_availability, shipping_availability, delivery_availability,
                  available_quantity_for_purchase, inventory_status, sku_status, retailer_membership_discounts,
                  detailed_review_content, summarized_review_content, top_mentions, recommendation_intent,
                  main_rank, bsr_rank, rank_1, rank_2, promotion_position, trend_rank,
                  number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, retailer_sku_name_similar,
                  estimated_annual_electricity_use, promotion_type, number_of_units_purchased_past_month, model_year,
                  calendar_week, crawl_datetime, batch_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 data['item'],
                 'Amazon',  # account_name
@@ -2159,9 +2146,8 @@ class AmazonDetailCrawler:
                 data.get('discount_type'),  # discount_type
                 None,  # offer (Amazon doesn't have this)
                 None,  # pick_up_availability (Amazon doesn't have this)
-                None,  # shipping_availability (Amazon doesn't have this)
-                None,  # delivery_availability (Amazon doesn't have this)
-                data.get('shipping_info'),  # shipping_info
+                data.get('fastest_delivery'),  # shipping_availability (RENAME 예정 → fastest_delivery)
+                data.get('delivery_availability'),  # delivery_availability
                 data.get('available_quantity_for_purchase'),  # available_quantity_for_purchase
                 None,  # inventory_status (Amazon doesn't have this)
                 None,  # sku_status (Amazon doesn't have this)
@@ -2411,7 +2397,7 @@ class AmazonDetailCrawler:
                     SELECT retailer_sku_name, star_rating, count_of_star_ratings, count_of_reviews,
                            screen_size, sku_popularity, final_sku_price, original_sku_price,
                            savings, discount_type, offer, pick_up_availability,
-                           shipping_availability, delivery_availability, shipping_info,
+                           shipping_availability, delivery_availability,
                            available_quantity_for_purchase, inventory_status, sku_status,
                            retailer_membership_discounts, detailed_review_content, summarized_review_content,
                            top_mentions, recommendation_intent, main_rank, bsr_rank, trend_rank,
@@ -2427,7 +2413,7 @@ class AmazonDetailCrawler:
                     'retailer_sku_name', 'star_rating', 'count_of_star_ratings', 'count_of_reviews',
                     'screen_size', 'sku_popularity', 'final_sku_price', 'original_sku_price',
                     'savings', 'discount_type', 'offer', 'pick_up_availability',
-                    'shipping_availability', 'delivery_availability', 'shipping_info',
+                    'shipping_availability', 'delivery_availability',
                     'available_quantity_for_purchase', 'inventory_status', 'sku_status',
                     'retailer_membership_discounts', 'detailed_review_content', 'summarized_review_content',
                     'top_mentions', 'recommendation_intent', 'main_rank', 'bsr_rank', 'trend_rank',

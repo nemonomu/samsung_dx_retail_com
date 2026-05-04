@@ -64,9 +64,14 @@ class AmazonDetailCrawler:
         self.max_review_pages = _config.get_constant_int('max_review_pages', 'amazon_tv_dt1', 3)
         self.sorry_page_max_retry = _config.get_retry('sorry_page_max', 'amazon_tv_dt1', 5)
         self.browser_restart_after_fail = _config.get_retry('browser_restart_after_fail', 'amazon_tv_dt1', 5)
-        # Generate batch_id using Korea timezone
+        # Generate batch_id using Korea timezone (env override for catch-up runs)
         korea_tz = pytz.timezone('Asia/Seoul')
-        self.batch_id = datetime.now(korea_tz).strftime('%Y%m%d_%H%M%S')
+        _override_batch = os.environ.get('AMAZON_TV_DT1_BATCH_ID', '').strip()
+        if _override_batch:
+            self.batch_id = _override_batch
+            print(f"[INFO] batch_id override from env: {self.batch_id}")
+        else:
+            self.batch_id = datetime.now(korea_tz).strftime('%Y%m%d_%H%M%S')
         # Error tracking lists for alert email
         self.rv_detail_null_records = []  # count_of_reviews > 0 but detailed_review_content is null
         self.reviews_equals_ratings_records = []  # count_of_reviews == count_of_star_ratings

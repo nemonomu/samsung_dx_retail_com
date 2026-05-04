@@ -27,8 +27,8 @@ CREATE TABLE tv_retail_com (
 
     -- 4. Inventory/Shipping information
     pick_up_availability VARCHAR(50),
-    shipping_availability VARCHAR(50),
-    delivery_availability VARCHAR(50),
+    shipping_availability TEXT,
+    delivery_availability TEXT,
     shipping_info TEXT,
     available_quantity_for_purchase VARCHAR(50),
     inventory_status VARCHAR(100),

@@ -1415,11 +1415,17 @@ class AmazonDetailCrawler:
             return None
 
     def extract_fastest_delivery(self, tree):
-        """Extract secondary delivery message (e.g., 'Or fastest delivery Today, 11AM')"""
+        """Extract secondary delivery message (e.g., 'Or fastest delivery Today, 11AM')
+
+        'Or fastest' 로 시작하는 텍스트만 반환. 그 외는 None (shipping_availability 에 의도한 패턴만 들어가도록).
+        """
         try:
             xpath2 = (self.xpaths.get('delivery_secondary') or ['//*[@id="mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE"]/span'])[0]
             text2 = self.extract_text_safe(tree, xpath2)
-            return self.clean_shipping_text(text2)
+            cleaned = self.clean_shipping_text(text2)
+            if cleaned and cleaned.startswith('Or fastest'):
+                return cleaned
+            return None
         except Exception as e:
             print(f"  [WARNING] Failed to extract fastest delivery: {e}")
             return None

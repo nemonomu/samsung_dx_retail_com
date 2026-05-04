@@ -347,12 +347,14 @@ class AmazonDetailCrawler:
 
                 # Get all distinct processed ASINs (item) from current session in amazon_tv_detail_crawled
                 # item column stores ASIN extracted from final URL after redirect
+                # crawl_datetime 은 로컬 시스템 tz, session_start_str 은 batch_id 기반 KST → tz 어긋남 가능
+                # OR batch_id = self.batch_id 로 catch-up(env override) 케이스도 함께 잡음
                 cursor.execute("""
                     SELECT DISTINCT item
                     FROM amazon_tv_detail_crawled
                     WHERE item IS NOT NULL
-                      AND crawl_datetime >= %s
-                """, (session_start_str,))
+                      AND (crawl_datetime >= %s OR batch_id = %s)
+                """, (session_start_str, self.batch_id))
 
                 already_processed_asins = {row[0] for row in cursor.fetchall()}
                 print(f"[INFO] Found {len(already_processed_asins)} already processed ASINs in current session")

@@ -1417,7 +1417,7 @@ class AmazonDetailCrawler:
     def extract_fastest_delivery(self, tree):
         """Extract secondary delivery message (e.g., 'Or fastest delivery Today, 11AM')
 
-        'Or fastest' 로 시작하는 텍스트만 반환. 그 외는 None (shipping_availability 에 의도한 패턴만 들어가도록).
+        'Or fastest' 로 시작하는 텍스트만 반환. 그 외는 None (fastest_delivery 에 의도한 패턴만 들어가도록).
         """
         try:
             xpath2 = (self.xpaths.get('delivery_secondary') or ['//*[@id="mir-layout-DELIVERY_BLOCK-slot-SECONDARY_DELIVERY_MESSAGE_LARGE"]/span'])[0]
@@ -2134,7 +2134,7 @@ class AmazonDetailCrawler:
                 (item, account_name, page_type, count_of_reviews, retailer_sku_name, product_url,
                  star_rating, count_of_star_ratings, screen_size, sku_popularity,
                  final_sku_price, original_sku_price, savings, discount_type, offer,
-                 pick_up_availability, shipping_availability, delivery_availability,
+                 pick_up_availability, fastest_delivery, delivery_availability,
                  available_quantity_for_purchase, inventory_status, sku_status, retailer_membership_discounts,
                  detailed_review_content, summarized_review_content, top_mentions, recommendation_intent,
                  main_rank, bsr_rank, rank_1, rank_2, promotion_position, trend_rank,
@@ -2159,7 +2159,7 @@ class AmazonDetailCrawler:
                 data.get('discount_type'),  # discount_type
                 None,  # offer (Amazon doesn't have this)
                 None,  # pick_up_availability (Amazon doesn't have this)
-                data.get('fastest_delivery'),  # shipping_availability (RENAME 예정 → fastest_delivery)
+                data.get('fastest_delivery'),  # fastest_delivery
                 data.get('delivery_availability'),  # delivery_availability
                 data.get('available_quantity_for_purchase'),  # available_quantity_for_purchase
                 None,  # inventory_status (Amazon doesn't have this)
@@ -2410,7 +2410,7 @@ class AmazonDetailCrawler:
                     SELECT retailer_sku_name, star_rating, count_of_star_ratings, count_of_reviews,
                            screen_size, sku_popularity, final_sku_price, original_sku_price,
                            savings, discount_type, offer, pick_up_availability,
-                           shipping_availability, delivery_availability,
+                           fastest_delivery, delivery_availability,
                            available_quantity_for_purchase, inventory_status, sku_status,
                            retailer_membership_discounts, detailed_review_content, summarized_review_content,
                            top_mentions, recommendation_intent, main_rank, bsr_rank, trend_rank,
@@ -2426,7 +2426,7 @@ class AmazonDetailCrawler:
                     'retailer_sku_name', 'star_rating', 'count_of_star_ratings', 'count_of_reviews',
                     'screen_size', 'sku_popularity', 'final_sku_price', 'original_sku_price',
                     'savings', 'discount_type', 'offer', 'pick_up_availability',
-                    'shipping_availability', 'delivery_availability',
+                    'fastest_delivery', 'delivery_availability',
                     'available_quantity_for_purchase', 'inventory_status', 'sku_status',
                     'retailer_membership_discounts', 'detailed_review_content', 'summarized_review_content',
                     'top_mentions', 'recommendation_intent', 'main_rank', 'bsr_rank', 'trend_rank',

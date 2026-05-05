@@ -2275,7 +2275,7 @@ class WalmartDetailCrawler:
                 (item, account_name, page_type, count_of_reviews, retailer_sku_name, product_url,
                  star_rating, count_of_star_ratings, screen_size, sku_popularity,
                  final_sku_price, original_sku_price, savings, discount_type, offer,
-                 pick_up_availability, shipping_availability, delivery_availability, shipping_info,
+                 pick_up_availability, fastest_delivery, delivery_availability, shipping_info,
                  available_quantity_for_purchase, inventory_status, sku_status, retailer_membership_discounts,
                  detailed_review_content, summarized_review_content, top_mentions, recommendation_intent,
                  main_rank, bsr_rank, trend_rank, rank_1, rank_2, promotion_position,

@@ -83,7 +83,7 @@ def analyze_crawl_results(retailer_code, target_count, results_df):
         'retailer_sku_name', 'star_rating', 'count_of_star_ratings', 'count_of_reviews',
         'screen_size', 'sku_popularity', 'final_sku_price', 'original_sku_price',
         'savings', 'discount_type', 'offer', 'pick_up_availability',
-        'shipping_availability', 'delivery_availability', 'shipping_info',
+        'fastest_delivery', 'delivery_availability', 'shipping_info',
         'available_quantity_for_purchase', 'inventory_status', 'sku_status',
         'retailer_membership_discounts', 'detailed_review_content', 'summarized_review_content',
         'top_mentions', 'recommendation_intent', 'main_rank', 'bsr_rank', 'trend_rank',
@@ -104,7 +104,7 @@ def analyze_crawl_results(retailer_code, target_count, results_df):
         'discount_type': 'Discount Type',
         'offer': 'Offer',
         'pick_up_availability': 'Pick Up Availability',
-        'shipping_availability': 'Shipping Availability',
+        'fastest_delivery': 'Fastest Delivery',
         'delivery_availability': 'Delivery Availability',
         'shipping_info': 'Shipping Info',
         'available_quantity_for_purchase': 'Available Quantity',
@@ -1220,7 +1220,7 @@ def _get_prev_session_data(db_conn, current_session_min, account_name='Walmart')
             SELECT product_url, retailer_sku_name, star_rating, count_of_star_ratings, count_of_reviews,
                    screen_size, sku_popularity, final_sku_price, original_sku_price,
                    savings, discount_type, offer, pick_up_availability,
-                   shipping_availability, delivery_availability, shipping_info,
+                   fastest_delivery, delivery_availability, shipping_info,
                    available_quantity_for_purchase, inventory_status, sku_status,
                    retailer_membership_discounts, detailed_review_content, main_rank, bsr_rank,
                    model_year
@@ -1234,7 +1234,7 @@ def _get_prev_session_data(db_conn, current_session_min, account_name='Walmart')
             'product_url', 'retailer_sku_name', 'star_rating', 'count_of_star_ratings', 'count_of_reviews',
             'screen_size', 'sku_popularity', 'final_sku_price', 'original_sku_price',
             'savings', 'discount_type', 'offer', 'pick_up_availability',
-            'shipping_availability', 'delivery_availability', 'shipping_info',
+            'fastest_delivery', 'delivery_availability', 'shipping_info',
             'available_quantity_for_purchase', 'inventory_status', 'sku_status',
             'retailer_membership_discounts', 'detailed_review_content', 'main_rank', 'bsr_rank',
             'model_year'
@@ -1276,7 +1276,7 @@ def _get_current_session_data(db_conn, account_name='Walmart'):
             SELECT product_url, retailer_sku_name, star_rating, count_of_star_ratings, count_of_reviews,
                    screen_size, sku_popularity, final_sku_price, original_sku_price,
                    savings, discount_type, offer, pick_up_availability,
-                   shipping_availability, delivery_availability, shipping_info,
+                   fastest_delivery, delivery_availability, shipping_info,
                    available_quantity_for_purchase, inventory_status, sku_status,
                    retailer_membership_discounts, detailed_review_content, main_rank, bsr_rank,
                    model_year
@@ -1290,7 +1290,7 @@ def _get_current_session_data(db_conn, account_name='Walmart'):
             'product_url', 'retailer_sku_name', 'star_rating', 'count_of_star_ratings', 'count_of_reviews',
             'screen_size', 'sku_popularity', 'final_sku_price', 'original_sku_price',
             'savings', 'discount_type', 'offer', 'pick_up_availability',
-            'shipping_availability', 'delivery_availability', 'shipping_info',
+            'fastest_delivery', 'delivery_availability', 'shipping_info',
             'available_quantity_for_purchase', 'inventory_status', 'sku_status',
             'retailer_membership_discounts', 'detailed_review_content', 'main_rank', 'bsr_rank',
             'model_year'
@@ -1325,7 +1325,7 @@ def _compare_sessions(curr_df, prev_df, retailer='Walmart'):
     ]
     # Walmart 전용 필드 (Amazon에서는 항상 NULL이므로 제외)
     if retailer == 'Walmart':
-        fields_to_check.extend(['pick_up_availability', 'shipping_availability', 'delivery_availability'])
+        fields_to_check.extend(['pick_up_availability', 'fastest_delivery', 'delivery_availability'])
 
     result = {
         'field_stats': {},

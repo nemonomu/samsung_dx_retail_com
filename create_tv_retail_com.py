@@ -41,7 +41,7 @@ def create_tv_retail_com_table():
 
                 -- 4. Inventory/Shipping information
                 pick_up_availability VARCHAR(50),
-                shipping_availability TEXT,
+                fastest_delivery TEXT,
                 delivery_availability TEXT,
                 shipping_info TEXT,
                 available_quantity_for_purchase VARCHAR(50),

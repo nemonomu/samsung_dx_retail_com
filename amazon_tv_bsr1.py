@@ -432,12 +432,33 @@ class AmazonBSRCrawler:
                     return False
 
             # Wait for BSR containers to be present using explicit wait
+            # 일시 글리치/soft-block 대비 N회 retry (URL 재접속 + 추가 wait)
+            # 이 시점은 INSERT 0건 보장 영역이라 retry 가 중복 INSERT 위험 없음
             print("[INFO] Waiting for BSR containers to load...")
-            try:
-                self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "zg-no-numbers")))
-                print("[OK] BSR containers detected")
-            except Exception as e:
-                print(f"[ERROR] BSR containers not found: {e}")
+            container_max_retries = 3  # 1차 + 2회 재시도
+            containers_loaded = False
+            last_error = None
+            for container_attempt in range(1, container_max_retries + 1):
+                try:
+                    self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "zg-no-numbers")))
+                    print(f"[OK] BSR containers detected (attempt {container_attempt}/{container_max_retries})")
+                    containers_loaded = True
+                    break
+                except Exception as e:
+                    last_error = e
+                    print(f"[WARNING] BSR containers not found (attempt {container_attempt}/{container_max_retries}): {e}")
+                    if container_attempt < container_max_retries:
+                        wait_s = random.uniform(15, 30)
+                        print(f"[RETRY] {wait_s:.1f}s 대기 후 URL 재접속 ...")
+                        time.sleep(wait_s)
+                        try:
+                            self.driver.get(url)
+                            time.sleep(random.uniform(8, 12))
+                        except Exception as get_e:
+                            print(f"[WARNING] URL 재접속 중 오류: {get_e}")
+
+            if not containers_loaded:
+                print(f"[ERROR] BSR containers not found after {container_max_retries} attempts: {last_error}")
                 screenshot_path = f"bsr_page_{page_number}_no_containers.png"
                 self.driver.save_screenshot(screenshot_path)
                 print(f"[ERROR] Screenshot saved to {screenshot_path}")

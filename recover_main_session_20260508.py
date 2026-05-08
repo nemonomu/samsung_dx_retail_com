@@ -90,10 +90,22 @@ def main():
     print("\n[STEP 1/5] 백업 테이블 생성")
     create_backups()
 
-    # === STEP 2: main1 재실행 ===
-    print(f"\n[STEP 2/5] main1 재실행 (env AMAZON_TV_MAIN1_BATCH_ID={NEW_MAIN_BATCH})")
-    main_crawler = AmazonTVCrawler()
-    main_crawler.run()  # run() 안에서 env 읽어 batch_id set + INSERT + driver.quit()
+    # === STEP 2: main1 재실행 (idempotent — 이미 row 있으면 skip) ===
+    db_check = psycopg2.connect(**DB_CONFIG)
+    cur_check = db_check.cursor()
+    cur_check.execute("""
+        SELECT COUNT(*) FROM amazon_tv_main_crawled WHERE batch_id = %s
+    """, (NEW_MAIN_BATCH,))
+    existing_count = cur_check.fetchone()[0]
+    cur_check.close()
+    db_check.close()
+
+    if existing_count > 0:
+        print(f"\n[STEP 2/5] amazon_tv_main_crawled batch={NEW_MAIN_BATCH} 이미 {existing_count} row 존재 — main1 재실행 skip")
+    else:
+        print(f"\n[STEP 2/5] main1 재실행 (env AMAZON_TV_MAIN1_BATCH_ID={NEW_MAIN_BATCH})")
+        main_crawler = AmazonTVCrawler()
+        main_crawler.run()  # run() 안에서 env 읽어 batch_id set + INSERT + driver.quit()
 
     # main1 INSERT row 수 검증
     db_conn = psycopg2.connect(**DB_CONFIG)
@@ -132,11 +144,16 @@ def main():
     old_dt1_main_asins = {r[0] for r in cur.fetchall()}
     print(f"  dt1 batch main URL ASIN: {len(old_dt1_main_asins)}")
 
+    # amazon_tv_bsr 에는 item 컬럼 없음 → product_url 에서 ASIN 추출
     cur.execute("""
-        SELECT DISTINCT item FROM amazon_tv_bsr
-         WHERE batch_id = %s AND item IS NOT NULL
+        SELECT DISTINCT product_url FROM amazon_tv_bsr
+         WHERE batch_id = %s AND product_url IS NOT NULL
     """, (BSR_BATCH,))
-    bsr_asins = {r[0] for r in cur.fetchall()}
+    bsr_asins = set()
+    for (url,) in cur.fetchall():
+        asin = extract_asin(url)
+        if asin:
+            bsr_asins.add(asin)
     print(f"  bsr batch ASIN: {len(bsr_asins)}")
 
     intersect = set(new_main_map.keys()) & old_dt1_main_asins

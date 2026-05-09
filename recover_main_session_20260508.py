@@ -183,14 +183,15 @@ def main():
                  WHERE item = %s AND batch_id = %s AND account_name = 'Amazon'
             """, (rank, asin, DT1_BATCH))
 
-        # B-1. main_rank=NULL UPDATE (BSR keep)
+        # B-1. main_rank=NULL + page_type='bsr' UPDATE (BSR keep)
+        # page_type 도 'bsr' 로 같이 변경: main_rank=NULL 인 row 는 사실상 BSR-only 이므로 정합성 일치
         for asin in bsr_keep:
             cur.execute("""
-                UPDATE amazon_tv_detail_crawled SET main_rank = NULL
+                UPDATE amazon_tv_detail_crawled SET main_rank = NULL, page_type = 'bsr'
                  WHERE item = %s AND batch_id = %s
             """, (asin, DT1_BATCH))
             cur.execute("""
-                UPDATE tv_retail_com SET main_rank = NULL
+                UPDATE tv_retail_com SET main_rank = NULL, page_type = 'bsr'
                  WHERE item = %s AND batch_id = %s AND account_name = 'Amazon'
             """, (asin, DT1_BATCH))
 

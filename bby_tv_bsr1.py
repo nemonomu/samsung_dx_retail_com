@@ -27,6 +27,7 @@ import os
 import csv
 import psycopg2
 from datetime import datetime
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import pytz
 from DrissionPage import ChromiumPage, ChromiumOptions
 from lxml import html
@@ -105,11 +106,22 @@ class BestBuyBSRCrawler:
                 pass
             self.page = None
 
+    def ensure_24_results_url(self, url):
+        """Force Best Buy search pages to request 24 results per page."""
+        try:
+            parts = urlsplit(url)
+            query = dict(parse_qsl(parts.query, keep_blank_values=True))
+            query['nrp'] = '24'
+            return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+        except Exception:
+            separator = '&' if '?' in url else '?'
+            return f"{url}{separator}nrp=24"
+
     def load_page_urls(self):
         """Load page URLs from database, or use defaults when DB is unavailable."""
         default_urls = [
-            (1, 'https://www.bestbuy.com/site/searchpage.jsp?id=pcat17071&sp=Best-Selling&st=tv'),
-            (2, 'https://www.bestbuy.com/site/searchpage.jsp?id=pcat17071&sp=Best-Selling&st=tv&cp=2'),
+            (1, 'https://www.bestbuy.com/site/searchpage.jsp?id=pcat17071&sp=Best-Selling&st=tv&nrp=24'),
+            (2, 'https://www.bestbuy.com/site/searchpage.jsp?id=pcat17071&sp=Best-Selling&st=tv&nrp=24&cp=2'),
         ]
         if not self.db_conn:
             print("[INFO] DB unavailable - using default Best Buy TV BSR URLs")
@@ -127,7 +139,7 @@ class BestBuyBSRCrawler:
             urls = cursor.fetchall()
             cursor.close()
             print(f"[OK] Loaded {len(urls)} page URLs")
-            return urls
+            return [(page_number, self.ensure_24_results_url(url)) for page_number, url in urls]
 
         except Exception as e:
             print(f"[WARNING] Failed to load page URLs from DB; using defaults: {e}")

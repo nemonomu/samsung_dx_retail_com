@@ -109,7 +109,7 @@ class BestBuyBSRCrawler:
         """Load page URLs from database, or use defaults when DB is unavailable."""
         default_urls = [
             (1, 'https://www.bestbuy.com/site/searchpage.jsp?id=pcat17071&sp=Best-Selling&st=tv'),
-            (2, 'https://www.bestbuy.com/site/searchpage.jsp?id=pcat17071&sp=Best-Selling&st=tv&page=2'),
+            (2, 'https://www.bestbuy.com/site/searchpage.jsp?id=pcat17071&sp=Best-Selling&st=tv&cp=2'),
         ]
         if not self.db_conn:
             print("[INFO] DB unavailable - using default Best Buy TV BSR URLs")
@@ -245,11 +245,6 @@ class BestBuyBSRCrawler:
             print(f"[INFO] Found {len(all_containers)} total containers, {len(containers)} with product links")
 
             collected_count = 0
-
-            # Save HTML for debugging (all pages for troubleshooting)
-            with open(f'bestbuy_bsr_page_{page_number}_debug.html', 'w', encoding='utf-8') as f:
-                f.write(page_source)
-            print(f"[DEBUG] Saved page source to bestbuy_bsr_page_{page_number}_debug.html")
 
             # XPath/정규식 설정 로드
             xpath_product_title_list = self.config.get_xpath_list('product_title', self.file_name) or [
@@ -398,7 +393,7 @@ class BestBuyBSRCrawler:
                 print(f"[INFO] Maximum {self.max_products} products reached. Stopping page collection.")
                 return False
 
-            return True
+            return collected_count
 
         except Exception as e:
             print(f"[ERROR] Failed to scrape page {page_number}: {e}")
@@ -485,13 +480,15 @@ class BestBuyBSRCrawler:
             for page_number, url in page_urls:
                 try:
                     # Scrape the target page
-                    if not self.scrape_page(url, page_number):
+                    collected_count = self.scrape_page(url, page_number)
+                    if not collected_count:
                         # scrape_page returns False if max_products reached or error occurred
                         if self.total_collected >= self.max_products:
                             print(f"[INFO] Stopping page collection - reached maximum {self.max_products} products")
                             break
                         else:
-                            print(f"[WARNING] Failed to scrape page {page_number}, continuing...")
+                            print(f"[INFO] No new products on page {page_number}; stopping remaining pages")
+                            break
 
                     # Random delay between pages
                     time.sleep(random.uniform(between_pages_wait[0], between_pages_wait[1]) if between_pages_wait else random.uniform(3, 5))

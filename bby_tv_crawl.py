@@ -272,13 +272,14 @@ def main():
         # Collect failed stages
         failed_stages = [name for name, result in crawler.results.items() if not result['success']]
 
-        # Send email notification
-        send_crawl_alert(
-            retailer=crawler.retailer_name,
-            results=crawler.results,
-            failed_stages=failed_stages,
-            elapsed_time=total_duration
-        )
+        # Email notification disabled during VPN test.
+        print("[INFO] Email alert disabled for VPN test")
+        # send_crawl_alert(
+        #     retailer=crawler.retailer_name,
+        #     results=crawler.results,
+        #     failed_stages=failed_stages,
+        #     elapsed_time=total_duration
+        # )
 
         if success:
             print("\n[✓] All crawlers completed successfully")
@@ -289,27 +290,27 @@ def main():
 
     except KeyboardInterrupt:
         print("\n[!] Interrupted by user")
-        # Send alert for interruption
-        send_crawl_alert(
-            retailer=crawler.retailer_name if crawler else 'BestBuy',
-            results=crawler.results if crawler else {},
-            failed_stages=['Interrupted by user'],
-            elapsed_time=0,
-            error_message='Crawler interrupted by user'
-        )
+        print("[INFO] Email alert disabled for VPN test")
+        # send_crawl_alert(
+        #     retailer=crawler.retailer_name if crawler else 'BestBuy',
+        #     results=crawler.results if crawler else {},
+        #     failed_stages=['Interrupted by user'],
+        #     elapsed_time=0,
+        #     error_message='Crawler interrupted by user'
+        # )
         sys.exit(1)
     except Exception as e:
         print(f"\n[!] Fatal error: {e}")
         import traceback
         traceback.print_exc()
-        # Send alert for fatal error
-        send_crawl_alert(
-            retailer=crawler.retailer_name if crawler else 'BestBuy',
-            results=crawler.results if crawler else {},
-            failed_stages=['Fatal error'],
-            elapsed_time=0,
-            error_message=str(e)
-        )
+        print("[INFO] Email alert disabled for VPN test")
+        # send_crawl_alert(
+        #     retailer=crawler.retailer_name if crawler else 'BestBuy',
+        #     results=crawler.results if crawler else {},
+        #     failed_stages=['Fatal error'],
+        #     elapsed_time=0,
+        #     error_message=str(e)
+        # )
         sys.exit(1)
 
 if __name__ == "__main__":

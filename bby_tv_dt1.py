@@ -1636,8 +1636,8 @@ class BestBuyDetailCrawler:
                 actual_sku = actual_sku_match.group(1)
                 if actual_sku != expected_sku:
                     print(f"  [ERROR] SKU mismatch! Expected: {expected_sku}, Actual: {actual_sku}")
-                    print(f"  [ERROR] Sending alert email...")
-                    send_review_url_error_alert(product_url, expected_sku, actual_sku)
+                    print(f"  [INFO] Email alert disabled for VPN test")
+                    # send_review_url_error_alert(product_url, expected_sku, actual_sku)
                     return False
                 else:
                     print(f"  [OK] SKU verified: {actual_sku}")

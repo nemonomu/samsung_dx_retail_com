@@ -135,6 +135,20 @@ class BestBuyDetailCrawler:
             cursor.close()
             if row:
                 return {'screen_size': row[0], 'estimated_annual_electricity_use': row[1]}
+            page_text = tree.text_content()
+            if re.search(r'reviews?\s+from\s+', page_text, re.IGNORECASE):
+                return 'EXTERNAL_REVIEWS'
+            if "Not yet reviewed" in page_text:
+                return 0
+            for pattern in [
+                r'with\s+([\d,]+)\s+reviews',
+                r'\(([\d,]+)\s*reviews?\)',
+                r'([\d,]+)\s+reviews'
+            ]:
+                match = re.search(pattern, page_text, re.IGNORECASE)
+                if match:
+                    return match.group(1).replace(',', '')
+
             return None
         except Exception as e:
             print(f"  [WARNING] Failed to get item_mst data: {e}")
@@ -857,7 +871,6 @@ class BestBuyDetailCrawler:
             xpaths = self.config.get_xpath_list('model_year', self.file_name)
 
             if not xpaths:
-                print(f"  [WARNING] No model_year xpath found in DB for {self.file_name}")
                 return None
 
             for xpath in xpaths:
@@ -1112,9 +1125,7 @@ class BestBuyDetailCrawler:
             # Step 1: "Not yet reviewed" 우선 감지 (Sponsored 섹션 제외)
             # 리뷰가 없는 제품을 먼저 처리하여 다른 섹션의 값이 잘못 추출되는 것을 방지
             not_reviewed_xpaths = self.config.get_xpath_list('not_yet_reviewed', self.file_name)
-            if not not_reviewed_xpaths:
-                print(f"  [WARNING] No not_yet_reviewed xpath in DB for {self.file_name}")
-            else:
+            if not_reviewed_xpaths:
                 for xpath in not_reviewed_xpaths:
                     elem = tree.xpath(xpath)
                     if elem:
@@ -1124,9 +1135,7 @@ class BestBuyDetailCrawler:
 
             # Step 2: visually-hidden에서 리뷰 수 추출 (Sponsored 섹션 제외)
             hidden_xpaths = self.config.get_xpath_list('count_of_reviews_hidden', self.file_name)
-            if not hidden_xpaths:
-                print(f"  [WARNING] No count_of_reviews_hidden xpath in DB for {self.file_name}")
-            else:
+            if hidden_xpaths:
                 for xpath in hidden_xpaths:
                     elem = tree.xpath(xpath)
                     if elem:
@@ -1152,9 +1161,7 @@ class BestBuyDetailCrawler:
 
             # Step 3: visible span에서 리뷰 수 추출 (Sponsored 섹션 제외)
             visible_xpaths = self.config.get_xpath_list('count_of_reviews_visible', self.file_name)
-            if not visible_xpaths:
-                print(f"  [WARNING] No count_of_reviews_visible xpath in DB for {self.file_name}")
-            else:
+            if visible_xpaths:
                 for xpath in visible_xpaths:
                     elem = tree.xpath(xpath)
                     if elem:
@@ -1676,6 +1683,18 @@ class BestBuyDetailCrawler:
         if not reviews_data:
             return None
         try:
+            def collect_review_texts(value, texts):
+                if isinstance(value, dict):
+                    for key in ['reviewText', 'text', 'comment', 'body', 'content', 'description']:
+                        text = value.get(key)
+                        if isinstance(text, str) and len(text.strip()) > 20:
+                            texts.append(text.strip())
+                    for child in value.values():
+                        collect_review_texts(child, texts)
+                elif isinstance(value, list):
+                    for child in value:
+                        collect_review_texts(child, texts)
+
             product = reviews_data.get('data', {}).get('productBySkuId', {})
             reviews_list = product.get('reviews', {})
 
@@ -1707,6 +1726,22 @@ class BestBuyDetailCrawler:
                     result = ' ||| '.join(formatted)
                     print(f"  [OK] GraphQL reviews: {len(formatted)} reviews, {len(result)} chars")
                     return result
+
+            texts = []
+            collect_review_texts(reviews_data, texts)
+            unique_texts = []
+            seen = set()
+            for text in texts:
+                key = re.sub(r'\s+', ' ', text).strip()
+                if key not in seen:
+                    seen.add(key)
+                    unique_texts.append(key)
+                if len(unique_texts) >= 20:
+                    break
+            if unique_texts:
+                result = ' ||| '.join([f"review{i} - {text}" for i, text in enumerate(unique_texts, 1)])
+                print(f"  [OK] GraphQL reviews fallback: {len(unique_texts)} reviews, {len(result)} chars")
+                return result
             return None
         except Exception as e:
             print(f"  [ERROR] GraphQL review parsing failed: {e}")
@@ -2551,45 +2586,50 @@ class BestBuyDetailCrawler:
                 gql_ai_summary = self.parse_graphql_ai_summary(gql_data)
                 gql_reviews = self.parse_graphql_reviews(gql_data)
 
+                if gql_reviews:
+                    detailed_reviews = gql_reviews
+                    print(f"  [INFO] Using GraphQL reviews; skipping review page DOM wait")
+
                 # 3) "See All Customer Reviews" 클릭 (re 파일과 동일 - 단순 JS 클릭)
-                self.page.run_js("window.scrollTo(0, document.body.scrollHeight * 0.7)")
-                time.sleep(1)
-                see_all_result = self.page.run_js('''
-                    var btns = document.querySelectorAll('button, a');
-                    for (var i = 0; i < btns.length; i++) {
-                        var text = btns[i].textContent.trim().toLowerCase();
-                        if (text.includes('see all') && text.includes('review')) {
-                            btns[i].scrollIntoView({behavior: "smooth", block: "center"});
-                            btns[i].click();
-                            return 'clicked: ' + btns[i].textContent.trim().substring(0, 60);
-                        }
-                    }
-                    return 'not found';
-                ''')
-                print(f"  [INFO] See All Reviews: {see_all_result}")
-
-                if see_all_result == 'not found':
-                    # 추가 스크롤 후 재시도 (re 파일과 동일)
-                    for scroll_pct in [0.8, 0.9, 1.0]:
-                        self.page.run_js(f"window.scrollTo(0, document.body.scrollHeight * {scroll_pct})")
-                        time.sleep(1.5)
-                        see_all_result = self.page.run_js('''
-                            var btns = document.querySelectorAll('button, a');
-                            for (var i = 0; i < btns.length; i++) {
-                                var text = btns[i].textContent.trim().toLowerCase();
-                                if (text.includes('see all') && text.includes('review')) {
-                                    btns[i].scrollIntoView({behavior: "smooth", block: "center"});
-                                    btns[i].click();
-                                    return 'clicked: ' + btns[i].textContent.trim().substring(0, 60);
-                                }
+                if not detailed_reviews:
+                    self.page.run_js("window.scrollTo(0, document.body.scrollHeight * 0.7)")
+                    time.sleep(1)
+                    see_all_result = self.page.run_js('''
+                        var btns = document.querySelectorAll('button, a');
+                        for (var i = 0; i < btns.length; i++) {
+                            var text = btns[i].textContent.trim().toLowerCase();
+                            if (text.includes('see all') && text.includes('review')) {
+                                btns[i].scrollIntoView({behavior: "smooth", block: "center"});
+                                btns[i].click();
+                                return 'clicked: ' + btns[i].textContent.trim().substring(0, 60);
                             }
-                            return 'not found';
-                        ''')
-                        if see_all_result != 'not found':
-                            print(f"  [INFO] See All Reviews (scroll {int(scroll_pct*100)}%): {see_all_result}")
-                            break
+                        }
+                        return 'not found';
+                    ''')
+                    print(f"  [INFO] See All Reviews: {see_all_result}")
 
-                if see_all_result != 'not found':
+                    if see_all_result == 'not found':
+                        # 추가 스크롤 후 재시도 (re 파일과 동일)
+                        for scroll_pct in [0.8, 0.9, 1.0]:
+                            self.page.run_js(f"window.scrollTo(0, document.body.scrollHeight * {scroll_pct})")
+                            time.sleep(1.5)
+                            see_all_result = self.page.run_js('''
+                                var btns = document.querySelectorAll('button, a');
+                                for (var i = 0; i < btns.length; i++) {
+                                    var text = btns[i].textContent.trim().toLowerCase();
+                                    if (text.includes('see all') && text.includes('review')) {
+                                        btns[i].scrollIntoView({behavior: "smooth", block: "center"});
+                                        btns[i].click();
+                                        return 'clicked: ' + btns[i].textContent.trim().substring(0, 60);
+                                    }
+                                }
+                                return 'not found';
+                            ''')
+                            if see_all_result != 'not found':
+                                print(f"  [INFO] See All Reviews (scroll {int(scroll_pct*100)}%): {see_all_result}")
+                                break
+
+                if not detailed_reviews and see_all_result != 'not found':
                     # 4) 리뷰 페이지 로딩 대기 (re 파일과 동일)
                     time.sleep(5)
                     print(f"  [INFO] Reviews page URL: {self.page.url[:100]}")
@@ -2657,11 +2697,6 @@ class BestBuyDetailCrawler:
                     if reviews:
                         detailed_reviews = ' ||| '.join(reviews)
                         print(f"  [OK] Detailed_Reviews: {collected} reviews, {len(detailed_reviews)} chars")
-
-                # GraphQL fallback (DOM 실패 시)
-                if not detailed_reviews and gql_reviews:
-                    detailed_reviews = gql_reviews
-                    print(f"  [INFO] Using GraphQL reviews as fallback")
 
                 print(f"  [✓] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
 

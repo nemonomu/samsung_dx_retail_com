@@ -53,7 +53,7 @@ class BestBuyPromotionCrawler:
         self.csv_output_path = os.path.join(self.csv_output_dir, 'bby_tv_pmt1_vpn_test.csv')
 
         # URL from config
-        self.url = self.config.get_url('promo_page', self.file_name)
+        self.url = self.config.get_url('promo_page', self.file_name) or 'https://www.bestbuy.com/site/all-tv-home-theater-on-sale/tvs-on-sale/pcmcat1720647543741.c'
 
         # Data validator 초기화
         session_start_time = os.environ.get('SESSION_START_TIME', datetime.now().strftime('%Y%m%d%H%M'))
@@ -515,9 +515,7 @@ class BestBuyPromotionCrawler:
             print(f"Best Buy TV Promotion Crawler (DrissionPage) (Batch ID: {self.batch_id})")
             print("="*80)
 
-            # DB 연결
-            if not self.connect_db():
-                return
+            self.connect_db()
 
             # 브라우저 설정 (DrissionPage)
             if not self.setup_browser():

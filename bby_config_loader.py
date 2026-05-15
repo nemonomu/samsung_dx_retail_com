@@ -64,8 +64,7 @@ class BbyConfigLoader:
             print(f"[CONFIG] Loaded {sum(len(v) for cat in self._configs.values() for v in cat.values())} config entries")
 
         except Exception as e:
-            print(f"[CONFIG ERROR] Failed to load configs: {e}")
-            raise
+            print(f"[CONFIG WARNING] Failed to load configs; using code defaults: {e}")
 
     def get(self, category, key, file_name=None, default=None):
         """

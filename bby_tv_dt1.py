@@ -2891,9 +2891,7 @@ class BestBuyDetailCrawler:
             print(f"Best Buy TV Detail Page Crawler (DrissionPage) (Batch ID: {self.batch_id})")
             print("="*80)
 
-            # DB connection
-            if not self.connect_db():
-                return
+            self.connect_db()
 
             # URLs 가져오기
             urls = self.get_recent_urls()

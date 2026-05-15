@@ -332,9 +332,7 @@ class BestBuyTrendCrawler:
             print(f"Batch ID: {self.batch_id}")
             print("="*80)
 
-            # DB 연결
-            if not self.connect_db():
-                return
+            self.connect_db()
 
             # 브라우저 설정
             if not self.setup_browser():

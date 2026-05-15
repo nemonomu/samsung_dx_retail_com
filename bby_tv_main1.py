@@ -106,7 +106,18 @@ class BestBuyTVCrawler:
             self.page = None
 
     def load_page_urls(self):
-        """Load page URLs from database"""
+        """Load page URLs from database, or use defaults when DB is unavailable."""
+        default_urls = [
+            (1, 'https://www.bestbuy.com/site/searchpage.jsp?st=tv'),
+            (2, 'https://www.bestbuy.com/site/searchpage.jsp?st=tv&page=2'),
+            (3, 'https://www.bestbuy.com/site/searchpage.jsp?st=tv&page=3'),
+            (4, 'https://www.bestbuy.com/site/searchpage.jsp?st=tv&page=4'),
+            (5, 'https://www.bestbuy.com/site/searchpage.jsp?st=tv&page=5'),
+            (6, 'https://www.bestbuy.com/site/searchpage.jsp?st=tv&page=6'),
+        ]
+        if not self.db_conn:
+            print("[INFO] DB unavailable - using default Best Buy TV main URLs")
+            return default_urls
         try:
             cursor = self.db_conn.cursor()
             table_name = self.config.get_table('main_page_url')
@@ -123,8 +134,8 @@ class BestBuyTVCrawler:
             return urls
 
         except Exception as e:
-            print(f"[ERROR] Failed to load page URLs: {e}")
-            return []
+            print(f"[WARNING] Failed to load page URLs from DB; using defaults: {e}")
+            return default_urls
 
     def extract_text_safe(self, element, xpath):
         """Safely extract text from element using xpath"""
@@ -434,9 +445,7 @@ class BestBuyTVCrawler:
             print(f"Best Buy TV Main Page Crawler (Modified) (Batch ID: {self.batch_id})")
             print("="*80)
 
-            # Connect to database
-            if not self.connect_db():
-                return
+            self.connect_db()
 
             # Load page URLs
             page_urls = self.load_page_urls()

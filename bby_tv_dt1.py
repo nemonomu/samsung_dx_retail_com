@@ -118,7 +118,7 @@ class BestBuyDetailCrawler:
             print("[OK] Database connected")
             return True
         except Exception as e:
-            print(f"[ERROR] Database connection failed: {e}")
+            print("[INFO] DB unavailable - using CSV/default fallback")
             return False
 
     def get_item_mst_data(self, item):
@@ -215,22 +215,24 @@ class BestBuyDetailCrawler:
         return self.setup_browser()
 
     def check_db_connection(self):
-        """DB 커넥션 상태 확인 및 재연결"""
+        """DB 커넥션 상태 확인. VPN CSV 테스트에서는 DB가 없어도 계속 진행."""
+        if not self.db_conn:
+            return True
         try:
             cursor = self.db_conn.cursor()
             cursor.execute("SELECT 1")
             cursor.close()
             return True
         except Exception:
-            print("[WARNING] DB connection lost, reconnecting...")
+            print("[INFO] DB connection unavailable - continuing without DB")
             try:
                 self.db_conn = psycopg2.connect(**DB_CONFIG)
                 self.db_conn.autocommit = True
                 print("[OK] DB reconnected")
                 return True
             except Exception as e:
-                print(f"[ERROR] DB reconnection failed: {e}")
-                return False
+                self.db_conn = None
+                return True
 
     def get_recent_urls(self):
         """최신 batch_id의 product URLs와 추가 data 가져오기"""
@@ -2957,10 +2959,7 @@ class BestBuyDetailCrawler:
                         print(f"{'='*80}")
                         time.sleep(wait_time)
 
-                    # DB 커넥션 체크
-                    if not self.check_db_connection():
-                        print("[ERROR] DB reconnection failed. Stopping.")
-                        break
+                    self.check_db_connection()
 
                     # 다른 카테고리 상품 페이지 접속 (세션 워밍업)
                     self._warmup_with_different_page()
@@ -2998,9 +2997,7 @@ class BestBuyDetailCrawler:
                             print(f"{'='*80}")
                             time.sleep(wait_time)
 
-                        if not self.check_db_connection():
-                            print("[ERROR] DB reconnection failed. Stopping.")
-                            break
+                        self.check_db_connection()
 
                         # 다른 카테고리 상품 페이지 접속 (세션 워밍업)
                         self._warmup_with_different_page()

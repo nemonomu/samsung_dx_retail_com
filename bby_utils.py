@@ -76,7 +76,7 @@ def load_excluded_items(table_name='tv_item_mst'):
             print(f"[CONFIG] Loaded {len(excluded_items)} excluded items (is_product=false)")
 
     except Exception as e:
-        print(f"[CONFIG WARNING] Failed to load excluded items: {e}")
+        print("[CONFIG] Excluded item list unavailable; continuing without exclusions")
 
     return excluded_items
 

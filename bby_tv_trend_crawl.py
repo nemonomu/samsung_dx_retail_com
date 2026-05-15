@@ -44,7 +44,7 @@ class BestBuyTrendCrawler:
             print("[OK] Database connected")
             return True
         except Exception as e:
-            print(f"[ERROR] Database connection failed: {e}")
+            print("[INFO] DB unavailable - using CSV/default fallback")
             return False
 
     def setup_browser(self):

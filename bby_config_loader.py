@@ -64,7 +64,7 @@ class BbyConfigLoader:
             print(f"[CONFIG] Loaded {sum(len(v) for cat in self._configs.values() for v in cat.values())} config entries")
 
         except Exception as e:
-            print(f"[CONFIG WARNING] Failed to load configs; using code defaults: {e}")
+            print("[CONFIG] DB config unavailable; using code defaults")
 
     def get(self, category, key, file_name=None, default=None):
         """
@@ -100,7 +100,7 @@ class BbyConfigLoader:
             return default
 
         except Exception as e:
-            print(f"[CONFIG WARNING] get({category}, {key}, {file_name}) failed: {e}")
+            print(f"[CONFIG] Using default for {category}.{key}")
             return default
 
     def get_int(self, category, key, file_name=None, default=0):
@@ -143,7 +143,7 @@ class BbyConfigLoader:
             return result if result else None
 
         except Exception as e:
-            print(f"[CONFIG WARNING] get_xpath_list({key}, {file_name}) failed: {e}")
+            print(f"[CONFIG] Using default xpath list for {key}")
             return None
 
     def get_selectors(self, key, file_name):

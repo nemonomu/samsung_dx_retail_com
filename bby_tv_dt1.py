@@ -137,20 +137,6 @@ class BestBuyDetailCrawler:
             cursor.close()
             if row:
                 return {'screen_size': row[0], 'estimated_annual_electricity_use': row[1]}
-            page_text = tree.text_content()
-            if re.search(r'reviews?\s+from\s+', page_text, re.IGNORECASE):
-                return 'EXTERNAL_REVIEWS'
-            if "Not yet reviewed" in page_text:
-                return 0
-            for pattern in [
-                r'with\s+([\d,]+)\s+reviews',
-                r'\(([\d,]+)\s*reviews?\)',
-                r'([\d,]+)\s+reviews'
-            ]:
-                match = re.search(pattern, page_text, re.IGNORECASE)
-                if match:
-                    return match.group(1).replace(',', '')
-
             return None
         except Exception as e:
             print(f"  [WARNING] Failed to get item_mst data: {e}")
@@ -917,6 +903,22 @@ class BestBuyDetailCrawler:
                         print(f"  [✓] SKU (Model Number): {sku}")
                         return sku
 
+            labels = tree.xpath('//*[normalize-space()="Model Number"]')
+            for label in labels:
+                candidates = label.xpath('./following::*[normalize-space()][1]')
+                for candidate in candidates:
+                    sku = candidate.text_content().strip()
+                    if sku and sku != 'Model Number' and re.match(r'^[A-Za-z0-9][A-Za-z0-9._/-]{2,}$', sku):
+                        print(f"  [?? SKU (Model Number fallback): {sku}")
+                        return sku
+
+            text = re.sub(r'\s+', ' ', tree.text_content())
+            match = re.search(r'Model Number\s+([A-Za-z0-9][A-Za-z0-9._/-]{2,})', text)
+            if match:
+                sku = match.group(1).strip()
+                print(f"  [?? SKU (Model Number text fallback): {sku}")
+                return sku
+
             print(f"  [WARNING] SKU (Model Number) not found - using 'no sku'")
             return "no sku"
 
@@ -1220,6 +1222,45 @@ class BestBuyDetailCrawler:
             return None
         except Exception:
             return None
+
+    def extract_review_count_from_text(self, text):
+        """Extract review count from arbitrary rating/review text."""
+        if not text:
+            return None
+        for pattern in [
+            r'with\s+([\d,]+)\s+reviews',
+            r'\(([\d,]+)\s*reviews?\)',
+            r'([\d,]+)\s+reviews'
+        ]:
+            match = re.search(pattern, str(text), re.IGNORECASE)
+            if match:
+                return match.group(1).replace(',', '')
+        return None
+
+    def is_valid_review_text(self, text):
+        """Return True only for actual customer review body text."""
+        if not text:
+            return False
+        clean = re.sub(r'\s+', ' ', str(text)).strip()
+        if len(clean) < 40:
+            return False
+
+        lower = clean.lower()
+        boilerplate_phrases = [
+            'this reviewer received promo considerations',
+            'sweepstakes entry for writing a review',
+            "we've verified that this content was written",
+            'we’ve verified that this content was written',
+            'verified that this content was written',
+            'rating ',
+            'out of 5 stars with',
+            'would recommend to a friend',
+        ]
+        if any(phrase in lower for phrase in boilerplate_phrases):
+            return False
+        if re.search(r'^rating\s+[\d.]+\s+out of\s+5\s+stars', lower):
+            return False
+        return True
 
     def close_specifications_dialog(self):
         """Specification dialog close (DrissionPage)"""
@@ -1770,7 +1811,7 @@ class BestBuyDetailCrawler:
                         text = (review.get('reviewText') or review.get('text')
                                 or review.get('comment') or review.get('body')
                                 or review.get('content', '')).strip()
-                        if text:
+                        if self.is_valid_review_text(text):
                             formatted.append(f"review{i} - {text}")
                 if formatted:
                     result = ' ||| '.join(formatted)
@@ -1783,7 +1824,7 @@ class BestBuyDetailCrawler:
             seen = set()
             for text in texts:
                 key = re.sub(r'\s+', ' ', text).strip()
-                if key not in seen:
+                if self.is_valid_review_text(key) and key not in seen:
                     seen.add(key)
                     unique_texts.append(key)
                 if len(unique_texts) >= 20:
@@ -1853,6 +1894,28 @@ class BestBuyDetailCrawler:
                             return str(text).strip()
             return None
         except:
+            return None
+
+    def parse_graphql_review_count(self, captured_data):
+        """Extract review count from captured GraphQL payloads."""
+        try:
+            for payload in captured_data.values():
+                if not payload:
+                    continue
+                text = json.dumps(payload, ensure_ascii=False)
+                count = self.extract_review_count_from_text(text)
+                if count is not None:
+                    return count
+
+                for key in [
+                    'reviewCount', 'totalReviewCount', 'totalReviews',
+                    'reviewsCount', 'customerReviewCount'
+                ]:
+                    match = re.search(rf'"{key}"\s*:\s*"?([\d,]+)"?', text, re.IGNORECASE)
+                    if match:
+                        return match.group(1).replace(',', '')
+            return None
+        except Exception:
             return None
 
     def extract_reviews_from_js_dom(self):
@@ -2636,7 +2699,13 @@ class BestBuyDetailCrawler:
                 gql_top_mentions = self.parse_graphql_top_mentions(gql_data)
                 gql_recommendation = self.parse_graphql_recommendation(gql_data)
                 gql_ai_summary = self.parse_graphql_ai_summary(gql_data)
+                gql_count = self.parse_graphql_review_count(gql_data)
                 gql_reviews = self.parse_graphql_reviews(gql_data)
+
+                if gql_count is not None and str(count_of_reviews or '0') in ('0', 'None', ''):
+                    count_of_reviews = gql_count
+                    count_of_star_ratings = gql_count
+                    print(f"  [OK] Count_of_Reviews updated from GraphQL: {count_of_reviews}")
 
                 if gql_reviews:
                     detailed_reviews = gql_reviews
@@ -2732,9 +2801,16 @@ class BestBuyDetailCrawler:
                     while collected < 20:
                         page_reviews = self.page.run_js(review_dom_js)
                         if page_reviews:
+                            page_count = self.extract_review_count_from_text(' '.join(page_reviews))
+                            if page_count is not None and str(count_of_reviews or '0') in ('0', 'None', ''):
+                                count_of_reviews = page_count
+                                count_of_star_ratings = page_count
+                                print(f"  [OK] Count_of_Reviews updated from review page text: {count_of_reviews}")
                             for text in page_reviews:
                                 if collected >= 20:
                                     break
+                                if not self.is_valid_review_text(text):
+                                    continue
                                 collected += 1
                                 reviews.append(f"review{collected} - {text}")
                             print(f"  [INFO] Page {page_num}: {len(page_reviews)} reviews (total: {collected}/20)")

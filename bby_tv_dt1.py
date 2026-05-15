@@ -42,6 +42,7 @@ import re
 import os
 import sys
 import json
+import csv
 import psycopg2
 from datetime import datetime, timedelta
 import pytz
@@ -53,8 +54,6 @@ from alert_monitor import send_review_url_error_alert
 # Import database configuration
 from config import DB_CONFIG
 from bby_config_loader import get_config
-import pandas as pd
-from alert_monitor import monitor_and_alert, send_sku_renewed_alert
 
 
 class Tee:
@@ -90,6 +89,7 @@ class BestBuyDetailCrawler:
         # Config loader 초기화
         self.config = get_config()
         self.file_name = 'bby_tv_dt1'
+        self.csv_output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bby_tv_vpn_test.csv')
 
         self.max_skus = self.config.get_int('constant', 'max_products_detail', self.file_name, 300)
 
@@ -512,44 +512,13 @@ class BestBuyDetailCrawler:
 
             print(f"[OK] Total unique items from main/bsr/promo/trend: {len(all_urls)}")
 
-            # Filter out already processed URLs (세션 기반 - main_batch_id 이후 처리된 것만)
-            print("[INFO] Checking for already processed URLs (current session)...")
-            cursor = self.db_conn.cursor()
+            print("[INFO] VPN test mode: skipping DB processed-url filter")
+            print(f"[OK] URLs to process: {len(all_urls)}")
 
-            detail_table = self.config.get_table('detail_data') or 'bby_tv_crawl'
-            print(f"[INFO] Checking batch_id >= '{main_batch_id}' (session-based)")
+            if len(all_urls) == 0:
+                print("[ERROR] No URLs found!")
 
-            # 현재 세션(main_batch_id 이후)에서 수집된 URL 중 핵심 필드가 모두 있는 경우만 완료로 간주
-            cursor.execute(f"""
-                SELECT DISTINCT product_url
-                FROM {detail_table}
-                WHERE product_url IS NOT NULL
-                  AND batch_id >= %s
-                  AND retailer_sku_name IS NOT NULL
-                  AND final_sku_price IS NOT NULL
-            """, (main_batch_id,))
-
-            already_processed_urls = {row[0] for row in cursor.fetchall()}
-            print(f"[INFO] Found {len(already_processed_urls)} already processed URLs in current session")
-
-            cursor.close()
-
-            # Filter out already processed URLs
-            new_urls = [url_data for url_data in all_urls
-                        if url_data['product_url'] not in already_processed_urls]
-
-            # Summary
-            already_processed_count = len(all_urls) - len(new_urls)
-            print(f"[INFO] Already processed (skipped): {already_processed_count}")
-            print(f"[OK] New URLs to process: {len(new_urls)}")
-
-            if len(new_urls) == 0:
-                if len(all_urls) > 0:
-                    print("[WARNING] All URLs have been processed already in current session!")
-                else:
-                    print("[ERROR] No URLs found!")
-
-            return new_urls
+            return all_urls
 
         except Exception as e:
             print(f"[ERROR] Failed to load URLs: {e}")
@@ -2652,79 +2621,20 @@ class BestBuyDetailCrawler:
                    pick_up_availability, shipping_availability, delivery_availability,
                    sku_status, star_rating_source, promotion_type, promotion_position,
                    bsr_rank, main_rank, trend_rank, model_year, sku="no sku", similar_products=None):
-        """DB에 save"""
+        """VPN 테스트용 CSV 저장. DB에는 쓰지 않는다."""
         try:
-            print(f"  [DB] Saving to database...")
+            print(f"  [CSV] Saving to {self.csv_output_path}...")
             print(f"       Product: {retailer_sku_name[:60] if retailer_sku_name else 'N/A'}...")
             print(f"       Item (SKU): {item if item else 'N/A'}")
 
-            cursor = self.db_conn.cursor()
-
-            # Config에서 테이블명 가져오기
-            detail_table = self.config.get_table('detail_data') or 'bby_tv_crawl'
-            retail_com_table = self.config.get_table('retail_com') or 'tv_retail_com'
-            item_mst_table = self.config.get_table('item_master') or 'tv_item_mst'
             account_name = self.config.get_constant('account_name', None, 'Bestbuy')
-
-            # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
+            crawl_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            # Calculate crawl_datetime (format: 2025-11-04 03:00:27)
-            now = datetime.now()
-            crawl_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
-
-            # If "Not yet reviewed", set both to 0
             if star_rating_source == "Not yet reviewed":
                 count_of_star_ratings = 0
                 count_of_reviews = 0
 
-            # data 삽입
-            insert_query = f"""
-                INSERT INTO {detail_table}
-                (account_name, batch_id, page_type, "order", retailer_sku_name, item,
-                 Estimated_Annual_Electricity_Use, screen_size, count_of_reviews, Count_of_Star_Ratings, Top_Mentions,
-                 Detailed_Review_Content, Recommendation_Intent, product_url, crawl_datetime, calendar_week,
-                 final_sku_price, savings, original_sku_price, offer, pick_up_availability, shipping_availability,
-                 delivery_availability, sku_status, star_rating, promotion_type, promotion_position,
-                 bsr_rank, main_rank, trend_rank)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """
-
-            cursor.execute(insert_query, (
-                account_name,
-                self.batch_id,
-                page_type,
-                order,
-                retailer_sku_name,
-                item,
-                electricity_use,
-                screen_size,
-                count_of_reviews,
-                count_of_star_ratings,
-                top_mentions,
-                detailed_reviews,
-                recommendation_intent,
-                product_url,
-                crawl_datetime,
-                calendar_week,
-                final_sku_price,
-                savings,
-                original_sku_price,
-                offer,
-                pick_up_availability,
-                shipping_availability,
-                delivery_availability,
-                sku_status,
-                star_rating_source,
-                promotion_type,
-                promotion_position,
-                bsr_rank,
-                main_rank,
-                trend_rank
-            ))
-
-            # Also insert into unified tv_retail_com table
-            # Convert count_of_reviews to integer (remove commas if present)
             count_of_reviews_int = None
             if count_of_reviews is not None:
                 try:
@@ -2732,115 +2642,80 @@ class BestBuyDetailCrawler:
                 except:
                     count_of_reviews_int = None
 
-            # Data validation: If star_rating is "Not yet reviewed", count_of_reviews must be 0
             if star_rating_source and "not yet reviewed" in str(star_rating_source).lower():
                 if count_of_reviews_int != 0 and count_of_reviews_int is not None:
                     print(f"  [WARNING] Data inconsistency detected: star_rating='Not yet reviewed' but count_of_reviews={count_of_reviews_int}")
                     print(f"  [FIX] Setting count_of_reviews to 0")
                 count_of_reviews_int = 0
 
-            cursor.execute(f"""
-                INSERT INTO {retail_com_table}
-                (item, account_name, page_type, count_of_reviews, retailer_sku_name, product_url,
-                 star_rating, count_of_star_ratings, screen_size, sku_popularity,
-                 final_sku_price, original_sku_price, savings, discount_type, offer,
-                 pick_up_availability, shipping_availability, delivery_availability, shipping_info,
-                 available_quantity_for_purchase, inventory_status, sku_status, retailer_membership_discounts,
-                 detailed_review_content, summarized_review_content, top_mentions, recommendation_intent,
-                 main_rank, bsr_rank, trend_rank, rank_1, rank_2, promotion_position,
-                 number_of_ppl_purchased_yesterday, number_of_ppl_added_to_carts, number_of_units_purchased_past_month, retailer_sku_name_similar,
-                 estimated_annual_electricity_use, promotion_type, model_year,
-                 calendar_week, crawl_datetime)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (
-                item,
-                account_name,  # account_name
-                page_type,
-                count_of_reviews_int,  # Converted to integer
-                retailer_sku_name,
-                product_url,
-                star_rating_source,
-                count_of_star_ratings,
-                screen_size,
-                None,  # sku_popularity (BestBuy doesn't have this)
-                final_sku_price,
-                original_sku_price,
-                savings,
-                None,  # discount_type (BestBuy doesn't have this)
-                offer,
-                pick_up_availability,
-                shipping_availability,
-                delivery_availability,
-                None,  # shipping_info (BestBuy doesn't have this)
-                None,  # available_quantity_for_purchase (BestBuy doesn't have this)
-                None,  # inventory_status (BestBuy doesn't have this)
-                sku_status,
-                None,  # retailer_membership_discounts (BestBuy doesn't have this)
-                detailed_reviews,
-                summarized_review_content,  # AI 요약 리뷰
-                top_mentions,
-                recommendation_intent,
-                main_rank,
-                bsr_rank,
-                trend_rank,
-                None,  # rank_1 (BestBuy doesn't have this)
-                None,  # rank_2 (BestBuy doesn't have this)
-                promotion_position,
-                None,  # number_of_ppl_purchased_yesterday (BestBuy doesn't have this)
-                None,  # number_of_ppl_added_to_carts (BestBuy doesn't have this)
-                None,  # number_of_units_purchased_past_month (BestBuy doesn't have this)
-                (' ||| '.join([p.get('product_name', '') for p in similar_products if p.get('product_name')]) or None) if similar_products else None,  # retailer_sku_name_similar
-                electricity_use,
-                promotion_type,
-                model_year,
-                calendar_week,
-                crawl_datetime
-            ))
+            similar_names = None
+            if similar_products:
+                similar_names = ' ||| '.join([p.get('product_name', '') for p in similar_products if p.get('product_name')]) or None
 
-            # Insert into tv_item_mst (update sku, screen_size and electricity_use on conflict)
-            if item:
-                # Check existing sku before upsert
-                cursor.execute(f"""
-                    SELECT sku FROM {item_mst_table} WHERE item = %s
-                """, (item,))
-                existing_row = cursor.fetchone()
-                existing_sku = existing_row[0] if existing_row else None
+            fieldnames = [
+                'account_name', 'batch_id', 'page_type', 'order', 'retailer_sku_name',
+                'item', 'sku', 'product_url', 'crawl_datetime', 'calendar_week',
+                'star_rating', 'count_of_reviews', 'count_of_reviews_int',
+                'count_of_star_ratings', 'screen_size', 'estimated_annual_electricity_use',
+                'final_sku_price', 'original_sku_price', 'savings', 'offer',
+                'pick_up_availability', 'shipping_availability', 'delivery_availability',
+                'sku_status', 'top_mentions', 'detailed_review_content',
+                'summarized_review_content', 'recommendation_intent', 'main_rank',
+                'bsr_rank', 'trend_rank', 'promotion_position', 'promotion_type',
+                'model_year', 'retailer_sku_name_similar'
+            ]
+            row = {
+                'account_name': account_name,
+                'batch_id': self.batch_id,
+                'page_type': page_type,
+                'order': order,
+                'retailer_sku_name': retailer_sku_name,
+                'item': item,
+                'sku': sku,
+                'product_url': product_url,
+                'crawl_datetime': crawl_datetime,
+                'calendar_week': calendar_week,
+                'star_rating': star_rating_source,
+                'count_of_reviews': count_of_reviews,
+                'count_of_reviews_int': count_of_reviews_int,
+                'count_of_star_ratings': count_of_star_ratings,
+                'screen_size': screen_size,
+                'estimated_annual_electricity_use': electricity_use,
+                'final_sku_price': final_sku_price,
+                'original_sku_price': original_sku_price,
+                'savings': savings,
+                'offer': offer,
+                'pick_up_availability': pick_up_availability,
+                'shipping_availability': shipping_availability,
+                'delivery_availability': delivery_availability,
+                'sku_status': sku_status,
+                'top_mentions': top_mentions,
+                'detailed_review_content': detailed_reviews,
+                'summarized_review_content': summarized_review_content,
+                'recommendation_intent': recommendation_intent,
+                'main_rank': main_rank,
+                'bsr_rank': bsr_rank,
+                'trend_rank': trend_rank,
+                'promotion_position': promotion_position,
+                'promotion_type': promotion_type,
+                'model_year': model_year,
+                'retailer_sku_name_similar': similar_names
+            }
 
-                cursor.execute(f"""
-                    INSERT INTO {item_mst_table} (item, product_url, sku, account_name, screen_size, estimated_annual_electricity_use)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (item) DO UPDATE SET
-                        sku = EXCLUDED.sku,
-                        product_url = EXCLUDED.product_url,
-                        screen_size = COALESCE({item_mst_table}.screen_size, EXCLUDED.screen_size),
-                        estimated_annual_electricity_use = COALESCE({item_mst_table}.estimated_annual_electricity_use, EXCLUDED.estimated_annual_electricity_use)
-                """, (item, product_url, sku, account_name, screen_size, electricity_use))
-                print(f"  [DB] ✓ {item_mst_table} upsert (item: {item}, sku: {sku}, screen_size: {screen_size}, electricity: {electricity_use})")
+            file_exists = os.path.exists(self.csv_output_path)
+            with open(self.csv_output_path, 'a', newline='', encoding='utf-8-sig') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                if not file_exists or os.path.getsize(self.csv_output_path) == 0:
+                    writer.writeheader()
+                writer.writerow(row)
 
-                # Track sku renewal
-                if existing_sku and sku and existing_sku != sku:
-                    self.sku_updated_records.append({
-                        'account_name': account_name,
-                        'item': item,
-                        'product_url': product_url,
-                        'old_sku': existing_sku,
-                        'new_sku': sku
-                    })
-                    print(f"  [INFO] SKU renewed: {existing_sku} -> {sku}")
-
-            cursor.close()
-            print(f"  [DB] ✓ Successfully saved to {detail_table} + {retail_com_table} + {item_mst_table}")
+            print(f"  [CSV] ✓ Saved VPN test row")
             return True
 
         except Exception as e:
-            # 모든 에러를 명확하게 출력 (중복 키 포함)
-            if 'duplicate key' in str(e):
-                print(f"  [WARNING] Duplicate key - product already exists in DB")
-                print(f"            URL: {product_url[:80] if product_url else 'N/A'}...")
-            else:
-                print(f"  [ERROR] DB save failed: {e}")
-                import traceback
-                traceback.print_exc()
+            print(f"  [ERROR] CSV save failed: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def cleanup_old_logs(self, log_dir, days=30):
@@ -2900,10 +2775,8 @@ class BestBuyDetailCrawler:
             # 자동 재시도 설정
             MAX_RETRIES = 5          # 최대 재시도 횟수
             INITIAL_WAIT = 1200      # 대기 시간 (20분)
-            RESTART_EVERY = 10       # N건마다 브라우저 재시작 (세션 초기화)
             retry_count = 0          # 현재 재시도 횟수
             consecutive_fails = 0    # 연속 실패 횟수
-            since_restart = 0        # 마지막 재시작 이후 수집 건수
 
             i = 0
             while i < len(urls):
@@ -2963,13 +2836,6 @@ class BestBuyDetailCrawler:
                     success_count += 1
                     consecutive_fails = 0
                     retry_count = 0
-                    since_restart += 1
-
-                    # 일정 건수마다 다른 페이지 접속 (세션 유지 + 패턴 분산)
-                    if since_restart >= RESTART_EVERY:
-                        print(f"\n[INFO] {RESTART_EVERY}건 수집 완료 - 다른 카테고리 페이지로 세션 워밍업")
-                        self._warmup_with_different_page()
-                        since_restart = 0
 
                 else:
                     # 일반 실패 (h1 not found 등) → skip하고 다음 URL로
@@ -3054,51 +2920,7 @@ class BestBuyDetailCrawler:
             else:
                 print("\n[OK] No data quality issues detected")
 
-            # Send alert email
-            try:
-                cursor = self.db_conn.cursor()
-                retail_com_table = self.config.get_table('retail_com') or 'tv_retail_com'
-                account_name = self.config.get_constant('account_name', None, 'Bestbuy')
-                cursor.execute(f"""
-                    SELECT retailer_sku_name, star_rating, count_of_star_ratings, count_of_reviews,
-                           screen_size, sku_popularity, final_sku_price, original_sku_price,
-                           savings, discount_type, offer, pick_up_availability,
-                           shipping_availability, delivery_availability, shipping_info,
-                           available_quantity_for_purchase, inventory_status, sku_status,
-                           retailer_membership_discounts, detailed_review_content, summarized_review_content,
-                           top_mentions, recommendation_intent, main_rank, bsr_rank, trend_rank,
-                           rank_1, rank_2, promotion_position, number_of_ppl_purchased_yesterday,
-                           number_of_ppl_added_to_carts, number_of_units_purchased_past_month,
-                           retailer_sku_name_similar, estimated_annual_electricity_use, promotion_type, model_year
-                    FROM {retail_com_table}
-                    WHERE account_name = %s
-                    AND crawl_datetime::timestamp >= NOW() - INTERVAL '4 hours'
-                """, (account_name,))
-                rows = cursor.fetchall()
-                columns = [
-                    'retailer_sku_name', 'star_rating', 'count_of_star_ratings', 'count_of_reviews',
-                    'screen_size', 'sku_popularity', 'final_sku_price', 'original_sku_price',
-                    'savings', 'discount_type', 'offer', 'pick_up_availability',
-                    'shipping_availability', 'delivery_availability', 'shipping_info',
-                    'available_quantity_for_purchase', 'inventory_status', 'sku_status',
-                    'retailer_membership_discounts', 'detailed_review_content', 'summarized_review_content',
-                    'top_mentions', 'recommendation_intent', 'main_rank', 'bsr_rank', 'trend_rank',
-                    'rank_1', 'rank_2', 'promotion_position', 'number_of_ppl_purchased_yesterday',
-                    'number_of_ppl_added_to_carts', 'number_of_units_purchased_past_month',
-                    'retailer_sku_name_similar', 'estimated_annual_electricity_use', 'promotion_type', 'model_year'
-                ]
-                results_df = pd.DataFrame(rows, columns=columns)
-                cursor.close()
-
-                monitor_and_alert('bestbuy', len(urls), results_df,
-                                 screen_size_mismatch_records=self.screen_size_mismatch_records,
-                                 electricity_use_mismatch_records=self.electricity_use_mismatch_records)
-
-                # Send SKU renewed alert if any
-                if self.sku_updated_records:
-                    send_sku_renewed_alert('BestBuy TV', self.sku_updated_records)
-            except Exception as e:
-                print(f"[WARNING] Failed to send alert: {e}")
+            print(f"\n[INFO] VPN test CSV saved at: {self.csv_output_path}")
 
         except Exception as e:
             print(f"[ERROR] crawler execution error: {e}")

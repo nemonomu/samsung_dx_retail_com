@@ -89,7 +89,9 @@ class BestBuyDetailCrawler:
         # Config loader 초기화
         self.config = get_config()
         self.file_name = 'bby_tv_dt1'
-        self.csv_output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bby_tv_vpn_test.csv')
+        self.csv_output_dir = r'C:\samsung_dx_retail_com\bby_vpn'
+        os.makedirs(self.csv_output_dir, exist_ok=True)
+        self.csv_output_path = os.path.join(self.csv_output_dir, 'bby_tv_vpn_test.csv')
 
         self.max_skus = self.config.get_int('constant', 'max_products_detail', self.file_name, 300)
 
@@ -252,7 +254,7 @@ class BestBuyDetailCrawler:
                     return url
 
             def _read_csv_rows(filename):
-                path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+                path = os.path.join(self.csv_output_dir, filename)
                 if not os.path.exists(path) or os.path.getsize(path) == 0:
                     return []
                 with open(path, newline='', encoding='utf-8-sig') as csvfile:

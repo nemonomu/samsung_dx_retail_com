@@ -29,7 +29,9 @@ class BestBuyTrendCrawler:
         # Config loader 초기화
         self.config = get_config()
         self.file_name = 'bby_tv_trend_crawl'
-        self.csv_output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bby_tv_trend_crawl_vpn_test.csv')
+        self.csv_output_dir = r'C:\samsung_dx_retail_com\bby_vpn'
+        os.makedirs(self.csv_output_dir, exist_ok=True)
+        self.csv_output_path = os.path.join(self.csv_output_dir, 'bby_tv_trend_crawl_vpn_test.csv')
 
         # Load excluded items (is_product=false)
         self.excluded_items = load_excluded_items()

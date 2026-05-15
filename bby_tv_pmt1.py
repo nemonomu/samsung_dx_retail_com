@@ -48,7 +48,9 @@ class BestBuyPromotionCrawler:
         # Config loader 초기화
         self.config = get_config()
         self.file_name = 'bby_tv_pmt1'
-        self.csv_output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bby_tv_pmt1_vpn_test.csv')
+        self.csv_output_dir = r'C:\samsung_dx_retail_com\bby_vpn'
+        os.makedirs(self.csv_output_dir, exist_ok=True)
+        self.csv_output_path = os.path.join(self.csv_output_dir, 'bby_tv_pmt1_vpn_test.csv')
 
         # URL from config
         self.url = self.config.get_url('promo_page', self.file_name)

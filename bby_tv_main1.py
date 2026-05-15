@@ -200,7 +200,11 @@ class BestBuyTVCrawler:
 
             # 제품 링크 개수 확인 - 부족하면 추가 대기
             css_product_link = 'css:' + self.config.get('css', 'product_link', self.file_name, '.product-list-item-link')
-            min_product_count = self.config.get_int('constant', 'min_product_count', self.file_name, 20)
+            expected_product_count = self.config.get_int('constant', 'expected_product_count', self.file_name, 24)
+            min_product_count = max(
+                self.config.get_int('constant', 'min_product_count', self.file_name, 20),
+                expected_product_count
+            )
             product_load_retry = self.config.get_retry('product_load', self.file_name, 3)
             extra_scroll_wait = self.config.get_float('timing', 'extra_scroll_wait', self.file_name, 3)
 
@@ -237,13 +241,15 @@ class BestBuyTVCrawler:
             tree = html.fromstring(page_source)
 
             # Find all product containers
-            xpath_container = self.config.get('xpath', 'product_container', self.file_name, '//li[contains(@class, "product-list-item") and contains(@class, "grid-view")]')
-            xpath_product_link = self.config.get('xpath', 'product_link', self.file_name, './/a[@class="product-list-item-link"]')
+            xpath_container = self.config.get('xpath', 'product_container', self.file_name, '//li[contains(@class, "product-list-item")]')
+            xpath_product_link = self.config.get('xpath', 'product_link', self.file_name, './/a[contains(@class, "product-list-item-link") or @data-testid="product-title" or (contains(@href, "/site/") and contains(@href, ".p"))]')
             all_containers = tree.xpath(xpath_container)
 
             # Filter containers that have product links (more reliable)
             containers = [c for c in all_containers if c.xpath(xpath_product_link)]
             print(f"[INFO] Found {len(all_containers)} total containers, {len(containers)} with product links")
+            if len(containers) < expected_product_count:
+                print(f"[WARNING] Expected about {expected_product_count} products, parsed {len(containers)} containers")
 
             collected_count = 0
 
@@ -256,7 +262,7 @@ class BestBuyTVCrawler:
                 './/h2//a',
                 './/a[contains(@href, "/site/") and contains(@href, ".p")]'
             ]
-            xpath_product_url = self.config.get('xpath', 'product_url', self.file_name, './/a[@class="product-list-item-link"]/@href')
+            xpath_product_url = self.config.get('xpath', 'product_url', self.file_name, './/a[contains(@class, "product-list-item-link") or @data-testid="product-title" or (contains(@href, "/site/") and contains(@href, ".p"))]/@href')
             xpath_offer = self.config.get('xpath', 'offer', self.file_name, './/div[@data-testid="plus-x-offers"]//span[@class="font-sans text-default text-style-body-md-400"]')
             xpath_pickup = self.config.get('xpath', 'pickup_availability', self.file_name)
             xpath_shipping = self.config.get('xpath', 'shipping_availability', self.file_name)

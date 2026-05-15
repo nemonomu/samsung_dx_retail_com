@@ -20,15 +20,21 @@ import subprocess
 import sys
 import time
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from alert_monitor import send_crawl_alert
 from bby_config_loader import get_config
 
 class IntegratedCrawler:
-    def __init__(self):
+    def __init__(self, max_runtime_seconds=None):
         self.batch_id = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.session_start_time = datetime.now().strftime('%Y%m%d%H%M')  # YYYYMMDDHHMM
         self.overall_start_time = datetime.now()
+        self.max_runtime_seconds = max_runtime_seconds
+        self.stop_at = (
+            self.overall_start_time + timedelta(seconds=max_runtime_seconds)
+            if max_runtime_seconds
+            else None
+        )
         self.results = {
             'main1': {'success': None, 'duration': None},
             'bsr1': {'success': None, 'duration': None},
@@ -45,6 +51,22 @@ class IntegratedCrawler:
         # 환경변수 설정 (각 크롤러가 사용)
         os.environ['SESSION_START_TIME'] = self.session_start_time
 
+    def _remaining_seconds(self):
+        if not self.stop_at:
+            return None
+        remaining = (self.stop_at - datetime.now()).total_seconds()
+        return max(0, int(remaining))
+
+    def _time_limit_reached(self):
+        return self.stop_at is not None and datetime.now() >= self.stop_at
+
+    def _sleep_between_stages(self, seconds):
+        remaining = self._remaining_seconds()
+        if remaining is None:
+            time.sleep(seconds)
+        elif remaining > 0:
+            time.sleep(min(seconds, remaining))
+
     def run_crawler(self, script_name, description):
         """Run a crawler script and return success status with timing"""
         start_time = datetime.now()
@@ -56,11 +78,25 @@ class IntegratedCrawler:
 
         try:
             # Config에서 timeout 가져오기
-            subprocess_timeout = self.config.get_int('timing', 'subprocess_timeout', self.file_name, 21600)
+            configured_timeout = self.config.get_int('timing', 'subprocess_timeout', self.file_name, 21600)
+            remaining_seconds = self._remaining_seconds()
+            if remaining_seconds is not None:
+                if remaining_seconds <= 0:
+                    print(f"[INFO] Max runtime reached before starting {description}. Skipping.")
+                    return False, 0
+                subprocess_timeout = min(configured_timeout, remaining_seconds)
+                print(f"[INFO] Max runtime stop time: {self.stop_at.strftime('%Y-%m-%d %H:%M:%S')}")
+                print(f"[INFO] Remaining runtime for this stage: {subprocess_timeout} seconds")
+            else:
+                subprocess_timeout = configured_timeout
+
+            command = [sys.executable, '-u', script_name]
+            if script_name == 'bby_tv_dt1.py' and self.stop_at:
+                command.extend(['until', self.stop_at.strftime('%Y%m%d%H%M%S')])
 
             # Run with real-time output (no buffering)
             result = subprocess.run(
-                [sys.executable, '-u', script_name],  # -u: unbuffered output
+                command,  # -u: unbuffered output
                 stdout=None,  # Inherit parent's stdout for real-time output
                 stderr=None,  # Inherit parent's stderr
                 text=True,
@@ -96,6 +132,9 @@ class IntegratedCrawler:
         print(f"Batch ID: {self.batch_id}")
         print(f"Session ID: {self.session_start_time}")
         print(f"Overall Start Time: {self.overall_start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        if self.stop_at:
+            print(f"Max Runtime: {self.max_runtime_seconds} seconds ({self.max_runtime_seconds / 3600:.2f} hours)")
+            print(f"Stop At: {self.stop_at.strftime('%Y-%m-%d %H:%M:%S')}")
         print("="*80)
 
         # Config에서 크롤러 간 대기 시간 가져오기
@@ -112,7 +151,10 @@ class IntegratedCrawler:
         if not success:
             print("\n[WARNING] Main crawler failed, but continuing with other crawlers...")
 
-        time.sleep(between_crawlers_wait)  # Brief pause between crawlers
+        if self._time_limit_reached():
+            print("\n[INFO] Max runtime reached after main crawler. Stopping sequence.")
+            return False
+        self._sleep_between_stages(between_crawlers_wait)  # Brief pause between crawlers
 
         # Step 2: Best-selling page crawler
         success, duration = self.run_crawler(
@@ -125,7 +167,10 @@ class IntegratedCrawler:
         if not success:
             print("\n[WARNING] BSR crawler failed, but continuing with other crawlers...")
 
-        time.sleep(between_crawlers_wait)
+        if self._time_limit_reached():
+            print("\n[INFO] Max runtime reached after BSR crawler. Stopping sequence.")
+            return False
+        self._sleep_between_stages(between_crawlers_wait)
 
         # Step 3: Promotion page crawler
         success, duration = self.run_crawler(
@@ -138,7 +183,10 @@ class IntegratedCrawler:
         if not success:
             print("\n[WARNING] Promotion crawler failed, but continuing with trend crawler...")
 
-        time.sleep(between_crawlers_wait)
+        if self._time_limit_reached():
+            print("\n[INFO] Max runtime reached after promotion crawler. Stopping sequence.")
+            return False
+        self._sleep_between_stages(between_crawlers_wait)
 
         # Step 4: Trending deals crawler
         success, duration = self.run_crawler(
@@ -151,7 +199,10 @@ class IntegratedCrawler:
         if not success:
             print("\n[WARNING] Trend crawler failed, but continuing with detail crawler...")
 
-        time.sleep(between_crawlers_wait)
+        if self._time_limit_reached():
+            print("\n[INFO] Max runtime reached after trend crawler. Stopping sequence.")
+            return False
+        self._sleep_between_stages(between_crawlers_wait)
 
         # Step 5: Detail page crawler (uses URLs from above)
         success, duration = self.run_crawler(
@@ -185,11 +236,34 @@ class IntegratedCrawler:
         # Return overall success status
         return all(r['success'] for r in self.results.values())
 
+def parse_runtime_limit(args):
+    """Parse runtime limit args: 6 hours, 6 hour, 6h, --max-hours 6."""
+    if not args:
+        return None
+
+    normalized = [arg.strip().lower() for arg in args if arg.strip()]
+    if not normalized:
+        return None
+
+    try:
+        if normalized[0] in ('--max-hours', '--max-runtime-hours', '--hours') and len(normalized) >= 2:
+            return int(float(normalized[1]) * 3600)
+        if normalized[0].endswith('h') and normalized[0][:-1]:
+            return int(float(normalized[0][:-1]) * 3600)
+        if len(normalized) >= 2 and normalized[1] in ('hour', 'hours', 'hr', 'hrs', 'h'):
+            return int(float(normalized[0]) * 3600)
+    except ValueError:
+        print(f"[WARNING] Invalid max runtime arguments: {' '.join(args)}")
+
+    print("[INFO] No max runtime limit applied. Usage: python bby_tv_crawl.py 6 hours")
+    return None
+
 def main():
     """Main execution"""
     crawler = None
     try:
-        crawler = IntegratedCrawler()
+        max_runtime_seconds = parse_runtime_limit(sys.argv[1:])
+        crawler = IntegratedCrawler(max_runtime_seconds=max_runtime_seconds)
         success = crawler.run()
 
         # Calculate total duration

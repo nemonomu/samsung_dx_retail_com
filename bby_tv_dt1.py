@@ -92,6 +92,8 @@ class BestBuyDetailCrawler:
         self.csv_output_dir = r'C:\samsung_dx_retail_com\bby_vpn'
         os.makedirs(self.csv_output_dir, exist_ok=True)
         self.csv_output_path = os.path.join(self.csv_output_dir, 'bby_tv_vpn_test.csv')
+        if os.path.exists(self.csv_output_path):
+            os.remove(self.csv_output_path)
 
         self.max_skus = self.config.get_int('constant', 'max_products_detail', self.file_name, 300)
 
@@ -1183,6 +1185,42 @@ class BestBuyDetailCrawler:
             print(f"  [ERROR] Count_of_Reviews extraction failed: {e}")
             return None
 
+    def extract_count_of_reviews_from_page_js(self):
+        """Extract review count from rendered DOM text/attributes without DB xpaths."""
+        try:
+            texts = self.page.run_js('''
+                var values = [];
+                document.querySelectorAll('a, button, span, p, div').forEach(function(el) {
+                    var text = (el.textContent || '').trim();
+                    var aria = (el.getAttribute('aria-label') || '').trim();
+                    var title = (el.getAttribute('title') || '').trim();
+                    [text, aria, title].forEach(function(v) {
+                        if (v && /review|rating|stars/i.test(v)) values.push(v);
+                    });
+                });
+                return values.slice(0, 300);
+            ''') or []
+            joined = ' '.join(texts)
+            if re.search(r'reviews?\s+from\s+', joined, re.IGNORECASE):
+                return 'EXTERNAL_REVIEWS'
+            if 'Not yet reviewed' in joined:
+                return 0
+            for pattern in [
+                r'with\s+([\d,]+)\s+reviews',
+                r'\(([\d,]+)\s*reviews?\)',
+                r'([\d,]+)\s+reviews'
+            ]:
+                match = re.search(pattern, joined, re.IGNORECASE)
+                if match:
+                    return match.group(1).replace(',', '')
+            compact = re.sub(r'\s+', '', joined)
+            match = re.search(r'\d(?:\.\d)?\(?([\d,]{2,})\)?', compact)
+            if match:
+                return match.group(1).replace(',', '')
+            return None
+        except Exception:
+            return None
+
     def close_specifications_dialog(self):
         """Specification dialog close (DrissionPage)"""
         try:
@@ -1585,28 +1623,40 @@ class BestBuyDetailCrawler:
         try:
             self.page.listen.start('graphql')
 
-            # rating link 클릭 (메인 제품의 리뷰 링크)
+            # rating/review link 클릭. VPN 렌더링에서는 rating link가 안 보이고
+            # See all reviews 버튼만 보이는 경우가 있어 둘 다 시도한다.
             click_result = self.page.run_js('''
-                var ratingLink = document.querySelector(
-                    '.price-ratings a[href*="customerreviews"], '
-                    + '.c-stars-reviews a, '
-                    + 'a[href*="tabbed-customerreviews"]'
-                );
-                if (ratingLink) {
-                    ratingLink.scrollIntoView({behavior: "smooth", block: "center"});
-                    ratingLink.click();
-                    return 'clicked: ' + ratingLink.textContent.trim().substring(0, 50);
-                }
-                var links = document.querySelectorAll('a');
-                for (var i = 0; i < links.length; i++) {
-                    var text = links[i].textContent.trim().toLowerCase();
-                    var href = links[i].href || '';
-                    if (text.includes('review') && href.includes('customerreviews')
-                        && !text.includes('write')) {
-                        links[i].scrollIntoView({behavior: "smooth", block: "center"});
-                        links[i].click();
-                        return 'clicked: ' + links[i].textContent.trim().substring(0, 50);
+                function clickReviewCandidate() {
+                    var direct = document.querySelector(
+                        '.price-ratings a[href*="customerreviews"], '
+                        + '.c-stars-reviews a, '
+                        + 'a[href*="tabbed-customerreviews"], '
+                        + 'a[href*="customerreviews"]'
+                    );
+                    if (direct) {
+                        direct.scrollIntoView({behavior: "smooth", block: "center"});
+                        direct.click();
+                        return 'clicked: ' + direct.textContent.trim().substring(0, 80);
                     }
+                    var nodes = document.querySelectorAll('a, button, [role="button"], [role="link"]');
+                    for (var i = 0; i < nodes.length; i++) {
+                        var text = (nodes[i].textContent || '').trim().toLowerCase();
+                        var aria = (nodes[i].getAttribute('aria-label') || '').trim().toLowerCase();
+                        var label = text + ' ' + aria;
+                        if (label.includes('review') && !label.includes('write')) {
+                            nodes[i].scrollIntoView({behavior: "smooth", block: "center"});
+                            nodes[i].click();
+                            return 'clicked: ' + (nodes[i].textContent || aria).trim().substring(0, 80);
+                        }
+                    }
+                    return 'not found';
+                }
+                var result = clickReviewCandidate();
+                if (result !== 'not found') return result;
+                for (var pct of [0.55, 0.75, 0.9, 1.0]) {
+                    window.scrollTo(0, document.body.scrollHeight * pct);
+                    result = clickReviewCandidate();
+                    if (result !== 'not found') return result;
                 }
                 return 'not found';
             ''')
@@ -2454,6 +2504,8 @@ class BestBuyDetailCrawler:
             print(f"  [✓] Star_Rating: {star_rating}")
 
             count_of_reviews = self.extract_count_of_reviews_from_detail(tree)
+            if count_of_reviews is None:
+                count_of_reviews = self.extract_count_of_reviews_from_page_js()
 
             # 외부 리뷰 감지 시 (예: "reviews from Skyworth USA") 0으로 처리, star_rating도 변경
             is_external_reviews = (count_of_reviews == 'EXTERNAL_REVIEWS')
@@ -2639,15 +2691,34 @@ class BestBuyDetailCrawler:
                     collected = 0
                     page_num = 1
 
-                    # p.pre-white-space 렌더링 대기 (최대 15초)
-                    for wait in range(15):
-                        count = self.page.run_js('return document.querySelectorAll("p.pre-white-space").length')
+                    review_dom_js = '''
+                        var reviews = [];
+                        var selectors = [
+                            'p.pre-white-space',
+                            'li.review-item p',
+                            '.ugc-review-body p',
+                            '[data-testid*="review"] p',
+                            '[class*="review"] p'
+                        ];
+                        selectors.forEach(function(sel) {
+                            document.querySelectorAll(sel).forEach(function(el) {
+                                var text = el.textContent.trim();
+                                if (text && text.length > 20 && !reviews.includes(text)) reviews.push(text);
+                            });
+                        });
+                        return reviews;
+                    '''
+                    review_dom_count_js = review_dom_js.replace('return reviews;', 'return reviews.length;')
+
+                    # 리뷰 DOM 렌더링 대기 (최대 5초)
+                    for wait in range(5):
+                        count = self.page.run_js(review_dom_count_js)
                         if count and count > 0:
                             print(f"  [OK] Reviews rendered in DOM ({count} items, waited {wait}s)")
                             break
                         time.sleep(1)
                     else:
-                        print(f"  [WARNING] Reviews not rendered in DOM after 15s wait")
+                        print(f"  [INFO] Reviews not rendered in DOM after 5s")
                         # DOM 확인용 HTML 저장 (1회만)
                         try:
                             dump_path = os.path.join(os.path.dirname(__file__), 'review_page_dump.html')
@@ -2659,14 +2730,7 @@ class BestBuyDetailCrawler:
 
                     # 리뷰 수집 + 페이지네이션
                     while collected < 20:
-                        page_reviews = self.page.run_js('''
-                            var reviews = [];
-                            document.querySelectorAll('p.pre-white-space').forEach(function(el) {
-                                var text = el.textContent.trim();
-                                if (text && text.length > 10) reviews.push(text);
-                            });
-                            return reviews;
-                        ''')
+                        page_reviews = self.page.run_js(review_dom_js)
                         if page_reviews:
                             for text in page_reviews:
                                 if collected >= 20:

@@ -337,14 +337,22 @@ class BestBuyPromotionCrawler:
 
             # Config values
             carousel_list_xpath = self.config.get('xpath', 'carousel_list', self.file_name) or '//ul[@class="c-carousel-list"]'
-            product_item_xpath = self.config.get('xpath', 'product_item', self.file_name) or './/li[@class="item c-carousel-item "]'
+            product_item_xpaths = self.config.get_xpath_list('product_item', self.file_name) or [
+                './/li[contains(@class, "c-carousel-item")]',
+                './/li[contains(@class, "item")]',
+                './/li[.//a[contains(@href, "/site/") and contains(@href, ".p")]]'
+            ]
             section_max_products = self.config.get_int('constant', 'section_max_products', self.file_name, 6)
             page_type = self.config.get_constant('page_type_promo', self.file_name) or 'Top deals'
             name_xpaths = self.config.get_xpath_list('product_name', self.file_name) or [
-                './/span[contains(@class, "BxIuyHdYvE_KO21sTHqZ")]'
+                './/span[contains(@class, "BxIuyHdYvE_KO21sTHqZ")]',
+                './/span[@data-testid="ProductCard-Title-TestID"]',
+                './/*[contains(@class, "product-title")]',
+                './/a[contains(@href, "/site/") and contains(@href, ".p")]'
             ]
             url_xpaths = self.config.get_xpath_list('product_url', self.file_name) or [
-                './/a[@data-testid="hero-experience-deal-card-test-id"]/@href'
+                './/a[@data-testid="hero-experience-deal-card-test-id"]/@href',
+                './/a[contains(@href, "/site/") and contains(@href, ".p")]/@href'
             ]
             offer_xpaths = self.config.get_xpath_list('offer', self.file_name) or [
                 './/button[@id="offer-link"]//div'
@@ -376,8 +384,11 @@ class BestBuyPromotionCrawler:
                     # 모든 carousel에서 li 아이템 수집
                     product_items = []
                     for carousel in section_carousels:
-                        items = carousel.xpath(product_item_xpath)
-                        product_items.extend(items)
+                        for product_item_xpath in product_item_xpaths:
+                            items = carousel.xpath(product_item_xpath)
+                            if items:
+                                product_items.extend(items)
+                                break
                         if len(product_items) >= section_max_products:
                             break
 
@@ -395,8 +406,21 @@ class BestBuyPromotionCrawler:
                             for name_xpath in name_xpaths:
                                 name_elem = item.xpath(name_xpath)
                                 if name_elem:
-                                    product_name = name_elem[0].text_content().strip()
+                                    product_name = name_elem[0].text_content().strip() if not isinstance(name_elem[0], str) else name_elem[0].strip()
                                     break
+
+                            if not product_name:
+                                for attr_xpath in [
+                                    './/a[contains(@href, "/site/") and contains(@href, ".p")]/@aria-label',
+                                    './/a[contains(@href, "/site/") and contains(@href, ".p")]/@title',
+                                    './/a[@data-testid="hero-experience-deal-card-test-id"]/@aria-label',
+                                    './/a[@data-testid="hero-experience-deal-card-test-id"]/@title'
+                                ]:
+                                    values = item.xpath(attr_xpath)
+                                    if values:
+                                        product_name = values[0].strip()
+                                        if product_name:
+                                            break
 
                             # URL 추출
                             product_url = None

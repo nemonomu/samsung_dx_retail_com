@@ -169,16 +169,23 @@ class BestBuyTrendCrawler:
             extract_wait = self.config.get_float('timing', 'extract_wait', self.file_name, 3)
             page_type = self.config.get_constant('page_type_trend', self.file_name) or 'Trend'
             product_items_xpaths = self.config.get_xpath_list('product_items', self.file_name) or [
-                '//div[@data-testid="story-block-trending_deals_story"]//ul//li[@data-carousel-index]'
+                '//div[@data-testid="story-block-trending_deals_story"]//ul//li[@data-carousel-index]',
+                '//div[@data-testid="story-block-trending_deals_story"]//li[.//a[contains(@href, "/site/") and contains(@href, ".p")]]',
+                '//li[@data-carousel-index and .//a[contains(@href, "/site/") and contains(@href, ".p")]]'
             ]
             rank_xpaths = self.config.get_xpath_list('rank', self.file_name) or [
                 './/div[@data-testid="PriceBlockOffer-CarouselProductRank-TestID"]//span'
             ]
             name_xpaths = self.config.get_xpath_list('product_name', self.file_name) or [
-                './/span[@data-testid="ProductCard-Title-TestID"]'
+                './/span[@data-testid="ProductCard-Title-TestID"]',
+                './/*[contains(@class, "product-title")]',
+                './/a[contains(@href, "/site/") and contains(@href, ".p")]',
+                './/a[contains(@href, "/site/") and contains(@href, ".p")]/@aria-label',
+                './/a[contains(@href, "/site/") and contains(@href, ".p")]/@title'
             ]
             url_xpaths = self.config.get_xpath_list('product_url', self.file_name) or [
-                './/a[@data-testid="trending-deals-card-TestID"]/@href'
+                './/a[@data-testid="trending-deals-card-TestID"]/@href',
+                './/a[contains(@href, "/site/") and contains(@href, ".p")]/@href'
             ]
 
             # 추가 대기 시간
@@ -228,7 +235,7 @@ class BestBuyTrendCrawler:
                     # 제품명 추출 (fallback list from config)
                     product_name = None
                     for name_xpath in name_xpaths:
-                        if '@aria-label' in name_xpath:
+                        if '@aria-label' in name_xpath or '@title' in name_xpath:
                             name_elem = item.xpath(name_xpath)
                             if name_elem:
                                 product_name = name_elem[0].strip()

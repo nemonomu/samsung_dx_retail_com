@@ -256,7 +256,14 @@ class BestBuyTVCrawler:
             print(f"[DEBUG] Saved page source to bestbuy_page_{page_number}_debug.html")
 
             # XPath/정규식 설정 로드
-            xpath_product_title_list = self.config.get_xpath_list('product_title', self.file_name) or ['.//h2[contains(@class, "product-title")]']
+            xpath_product_title_list = self.config.get_xpath_list('product_title', self.file_name) or [
+                './/h2[contains(@class, "product-title")]',
+                './/*[contains(@class, "product-title")]',
+                './/a[contains(@class, "product-list-item-link")]',
+                './/a[@data-testid="product-title"]',
+                './/h2//a',
+                './/a[contains(@href, "/site/") and contains(@href, ".p")]'
+            ]
             xpath_product_url = self.config.get('xpath', 'product_url', self.file_name, './/a[@class="product-list-item-link"]/@href')
             xpath_offer = self.config.get('xpath', 'offer', self.file_name, './/div[@data-testid="plus-x-offers"]//span[@class="font-sans text-default text-style-body-md-400"]')
             xpath_pickup = self.config.get('xpath', 'pickup_availability', self.file_name)
@@ -287,6 +294,19 @@ class BestBuyTVCrawler:
                                     break
                         except:
                             continue
+
+                    if not product_name:
+                        for attr_xpath in [
+                            './/a[contains(@class, "product-list-item-link")]/@aria-label',
+                            './/a[contains(@class, "product-list-item-link")]/@title',
+                            './/a[contains(@href, "/site/") and contains(@href, ".p")]/@aria-label',
+                            './/a[contains(@href, "/site/") and contains(@href, ".p")]/@title'
+                        ]:
+                            values = container.xpath(attr_xpath)
+                            if values:
+                                product_name = values[0].strip()
+                                if product_name:
+                                    break
 
                     if not product_name:
                         # Save container HTML for debugging (all failed items)

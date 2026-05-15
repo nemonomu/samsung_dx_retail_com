@@ -91,8 +91,22 @@ class IntegratedCrawler:
                 subprocess_timeout = configured_timeout
 
             command = [sys.executable, '-u', script_name]
+            child_env = os.environ.copy()
             if script_name == 'bby_tv_dt1.py' and self.stop_at:
                 command.extend(['until', self.stop_at.strftime('%Y%m%d%H%M%S')])
+            if script_name == 'bby_tv_dt1.py':
+                # VPN test default: collect required spec fields for every item, defer review-heavy actions.
+                child_env.setdefault('BBY_DT_SKIP_REVIEWS', '1')
+                child_env.setdefault('BBY_DT_RESTART_EVERY', '12')
+                child_env.setdefault('BBY_DT_COOLDOWN_EVERY', '12')
+                child_env.setdefault('BBY_DT_COOLDOWN_MIN', '300')
+                child_env.setdefault('BBY_DT_COOLDOWN_MAX', '900')
+                print("[INFO] DT VPN automation defaults:")
+                print(f"       BBY_DT_SKIP_REVIEWS={child_env.get('BBY_DT_SKIP_REVIEWS')}")
+                print(f"       BBY_DT_RESTART_EVERY={child_env.get('BBY_DT_RESTART_EVERY')}")
+                print(f"       BBY_DT_COOLDOWN_EVERY={child_env.get('BBY_DT_COOLDOWN_EVERY')}")
+                print(f"       BBY_DT_COOLDOWN_MIN={child_env.get('BBY_DT_COOLDOWN_MIN')}")
+                print(f"       BBY_DT_COOLDOWN_MAX={child_env.get('BBY_DT_COOLDOWN_MAX')}")
 
             # Run with real-time output (no buffering)
             result = subprocess.run(
@@ -100,7 +114,8 @@ class IntegratedCrawler:
                 stdout=None,  # Inherit parent's stdout for real-time output
                 stderr=None,  # Inherit parent's stderr
                 text=True,
-                timeout=subprocess_timeout
+                timeout=subprocess_timeout,
+                env=child_env
             )
 
             end_time = datetime.now()

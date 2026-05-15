@@ -159,6 +159,48 @@ class BestBuyTVCrawler:
         except Exception as e:
             return None
 
+    def random_scroll_until_products(self, expected_count, css_product_link, page_number):
+        """Move through random viewport positions until lazy-loaded product cards reach expected_count."""
+        max_rounds = self.config.get_int('constant', 'lazy_scroll_rounds', self.file_name, 18)
+        min_wait = self.config.get_float('timing', 'lazy_scroll_min_wait', self.file_name, 0.7)
+        max_wait = self.config.get_float('timing', 'lazy_scroll_max_wait', self.file_name, 1.8)
+        best_count = 0
+
+        for round_no in range(1, max_rounds + 1):
+            try:
+                product_links = self.page.eles(css_product_link)
+                best_count = max(best_count, len(product_links))
+                if len(product_links) >= expected_count:
+                    print(f"[OK] Lazy loading reached {len(product_links)} products on page {page_number}")
+                    return len(product_links)
+
+                page_height = self.page.run_js("return Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)")
+                viewport_height = self.page.run_js("return window.innerHeight") or 900
+                max_y = max(0, int(page_height) - int(viewport_height))
+
+                positions = [
+                    random.randint(0, max_y) if max_y else 0,
+                    int(max_y * random.uniform(0.35, 0.65)) if max_y else 0,
+                    int(max_y * random.uniform(0.70, 0.95)) if max_y else 0,
+                    int(max_y * random.uniform(0.05, 0.30)) if max_y else 0,
+                ]
+
+                for pos in positions:
+                    self.page.run_js(f"window.scrollTo(0, {pos})")
+                    time.sleep(random.uniform(min_wait, max_wait))
+                    product_links = self.page.eles(css_product_link)
+                    best_count = max(best_count, len(product_links))
+                    print(f"[DEBUG] Lazy scroll page {page_number} round {round_no}: y={pos}, products={len(product_links)}")
+                    if len(product_links) >= expected_count:
+                        print(f"[OK] Lazy loading reached {len(product_links)} products on page {page_number}")
+                        return len(product_links)
+
+            except Exception as e:
+                print(f"[WARNING] Lazy scroll round failed: {e}")
+
+        print(f"[WARNING] Lazy loading ended with {best_count}/{expected_count} products on page {page_number}")
+        return best_count
+
     def scrape_page(self, url, page_number):
         """Scrape a single Best Buy page"""
         try:
@@ -223,11 +265,16 @@ class BestBuyTVCrawler:
             product_links = self.page.eles(css_product_link)
             if len(product_links) < min_product_count:
                 print(f"[WARNING] Only {len(product_links)} products found, waiting more...")
+                self.random_scroll_until_products(expected_product_count, css_product_link, page_number)
+                product_links = self.page.eles(css_product_link)
                 for _ in range(product_load_retry):
+                    if len(product_links) >= min_product_count:
+                        break
                     self.page.scroll.to_bottom()
                     time.sleep(extra_scroll_wait)
-                    self.page.scroll.to_top()
-                    time.sleep(top_scroll_wait)
+                    self.page.run_js("window.scrollTo(0, Math.floor(document.body.scrollHeight * Math.random()))")
+                    time.sleep(random.uniform(scroll_up_wait, top_scroll_wait))
+                    self.random_scroll_until_products(expected_product_count, css_product_link, page_number)
                     product_links = self.page.eles(css_product_link)
                     print(f"[DEBUG] Products after extra scroll: {len(product_links)}")
                     if len(product_links) >= min_product_count:

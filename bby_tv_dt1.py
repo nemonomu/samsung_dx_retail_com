@@ -251,6 +251,143 @@ class BestBuyDetailCrawler:
                 except:
                     return url
 
+            def _read_csv_rows(filename):
+                path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+                if not os.path.exists(path) or os.path.getsize(path) == 0:
+                    return []
+                with open(path, newline='', encoding='utf-8-sig') as csvfile:
+                    return list(csv.DictReader(csvfile))
+
+            csv_sources = {
+                'main': _read_csv_rows('bby_tv_main1_vpn_test.csv'),
+                'bsr': _read_csv_rows('bby_tv_bsr1_vpn_test.csv'),
+                'promotion': _read_csv_rows('bby_tv_pmt1_vpn_test.csv'),
+                'trend': _read_csv_rows('bby_tv_trend_crawl_vpn_test.csv'),
+            }
+            if any(csv_sources.values()):
+                print("[INFO] VPN test mode: loading listing URLs from CSV files")
+                url_data_map = {}
+
+                for row in csv_sources['main']:
+                    url = row.get('product_url')
+                    if not url:
+                        continue
+                    item_key = _extract_item(url)
+                    if item_key not in url_data_map:
+                        url_data_map[item_key] = {
+                            'page_type': row.get('page_type') or 'main',
+                            'product_url': url,
+                            'retailer_sku_name': row.get('retailer_sku_name'),
+                            'final_sku_price': None,
+                            'savings': None,
+                            'original_sku_price': None,
+                            'offer': row.get('offer'),
+                            'pick_up_availability': row.get('pick_up_availability'),
+                            'shipping_availability': row.get('shipping_availability'),
+                            'delivery_availability': row.get('delivery_availability'),
+                            'sku_status': row.get('sku_status'),
+                            'star_rating': None,
+                            'main_rank': row.get('main_rank'),
+                            'bsr_rank': None,
+                            'trend_rank': None,
+                            'promotion_position': None,
+                            'promotion_type': None
+                        }
+
+                for row in csv_sources['bsr']:
+                    url = row.get('product_url')
+                    if not url:
+                        continue
+                    item_key = _extract_item(url)
+                    if item_key in url_data_map:
+                        url_data_map[item_key]['bsr_rank'] = row.get('bsr_rank')
+                    else:
+                        url_data_map[item_key] = {
+                            'page_type': row.get('page_type') or 'bsr',
+                            'product_url': url,
+                            'retailer_sku_name': row.get('retailer_sku_name'),
+                            'final_sku_price': None,
+                            'savings': None,
+                            'original_sku_price': None,
+                            'offer': row.get('offer'),
+                            'pick_up_availability': row.get('pick_up_availability'),
+                            'shipping_availability': row.get('shipping_availability'),
+                            'delivery_availability': row.get('delivery_availability'),
+                            'sku_status': row.get('sku_status'),
+                            'star_rating': None,
+                            'main_rank': None,
+                            'bsr_rank': row.get('bsr_rank'),
+                            'trend_rank': None,
+                            'promotion_position': None,
+                            'promotion_type': None
+                        }
+
+                for row in csv_sources['promotion']:
+                    url = row.get('product_url')
+                    if not url:
+                        continue
+                    item_key = _extract_item(url)
+                    if item_key in url_data_map:
+                        url_data_map[item_key]['promotion_position'] = row.get('promotion_rank')
+                        url_data_map[item_key]['promotion_type'] = row.get('promotion_type')
+                    else:
+                        url_data_map[item_key] = {
+                            'page_type': row.get('page_type') or 'promotion',
+                            'product_url': url,
+                            'retailer_sku_name': row.get('retailer_sku_name'),
+                            'final_sku_price': None,
+                            'savings': None,
+                            'original_sku_price': None,
+                            'offer': row.get('offer'),
+                            'pick_up_availability': None,
+                            'shipping_availability': None,
+                            'delivery_availability': None,
+                            'sku_status': None,
+                            'star_rating': None,
+                            'main_rank': None,
+                            'bsr_rank': None,
+                            'trend_rank': None,
+                            'promotion_position': row.get('promotion_rank'),
+                            'promotion_type': row.get('promotion_type')
+                        }
+
+                for row in csv_sources['trend']:
+                    url = row.get('product_url')
+                    if not url:
+                        continue
+                    item_key = _extract_item(url)
+                    if item_key in url_data_map:
+                        url_data_map[item_key]['trend_rank'] = row.get('rank')
+                    else:
+                        url_data_map[item_key] = {
+                            'page_type': row.get('page_type') or 'Trend',
+                            'product_url': url,
+                            'retailer_sku_name': row.get('product_name'),
+                            'final_sku_price': None,
+                            'savings': None,
+                            'original_sku_price': None,
+                            'offer': None,
+                            'pick_up_availability': None,
+                            'shipping_availability': None,
+                            'delivery_availability': None,
+                            'sku_status': None,
+                            'star_rating': None,
+                            'main_rank': None,
+                            'bsr_rank': None,
+                            'trend_rank': row.get('rank'),
+                            'promotion_position': None,
+                            'promotion_type': None
+                        }
+
+                all_urls = list(url_data_map.values())
+                before_openbox_filter = len(all_urls)
+                all_urls = [u for u in all_urls if 'openbox' not in u['product_url'].lower()]
+                openbox_filtered = before_openbox_filter - len(all_urls)
+                if openbox_filtered > 0:
+                    print(f"[INFO] Filtered out {openbox_filtered} Open Box products")
+                print(f"[OK] Total unique items from listing CSV files: {len(all_urls)}")
+                return all_urls
+
             cursor = self.db_conn.cursor()
             urls = []
 
@@ -2567,7 +2704,7 @@ class BestBuyDetailCrawler:
             self.validator.validate_count(count_of_reviews, 'count_of_reviews', product_url, 'bby_tv_dt1')
             self.validator.validate_star_rating(star_rating, product_url, 'bby_tv_dt1')
 
-            # 10. Detail DB save
+            # 10. Detail CSV save
             self.save_to_db(
                 page_type=page_type,
                 order=self.order,

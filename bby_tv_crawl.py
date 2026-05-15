@@ -3,20 +3,16 @@ Best Buy TV Integrated Crawler
 통합 크롤러: main1 → bsr1 → pmt1 → trend_crawl → dt1 순차 실행
 
 실행 순서:
-1. bby_tv_main1.py: Main page crawling → bby_tv_main1 table
-2. bby_tv_bsr1.py: Best-selling page crawling → bby_tv_bsr1 table
-3. bby_tv_pmt1.py: Promotion page crawling → bby_tv_pmt1 table
-4. bby_tv_trend_crawl.py: Trending deals crawling → bby_tv_Trend_crawl table
-5. bby_tv_dt1.py: Detail page crawling → bby_tv_crawl + tv_retail_com tables
-   - Uses URLs from: bby_tv_main1, bby_tv_bsr1, bby_tv_pmt1, bby_tv_Trend_crawl
+1. bby_tv_main1.py: Main page crawling → bby_tv_main1_vpn_test.csv
+2. bby_tv_bsr1.py: Best-selling page crawling → bby_tv_bsr1_vpn_test.csv
+3. bby_tv_pmt1.py: Promotion page crawling → bby_tv_pmt1_vpn_test.csv
+4. bby_tv_trend_crawl.py: Trending deals crawling → bby_tv_trend_crawl_vpn_test.csv
+5. bby_tv_dt1.py: Detail page crawling → bby_tv_vpn_test.csv
+   - Uses URLs from listing CSV files above.
 
-저장 테이블:
-- bby_tv_main1: Main listing data
-- bby_tv_bsr1: Best-selling listing data
-- bby_tv_pmt1: Promotion listing data
-- bby_tv_Trend_crawl: Trending deals data
-- bby_tv_crawl: Detail page data (copy structure from bby_tv_detail_crawled)
-- tv_retail_com: Unified retail data
+VPN 테스트 모드:
+- 수집 결과는 DB에 저장하지 않는다.
+- listing CSV를 통해 URL과 rank/type 메타데이터를 dt1으로 전달한다.
 
 Sends email notification on completion or failure.
 """

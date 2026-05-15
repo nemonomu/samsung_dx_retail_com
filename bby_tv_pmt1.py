@@ -25,6 +25,7 @@ import time
 import random
 import re
 import os
+import csv
 import psycopg2
 from datetime import datetime
 import pytz
@@ -47,6 +48,7 @@ class BestBuyPromotionCrawler:
         # Config loader 초기화
         self.config = get_config()
         self.file_name = 'bby_tv_pmt1'
+        self.csv_output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bby_tv_pmt1_vpn_test.csv')
 
         # URL from config
         self.url = self.config.get_url('promo_page', self.file_name)
@@ -461,58 +463,45 @@ class BestBuyPromotionCrawler:
             return []
 
     def save_to_db(self, products):
-        """Save to database"""
+        """VPN 테스트용 CSV 저장. DB에는 쓰지 않는다."""
         if not products:
             print("[WARNING] No data to save")
             return False
 
         try:
-            cursor = self.db_conn.cursor()
-
-            # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
-
-            # Calculate crawl_datetime (format: YYYY-MM-DD HH:MM:SS)
-            now = datetime.now()
-            crawl_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
-
-            # Config values
-            table_name = self.config.get_table('pmt_data') or 'bby_tv_pmt1'
+            crawl_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             account_name = self.config.get_constant('account_name', None, 'Bestbuy')
 
-            # 데이터 삽입
-            insert_query = f"""
-                INSERT INTO {table_name}
-                (account_name, page_type, retailer_sku_name, promotion_rank, offer,
-                 promotion_type, product_url, crawl_datetime, calendar_week, batch_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """
-
+            fieldnames = [
+                'account_name', 'batch_id', 'page_type', 'retailer_sku_name',
+                'promotion_rank', 'offer', 'promotion_type', 'product_url',
+                'crawl_datetime', 'calendar_week'
+            ]
             success_count = 0
-            for product in products:
-                try:
-                    cursor.execute(insert_query, (
-                        account_name,
-                        product['page_type'],
-                        product['retailer_sku_name'],
-                        product['promotion_rank'],
-                        product['offer'],
-                        product['promotion_type'],
-                        product['product_url'],
-                        crawl_datetime,
-                        calendar_week,
-                        self.batch_id
-                    ))
+            with open(self.csv_output_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                for product in products:
+                    writer.writerow({
+                        'account_name': account_name,
+                        'batch_id': self.batch_id,
+                        'page_type': product['page_type'],
+                        'retailer_sku_name': product['retailer_sku_name'],
+                        'promotion_rank': product['promotion_rank'],
+                        'offer': product['offer'],
+                        'promotion_type': product['promotion_type'],
+                        'product_url': product['product_url'],
+                        'crawl_datetime': crawl_datetime,
+                        'calendar_week': calendar_week
+                    })
                     success_count += 1
-                except Exception as e:
-                    print(f"[ERROR] Save failed - Promotion Rank {product['promotion_rank']}: {e}")
 
-            cursor.close()
-            print(f"[OK] DB save complete: {success_count}/{len(products)} products")
+            print(f"[OK] CSV save complete: {success_count}/{len(products)} products -> {self.csv_output_path}")
             return True
 
         except Exception as e:
-            print(f"[ERROR] DB save failed: {e}")
+            print(f"[ERROR] CSV save failed: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -539,7 +528,7 @@ class BestBuyPromotionCrawler:
             # 제품 정보 추출
             products = self.extract_products()
 
-            # DB 저장
+            # CSV 저장
             if products:
                 self.save_to_db(products)
 

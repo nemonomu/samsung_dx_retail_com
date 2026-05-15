@@ -24,6 +24,7 @@ import time
 import random
 import re
 import os
+import csv
 import psycopg2
 from datetime import datetime
 import pytz
@@ -46,6 +47,10 @@ class BestBuyBSRCrawler:
         # Config loader 초기화
         self.config = get_config()
         self.file_name = 'bby_tv_bsr1'
+        self.csv_output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bby_tv_bsr1_vpn_test.csv')
+        self.saved_urls = set()
+        if os.path.exists(self.csv_output_path):
+            os.remove(self.csv_output_path)
 
         # Check for TEST_MODE
         if os.environ.get('TEST_MODE') == '1':
@@ -374,49 +379,50 @@ class BestBuyBSRCrawler:
 
     def save_to_db(self, page_type, bsr_rank, retailer_sku_name, offer, pickup, shipping, delivery,
                    sku_status, product_url):
-        """Save product data to database (without price/savings/star_rating)"""
+        """VPN 테스트용 CSV 저장. DB에는 쓰지 않는다."""
         try:
-            cursor = self.db_conn.cursor()
-            table_name = self.config.get_table('bsr_data')
             account_name = self.config.get_constant('account_name', None, 'Bestbuy')
 
-            # Check for duplicate product_url in the same batch
-            cursor.execute(f"""
-                SELECT COUNT(*) FROM {table_name}
-                WHERE batch_id = %s AND product_url = %s
-            """, (self.batch_id, product_url))
-
-            count = cursor.fetchone()[0]
-
-            if count > 0:
-                cursor.close()
-                print(f"  [SKIP] Duplicate URL already saved in this batch")
+            if product_url in self.saved_urls:
+                print(f"  [SKIP] Duplicate URL already saved in this CSV")
                 return False
 
-            # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
-
-            # Calculate crawl_datetime (format: YYYY-MM-DD HH:MM:SS)
-            now = datetime.now()
-            crawl_datetime = now.strftime('%Y-%m-%d %H:%M:%S')
-
-            cursor.execute(f"""
-                INSERT INTO {table_name}
-                (account_name, batch_id, page_type, bsr_rank, retailer_sku_name,
-                 Offer, Pick_Up_Availability, Shipping_Availability, Delivery_Availability,
-                 SKU_Status, Product_url, crawl_datetime, calendar_week)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (account_name, self.batch_id, page_type, bsr_rank, retailer_sku_name,
-                  offer, pickup, shipping, delivery, sku_status, product_url, crawl_datetime, calendar_week))
-
-            self.db_conn.commit()
-            cursor.close()
+            crawl_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            fieldnames = [
+                'account_name', 'batch_id', 'page_type', 'bsr_rank', 'retailer_sku_name',
+                'offer', 'pick_up_availability', 'shipping_availability',
+                'delivery_availability', 'sku_status', 'product_url',
+                'crawl_datetime', 'calendar_week'
+            ]
+            row = {
+                'account_name': account_name,
+                'batch_id': self.batch_id,
+                'page_type': page_type,
+                'bsr_rank': bsr_rank,
+                'retailer_sku_name': retailer_sku_name,
+                'offer': offer,
+                'pick_up_availability': pickup,
+                'shipping_availability': shipping,
+                'delivery_availability': delivery,
+                'sku_status': sku_status,
+                'product_url': product_url,
+                'crawl_datetime': crawl_datetime,
+                'calendar_week': calendar_week
+            }
+            file_exists = os.path.exists(self.csv_output_path)
+            with open(self.csv_output_path, 'a', newline='', encoding='utf-8-sig') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                if not file_exists or os.path.getsize(self.csv_output_path) == 0:
+                    writer.writeheader()
+                writer.writerow(row)
+            self.saved_urls.add(product_url)
 
             return True
 
         except Exception as e:
-            print(f"[ERROR] Failed to save to DB: {e}")
-            self.error_messages.append(f"DB save error: {e}")
+            print(f"[ERROR] Failed to save to CSV: {e}")
+            self.error_messages.append(f"CSV save error: {e}")
             return False
 
     def run(self):

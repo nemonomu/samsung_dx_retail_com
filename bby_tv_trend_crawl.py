@@ -7,6 +7,7 @@ https://www.bestbuy.com/ → Trending deals → TVs & Projectors
 import time
 import random
 import os
+import csv
 import psycopg2
 from datetime import datetime
 import pytz
@@ -28,6 +29,7 @@ class BestBuyTrendCrawler:
         # Config loader 초기화
         self.config = get_config()
         self.file_name = 'bby_tv_trend_crawl'
+        self.csv_output_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bby_tv_trend_crawl_vpn_test.csv')
 
         # Load excluded items (is_product=false)
         self.excluded_items = load_excluded_items()
@@ -279,69 +281,43 @@ class BestBuyTrendCrawler:
             return []
 
     def save_to_db(self, products):
-        """DB에 저장"""
+        """VPN 테스트용 CSV 저장. DB에는 쓰지 않는다."""
         if not products:
             print("[WARNING] 저장할 데이터가 없습니다.")
             return False
 
         try:
-            cursor = self.db_conn.cursor()
-
-            # Config values
-            table_name = self.config.get_table('trend_data') or 'bby_tv_Trend_crawl'
             account_name = self.config.get_constant('account_name', None, 'Bestbuy')
-
-            # 테이블 존재 확인 및 생성
-            cursor.execute(f"""
-                CREATE TABLE IF NOT EXISTS {table_name} (
-                    id SERIAL PRIMARY KEY,
-                    account_name VARCHAR(50),
-                    page_type VARCHAR(50),
-                    rank INTEGER,
-                    product_name TEXT,
-                    product_url TEXT,
-                    crawl_strdatetime VARCHAR(20),
-                    batch_id VARCHAR(50),
-                    calendar_week VARCHAR(10)
-                )
-            """)
-
-            # Calculate calendar week
             calendar_week = f"w{datetime.now().isocalendar().week}"
-
-            # Calculate crawl_strdatetime (format: YYYYMMDDHHMISS + microseconds 4 digits)
             now = datetime.now()
             crawl_strdatetime = now.strftime('%Y%m%d%H%M%S') + now.strftime('%f')[:4]
 
-            # 데이터 삽입
-            insert_query = f"""
-                INSERT INTO {table_name} (account_name, batch_id, page_type, rank, product_name, product_url, crawl_strdatetime, calendar_week)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """
-
+            fieldnames = [
+                'account_name', 'batch_id', 'page_type', 'rank', 'product_name',
+                'product_url', 'crawl_strdatetime', 'calendar_week'
+            ]
             success_count = 0
-            for product in products:
-                try:
-                    cursor.execute(insert_query, (
-                        account_name,
-                        self.batch_id,
-                        product['page_type'],
-                        product['rank'],
-                        product['product_name'],
-                        product['product_url'],
-                        crawl_strdatetime,
-                        calendar_week
-                    ))
+            with open(self.csv_output_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                writer.writeheader()
+                for product in products:
+                    writer.writerow({
+                        'account_name': account_name,
+                        'batch_id': self.batch_id,
+                        'page_type': product['page_type'],
+                        'rank': product['rank'],
+                        'product_name': product['product_name'],
+                        'product_url': product['product_url'],
+                        'crawl_strdatetime': crawl_strdatetime,
+                        'calendar_week': calendar_week
+                    })
                     success_count += 1
-                except Exception as e:
-                    print(f"[ERROR] 저장 실패 - Rank {product['rank']}: {e}")
 
-            cursor.close()
-            print(f"[OK] DB 저장 완료: {success_count}/{len(products)}개")
+            print(f"[OK] CSV 저장 완료: {success_count}/{len(products)}개 -> {self.csv_output_path}")
             return True
 
         except Exception as e:
-            print(f"[ERROR] DB 저장 실패: {e}")
+            print(f"[ERROR] CSV 저장 실패: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -358,20 +334,6 @@ class BestBuyTrendCrawler:
             if not self.connect_db():
                 return
 
-            # Add batch_id column if not exists
-            try:
-                cursor = self.db_conn.cursor()
-                table_name = self.config.get_table('trend_data') or 'bby_tv_Trend_crawl'
-                cursor.execute(f"""
-                    ALTER TABLE {table_name}
-                    ADD COLUMN IF NOT EXISTS batch_id VARCHAR(50)
-                """)
-                self.db_conn.commit()
-                cursor.close()
-                print("[OK] Table schema updated (batch_id column added if needed)")
-            except Exception as e:
-                print(f"[WARNING] Could not add batch_id column: {e}")
-
             # 브라우저 설정
             if not self.setup_browser():
                 return
@@ -383,7 +345,7 @@ class BestBuyTrendCrawler:
             # 제품 정보 추출
             products = self.extract_trending_products()
 
-            # DB 저장
+            # CSV 저장
             if products:
                 self.save_to_db(products)
 

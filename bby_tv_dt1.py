@@ -96,6 +96,11 @@ class BestBuyDetailCrawler:
             os.remove(self.csv_output_path)
 
         self.max_skus = self.config.get_int('constant', 'max_products_detail', self.file_name, 300)
+        self.review_extraction_enabled = os.environ.get('BBY_DT_SKIP_REVIEWS', '0') != '1'
+        self.proactive_restart_every = int(os.environ.get('BBY_DT_RESTART_EVERY', '20'))
+        self.proactive_cooldown_every = int(os.environ.get('BBY_DT_COOLDOWN_EVERY', '20'))
+        self.proactive_cooldown_min = int(os.environ.get('BBY_DT_COOLDOWN_MIN', '180'))
+        self.proactive_cooldown_max = int(os.environ.get('BBY_DT_COOLDOWN_MAX', '360'))
 
         # NULL detailed_review_content 로그 저장용
         self.null_review_logs = []
@@ -215,6 +220,33 @@ class BestBuyDetailCrawler:
         self.close_browser()
         time.sleep(3)
         return self.setup_browser()
+
+    def proactive_session_refresh(self, success_count):
+        """Take a conservative pause and browser refresh before bot checks accumulate."""
+        if success_count <= 0:
+            return True
+
+        should_cooldown = (
+            self.proactive_cooldown_every > 0
+            and success_count % self.proactive_cooldown_every == 0
+        )
+        should_restart = (
+            self.proactive_restart_every > 0
+            and success_count % self.proactive_restart_every == 0
+        )
+
+        if should_cooldown:
+            wait_time = random.randint(self.proactive_cooldown_min, self.proactive_cooldown_max)
+            print(f"\n[INFO] Proactive cooldown after {success_count} detail items: {wait_time // 60}m {wait_time % 60}s")
+            time.sleep(wait_time)
+
+        if should_restart:
+            print(f"[INFO] Proactive browser restart after {success_count} detail items")
+            if not self.restart_browser():
+                return False
+            self._warmup_with_different_page()
+
+        return True
 
     def check_db_connection(self):
         """DB 커넥션 상태 확인. VPN CSV 테스트에서는 DB가 없어도 계속 진행."""
@@ -2678,9 +2710,19 @@ class BestBuyDetailCrawler:
             top_mentions = None
             detailed_reviews = None
             recommendation_intent = None
+            try:
+                review_count_for_decision = int(str(count_of_reviews).replace(',', '')) if count_of_reviews is not None else 0
+            except Exception:
+                review_count_for_decision = 0
+            should_collect_reviews = (
+                self.review_extraction_enabled
+                and not is_external_reviews
+                and review_count_for_decision > 0
+                and "not yet reviewed" not in str(star_rating or '').lower()
+            )
 
             # 외부 리뷰인 경우 리뷰 페이지 접근 스킵
-            if is_external_reviews:
+            if not should_collect_reviews:
                 print(f"  [INFO] 외부 리뷰 - 리뷰 페이지 수집 스킵 (detailed_reviews, top_mentions 등 수집 안함)")
             else:
                 # ── re_bby_tv_dt1_reviews.py와 완전 동일한 흐름 ──
@@ -3137,6 +3179,7 @@ class BestBuyDetailCrawler:
                     self.check_db_connection()
 
                     # 다른 카테고리 상품 페이지 접속 (세션 워밍업)
+                    self.restart_browser()
                     self._warmup_with_different_page()
 
                     # 같은 URL 다시 시도 (i 증가 안 함)
@@ -3147,6 +3190,9 @@ class BestBuyDetailCrawler:
                     success_count += 1
                     consecutive_fails = 0
                     retry_count = 0
+                    if not self.proactive_session_refresh(success_count):
+                        print("[ERROR] Browser refresh failed. Stopping.")
+                        break
 
                 else:
                     # 일반 실패 (h1 not found 등) → skip하고 다음 URL로

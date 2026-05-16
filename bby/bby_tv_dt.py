@@ -1046,61 +1046,9 @@ class BestBuyTVDetailCrawler(BaseCrawler):
             self.db_conn.rollback()
 
     def save_to_retail_com(self, product):
-        """DB 저장: 1개씩 INSERT"""
-        if not product:
-            return False
-
-        try:
-            cursor = self.db_conn.cursor()
-
-            # 테스트 모드면 test_tv_retail_com, 통합 크롤러면 tv_retail_com
-            table_name = 'test_tv_retail_com' if self.test_mode else 'tv_retail_com'
-
-            insert_query = f"""
-                INSERT INTO {table_name} (
-                    country, item, account_name, page_type,
-                    count_of_reviews, retailer_sku_name, product_url,
-                    star_rating, count_of_star_ratings, screen_size,
-                    final_sku_price, original_sku_price, savings,
-                    offer,
-                    pick_up_availability, fastest_delivery, delivery_availability,
-                    sku_status, recommendation_intent,
-                    detailed_review_content, retailer_sku_name_similar,
-                    main_rank, bsr_rank, trend_rank, promotion_position,
-                    estimated_annual_electricity_use, promotion_type, model_year,
-                    calendar_week, crawl_datetime, batch_id
-                ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s
-                )
-            """
-
-            values = (
-                product.get('country'), product.get('item'), self.account_name, product.get('page_type'),
-                product.get('count_of_reviews'), product.get('retailer_sku_name'), product.get('product_url'),
-                product.get('star_rating'), product.get('count_of_star_ratings'), product.get('screen_size'),
-                product.get('final_sku_price'), product.get('original_sku_price'), product.get('savings'),
-                product.get('offer'),
-                product.get('pick_up_availability'), product.get('fastest_delivery'), product.get('delivery_availability'),
-                product.get('sku_status'), product.get('recommendation_intent'),
-                product.get('detailed_review_content'), product.get('retailer_sku_name_similar'),
-                product.get('main_rank'), product.get('bsr_rank'), product.get('trend_rank'), product.get('promotion_position'),
-                product.get('estimated_annual_electricity_use'), product.get('promotion_type'), product.get('model_year'),
-                product.get('calendar_week'), product.get('crawl_datetime'), self.batch_id
-            )
-
-            cursor.execute(insert_query, values)
-            self.db_conn.commit()
-            cursor.close()
-            return True
-
-        except Exception as e:
-            print(f"[ERROR] DB save failed: {product.get('item')}: {e}")
-            traceback.print_exc()
-            self.db_conn.rollback()
-            return False
+        """DB 저장은 현재 비활성화됨"""
+        print(f"[INFO] DB save skipped for product: {product.get('item')}")
+        return False
 
     def restart_browser(self):
         """브라우저 재시작 (메모리 정리)"""
@@ -1141,8 +1089,9 @@ class BestBuyTVDetailCrawler(BaseCrawler):
                     combined_data = self.crawl_detail(product)
                     if combined_data:
                         self.upsert_item_mst(combined_data)
-                        if self.save_to_retail_com(combined_data):
-                            total_saved += 1
+                        # DB 저장은 현재 비활성화됨
+                        # if self.save_to_retail_com(combined_data):
+                        #     total_saved += 1
 
                     time.sleep(random.uniform(5, 8))
 
@@ -1158,8 +1107,9 @@ class BestBuyTVDetailCrawler(BaseCrawler):
                                 combined_data = self.crawl_detail(product)
                                 if combined_data:
                                     self.upsert_item_mst(combined_data)
-                                    if self.save_to_retail_com(combined_data):
-                                        total_saved += 1
+                                    # DB 저장은 현재 비활성화됨
+                                    # if self.save_to_retail_com(combined_data):
+                                    #     total_saved += 1
                                 print(f"[SUCCESS] 재시도 성공: {sku_name[:30]}")
                             except Exception as retry_e:
                                 print(f"[ERROR] 재시도 실패: {retry_e}")

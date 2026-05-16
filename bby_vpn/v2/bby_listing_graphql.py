@@ -336,6 +336,24 @@ def extract_product_list_rows(payload, page_type, page_number=None):
             product = document.get("product") if isinstance(document, dict) else None
             add_product(product)
 
+    find_more_documents = nested_get(data, ["findMoreExperience", "documents"], [])
+    if isinstance(find_more_documents, list):
+        for document in find_more_documents:
+            if not isinstance(document, dict):
+                continue
+            product = document.get("product")
+            if isinstance(product, dict):
+                add_product(product)
+            else:
+                row_count = len(rows)
+                for row in extract_listing_products_from_payload(document, page_type, page_number=page_number):
+                    key = row.get("numeric_sku") or extract_item_from_url(row.get("product_url"))
+                    if key and key not in seen:
+                        seen.add(key)
+                        rows.append(row)
+                if len(rows) == row_count:
+                    add_product(document)
+
     placements = nested_get(data, ["search", "withBestMedia", "placements"], [])
     if isinstance(placements, list):
         for placement in placements:
@@ -735,13 +753,33 @@ def is_reusable_listing_operation(request_payload, response_shape=None):
     if not isinstance(request_payload, dict):
         return False
     operation_name = str(request_payload.get("operationName") or "")
-    # Only the Apollo product-list operation is reusable for page-level listing
-    # replay. Header/footer/config/intent/recommendation/card/price operations
-    # can expose paging-like keys or product URLs, but they are not the 24-item
-    # search listing contract.
+    # Header/footer/config/intent/recommendation/card/price operations can expose
+    # paging-like keys or product URLs, but they are not page-level listing
+    # contracts. Keep this allow-list tight and require matching response shape
+    # for newer PLP contracts.
     if operation_name == "PlpView_ProductList_Init":
         return True
+    if operation_name == "PlpViewFindMoreExperience_Init" and _shape_has_path(
+        response_shape,
+        ("data", "findMoreExperience", "documents"),
+    ):
+        return True
     return False
+
+
+def _shape_has_path(shape, path):
+    current = shape
+    for key in path:
+        if isinstance(current, dict):
+            current = current.get(key)
+            continue
+        if isinstance(current, list) and current:
+            current = current[0]
+            if isinstance(current, dict):
+                current = current.get(key)
+                continue
+        return False
+    return current is not None
 
 
 def count_product_urls(value):
@@ -827,6 +865,8 @@ def build_listing_payload(template, page_number, page_size=24):
         for key in ("input", "detailedSearchInput"):
             if isinstance(variables.get(key), dict):
                 variables[key]["query"] = search_term
+                variables[key]["searchTerm"] = search_term
+                variables[key]["keyword"] = search_term
                 variables[key]["queryType"] = "SEARCH"
                 variables[key]["site"] = "WWW"
         variables["categoryId"] = search_term
@@ -842,6 +882,7 @@ def build_listing_payload(template, page_number, page_size=24):
         _set_first_existing(variables, ("page", "pageNumber", "currentPage", "cp"), page_number)
         _set_first_existing(variables, ("pageSize", "page_size", "nrp", "rows", "count", "limit"), page_size)
         _walk_mutate_paging(variables, page_number, page_size)
+        _walk_mutate_search(variables, search_term)
     query = payload.get("query")
     if isinstance(query, str):
         query = re.sub(r"pageSize:\s*\d+", f"pageSize: {page_size}", query)
@@ -871,6 +912,21 @@ def _walk_mutate_paging(value, page_number, page_size):
     elif isinstance(value, list):
         for child in value:
             _walk_mutate_paging(child, page_number, page_size)
+
+
+def _walk_mutate_search(value, search_term):
+    if isinstance(value, dict):
+        for key in list(value.keys()):
+            lower = str(key).lower()
+            if lower in {"query", "searchterm", "keyword"}:
+                value[key] = search_term
+            elif lower == "querytype":
+                value[key] = "SEARCH"
+            else:
+                _walk_mutate_search(value[key], search_term)
+    elif isinstance(value, list):
+        for child in value:
+            _walk_mutate_search(child, search_term)
 
 
 def direct_listing_products(base_dir, page_type, page_number, defaults=None, page_size=24, timeout=None):

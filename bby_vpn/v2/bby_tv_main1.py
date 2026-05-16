@@ -560,7 +560,7 @@ class BestBuyTVMainCrawler(BaseCrawler):
 
         # 중복 제거, is_product 체크 및 rank 할당
         unique_products = []
-        page_items = set()
+        page_valid_items = 0
         for idx, product in enumerate(products):
             retailer_sku_name = product.get('retailer_sku_name') or ''
 
@@ -581,7 +581,7 @@ class BestBuyTVMainCrawler(BaseCrawler):
                 continue
 
             if item:
-                page_items.add(item)
+                page_valid_items += 1
 
             # 중복 item 필터링
             if item and item in self.saved_urls:
@@ -605,10 +605,10 @@ class BestBuyTVMainCrawler(BaseCrawler):
             return 0
 
         expected_page_products = int(os.environ.get("BBY_LISTING_EXPECTED_PAGE_PRODUCTS", "24"))
-        if not self.test_mode and len(page_items) < expected_page_products:
+        if not self.test_mode and page_valid_items < expected_page_products:
             print(
                 f"[ERROR] Page products below minimum "
-                f"{len(page_items)}/{expected_page_products}; refusing partial page save"
+                f"{page_valid_items}/{expected_page_products}; refusing partial page save"
             )
             return 0
 

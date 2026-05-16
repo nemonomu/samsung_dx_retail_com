@@ -582,7 +582,7 @@ class BestBuyTVBSRCrawler(BaseCrawler):
         try:
             csv_products = []
             update_count = 0
-            page_items = set()
+            page_valid_items = 0
 
             for idx, product in enumerate(products):
                 retailer_sku_name = product.get('retailer_sku_name') or ''
@@ -604,7 +604,7 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                     continue
 
                 if item:
-                    page_items.add(item)
+                    page_valid_items += 1
 
                 # 2. 페이지 간 중복 체크 (이미 수집한 item → 스킵)
                 if item in self.crawled_urls:
@@ -627,10 +627,10 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                 return {'insert': 0, 'update': 0}
 
             expected_page_products = int(os.environ.get("BBY_LISTING_EXPECTED_PAGE_PRODUCTS", "24"))
-            if not self.test_mode and len(page_items) < expected_page_products:
+            if not self.test_mode and page_valid_items < expected_page_products:
                 print(
                     f"[ERROR] Page products below minimum "
-                    f"{len(page_items)}/{expected_page_products}; refusing partial page save"
+                    f"{page_valid_items}/{expected_page_products}; refusing partial page save"
                 )
                 return {'insert': 0, 'update': 0}
 

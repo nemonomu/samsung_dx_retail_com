@@ -956,7 +956,13 @@ def direct_listing_products(base_dir, page_type, page_number, defaults=None, pag
     if cookies:
         headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
     if os.environ.get("ZENROWS_API_KEY") and os.environ.get("BBY_LISTING_USE_ZENROWS", "1").strip().lower() not in {"0", "false", "no"}:
-        parsed = post_listing_graphql_via_zenrows(endpoint_url, payload, headers, timeout)
+        try:
+            parsed = post_listing_graphql_via_zenrows(endpoint_url, payload, headers, timeout)
+        except Exception as exc:
+            if os.environ.get("BBY_LISTING_ZENROWS_FAILOVER_DIRECT", "1").strip().lower() not in {"1", "true", "yes"}:
+                raise
+            print(f"[WARNING] ZenRows listing GraphQL failed; retrying direct POST: {exc}")
+            parsed = post_listing_graphql_direct(endpoint_url, payload, headers, timeout, base_dir)
     else:
         parsed = post_listing_graphql_direct(endpoint_url, payload, headers, timeout, base_dir)
     rows = extract_product_list_rows(parsed, page_type, page_number=page_number)
@@ -1007,7 +1013,7 @@ def post_listing_graphql_via_zenrows(endpoint_url, payload, headers, timeout):
     if os.environ.get("BESTBUY_GRAPHQL_PREMIUM_PROXY", "1").strip().lower() in {"1", "true", "yes"}:
         params["premium_proxy"] = "true"
         params["proxy_country"] = "us"
-    if os.environ.get("BESTBUY_GRAPHQL_JS_RENDER", "1").strip().lower() in {"1", "true", "yes"}:
+    if os.environ.get("BBY_LISTING_GRAPHQL_JS_RENDER", "0").strip().lower() in {"1", "true", "yes"}:
         params["js_render"] = "true"
     if os.environ.get("BESTBUY_GRAPHQL_MODE_AUTO", "0").strip().lower() in {"1", "true", "yes"}:
         params["mode"] = "auto"

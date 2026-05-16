@@ -10,8 +10,12 @@ from __future__ import annotations
 
 import json
 import html as html_lib
+import copy
+import os
 import re
 import time
+import urllib.error
+import urllib.request
 
 
 SKU_KEYS = {"skuId", "skuID", "sku_id"}
@@ -324,9 +328,151 @@ def extract_name_from_text_window(text):
     return None
 
 
+def _listing_registry_path(base_dir):
+    return os.path.join(base_dir or ".", "listing_graphql_operation.json")
+
+
+def load_listing_operation(base_dir):
+    candidates = [
+        _listing_registry_path(base_dir),
+        _listing_registry_path(os.path.dirname(os.path.abspath(__file__))),
+    ]
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                payload = json.load(f)
+            if payload.get("endpoint_url") and payload.get("request_payload"):
+                return payload
+        except Exception:
+            continue
+    return None
+
+
+def save_listing_operation(base_dir, endpoint_url, request_payload, request_headers, cookies, sample_response=None):
+    if not endpoint_url or not isinstance(request_payload, dict):
+        return None
+    operation = {
+        "endpoint_url": endpoint_url,
+        "request_payload": request_payload,
+        "request_headers": request_headers or {},
+        "cookies": cookies or {},
+        "sample_response_shape": _shape(sample_response),
+        "updated_at": int(time.time()),
+    }
+    written = None
+    for folder in {base_dir, os.path.dirname(os.path.abspath(__file__))}:
+        if not folder:
+            continue
+        try:
+            os.makedirs(folder, exist_ok=True)
+            path = _listing_registry_path(folder)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(operation, f, ensure_ascii=False, indent=2, default=str)
+            written = path
+        except Exception:
+            continue
+    return written
+
+
+def _shape(value, depth=0):
+    if depth >= 4:
+        return type(value).__name__
+    if isinstance(value, dict):
+        return {str(k): _shape(v, depth + 1) for k, v in list(value.items())[:30]}
+    if isinstance(value, list):
+        return [_shape(value[0], depth + 1)] if value else []
+    return type(value).__name__
+
+
+def build_listing_payload(template, page_number, page_size=24):
+    payload = copy.deepcopy(template or {})
+    variables = payload.get("variables")
+    if isinstance(variables, dict):
+        _set_first_existing(variables, ("page", "pageNumber", "currentPage", "cp"), page_number)
+        _set_first_existing(variables, ("pageSize", "page_size", "nrp", "rows", "count", "limit"), page_size)
+        _walk_mutate_paging(variables, page_number, page_size)
+    query = payload.get("query")
+    if isinstance(query, str):
+        query = re.sub(r"pageSize:\s*\d+", f"pageSize: {page_size}", query)
+        query = re.sub(r"first:\s*\d+", f"first: {page_size}", query)
+        payload["query"] = query
+    return payload
+
+
+def _set_first_existing(mapping, keys, value):
+    for key in keys:
+        if key in mapping:
+            mapping[key] = value
+            return True
+    return False
+
+
+def _walk_mutate_paging(value, page_number, page_size):
+    if isinstance(value, dict):
+        for key in list(value.keys()):
+            lower = str(key).lower()
+            if lower in {"page", "pagenumber", "currentpage", "cp"}:
+                value[key] = page_number
+            elif lower in {"pagesize", "page_size", "nrp", "rows", "count", "limit"}:
+                value[key] = page_size
+            else:
+                _walk_mutate_paging(value[key], page_number, page_size)
+    elif isinstance(value, list):
+        for child in value:
+            _walk_mutate_paging(child, page_number, page_size)
+
+
+def direct_listing_products(base_dir, page_type, page_number, defaults=None, page_size=24, timeout=30):
+    operation = load_listing_operation(base_dir)
+    if not operation:
+        return []
+    endpoint_url = operation.get("endpoint_url")
+    payload = build_listing_payload(operation.get("request_payload"), page_number, page_size)
+    headers = _sanitize_headers(operation.get("request_headers") or {})
+    headers.setdefault("content-type", "application/json")
+    headers.setdefault("accept", "application/graphql-response+json,application/json;q=0.9")
+    cookies = operation.get("cookies") or {}
+    if cookies:
+        headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(endpoint_url, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+            parsed = json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"listing GraphQL HTTP {exc.code}: {raw[:300]}") from exc
+    rows = extract_listing_products_from_payload(parsed, page_type, page_number=page_number)
+    merged_rows = []
+    defaults = dict(defaults or {})
+    for row in rows:
+        merged = dict(defaults)
+        merged.update(row)
+        merged["page_type"] = page_type
+        merged["page_number"] = page_number
+        merged_rows.append(merged)
+    return merged_rows
+
+
+def _sanitize_headers(headers):
+    skipped = {"accept-encoding", "content-length", "cookie", "host", "connection"}
+    clean = {}
+    for key, value in (headers or {}).items():
+        if not key or value in (None, ""):
+            continue
+        if str(key).lower() in skipped or str(key).startswith(":"):
+            continue
+        clean[str(key)] = str(value)
+    return clean
+
+
 class ListingGraphQLSkuCollector:
-    def __init__(self, page=None):
+    def __init__(self, page=None, output_dir=None):
         self.page = page
+        self.output_dir = output_dir or os.environ.get("BBY_OUTPUT_DIR") or os.path.dirname(os.path.abspath(__file__))
         self.item_to_sku = {}
         self.url_to_sku = {}
         self.sku_to_url = {}
@@ -387,8 +533,29 @@ class ListingGraphQLSkuCollector:
                 payload = json.loads(body)
             else:
                 payload = body
+            req_body = None
+            try:
+                for attr in ("body", "postData", "data"):
+                    value = getattr(packet.request, attr, None)
+                    if value:
+                        req_body = value
+                        break
+                req_payload = json.loads(req_body) if isinstance(req_body, str) else req_body
+            except Exception:
+                req_payload = None
             item_map, url_map = extract_sku_map_from_payload(payload)
             product_rows = extract_listing_products_from_payload(payload, page_type="listing")
+            if product_rows and isinstance(req_payload, dict):
+                endpoint_url = getattr(packet.request, "url", None) or getattr(packet, "url", None)
+                headers = getattr(packet.request, "headers", None) or {}
+                cookies = {}
+                try:
+                    for cookie in self.page.cookies():
+                        if cookie.get("name"):
+                            cookies[cookie.get("name")] = cookie.get("value")
+                except Exception:
+                    pass
+                save_listing_operation(self.output_dir, endpoint_url, req_payload, headers, cookies, payload)
             for row in product_rows:
                 self._remember_product_row(row)
             for url, sku in url_map.items():

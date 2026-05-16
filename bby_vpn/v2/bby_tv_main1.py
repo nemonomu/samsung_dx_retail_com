@@ -45,7 +45,7 @@ from common.base_crawler import BaseCrawler
 from config import DB_CONFIG
 from core.db_readonly import connect_readonly
 from bby_listing_sku import extract_numeric_sku, extract_sponsored_status
-from bby_listing_graphql import ListingGraphQLSkuCollector, extract_listing_products_from_html
+from bby_listing_graphql import ListingGraphQLSkuCollector, direct_listing_products, extract_listing_products_from_html
 
 
 
@@ -273,7 +273,7 @@ class BestBuyTVMainCrawler(BaseCrawler):
     def crawl_page(self, page_number):
         """페이지 크롤링: 페이지 로드 → 제품 파싱 → URL 누락 시 1스텝 스크롤 로딩 → 반복 (스마트 스크롤)"""
         products = []
-        sku_collector = ListingGraphQLSkuCollector(self.page)
+        sku_collector = ListingGraphQLSkuCollector(self.page, output_dir=self.csv_output_dir)
         try:
             url = self.ensure_24_results_url(self.url_template.replace('{page}', str(page_number)))
             expected_page_products = int(os.environ.get("BBY_LISTING_EXPECTED_PAGE_PRODUCTS", "24"))
@@ -281,6 +281,29 @@ class BestBuyTVMainCrawler(BaseCrawler):
             if not base_container_xpath:
                 print("[ERROR] base_container XPath not found")
                 return []
+
+            listing_defaults = {
+                'account_name': self.account_name,
+                'main_rank': 0,
+                'calendar_week': self.calendar_week,
+                'crawl_datetime': (datetime.now() + timedelta(hours=self.time_offset_hours)).strftime('%Y-%m-%d %H:%M:%S'),
+                'batch_id': self.batch_id,
+            }
+            try:
+                direct_products = direct_listing_products(
+                    self.csv_output_dir,
+                    self.page_type,
+                    page_number,
+                    defaults=listing_defaults,
+                    page_size=expected_page_products,
+                )
+                if direct_products:
+                    print(f"[INFO] Page {page_number}: Direct GraphQL listing rows collected: {len(direct_products)}")
+                    if len(direct_products) >= expected_page_products:
+                        return direct_products
+                    print(f"[WARNING] Page {page_number}: Direct GraphQL rows {len(direct_products)}/{expected_page_products}; falling back to browser discovery")
+            except Exception as exc:
+                print(f"[WARNING] Page {page_number}: Direct GraphQL listing failed: {exc}")
 
             sku_collector.start()
             self.page.get(url)
@@ -295,13 +318,6 @@ class BestBuyTVMainCrawler(BaseCrawler):
                 initial_tree = None
                 initial_card_count = 0
 
-            listing_defaults = {
-                'account_name': self.account_name,
-                'main_rank': 0,
-                'calendar_week': self.calendar_week,
-                'crawl_datetime': (datetime.now() + timedelta(hours=self.time_offset_hours)).strftime('%Y-%m-%d %H:%M:%S'),
-                'batch_id': self.batch_id,
-            }
             api_products = sku_collector.listing_products(
                 self.page_type,
                 page_number=page_number,

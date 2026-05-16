@@ -511,6 +511,7 @@ def save_listing_operation(base_dir, endpoint_url, request_payload, request_head
 def save_listing_operation_from_html(base_dir, html_text, cookies=None, headers=None):
     operation = find_started_operation(html_text, "PlpView_ProductList_Init")
     if not operation:
+        write_apollo_operation_diagnostics(base_dir, html_text, "PlpView_ProductList_Init")
         return None
     return save_listing_operation(
         base_dir,
@@ -530,18 +531,94 @@ def operation_name(query):
 
 
 def extract_apollo_payloads(html_text):
+    html_text = str(html_text or "")
     payloads = []
-    if not html_text or "ApolloSSRDataTransport" not in str(html_text):
+    if not html_text or "ApolloSSRDataTransport" not in html_text:
         return payloads
-    pattern = re.compile(r"ApolloSSRDataTransport.*?\.push\((.*?)\)\s*(?:;|</script>)", re.S)
-    for match in pattern.finditer(str(html_text)):
-        raw_payload = match.group(1)
-        normalized = re.sub(r":\s*undefined(?=[,}])", ":null", raw_payload)
+    pos = 0
+    while True:
+        marker = html_text.find(".push(", pos)
+        if marker < 0:
+            break
+        if "ApolloSSRDataTransport" not in html_text[max(0, marker - 120): marker + 120]:
+            pos = marker + 6
+            continue
+        start = marker + 6
+        depth = 0
+        in_string = False
+        escape = False
+        end = None
+        for idx in range(start, len(html_text)):
+            char = html_text[idx]
+            if in_string:
+                if escape:
+                    escape = False
+                elif char == "\\":
+                    escape = True
+                elif char == '"':
+                    in_string = False
+            else:
+                if char == '"':
+                    in_string = True
+                elif char in "[{":
+                    depth += 1
+                elif char in "]}":
+                    depth -= 1
+                    if depth == 0:
+                        end = idx + 1
+                        break
+        if end is None:
+            break
+        raw_payload = html_text[start:end]
+        normalized = re.sub(r":\s*undefined(?=[,}])", ":null", raw_payload).replace("undefined", "null")
         try:
             payloads.append(json.loads(normalized))
         except Exception:
-            continue
+            pass
+        pos = end
     return payloads
+
+
+def write_apollo_operation_diagnostics(base_dir, html_text, target_name):
+    payloads = extract_apollo_payloads(html_text)
+    operations = []
+    for payload in payloads:
+        events = payload.get("events", []) if isinstance(payload, dict) else []
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            options = event.get("options", {})
+            query = options.get("query", "") if isinstance(options, dict) else ""
+            name = operation_name(query)
+            if name:
+                operations.append(name)
+    record = {
+        "ts": int(time.time()),
+        "target": target_name,
+        "html_length": len(str(html_text or "")),
+        "has_apollo_marker": "ApolloSSRDataTransport" in str(html_text or ""),
+        "payload_count": len(payloads),
+        "operations": sorted(set(operations)),
+    }
+    written = None
+    for folder in {base_dir, os.path.dirname(os.path.abspath(__file__))}:
+        if not folder:
+            continue
+        try:
+            os.makedirs(folder, exist_ok=True)
+            path = os.path.join(folder, "listing_apollo_diagnostics.jsonl")
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+            written = path
+        except Exception:
+            continue
+    if written:
+        print(
+            "[INFO] Apollo listing operation not found: "
+            f"target={target_name} marker={record['has_apollo_marker']} "
+            f"payloads={record['payload_count']} operations={record['operations'][:10]} -> {written}"
+        )
+    return written
 
 
 def find_started_operation(html_text, target_name):

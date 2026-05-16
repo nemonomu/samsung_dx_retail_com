@@ -1,11 +1,35 @@
 """API-first GraphQL collector using httpx when available."""
 
 import asyncio
+import copy
 import json
+import os
+import re
 import time
 
 from core.rate_limit import AsyncHostRateLimiter
 from core.retry import ExponentialBackoff
+from parsers.graphql_product_parser import parse_product_facts
+from parsers.graphql_review_parser import collect_reviews
+
+
+REVIEW_OPERATIONS = (
+    "CustomerRatingCard_Init",
+    "Ai_Review_Summary_Init",
+    "CustomerReviewList_Init",
+)
+
+
+def extract_bestbuy_sku_id(product_url):
+    """Extract Best Buy skuId from current product URL, not from captured sample."""
+    if not product_url:
+        return None
+    clean = str(product_url).split("?", 1)[0].rstrip("/")
+    match = re.search(r"/(\d+)\.p$", clean)
+    if match:
+        return match.group(1)
+    tail = clean.rsplit("/", 1)[-1]
+    return tail or None
 
 
 class GraphQLCollector:
@@ -59,9 +83,109 @@ class GraphQLCollector:
     def execute_sync(self, endpoint_url, payload, headers=None, cookies=None):
         return asyncio.run(self.execute(endpoint_url, payload, headers=headers, cookies=cookies))
 
+    async def collect_review_bundle(self, product_url, registry, cookies=None):
+        """Run mapped review/rating operations for the product URL's skuId."""
+        sku_id = extract_bestbuy_sku_id(product_url)
+        if not sku_id:
+            return {"errors": [{"message": "skuId not found in product_url"}]}
+
+        tasks = []
+        operation_names = []
+        for operation_name in REVIEW_OPERATIONS:
+            operation = registry.get(operation_name)
+            if not operation:
+                continue
+            endpoint_url = operation.get("endpoint_url")
+            payload = build_payload_for_sku(operation, sku_id)
+            headers = build_headers_for_url(operation, product_url)
+            tasks.append(self.execute(endpoint_url, payload, headers=headers, cookies=cookies))
+            operation_names.append(operation_name)
+
+        responses = await asyncio.gather(*tasks) if tasks else []
+        bundle = dict(zip(operation_names, responses))
+        bundle["skuId"] = sku_id
+        bundle["product_url"] = product_url
+        bundle["parsed"] = parse_review_bundle(bundle)
+        return bundle
+
+    def collect_review_bundle_sync(self, product_url, registry, cookies=None):
+        return asyncio.run(self.collect_review_bundle(product_url, registry, cookies=cookies))
+
     def _log(self, event_type, payload):
         if self.audit_log:
             self.audit_log.write(event_type, payload)
         else:
             print(json.dumps({"event_type": event_type, **payload}, ensure_ascii=False))
 
+
+def load_graphql_registry(base_dir):
+    """Load registry from either mapping output root or crawler/discovery dir."""
+    candidates = [
+        os.path.join(base_dir, "graphql_registry.json"),
+        os.path.join(base_dir, "crawler", "discovery", "graphql_registry.json"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+    return {}
+
+
+def build_payload_for_sku(operation, sku_id):
+    payload = copy.deepcopy(operation.get("request_template") or operation.get("request_payload") or {})
+    variables = payload.setdefault("variables", {})
+    variables["skuId"] = str(sku_id)
+    if payload.get("operationName") == "CustomerReviewList_Init":
+        variables.setdefault("onlyIfRelated", True)
+    return payload
+
+
+def build_headers_for_url(operation, product_url):
+    headers = dict(operation.get("request_headers") or {})
+    headers["Referer"] = product_url
+    headers.setdefault("origin", "https://www.bestbuy.com")
+    headers.setdefault("content-type", "application/json")
+    headers.setdefault("accept", "application/graphql-response+json,application/json;q=0.9")
+    return headers
+
+
+def parse_review_bundle(bundle):
+    rating_payload = bundle.get("CustomerRatingCard_Init") or {}
+    summary_payload = bundle.get("Ai_Review_Summary_Init") or {}
+    review_payload = bundle.get("CustomerReviewList_Init") or {}
+
+    rating_facts = parse_product_facts(rating_payload)
+    review_result = collect_reviews(review_payload, max_reviews=20)
+    summary = _first_value(summary_payload, ("reviewSummary",))
+
+    return {
+        "skuId": bundle.get("skuId"),
+        "star_rating": rating_facts.get("star_rating"),
+        "count_of_reviews": rating_facts.get("count_of_reviews"),
+        "recommendation_intent": _first_value(rating_payload, ("recommendedPercent",)),
+        "summarized_review_content": summary,
+        "detailed_review_content": review_result.get("reviews"),
+        "review_count_collected": review_result.get("count"),
+    }
+
+
+def _first_value(payload, keys):
+    found = None
+
+    def walk(value):
+        nonlocal found
+        if found is not None:
+            return
+        if isinstance(value, dict):
+            for key in keys:
+                if key in value and value[key] not in (None, ""):
+                    found = value[key]
+                    return
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(payload)
+    return found

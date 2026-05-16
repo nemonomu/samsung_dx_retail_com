@@ -333,6 +333,10 @@ def _listing_registry_path(base_dir):
     return os.path.join(base_dir or ".", "listing_graphql_operation.json")
 
 
+def _listing_candidates_path(base_dir):
+    return os.path.join(base_dir or ".", "listing_graphql_candidates.jsonl")
+
+
 def load_listing_operation(base_dir):
     candidates = [
         _listing_registry_path(base_dir),
@@ -403,6 +407,39 @@ def save_listing_operation(base_dir, endpoint_url, request_payload, request_head
     return written
 
 
+def append_listing_candidate(base_dir, endpoint_url, request_payload, response_payload, request_headers=None):
+    if not isinstance(request_payload, dict):
+        return None
+    variables = request_payload.get("variables")
+    response_shape = _shape(response_payload)
+    candidate = {
+        "ts": int(time.time()),
+        "endpoint_url": endpoint_url,
+        "operationName": request_payload.get("operationName"),
+        "variable_keys": sorted(variables.keys()) if isinstance(variables, dict) else [],
+        "has_paging_key": _has_paging_key(variables),
+        "reusable_listing_operation": is_reusable_listing_operation(request_payload, response_shape),
+        "product_url_count": count_product_urls(response_payload),
+        "sku_count": count_sku_values(response_payload),
+        "response_root_keys": sorted(response_payload.keys()) if isinstance(response_payload, dict) else [],
+        "request_header_keys": sorted(normalize_header_mapping(request_headers).keys()),
+        "sample_response_shape": response_shape,
+    }
+    written = None
+    for folder in {base_dir, os.path.dirname(os.path.abspath(__file__))}:
+        if not folder:
+            continue
+        try:
+            os.makedirs(folder, exist_ok=True)
+            path = _listing_candidates_path(folder)
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(candidate, ensure_ascii=False, default=str) + "\n")
+            written = path
+        except Exception:
+            continue
+    return written
+
+
 def is_reusable_listing_operation(request_payload, response_shape=None):
     if not isinstance(request_payload, dict):
         return False
@@ -425,6 +462,44 @@ def is_reusable_listing_operation(request_payload, response_shape=None):
     return _has_paging_key(variables) or any(
         key in variables for key in ("st", "q", "query", "keyword", "searchTerm", "categoryId", "id")
     )
+
+
+def count_product_urls(value):
+    seen = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, child in node.items():
+                if key in URL_KEYS and value_is_product_url(child):
+                    seen.add(normalize_url(child))
+                else:
+                    walk(child)
+        elif isinstance(node, list):
+            for child in node:
+                walk(child)
+
+    walk(value)
+    return len(seen)
+
+
+def count_sku_values(value):
+    seen = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, child in node.items():
+                if key in SKU_KEYS or key == "sku":
+                    match = re.fullmatch(r"\s*(\d{5,})\s*", str(child or ""))
+                    if match:
+                        seen.add(match.group(1))
+                else:
+                    walk(child)
+        elif isinstance(node, list):
+            for child in node:
+                walk(child)
+
+    walk(value)
+    return len(seen)
 
 
 def _has_paging_key(value):
@@ -629,7 +704,12 @@ class ListingGraphQLSkuCollector:
         if not self.page:
             return False
         try:
-            self.page.listen.start("graphql")
+            targets = [
+                target.strip()
+                for target in os.environ.get("BBY_LISTING_LISTEN_TARGETS", "graphql").split(",")
+                if target.strip()
+            ]
+            self.page.listen.start(targets[0] if len(targets) == 1 else targets)
             return True
         except Exception as exc:
             print(f"[WARNING] Listing GraphQL listen start failed: {exc}")
@@ -679,11 +759,13 @@ class ListingGraphQLSkuCollector:
                 req_payload = json.loads(req_body) if isinstance(req_body, str) else req_body
             except Exception:
                 req_payload = None
+            endpoint_url = getattr(packet.request, "url", None) or getattr(packet, "url", None)
+            headers = getattr(packet.request, "headers", None) or {}
+            if isinstance(req_payload, dict):
+                append_listing_candidate(self.output_dir, endpoint_url, req_payload, payload, headers)
             item_map, url_map = extract_sku_map_from_payload(payload)
             product_rows = extract_listing_products_from_payload(payload, page_type="listing")
-            if product_rows and isinstance(req_payload, dict):
-                endpoint_url = getattr(packet.request, "url", None) or getattr(packet, "url", None)
-                headers = getattr(packet.request, "headers", None) or {}
+            if isinstance(req_payload, dict):
                 cookies = {}
                 try:
                     for cookie in self.page.cookies():
@@ -693,7 +775,11 @@ class ListingGraphQLSkuCollector:
                     pass
                 path = save_listing_operation(self.output_dir, endpoint_url, req_payload, headers, cookies, payload)
                 if path:
-                    print(f"[INFO] Saved listing GraphQL operation: {req_payload.get('operationName')} -> {path}")
+                    print(
+                        "[INFO] Saved reusable listing GraphQL operation: "
+                        f"{req_payload.get('operationName')} urls={count_product_urls(payload)} "
+                        f"skus={count_sku_values(payload)} -> {path}"
+                    )
             for row in product_rows:
                 self._remember_product_row(row)
             for url, sku in url_map.items():

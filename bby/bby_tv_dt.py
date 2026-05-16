@@ -343,51 +343,6 @@ class BestBuyTVDetailCrawler(BaseCrawler):
         print("[ERROR] BestBuy 접속 복구 대기 시간이 초과되었습니다.")
         return False
 
-    def click_review_control_fallback(self):
-        """Click a visible review link/button when DB XPath misses the current DOM."""
-        try:
-            result = self.page.run_js("""
-                const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim().toLowerCase();
-                const candidates = Array.from(document.querySelectorAll('a, button, [role="button"]'))
-                    .map((el, idx) => {
-                        const text = norm(el.innerText || el.textContent || el.getAttribute('aria-label') || '');
-                        const href = el.href || el.getAttribute('href') || '';
-                        const rect = el.getBoundingClientRect();
-                        const style = window.getComputedStyle(el);
-                        const visible = rect.width > 0 && rect.height > 0 &&
-                            style.visibility !== 'hidden' && style.display !== 'none';
-                        const reviewText = text.includes('review') || text.includes('customer rating');
-                        const reviewHref = href.includes('/reviews') || href.includes('/site/reviews/');
-                        const likelyAllReviews = text.includes('see all') || text.includes('read all') ||
-                            text.includes('customer reviews') || /\\d[\\d,]*\\s+reviews?/.test(text);
-                        return {el, idx, text, href, visible, score:
-                            (visible ? 10 : 0) + (reviewHref ? 20 : 0) +
-                            (reviewText ? 10 : 0) + (likelyAllReviews ? 10 : 0)};
-                    })
-                    .filter(c => c.visible && (c.href.includes('/reviews') || c.href.includes('/site/reviews/') ||
-                        (c.text.includes('review') && (c.text.includes('see all') || c.text.includes('read all') ||
-                         c.text.includes('customer reviews') || /\\d[\\d,]*\\s+reviews?/.test(c.text)))))
-                    .sort((a, b) => b.score - a.score);
-
-                if (!candidates.length) {
-                    return {clicked: false, reason: 'no candidates'};
-                }
-
-                const target = candidates[0];
-                target.el.scrollIntoView({behavior: 'instant', block: 'center'});
-                target.el.click();
-                return {clicked: true, text: target.text, href: target.href, score: target.score};
-            """)
-            if result and result.get("clicked"):
-                print(f"├─ 리뷰 컨트롤 클릭 성공 (fallback JS): text='{result.get('text')}', href='{result.get('href')}'")
-                time.sleep(2.5)
-                return True
-            print(f"[DEBUG] 리뷰 컨트롤 fallback 실패: {result}")
-            return False
-        except Exception as e:
-            print(f"[DEBUG] 리뷰 컨트롤 fallback 예외: {e}")
-            return False
-
     def extract_rating(self, text):
         """별점 텍스트에서 숫자 추출 (소수점 포함, 쉼표 제외)"""
         return extract_numeric_value(text, include_comma=False, include_decimal=True)
@@ -1020,9 +975,6 @@ class BestBuyTVDetailCrawler(BaseCrawler):
                         current_position += scroll_step
                         self.page.run_js(f"window.scrollTo({{top: {current_position}, behavior: 'smooth'}});")
                         time.sleep(0.2)
-
-                if not review_button_found:
-                    review_button_found = self.click_review_control_fallback()
 
                 # Direct review URL navigation is intentionally disabled.
                 # BestBuy often returns ERR_HTTP2_PROTOCOL_ERROR for direct review URLs,

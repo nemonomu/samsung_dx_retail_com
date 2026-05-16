@@ -3102,21 +3102,18 @@ class BestBuyDetailCrawler:
             else:
                 # ── re_bby_tv_dt1_reviews.py와 완전 동일한 흐름 ──
 
-                # 1) 페이지 새로 로드 (이전 인터랙션 상태 초기화)
-                print(f"  [INFO] Reloading product page for review extraction...")
-                self.rate_limiter.wait(product_url, reason='review_reload')
-                self.page.get(product_url)
-                self.browser_diagnostics.snapshot(self.page, product_url, 'review_reload_after_get')
-                self.network_diagnostics.snapshot(self.page, product_url, 'review_reload_after_get')
-                time.sleep(3)
-                try:
-                    self.page.ele('xpath://h1', timeout=10)
-                except:
-                    time.sleep(3)
-
-                # 2) Rating link 클릭 → GraphQL 캡처
                 gql_data = self.collect_review_data_via_graphql_replay(product_url)
                 if not any(gql_data.get(key) for key in ('rating_card', 'ai_summary', 'reviews')):
+                    print(f"  [INFO] Reloading product page for review GraphQL capture fallback...")
+                    self.rate_limiter.wait(product_url, reason='review_reload')
+                    self.page.get(product_url)
+                    self.browser_diagnostics.snapshot(self.page, product_url, 'review_reload_after_get')
+                    self.network_diagnostics.snapshot(self.page, product_url, 'review_reload_after_get')
+                    time.sleep(3)
+                    try:
+                        self.page.ele('xpath://h1', timeout=10)
+                    except:
+                        time.sleep(3)
                     gql_data = self.capture_review_data_via_graphql()
                 gql_top_mentions = None
                 gql_recommendation = self.parse_graphql_recommendation(gql_data)

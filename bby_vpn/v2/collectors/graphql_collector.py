@@ -48,7 +48,11 @@ class GraphQLCollector:
         try:
             import httpx
         except ImportError:
-            return await self._execute_with_urllib(endpoint_url, payload, headers=headers, cookies=cookies)
+            try:
+                import requests  # noqa: F401
+            except ImportError:
+                return await self._execute_with_urllib(endpoint_url, payload, headers=headers, cookies=cookies)
+            return await self._execute_with_requests(endpoint_url, payload, headers=headers, cookies=cookies)
 
         headers = headers or {}
         cookies = cookies or {}
@@ -67,6 +71,7 @@ class GraphQLCollector:
                             "status_code": response.status_code,
                             "elapsed_ms": elapsed_ms,
                             "attempt": attempt,
+                            "client": "httpx",
                         })
                         if response.status_code == 200:
                             body = response.json()
@@ -76,7 +81,7 @@ class GraphQLCollector:
 
                         decision = self.retry_policy.decide(attempt, status_code=response.status_code, error_kind="http_status")
                     except Exception as exc:
-                        self._log("graphql_exception", {"error": str(exc), "attempt": attempt})
+                        self._log("graphql_exception", {"error": str(exc), "attempt": attempt, "client": "httpx"})
                         decision = self.retry_policy.decide(attempt, error_kind="exception")
 
                     if not decision.retry:
@@ -84,8 +89,43 @@ class GraphQLCollector:
                     await asyncio.sleep(decision.delay_seconds)
                     attempt += 1
 
-    def execute_sync(self, endpoint_url, payload, headers=None, cookies=None):
-        return asyncio.run(self.execute(endpoint_url, payload, headers=headers, cookies=cookies))
+    async def _execute_with_requests(self, endpoint_url, payload, headers=None, cookies=None):
+        async with self.semaphore:
+            attempt = 1
+            while True:
+                await self.rate_limiter.wait(endpoint_url)
+                started = time.time()
+                try:
+                    status_code, body = await asyncio.to_thread(
+                        _post_json_with_requests,
+                        endpoint_url,
+                        payload,
+                        headers or {},
+                        cookies or {},
+                        self.timeout,
+                    )
+                    elapsed_ms = int((time.time() - started) * 1000)
+                    self._log("graphql_request", {
+                        "endpoint_url": endpoint_url,
+                        "operationName": payload.get("operationName") if isinstance(payload, dict) else None,
+                        "status_code": status_code,
+                        "elapsed_ms": elapsed_ms,
+                        "attempt": attempt,
+                        "client": "requests",
+                    })
+                    if status_code == 200:
+                        if isinstance(body, dict) and body.get("errors"):
+                            self._log("graphql_errors", {"errors": body.get("errors"), "operationName": payload.get("operationName")})
+                        return body
+                    decision = self.retry_policy.decide(attempt, status_code=status_code, error_kind="http_status")
+                except Exception as exc:
+                    self._log("graphql_exception", {"error": str(exc), "attempt": attempt, "client": "requests"})
+                    decision = self.retry_policy.decide(attempt, error_kind="exception")
+
+                if not decision.retry:
+                    return {"errors": [{"message": decision.reason, "terminal": decision.terminal}]}
+                await asyncio.sleep(decision.delay_seconds)
+                attempt += 1
 
     async def _execute_with_urllib(self, endpoint_url, payload, headers=None, cookies=None):
         async with self.semaphore:
@@ -124,6 +164,9 @@ class GraphQLCollector:
                     return {"errors": [{"message": decision.reason, "terminal": decision.terminal}]}
                 await asyncio.sleep(decision.delay_seconds)
                 attempt += 1
+
+    def execute_sync(self, endpoint_url, payload, headers=None, cookies=None):
+        return asyncio.run(self.execute(endpoint_url, payload, headers=headers, cookies=cookies))
 
     async def collect_review_bundle(self, product_url, registry, cookies=None, sku_map=None, operation_names=None):
         """Run mapped review/rating operations for the product URL's skuId."""
@@ -328,6 +371,29 @@ def _first_value(payload, keys):
 
     walk(payload)
     return found
+
+
+def _post_json_with_requests(endpoint_url, payload, headers, cookies, timeout):
+    import requests
+
+    request_headers = _sanitize_request_headers(headers)
+    request_headers.setdefault("Content-Type", "application/json")
+    request_headers.setdefault("Accept", "application/graphql-response+json,application/json;q=0.9")
+    request_headers["Accept-Encoding"] = "identity"
+    request_headers["Connection"] = "close"
+
+    response = requests.post(
+        endpoint_url,
+        json=payload,
+        headers=request_headers,
+        cookies=cookies or {},
+        timeout=(10, timeout),
+    )
+    try:
+        body = response.json() if response.content else {}
+    except Exception:
+        body = {"errors": [{"message": response.text[:500]}]}
+    return response.status_code, body
 
 
 def _post_json_with_urllib(endpoint_url, payload, headers, cookies, timeout):

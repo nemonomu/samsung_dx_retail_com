@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import importlib.util
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -21,19 +22,52 @@ BASE_DIR = Path(__file__).resolve().parent
 BBY_VPN_DIR = BASE_DIR.parent
 PROJECT_DIR = BBY_VPN_DIR.parent
 
+def add_import_path(path):
+    if path and path.exists() and str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+
+
+for path in (BASE_DIR, BBY_VPN_DIR, PROJECT_DIR):
+    add_import_path(path)
+
+for ancestor in (BASE_DIR, *BASE_DIR.parents):
+    for path in (
+        ancestor,
+        ancestor / "running",
+        ancestor / "bby_vpn",
+        ancestor / "bby_vpn" / "running",
+    ):
+        if (path / "common" / "setup.py").exists():
+            add_import_path(path)
+
 for path in (
-    BASE_DIR,
-    BBY_VPN_DIR,
+    BASE_DIR / "running",
     BBY_VPN_DIR / "running",
-    PROJECT_DIR,
     PROJECT_DIR / "running",
 ):
     if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+        add_import_path(path)
 
 from bby_listing_sku import extract_numeric_sku_from_text
 from collectors.graphql_collector import BrowserFetchGraphQLCollector, load_graphql_cookies, load_graphql_registry, load_sku_map
 from core.retry import ExponentialBackoff
+
+
+DETAIL_OPERATION_NAMES = (
+    "CustomerRatingCard_Init",
+    "Ai_Review_Summary_Init",
+    "CustomerReviewList_Init",
+    "Reviews_Pros_Cons_Init",
+    "ReviewStats_Init",
+    "getPDPProductBySkuId",
+    "getProduct",
+    "ProductSchema_init",
+    "ProductSpecification_Init",
+    "MediaGalleryImagesAndDetails_Init",
+    "ProductHeader_Init",
+    "GetCompareProduct",
+    "ProductCarousel_Recommendations",
+)
 
 
 def load_v2_class(module_filename, class_name):
@@ -226,6 +260,177 @@ def format_recommendation(value):
         return str(value)
 
 
+def money(value):
+    if value in (None, ""):
+        return None
+    try:
+        return f"${float(value):,.2f}"
+    except Exception:
+        text = str(value).strip()
+        return text if text.startswith("$") else text
+
+
+def first_value(payload, keys):
+    found = None
+
+    def walk(value):
+        nonlocal found
+        if found is not None:
+            return
+        if isinstance(value, dict):
+            for key in keys:
+                if key in value and value[key] not in (None, "", []):
+                    found = value[key]
+                    return
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(payload)
+    return found
+
+
+def parse_price(bundle):
+    for operation in ("getProduct", "getPDPProductBySkuId"):
+        payload = bundle.get(operation) or {}
+        price_payload = first_value(payload, ("price",))
+        if not isinstance(price_payload, dict):
+            continue
+        final_price = (
+            price_payload.get("displayableCustomerPrice")
+            or price_payload.get("currentPrice")
+            or price_payload.get("customerPrice")
+            or price_payload.get("salePrice")
+        )
+        original_price = price_payload.get("displayableRegularPrice") or price_payload.get("regularPrice")
+        savings = price_payload.get("totalSavings")
+        return {
+            "final_sku_price": money(final_price),
+            "original_sku_price": money(original_price),
+            "savings": money(savings),
+        }
+    return {"final_sku_price": None, "original_sku_price": None, "savings": None}
+
+
+def spec_text(payload):
+    parts = []
+
+    def walk(value):
+        if isinstance(value, dict):
+            label = (
+                value.get("name")
+                or value.get("displayName")
+                or value.get("specName")
+                or value.get("label")
+                or value.get("key")
+            )
+            val = (
+                value.get("value")
+                or value.get("displayValue")
+                or value.get("values")
+                or value.get("description")
+                or value.get("text")
+            )
+            if label is not None or val is not None:
+                parts.append(f"{label or ''}: {val or ''}")
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(payload)
+    return " | ".join(str(part) for part in parts)
+
+
+def parse_specs(bundle, product_name=""):
+    text = " | ".join(
+        spec_text(bundle.get(operation) or {})
+        for operation in ("ProductSpecification_Init", "ProductSchema_init", "GetCompareProduct")
+    )
+    search_text = f"{product_name or ''} | {text}"
+
+    def find_labeled_number(labels):
+        for label in labels:
+            pattern = rf"{label}[^|:]*[:| ]+[^|]*?(\d+(?:\.\d+)?)"
+            match = re.search(pattern, search_text, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return None
+
+    screen_size = find_labeled_number(("screen size", "class size", "display size", "diagonal screen"))
+    if not screen_size:
+        match = re.search(r'(\d+(?:\.\d+)?)\s*(?:"|inches|inch|\u201d)\s+class', search_text, re.IGNORECASE)
+        if match:
+            screen_size = match.group(1)
+    if screen_size and "inch" not in screen_size.lower():
+        screen_size = f"{screen_size} inches"
+
+    electricity_use = find_labeled_number(("estimated annual electricity use", "annual energy consumption", "electricity use"))
+    model_year = first_value(bundle.get("ProductSchema_init") or {}, ("modelYear",))
+    if not model_year:
+        match = re.search(r"\b(20[2-4]\d)\b", search_text)
+        model_year = match.group(1) if match else None
+    model_number = first_value(bundle.get("ProductSchema_init") or {}, ("modelNumber",))
+    if not model_number:
+        model_number = first_value(bundle.get("ProductSpecification_Init") or {}, ("modelNumber", "model"))
+    if not model_number:
+        match = re.search(r"(?:manufacturer\s+)?model\s+(?:number|no\.?)\s*:\s*([^|]+)", search_text, re.IGNORECASE)
+        model_number = match.group(1).strip() if match else None
+
+    return {
+        "screen_size": screen_size,
+        "estimated_annual_electricity_use": electricity_use,
+        "model_year": model_year,
+        "model_number": model_number,
+    }
+
+
+def parse_similar_products(bundle, current_name=None, limit=4):
+    names = []
+    seen = set()
+
+    def add_name(value):
+        if not value:
+            return
+        text = str(value).strip()
+        if len(text) < 8:
+            return
+        if current_name and text == current_name:
+            return
+        key = text.lower()
+        if key in seen:
+            return
+        seen.add(key)
+        names.append(text)
+
+    def walk(value):
+        if len(names) >= limit:
+            return
+        if isinstance(value, dict):
+            name_obj = value.get("name")
+            if isinstance(name_obj, dict):
+                add_name(name_obj.get("short") or name_obj.get("title"))
+            elif isinstance(name_obj, str):
+                add_name(name_obj)
+            add_name(value.get("productName") or value.get("title"))
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(bundle.get("GetCompareProduct") or {})
+    walk(bundle.get("ProductCarousel_Recommendations") or {})
+    return [{"product_name": name} for name in names[:limit]]
+
+
+def detail_operation_names(registry):
+    return [name for name in DETAIL_OPERATION_NAMES if name in registry]
+
+
 def run_api_only_detail(rows):
     print("\n" + "=" * 80)
     print(f"[RUN] API-only detail CSV for {len(rows)} filtered listing rows")
@@ -238,6 +443,9 @@ def run_api_only_detail(rows):
     saved_sku_map = load_sku_map(registry_dir)
     if not registry:
         print(f"[WARNING] GraphQL registry not found: {registry_dir}")
+    operation_names = detail_operation_names(registry)
+    if operation_names:
+        print(f"[INFO] Detail GraphQL operations: {', '.join(operation_names)}")
 
     crawler = BestBuyDetailCrawler()
     collector = None
@@ -270,12 +478,27 @@ def run_api_only_detail(rows):
                     registry,
                     cookies=cookies,
                     sku_map={product_url: numeric_sku, item: numeric_sku},
+                    operation_names=operation_names,
                 )
                 parsed = bundle.get("parsed") or {}
+                if parsed.get("count_of_reviews") is None:
+                    parsed["count_of_reviews"] = first_value(bundle, ("reviewCount", "totalReviewCount", "numberOfReviews"))
+                if parsed.get("star_rating") is None:
+                    parsed["star_rating"] = first_value(bundle, ("averageRating", "ratingValue", "starRating"))
+                price_data = parse_price(bundle)
+                spec_data = parse_specs(bundle, row.get("retailer_sku_name") or row.get("product_name"))
+                similar_products = parse_similar_products(bundle, row.get("retailer_sku_name") or row.get("product_name"))
                 errors = bundle.get("errors")
                 crawler.record_graphql_sku_map(product_url, numeric_sku)
             elif not numeric_sku:
                 errors = {"skuId": "numeric_sku missing from listing"}
+                price_data = {}
+                spec_data = {}
+                similar_products = []
+            else:
+                price_data = {}
+                spec_data = {}
+                similar_products = []
 
             if errors:
                 print(f"[API-ONLY] {order}/{len(rows)} {item}: GraphQL partial/failed: {errors}")
@@ -287,8 +510,8 @@ def run_api_only_detail(rows):
                 order=order,
                 retailer_sku_name=row.get("retailer_sku_name") or row.get("product_name"),
                 item=item,
-                electricity_use=None,
-                screen_size=None,
+                electricity_use=spec_data.get("estimated_annual_electricity_use"),
+                screen_size=spec_data.get("screen_size"),
                 count_of_reviews=parsed.get("count_of_reviews"),
                 count_of_star_ratings=parsed.get("count_of_reviews"),
                 top_mentions=None,
@@ -296,9 +519,9 @@ def run_api_only_detail(rows):
                 summarized_review_content=parsed.get("summarized_review_content"),
                 recommendation_intent=format_recommendation(parsed.get("recommendation_intent")),
                 product_url=product_url,
-                final_sku_price=None,
-                savings=None,
-                original_sku_price=None,
+                final_sku_price=price_data.get("final_sku_price"),
+                savings=price_data.get("savings"),
+                original_sku_price=price_data.get("original_sku_price"),
                 offer=row.get("offer"),
                 pick_up_availability=row.get("pick_up_availability"),
                 shipping_availability=row.get("shipping_availability") or row.get("fastest_delivery"),
@@ -310,9 +533,9 @@ def run_api_only_detail(rows):
                 bsr_rank=row.get("bsr_rank"),
                 main_rank=row.get("main_rank"),
                 trend_rank=row.get("trend_rank"),
-                model_year=None,
-                sku=numeric_sku or "no sku",
-                similar_products=None,
+                model_year=spec_data.get("model_year"),
+                sku=spec_data.get("model_number") or numeric_sku or "no sku",
+                similar_products=similar_products or None,
             )
             crawler.total_collected += 1
     finally:

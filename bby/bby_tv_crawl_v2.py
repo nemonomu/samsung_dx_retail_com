@@ -543,6 +543,63 @@ def parse_duration(value):
     return int(float(text) * 3600)
 
 
+def listing_csv_candidates(output_dir):
+    prefix = "bby_tv_v2_listing_"
+    suffix = ".csv"
+    if not os.path.isdir(output_dir):
+        return []
+    candidates = []
+    for name in os.listdir(output_dir):
+        if not (name.startswith(prefix) and name.endswith(suffix)):
+            continue
+        path = os.path.join(output_dir, name)
+        batch_id = name[len(prefix):-len(suffix)]
+        try:
+            mtime = os.path.getmtime(path)
+            with open(path, "r", newline="", encoding="utf-8-sig") as f:
+                row_count = sum(1 for _ in csv.DictReader(f))
+        except Exception:
+            mtime = 0
+            row_count = 0
+        candidates.append({
+            "path": path,
+            "name": name,
+            "batch_id": batch_id,
+            "mtime": mtime,
+            "row_count": row_count,
+        })
+    candidates.sort(key=lambda x: x["mtime"], reverse=True)
+    return candidates
+
+
+def choose_listing_batch_id(output_dir, mode):
+    candidates = listing_csv_candidates(output_dir)
+    if not candidates:
+        raise FileNotFoundError(f"No listing CSV found in {output_dir}")
+
+    if mode == "latest":
+        selected = candidates[0]
+        print(f"[INFO] Latest listing selected: {selected['name']} ({selected['row_count']} rows)")
+        return selected["batch_id"]
+
+    print("\nAvailable listing CSV files:")
+    for idx, item in enumerate(candidates[:30], 1):
+        modified = datetime.fromtimestamp(item["mtime"]).strftime("%Y-%m-%d %H:%M:%S")
+        print(f"  {idx}. {item['name']} | rows={item['row_count']} | modified={modified}")
+
+    while True:
+        choice = input("Select listing number: ").strip()
+        try:
+            choice_idx = int(choice)
+            if 1 <= choice_idx <= min(len(candidates), 30):
+                selected = candidates[choice_idx - 1]
+                print(f"[INFO] Listing selected: {selected['name']} ({selected['row_count']} rows)")
+                return selected["batch_id"]
+        except Exception:
+            pass
+        print("Invalid selection. Enter a number from the list.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="BestBuy TV CSV-only v2 orchestrator")
     parser.add_argument("--resume-from", choices=RESUME_STAGES)
@@ -556,8 +613,18 @@ def main():
     parser.add_argument("--with-similar", action="store_true", help="similar product actions are skipped by default")
     parser.add_argument("--start-order", type=int, help="detail stage starts from this 1-based listing order")
     parser.add_argument("--end-order", type=int, help="detail stage ends at this 1-based listing order")
+    parser.add_argument("--latest-listing", action="store_true", help="use the most recently modified listing CSV")
+    parser.add_argument("--select-listing", action="store_true", help="select a listing CSV from a numbered menu")
     parser.add_argument("max_runtime", nargs="*", help='optional duration such as "6 hours" or "6h"')
     args = parser.parse_args()
+
+    if args.latest_listing and args.select_listing:
+        parser.error("--latest-listing and --select-listing cannot be used together")
+
+    batch_id = args.batch_id
+    if args.latest_listing or args.select_listing:
+        mode = "latest" if args.latest_listing else "select"
+        batch_id = choose_listing_batch_id(args.output_dir, mode)
 
     max_runtime_text = " ".join(args.max_runtime) if args.max_runtime else None
     max_runtime_seconds = parse_duration(max_runtime_text)
@@ -568,7 +635,7 @@ def main():
 
     crawler = BestBuyTVCsvOrchestrator(
         resume_from=args.resume_from,
-        batch_id=args.batch_id,
+        batch_id=batch_id,
         time_offset_hours=args.time_offset,
         output_dir=args.output_dir,
         chunk_size=args.chunk_size,

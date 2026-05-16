@@ -308,6 +308,7 @@ class BestBuyDetailCrawler:
         try:
             print("[INFO] Setting up DrissionPage browser...")
             co = ChromiumOptions()
+            co.auto_port()
             co.no_imgs(True)
             self.page = ChromiumPage(co)
             print("[OK] DrissionPage browser setup complete")

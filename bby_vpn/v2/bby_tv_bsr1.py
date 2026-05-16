@@ -29,7 +29,7 @@ import re
 import csv
 from datetime import datetime, timedelta
 from lxml import html
-from DrissionPage import ChromiumPage
+from DrissionPage import ChromiumPage, ChromiumOptions
 
 # 공통 환경 설정 (작업 디렉토리, 한글 출력, 경로 설정)
 RUNNING_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'running')
@@ -140,7 +140,10 @@ class BestBuyTVBSRCrawler(BaseCrawler):
     def setup_drission_driver(self):
         """DrissionPage 브라우저 설정 (봇 감지 우회 강화)"""
         try:
-            self.page = ChromiumPage()
+            co = ChromiumOptions()
+            co.auto_port()
+            co.no_imgs(True)
+            self.page = ChromiumPage(co)
             print("[SUCCESS] DrissionPage setup complete")
         except Exception as e:
             print(f"[ERROR] DrissionPage setup failed: {e}")

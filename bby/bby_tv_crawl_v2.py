@@ -176,6 +176,29 @@ class CsvListingMixin:
         return False
 
 
+class ReviewSkipLogFilter:
+    def __init__(self, wrapped):
+        self.wrapped = wrapped
+        self.buffer = ""
+
+    def write(self, text):
+        self.buffer += text
+        while "\n" in self.buffer:
+            line, self.buffer = self.buffer.split("\n", 1)
+            if not self._should_suppress(line):
+                self.wrapped.write(line + "\n")
+
+    def flush(self):
+        if self.buffer:
+            if not self._should_suppress(self.buffer):
+                self.wrapped.write(self.buffer)
+            self.buffer = ""
+        self.wrapped.flush()
+
+    def _should_suppress(self, line):
+        return "reviews_button" in line and ("DB" in line or "XPath" in line or "7" in line)
+
+
 class BestBuyTVMainCsvCrawler(CsvListingMixin, BestBuyTVMainCrawler):
     def save_products(self, products):
         if not products:
@@ -379,13 +402,17 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
 
     def crawl_detail(self, product):
         removed = {}
+        original_stdout = None
         if self.skip_reviews:
+            print("[INFO] v2 skip_reviews=True - review button click and detailed review extraction skipped")
             for key in (
                 "reviews_button", "detailed_review_content",
                 "reviewpage_recommendation_intent",
             ):
                 if key in self.xpaths:
                     removed[key] = self.xpaths.pop(key)
+            original_stdout = sys.stdout
+            sys.stdout = ReviewSkipLogFilter(original_stdout)
         if self.skip_similar:
             for key in ("similar_products_container", "similar_product_name"):
                 if key in self.xpaths:
@@ -393,6 +420,9 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
         try:
             return super().crawl_detail(product)
         finally:
+            if original_stdout:
+                sys.stdout.flush()
+                sys.stdout = original_stdout
             self.xpaths.update(removed)
 
     def _looks_incomplete(self, data):

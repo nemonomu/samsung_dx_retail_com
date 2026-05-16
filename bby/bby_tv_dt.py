@@ -28,7 +28,14 @@ import traceback
 import re
 from datetime import datetime, timedelta
 from lxml import html
-from DrissionPage import ChromiumOptions, ChromiumPage
+import undetected_chromedriver as uc
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 # 공통 환경 설정 (작업 디렉토리, 한글 출력, 경로 설정)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -38,6 +45,123 @@ setup_environment(__file__)
 from common.base_crawler import BaseCrawler
 from common.data_extractor import extract_numeric_value
 
+
+class UndetectedChromePage:
+    def __init__(self, user_data_dir=None, cache_dir=None, user_agent=None, disable_cache=False):
+        options = webdriver.ChromeOptions()
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument("--disable-features=IsolateOrigins,site-per-process")
+        options.add_argument("--no-first-run")
+        options.add_argument("--no-default-browser-check")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-infobars")
+        options.add_argument("--disable-notifications")
+        options.add_argument("--disable-software-rasterizer")
+        options.add_argument("--lang=en-US,en;q=0.9")
+        options.add_argument("--window-size=1366,768")
+        options.add_argument("--start-maximized")
+        options.add_argument("--remote-allow-origins=*")
+        if user_data_dir:
+            options.add_argument(f"--user-data-dir={user_data_dir}")
+        if cache_dir:
+            options.add_argument(f"--disk-cache-dir={cache_dir}")
+        if user_agent:
+            options.add_argument(f"--user-agent={user_agent}")
+        if disable_cache:
+            options.add_argument("--disable-application-cache")
+            options.add_argument("--disk-cache-size=1")
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        options.add_experimental_option("useAutomationExtension", False)
+
+        self.driver = uc.Chrome(options=options)
+        try:
+            self.driver.maximize_window()
+        except Exception:
+            pass
+
+        self.driver.set_page_load_timeout(60)
+        self.driver.set_script_timeout(30)
+        try:
+            self.driver.execute_cdp_cmd("Network.enable", {})
+            if user_agent:
+                self.driver.execute_cdp_cmd("Network.setExtraHTTPHeaders", {"headers": {"User-Agent": user_agent}})
+        except Exception:
+            pass
+
+        self.set = self
+
+    @property
+    def html(self):
+        return self.driver.page_source
+
+    @property
+    def url(self):
+        return self.driver.current_url
+
+    @property
+    def actions(self):
+        return ActionChains(self.driver)
+
+    def get(self, url):
+        self.driver.get(url)
+
+    def refresh(self):
+        self.driver.refresh()
+
+    def quit(self):
+        try:
+            self.driver.quit()
+        except Exception:
+            pass
+
+    def run_js(self, script, *args):
+        return self.driver.execute_script(script, *args)
+
+    def _find(self, selector):
+        if selector.startswith("xpath:"):
+            return self.driver.find_element(By.XPATH, selector[6:])
+        if selector.startswith("css:"):
+            return self.driver.find_element(By.CSS_SELECTOR, selector[4:])
+        if selector.startswith("//") or selector.startswith("(//"):
+            return self.driver.find_element(By.XPATH, selector)
+        return self.driver.find_element(By.CSS_SELECTOR, selector)
+
+    def _finds(self, selector):
+        if selector.startswith("xpath:"):
+            return self.driver.find_elements(By.XPATH, selector[6:])
+        if selector.startswith("css:"):
+            return self.driver.find_elements(By.CSS_SELECTOR, selector[4:])
+        if selector.startswith("//") or selector.startswith("(//"):
+            return self.driver.find_elements(By.XPATH, selector)
+        return self.driver.find_elements(By.CSS_SELECTOR, selector)
+
+    def ele(self, selector, timeout=0):
+        if timeout and timeout > 0:
+            try:
+                return WebDriverWait(self.driver, timeout).until(lambda d: self._find(selector))
+            except TimeoutException:
+                return None
+        try:
+            return self._find(selector)
+        except NoSuchElementException:
+            return None
+
+    def eles(self, selector, timeout=0):
+        if timeout and timeout > 0:
+            end = time.time() + timeout
+            while time.time() < end:
+                elements = self._finds(selector)
+                if elements:
+                    return elements
+                time.sleep(0.1)
+            return []
+        return self._finds(selector)
+
+    def headers(self, headers):
+        try:
+            self.driver.execute_cdp_cmd("Network.setExtraHTTPHeaders", {"headers": headers})
+        except Exception:
+            pass
 
 
 class BestBuyTVDetailCrawler(BaseCrawler):
@@ -62,26 +186,19 @@ class BestBuyTVDetailCrawler(BaseCrawler):
         self.page = None
 
     def setup_drission_driver(self):
-        """DrissionPage 브라우저 설정 (봇 감지 우회 강화)"""
+        """undetected-chromedriver 브라우저 설정"""
         try:
-            opts = ChromiumOptions()
-            opts.set_argument("--disable-blink-features=AutomationControlled")
-            opts.set_argument("--disable-features=IsolateOrigins,site-per-process")
-            opts.set_argument("--no-first-run")
-            opts.set_argument("--no-default-browser-check")
-            opts.set_argument("--disable-dev-shm-usage")
-            opts.set_argument("--lang=en-US,en;q=0.9")
-            opts.set_argument("--window-size=1366,768")
-            opts.set_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
-            self.page = ChromiumPage(opts)
+            self.page = UndetectedChromePage(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            )
             self.page.set.headers({
                 "Accept-Language": "en-US,en;q=0.9",
                 "Upgrade-Insecure-Requests": "1",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             })
-            print("[SUCCESS] DrissionPage setup complete")
+            print("[SUCCESS] UndetectedChrome setup complete")
         except Exception as e:
-            print(f"[ERROR] DrissionPage setup failed: {e}")
+            print(f"[ERROR] UndetectedChrome setup failed: {e}")
             traceback.print_exc()
             raise
 

@@ -141,6 +141,11 @@ class BestBuyDetailCrawler:
         self.proactive_cooldown_every = int(os.environ.get('BBY_DT_COOLDOWN_EVERY', '8'))
         self.proactive_cooldown_min = int(os.environ.get('BBY_DT_COOLDOWN_MIN', '180'))
         self.proactive_cooldown_max = int(os.environ.get('BBY_DT_COOLDOWN_MAX', '360'))
+        self.reactive_refresh_on_graphql_error = os.environ.get('BBY_DT_REACTIVE_REFRESH_ON_GRAPHQL_ERROR', '1') == '1'
+        self.reactive_cooldown_min = int(os.environ.get('BBY_DT_REACTIVE_COOLDOWN_MIN', '180'))
+        self.reactive_cooldown_max = int(os.environ.get('BBY_DT_REACTIVE_COOLDOWN_MAX', '420'))
+        self.needs_reactive_session_refresh = False
+        self.reactive_session_refresh_reason = None
 
         self.audit_log = JsonlAuditLog(self.audit_log_path)
         self.audit_log.write("run_init", {
@@ -153,6 +158,7 @@ class BestBuyDetailCrawler:
             "similar_extraction_enabled": self.similar_extraction_enabled,
             "graphql_replay_enabled": self.graphql_replay_enabled,
             "discovery_refresh_every": self.discovery_refresh_every,
+            "reactive_refresh_on_graphql_error": self.reactive_refresh_on_graphql_error,
         })
         self.rate_limiter = ConservativeRateLimiter(self.audit_log)
         self.browser_diagnostics = BrowserSessionDiagnostics(self.audit_log)
@@ -463,6 +469,25 @@ class BestBuyDetailCrawler:
                 return False
             self._warmup_with_different_page()
 
+        return True
+
+    def reactive_session_refresh(self, success_count, reason):
+        """Refresh the browser immediately after weak-session signals."""
+        if not self.reactive_refresh_on_graphql_error:
+            return True
+
+        wait_time = random.randint(self.reactive_cooldown_min, self.reactive_cooldown_max)
+        print(f"\n[INFO] Reactive cooldown after {success_count} detail items ({reason}): {wait_time // 60}m {wait_time % 60}s")
+        self.audit_log.write("reactive_session_refresh", {
+            "success_count": success_count,
+            "reason": reason,
+            "cooldown_seconds": wait_time,
+        })
+        time.sleep(wait_time)
+        print(f"[INFO] Reactive browser restart after weak-session signal: {reason}")
+        if not self.restart_browser():
+            return False
+        self._warmup_with_different_page()
         return True
 
     def check_db_connection(self):
@@ -2097,6 +2122,9 @@ class BestBuyDetailCrawler:
             captured_data['reviews'] = valid_payload('CustomerReviewList_Init')
             captured_count = sum(1 for key in ('rating_card', 'ai_summary', 'reviews') if captured_data.get(key))
             if bundle.get("errors"):
+                self.needs_reactive_session_refresh = True
+                self.reactive_session_refresh_reason = "graphql_replay_errors"
+                self.rate_limiter.register_outcome(product_url, 'failed')
                 print(f"  [WARNING] GraphQL replay via browser_fetch: {captured_count}/3 operations, errors={bundle.get('errors')} ({selected_dir})")
             else:
                 print(f"  [OK] GraphQL replay via browser_fetch: {captured_count}/3 operations ({selected_dir})")
@@ -3616,6 +3644,15 @@ class BestBuyDetailCrawler:
                     success_count += 1
                     consecutive_fails = 0
                     retry_count = 0
+                    if self.needs_reactive_session_refresh:
+                        reason = self.reactive_session_refresh_reason or 'weak_session_signal'
+                        self.needs_reactive_session_refresh = False
+                        self.reactive_session_refresh_reason = None
+                        if not self.reactive_session_refresh(success_count, reason):
+                            print("[ERROR] Reactive browser refresh failed. Stopping.")
+                            break
+                        i += 1
+                        continue
                     self.refresh_discovery_page(success_count)
                     if not self.proactive_session_refresh(success_count):
                         print("[ERROR] Browser refresh failed. Stopping.")

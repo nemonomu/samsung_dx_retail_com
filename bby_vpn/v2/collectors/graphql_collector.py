@@ -57,7 +57,18 @@ class GraphQLCollector:
         headers = headers or {}
         cookies = cookies or {}
         async with self.semaphore:
-            async with httpx.AsyncClient(timeout=self.timeout, headers=headers, cookies=cookies) as client:
+            client_kwargs = {
+                "timeout": self.timeout,
+                "headers": headers,
+                "cookies": cookies,
+                "follow_redirects": True,
+            }
+            try:
+                import h2  # noqa: F401
+                client_kwargs["http2"] = True
+            except ImportError:
+                pass
+            async with httpx.AsyncClient(**client_kwargs) as client:
                 attempt = 1
                 while True:
                     await self.rate_limiter.wait(endpoint_url)

@@ -280,7 +280,7 @@ class BestBuyTVTrendCsvCrawler(CsvListingMixin, BestBuyTVTrendCrawler):
 
 class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
     def __init__(
-        self, batch_id, csv_store, detail_csv, time_offset_hours=0, chunk_size=20,
+        self, batch_id, csv_store, detail_csv, time_offset_hours=0, chunk_size=12,
         cooldown_min=300, cooldown_max=900, skip_reviews=True, skip_similar=True,
         deadline=None,
     ):
@@ -348,7 +348,7 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
             self.xpaths.update(removed)
 
     def _looks_incomplete(self, data):
-        return not any(data.get(k) for k in ("item", "sku", "screen_size", "final_sku_price"))
+        return not any(data.get(k) for k in ("sku", "screen_size", "final_sku_price", "star_rating"))
 
     def _cooldown(self, reason):
         wait_seconds = random.randint(self.cooldown_min, self.cooldown_max)
@@ -390,6 +390,10 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
                     self._cooldown("incomplete detail")
                     combined_data = self.crawl_detail(product)
 
+                if not combined_data or self._looks_incomplete(combined_data):
+                    print("[SKIP] Detail data still incomplete after retry; row not saved")
+                    continue
+
                 if combined_data:
                     combined_data["order"] = i
                 if combined_data and self.save_to_retail_com(combined_data):
@@ -416,7 +420,7 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
 class BestBuyTVCsvOrchestrator:
     def __init__(
         self, resume_from=None, batch_id=None, time_offset_hours=0,
-        output_dir=DEFAULT_OUTPUT_DIR, chunk_size=20, cooldown_min=300,
+        output_dir=DEFAULT_OUTPUT_DIR, chunk_size=12, cooldown_min=300,
         cooldown_max=900, skip_reviews=True, skip_similar=True,
         deadline=None,
     ):
@@ -533,7 +537,7 @@ def main():
     parser.add_argument("--batch-id")
     parser.add_argument("--time_offset", type=int, default=0)
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--chunk-size", type=int, default=20)
+    parser.add_argument("--chunk-size", type=int, default=12)
     parser.add_argument("--cooldown-min", type=int, default=300)
     parser.add_argument("--cooldown-max", type=int, default=900)
     parser.add_argument("--with-reviews", action="store_true", help="review page actions are skipped by default")

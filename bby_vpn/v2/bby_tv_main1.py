@@ -43,6 +43,7 @@ from bby_crawl_controls import (
     JsonlAuditLog,
     NetworkDiagnostics,
 )
+from core.db_readonly import connect_readonly
 
 class BestBuyTVCrawler:
     def __init__(self):
@@ -84,7 +85,7 @@ class BestBuyTVCrawler:
     def connect_db(self):
         """Connect to PostgreSQL database"""
         try:
-            self.db_conn = psycopg2.connect(**DB_CONFIG)
+            self.db_conn = connect_readonly(DB_CONFIG)
             print("[OK] Database connected")
             return True
         except Exception as e:

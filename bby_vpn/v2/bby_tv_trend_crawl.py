@@ -18,6 +18,7 @@ from lxml import html
 from config import DB_CONFIG
 from bby_config_loader import get_config
 from bby_utils import load_excluded_items, is_excluded_url
+from core.db_readonly import connect_readonly
 
 class BestBuyTrendCrawler:
     def __init__(self):
@@ -39,8 +40,7 @@ class BestBuyTrendCrawler:
     def connect_db(self):
         """DB 연결"""
         try:
-            self.db_conn = psycopg2.connect(**DB_CONFIG)
-            self.db_conn.autocommit = True
+            self.db_conn = connect_readonly(DB_CONFIG)
             print("[OK] Database connected")
             return True
         except Exception as e:

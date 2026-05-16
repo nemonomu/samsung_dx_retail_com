@@ -49,7 +49,7 @@ import pytz
 from DrissionPage import ChromiumPage, ChromiumOptions
 from lxml import html
 
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
@@ -72,6 +72,7 @@ from parsers.graphql_product_parser import parse_product_facts
 # Import database configuration
 from config import DB_CONFIG
 from bby_config_loader import get_config
+from core.db_readonly import connect_readonly
 
 
 class Tee:
@@ -230,8 +231,7 @@ class BestBuyDetailCrawler:
     def connect_db(self):
         """DB connection"""
         try:
-            self.db_conn = psycopg2.connect(**DB_CONFIG)
-            self.db_conn.autocommit = True
+            self.db_conn = connect_readonly(DB_CONFIG)
             print("[OK] Database connected")
             return True
         except Exception as e:
@@ -416,8 +416,7 @@ class BestBuyDetailCrawler:
         except Exception:
             print("[INFO] DB connection unavailable - continuing without DB")
             try:
-                self.db_conn = psycopg2.connect(**DB_CONFIG)
-                self.db_conn.autocommit = True
+                self.db_conn = connect_readonly(DB_CONFIG)
                 print("[OK] DB reconnected")
                 return True
             except Exception as e:

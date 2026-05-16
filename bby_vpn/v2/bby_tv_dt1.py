@@ -203,6 +203,52 @@ class BestBuyDetailCrawler:
         except Exception as e:
             print(f"[WARNING] Failed to save checkpoint: {e}")
 
+    def extract_graphql_sku_id_from_page(self, product_url, page_source=None):
+        """Extract Best Buy numeric skuId from PDP URL or rendered text."""
+        candidates = [product_url or "", page_source or ""]
+        try:
+            body_text = self.page.run_js("return document.body ? document.body.innerText : ''") if self.page else ""
+            candidates.append(body_text or "")
+        except Exception:
+            pass
+
+        patterns = (
+            r"/sku/(\d+)(?:/|$)",
+            r"\bSKU\s*[:#]?\s*(\d{5,})\b",
+            r'"skuId"\s*:\s*"(\d+)"',
+            r'"skuId"\s*:\s*(\d+)',
+        )
+        for text in candidates:
+            for pattern in patterns:
+                match = re.search(pattern, text or "", re.IGNORECASE)
+                if match:
+                    return match.group(1)
+        return None
+
+    def record_graphql_sku_map(self, product_url, sku_id):
+        """Persist URL/item -> Best Buy numeric skuId for API-first collectors."""
+        if not product_url or not sku_id:
+            return
+        try:
+            os.makedirs(self.discovery_dir, exist_ok=True)
+            path = os.path.join(self.discovery_dir, "graphql_sku_map.json")
+            try:
+                with open(path, encoding="utf-8") as f:
+                    sku_map = json.load(f)
+            except Exception:
+                sku_map = {}
+            sku_map[product_url] = {
+                "skuId": str(sku_id),
+                "source": "pdp_rendered_text",
+                "updated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            }
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(sku_map, f, ensure_ascii=False, indent=2)
+            self.audit_log.write("graphql_sku_map", {"product_url": product_url, "skuId": str(sku_id)})
+            print(f"  [INFO] GraphQL skuId mapped: {sku_id}")
+        except Exception as e:
+            print(f"  [WARNING] GraphQL skuId map save failed: {e}")
+
     def save_page_diagnostic(self, reason, product_url):
         """Save rendered HTML and browser/network summary for a failed PDP."""
         try:
@@ -2733,6 +2779,8 @@ class BestBuyDetailCrawler:
             print(f"  [INFO] Checking DOM for key elements...")
             page_source = self.page.html
             tree = html.fromstring(page_source)
+            graphql_sku_id = self.extract_graphql_sku_id_from_page(product_url, page_source)
+            self.record_graphql_sku_map(product_url, graphql_sku_id)
             embedded_data = self.extract_embedded_product_data(tree)
 
             # 핵심 요소 존재 여부 확인

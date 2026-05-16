@@ -27,6 +27,9 @@ def extract_bestbuy_sku_id(product_url):
     if not product_url:
         return None
     clean = str(product_url).split("?", 1)[0].rstrip("/")
+    match = re.search(r"/sku/(\d+)(?:/|$)", clean)
+    if match:
+        return match.group(1)
     match = re.search(r"/(\d+)\.p$", clean)
     if match:
         return match.group(1)
@@ -338,6 +341,8 @@ def resolve_sku_id_from_product_page(product_url, registry=None, timeout=20):
         return None
 
     patterns = (
+        r'\bSKU\s*[:#]?\s*(\d{5,})\b',
+        r'\bSku\s*[:#]?\s*(\d{5,})\b',
         r'"skuId"\s*:\s*"(\d+)"',
         r'"skuId"\s*:\s*(\d+)',
         r'"sku"\s*:\s*\{\s*"skuId"\s*:\s*"(\d+)"',

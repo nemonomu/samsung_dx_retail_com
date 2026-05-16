@@ -542,7 +542,7 @@ class BestBuyTVMainCrawler(BaseCrawler):
 
             # 중복 item 필터링
             if item and item in self.saved_urls:
-                print(f"[SKIP] 중복 item: {retailer_sku_name[:40] if retailer_sku_name else 'N/A'}...")
+                print(f"[SKIP] 중복 item={item}: {retailer_sku_name[:40] if retailer_sku_name else 'N/A'}... url={product_url}")
                 self.stats['duplicates'] += 1
                 continue
 

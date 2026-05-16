@@ -565,6 +565,7 @@ class BestBuyTVBSRCrawler(BaseCrawler):
 
                 # 2. 페이지 간 중복 체크 (이미 수집한 item → 스킵)
                 if item in self.crawled_urls:
+                    print(f"[SKIP] 중복 item={item}: {retailer_sku_name[:40] if retailer_sku_name else 'N/A'}... url={product_url}")
                     self.stats['duplicates'] += 1
                     continue
                 self.crawled_urls.add(item)

@@ -459,12 +459,35 @@ class ListingGraphQLSkuCollector:
     def apply_by_order(self, products):
         filled = 0
         rows = self.products
+        row_index = 0
+        used_items = {
+            extract_item_from_url(product.get("product_url"))
+            for product in (products or [])
+            if product.get("product_url")
+        }
+        used_items.discard(None)
         for idx, product in enumerate(products or []):
-            if idx >= len(rows):
+            if product.get("product_url"):
+                if not product.get("numeric_sku"):
+                    sku = self.resolve(product.get("product_url"))
+                    if sku:
+                        product["numeric_sku"] = sku
+                continue
+            while row_index < len(rows):
+                candidate = rows[row_index]
+                row_index += 1
+                candidate_item = extract_item_from_url(candidate.get("product_url"))
+                if candidate_item and candidate_item in used_items:
+                    continue
+                row = candidate
                 break
-            row = rows[idx]
-            if not product.get("product_url") and row.get("product_url"):
+            else:
+                break
+            if row.get("product_url"):
                 product["product_url"] = row.get("product_url")
+                candidate_item = extract_item_from_url(row.get("product_url"))
+                if candidate_item:
+                    used_items.add(candidate_item)
                 filled += 1
             if not product.get("numeric_sku") and row.get("numeric_sku"):
                 product["numeric_sku"] = row.get("numeric_sku")

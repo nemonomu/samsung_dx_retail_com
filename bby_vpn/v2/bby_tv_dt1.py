@@ -64,7 +64,14 @@ from bby_crawl_controls import (
 )
 from crawler.discovery.embedded_payload_mapper import EmbeddedPayloadMapper
 from crawler.discovery.graphql_mapper import GraphQLMapper
+from collectors.graphql_collector import (
+    BrowserFetchGraphQLCollector,
+    load_graphql_cookies,
+    load_graphql_registry,
+    load_sku_map,
+)
 from core.session_pool import cookies_from_drission_page, minimal_headers_from_packet
+from core.retry import ExponentialBackoff
 from diagnostics.endpoint_metrics import EndpointMetrics
 from parsers.graphql_review_parser import collect_reviews as collect_graphql_reviews
 from parsers.graphql_product_parser import parse_product_facts
@@ -127,6 +134,7 @@ class BestBuyDetailCrawler:
         self.browser_min_mode = os.environ.get('BBY_BROWSER_MIN_MODE', '1') == '1'
         self.review_extraction_enabled = os.environ.get('BBY_DT_SKIP_REVIEWS', '1') != '1'
         self.similar_extraction_enabled = os.environ.get('BBY_DT_SKIP_SIMILAR', '1') != '1'
+        self.graphql_replay_enabled = os.environ.get('BBY_DT_GRAPHQL_REPLAY', '1') == '1'
         self.discovery_refresh_every = int(os.environ.get('BBY_DT_DISCOVERY_REFRESH_EVERY', '4'))
         self.proactive_restart_every = int(os.environ.get('BBY_DT_RESTART_EVERY', '8'))
         self.proactive_cooldown_every = int(os.environ.get('BBY_DT_COOLDOWN_EVERY', '8'))
@@ -142,6 +150,7 @@ class BestBuyDetailCrawler:
             "browser_min_mode": self.browser_min_mode,
             "review_extraction_enabled": self.review_extraction_enabled,
             "similar_extraction_enabled": self.similar_extraction_enabled,
+            "graphql_replay_enabled": self.graphql_replay_enabled,
             "discovery_refresh_every": self.discovery_refresh_every,
         })
         self.rate_limiter = ConservativeRateLimiter(self.audit_log)
@@ -2023,6 +2032,80 @@ class BestBuyDetailCrawler:
 
         return captured_data
 
+    def collect_review_data_via_graphql_replay(self, product_url):
+        """Replay saved GraphQL operations through the active Chromium session."""
+        captured_data = {
+            'reviews': None,
+            'pros_cons': None,
+            'ai_summary': None,
+            'rating_card': None,
+        }
+
+        if not self.graphql_replay_enabled:
+            return captured_data
+
+        registry_dirs = []
+        configured_dir = os.environ.get('BBY_GRAPHQL_REGISTRY_DIR')
+        if configured_dir:
+            registry_dirs.append(configured_dir)
+        registry_dirs.extend([self.csv_output_dir, self.discovery_dir])
+
+        registry = {}
+        sku_map = {}
+        cookies = {}
+        selected_dir = None
+        for registry_dir in registry_dirs:
+            if not registry_dir or registry_dir == selected_dir:
+                continue
+            registry = load_graphql_registry(registry_dir)
+            if registry:
+                selected_dir = registry_dir
+                sku_map = load_sku_map(registry_dir)
+                cookies = load_graphql_cookies(registry_dir)
+                break
+
+        if not registry:
+            print("  [INFO] GraphQL replay skipped: registry not found")
+            return captured_data
+
+        try:
+            timeout = int(os.environ.get('BBY_GRAPHQL_REPLAY_TIMEOUT', '45'))
+            max_attempts = int(os.environ.get('BBY_GRAPHQL_REPLAY_MAX_ATTEMPTS', '1'))
+            retry_policy = ExponentialBackoff(max_attempts=max_attempts, base_delay=1.0, max_delay=10.0)
+            collector = BrowserFetchGraphQLCollector(
+                page=self.page,
+                audit_log=self.audit_log,
+                timeout=timeout,
+                concurrency=1,
+                retry_policy=retry_policy,
+            )
+            bundle = collector.collect_review_bundle_sync(
+                product_url,
+                registry,
+                cookies=cookies,
+                sku_map=sku_map,
+            )
+            captured_data['rating_card'] = bundle.get('CustomerRatingCard_Init')
+            captured_data['ai_summary'] = bundle.get('Ai_Review_Summary_Init')
+            captured_data['reviews'] = bundle.get('CustomerReviewList_Init')
+            captured_count = sum(1 for key in ('rating_card', 'ai_summary', 'reviews') if captured_data.get(key))
+            print(f"  [OK] GraphQL replay via browser_fetch: {captured_count}/3 operations ({selected_dir})")
+            self.audit_log.write("graphql_replay_result", {
+                "product_url": product_url,
+                "registry_dir": selected_dir,
+                "operation_count": captured_count,
+                "skuId": bundle.get("skuId"),
+                "errors": bundle.get("errors"),
+            })
+        except Exception as exc:
+            print(f"  [WARNING] GraphQL replay failed; falling back to capture: {exc}")
+            self.audit_log.write("graphql_replay_exception", {
+                "product_url": product_url,
+                "error": str(exc),
+            })
+
+        return captured_data
+
     def parse_graphql_reviews(self, captured_data):
         """GraphQL CustomerReviewList_Init 응답에서 리뷰 본문 파싱 (DOM 실패 시 fallback)"""
         reviews_data = captured_data.get('reviews')
@@ -2134,6 +2217,17 @@ class BestBuyDetailCrawler:
                 return f"{rec}% would recommend to a friend"
             return None
         except:
+            return None
+
+    def parse_graphql_star_rating(self, captured_data):
+        """Extract average rating from GraphQL rating payload."""
+        rating_data = captured_data.get('rating_card')
+        if not rating_data:
+            return None
+        try:
+            facts = parse_product_facts(rating_data)
+            return facts.get('star_rating')
+        except Exception:
             return None
 
     def parse_graphql_ai_summary(self, captured_data):
@@ -3021,17 +3115,26 @@ class BestBuyDetailCrawler:
                     time.sleep(3)
 
                 # 2) Rating link 클릭 → GraphQL 캡처
-                gql_data = self.capture_review_data_via_graphql()
+                gql_data = self.collect_review_data_via_graphql_replay(product_url)
+                if not any(gql_data.get(key) for key in ('rating_card', 'ai_summary', 'reviews')):
+                    gql_data = self.capture_review_data_via_graphql()
                 gql_top_mentions = None
                 gql_recommendation = self.parse_graphql_recommendation(gql_data)
+                gql_star_rating = self.parse_graphql_star_rating(gql_data)
                 gql_ai_summary = self.parse_graphql_ai_summary(gql_data)
                 gql_count = self.parse_graphql_review_count(gql_data)
                 gql_reviews = self.parse_graphql_reviews(gql_data)
 
-                if gql_count is not None and str(count_of_reviews or '0') in ('0', 'None', ''):
+                if gql_star_rating is not None and (not star_rating or "not yet reviewed" in str(star_rating).lower()):
+                    star_rating = gql_star_rating
+                    print(f"  [OK] Star_Rating updated from GraphQL: {star_rating}")
+
+                if gql_count is not None:
+                    old_count = count_of_reviews
                     count_of_reviews = gql_count
                     count_of_star_ratings = gql_count
-                    print(f"  [OK] Count_of_Reviews updated from GraphQL: {count_of_reviews}")
+                    if str(old_count) != str(gql_count):
+                        print(f"  [OK] Count_of_Reviews updated from GraphQL: {old_count} -> {count_of_reviews}")
 
                 if gql_reviews:
                     detailed_reviews = gql_reviews

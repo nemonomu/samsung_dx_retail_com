@@ -13,6 +13,7 @@ import html as html_lib
 import copy
 import os
 import re
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -350,6 +351,22 @@ def load_listing_operation(base_dir):
     return None
 
 
+def remove_listing_operation(base_dir):
+    removed = []
+    for path in {
+        _listing_registry_path(base_dir),
+        _listing_registry_path(os.path.dirname(os.path.abspath(__file__))),
+    }:
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            os.remove(path)
+            removed.append(path)
+        except Exception:
+            continue
+    return removed
+
+
 def save_listing_operation(base_dir, endpoint_url, request_payload, request_headers, cookies, sample_response=None):
     if not endpoint_url or not isinstance(request_payload, dict):
         return None
@@ -424,10 +441,12 @@ def _walk_mutate_paging(value, page_number, page_size):
             _walk_mutate_paging(child, page_number, page_size)
 
 
-def direct_listing_products(base_dir, page_type, page_number, defaults=None, page_size=24, timeout=30):
+def direct_listing_products(base_dir, page_type, page_number, defaults=None, page_size=24, timeout=None):
     operation = load_listing_operation(base_dir)
     if not operation:
         return []
+    if timeout is None:
+        timeout = int(os.environ.get("BBY_LISTING_DIRECT_TIMEOUT", "12"))
     endpoint_url = operation.get("endpoint_url")
     payload = build_listing_payload(operation.get("request_payload"), page_number, page_size)
     headers = _sanitize_headers(operation.get("request_headers") or {})
@@ -445,6 +464,12 @@ def direct_listing_products(base_dir, page_type, page_number, defaults=None, pag
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"listing GraphQL HTTP {exc.code}: {raw[:300]}") from exc
+    except (socket.timeout, TimeoutError) as exc:
+        removed = remove_listing_operation(base_dir)
+        raise RuntimeError(f"listing GraphQL timeout; removed stale operation files={removed}") from exc
+    except Exception as exc:
+        removed = remove_listing_operation(base_dir)
+        raise RuntimeError(f"listing GraphQL request failed; removed stale operation files={removed}: {exc}") from exc
     rows = extract_listing_products_from_payload(parsed, page_type, page_number=page_number)
     merged_rows = []
     defaults = dict(defaults or {})

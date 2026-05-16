@@ -1,6 +1,8 @@
 # Configuration files with sensitive information
 config.py
 amazon_login.py
+.env
+**/.env
 
 # Python cache
 __pycache__/
@@ -67,3 +69,4 @@ walmart_robot_page_*.html
 # Text dumps
 *.txt
 !requirements.txt
+.gstack/

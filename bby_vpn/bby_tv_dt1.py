@@ -98,7 +98,10 @@ class BestBuyDetailCrawler:
         # Config loader 초기화
         self.config = get_config()
         self.file_name = 'bby_tv_dt1'
-        self.csv_output_dir = r'C:\samsung_dx_retail_com\bby_vpn'
+        self.csv_output_dir = os.environ.get(
+            'BBY_OUTPUT_DIR',
+            os.path.dirname(os.path.abspath(__file__))
+        )
         os.makedirs(self.csv_output_dir, exist_ok=True)
         self.csv_output_path = os.path.join(self.csv_output_dir, 'bby_tv_vpn_test.csv')
         self.checkpoint_path = os.path.join(self.csv_output_dir, 'bby_tv_dt1_checkpoint.json')
@@ -108,13 +111,19 @@ class BestBuyDetailCrawler:
             os.remove(self.csv_output_path)
 
         self.max_skus = self.config.get_int('constant', 'max_products_detail', self.file_name, 300)
-        self.review_extraction_enabled = os.environ.get('BBY_DT_SKIP_REVIEWS', '0') != '1'
+        self.review_extraction_enabled = os.environ.get('BBY_DT_SKIP_REVIEWS', '1') != '1'
         self.proactive_restart_every = int(os.environ.get('BBY_DT_RESTART_EVERY', '20'))
         self.proactive_cooldown_every = int(os.environ.get('BBY_DT_COOLDOWN_EVERY', '20'))
         self.proactive_cooldown_min = int(os.environ.get('BBY_DT_COOLDOWN_MIN', '180'))
         self.proactive_cooldown_max = int(os.environ.get('BBY_DT_COOLDOWN_MAX', '360'))
 
         self.audit_log = JsonlAuditLog(self.audit_log_path)
+        self.audit_log.write("run_init", {
+            "batch_id": self.batch_id,
+            "output_dir": self.csv_output_dir,
+            "csv_output_path": self.csv_output_path,
+            "review_extraction_enabled": self.review_extraction_enabled,
+        })
         self.rate_limiter = ConservativeRateLimiter(self.audit_log)
         self.browser_diagnostics = BrowserSessionDiagnostics(self.audit_log)
         self.network_diagnostics = NetworkDiagnostics(self.audit_log)
@@ -170,6 +179,31 @@ class BestBuyDetailCrawler:
             print(f"[INFO] Checkpoint saved: {self.checkpoint_path}")
         except Exception as e:
             print(f"[WARNING] Failed to save checkpoint: {e}")
+
+    def save_page_diagnostic(self, reason, product_url):
+        """Save rendered HTML and browser/network summary for a failed PDP."""
+        try:
+            safe_reason = re.sub(r'[^A-Za-z0-9_.-]+', '_', reason or 'unknown')[:80]
+            stamp = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
+            diag_path = os.path.join(self.csv_output_dir, f'bby_dt_diag_{stamp}_{safe_reason}.html')
+            page_html = self.page.html if self.page else ''
+            page_title = self.page.title if self.page else ''
+            current_url = self.page.url if self.page else ''
+            with open(diag_path, 'w', encoding='utf-8') as f:
+                f.write(f"<!-- reason={reason} requested_url={product_url} current_url={current_url} title={page_title} -->\n")
+                f.write(page_html or '')
+            self.audit_log.write("page_diagnostic", {
+                "reason": reason,
+                "requested_url": product_url,
+                "current_url": current_url,
+                "title": page_title,
+                "html_path": diag_path,
+            })
+            print(f"  [DIAG] Page diagnostic saved: {diag_path}")
+            return diag_path
+        except Exception as e:
+            print(f"  [WARNING] Failed to save page diagnostic: {e}")
+            return None
 
     def connect_db(self):
         """DB connection"""
@@ -2573,10 +2607,30 @@ class BestBuyDetailCrawler:
                     print(f"  [OK] page load complete")
                 else:
                     print(f"  [ERROR] page loading timeout - h1 element not found")
+                    try:
+                        block_reason = detect_block_signal(self.page.title or '', self.page.html[:5000] if self.page.html else '')
+                        if block_reason:
+                            print(f"  [BLOCKED] Block signal detected after timeout: {block_reason}")
+                            self.rate_limiter.register_outcome(product_url, 'blocked')
+                            self.save_page_diagnostic(f'blocked_{block_reason}', product_url)
+                            return 'blocked'
+                    except Exception:
+                        pass
+                    self.save_page_diagnostic('h1_timeout', product_url)
                     self.rate_limiter.register_outcome(product_url, 'failed')
                     return False
             except Exception as e:
                 print(f"  [ERROR] page loading timeout: {e}")
+                try:
+                    block_reason = detect_block_signal(self.page.title or '', self.page.html[:5000] if self.page.html else '')
+                    if block_reason:
+                        print(f"  [BLOCKED] Block signal detected after load exception: {block_reason}")
+                        self.rate_limiter.register_outcome(product_url, 'blocked')
+                        self.save_page_diagnostic(f'blocked_{block_reason}', product_url)
+                        return 'blocked'
+                except Exception:
+                    pass
+                self.save_page_diagnostic('h1_exception', product_url)
                 self.rate_limiter.register_outcome(product_url, 'failed')
                 return False
 
@@ -3270,6 +3324,7 @@ class BestBuyDetailCrawler:
                 else:
                     # 일반 실패 (h1 not found 등) → skip하고 다음 URL로
                     consecutive_fails += 1
+                    self.save_checkpoint('failed', idx, url_data, success_count)
 
                     if consecutive_fails >= 3:
                         # 연속 3회 실패 → 차단 판정

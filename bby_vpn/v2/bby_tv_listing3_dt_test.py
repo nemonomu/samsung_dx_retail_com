@@ -292,6 +292,49 @@ def first_value(payload, keys):
     return found
 
 
+def contains_external_review_marker(payload):
+    found = False
+
+    def walk(value):
+        nonlocal found
+        if found:
+            return
+        if isinstance(value, str):
+            text = value.lower()
+            if "reviews from" in text or "review from" in text:
+                found = True
+                return
+        elif isinstance(value, dict):
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(payload)
+    return found
+
+
+def normalize_review_state(parsed, bundle):
+    parsed = dict(parsed or {})
+    star_rating = parsed.get("star_rating")
+    count = parsed.get("count_of_reviews")
+    external_reviews = contains_external_review_marker(bundle)
+    not_yet_reviewed = "not yet reviewed" in str(star_rating or "").lower()
+
+    if external_reviews or not_yet_reviewed:
+        parsed["star_rating"] = "Not yet reviewed"
+        parsed["count_of_reviews"] = 0
+        parsed["detailed_review_content"] = None
+        parsed["summarized_review_content"] = None
+        parsed["recommendation_intent"] = None
+        return parsed
+
+    if count in (None, ""):
+        parsed["count_of_reviews"] = 0
+    return parsed
+
+
 def parse_price(bundle):
     for operation in ("getProduct", "getPDPProductBySkuId"):
         payload = bundle.get(operation) or {}
@@ -485,6 +528,7 @@ def run_api_only_detail(rows):
                     parsed["count_of_reviews"] = first_value(bundle, ("reviewCount", "totalReviewCount", "numberOfReviews"))
                 if parsed.get("star_rating") is None:
                     parsed["star_rating"] = first_value(bundle, ("averageRating", "ratingValue", "starRating"))
+                parsed = normalize_review_state(parsed, bundle)
                 price_data = parse_price(bundle)
                 spec_data = parse_specs(bundle, row.get("retailer_sku_name") or row.get("product_name"))
                 similar_products = parse_similar_products(bundle, row.get("retailer_sku_name") or row.get("product_name"))

@@ -1898,7 +1898,6 @@ class BestBuyDetailCrawler:
 
             target_ops = {
                 'CustomerReviewList_Init': 'reviews',
-                'Reviews_Pros_Cons_Init': 'pros_cons',
                 'Ai_Review_Summary_Init': 'ai_summary',
                 'CustomerRatingCard_Init': 'rating_card',
             }
@@ -1962,7 +1961,7 @@ class BestBuyDetailCrawler:
             self.page.listen.stop()
             captured_count = sum(1 for v in captured_data.values() if v is not None)
             self.audit_log.write("endpoint_metrics", self.endpoint_metrics.summary())
-            print(f"  [INFO] GraphQL capture done: {captured_count}/4 operations captured")
+            print(f"  [INFO] GraphQL capture done: {captured_count}/{len(target_ops)} operations captured")
 
         except Exception as e:
             print(f"  [ERROR] GraphQL capture failed: {e}")
@@ -2970,7 +2969,7 @@ class BestBuyDetailCrawler:
 
                 # 2) Rating link 클릭 → GraphQL 캡처
                 gql_data = self.capture_review_data_via_graphql()
-                gql_top_mentions = self.parse_graphql_top_mentions(gql_data)
+                gql_top_mentions = None
                 gql_recommendation = self.parse_graphql_recommendation(gql_data)
                 gql_ai_summary = self.parse_graphql_ai_summary(gql_data)
                 gql_count = self.parse_graphql_review_count(gql_data)
@@ -3114,10 +3113,9 @@ class BestBuyDetailCrawler:
 
                 print(f"  [✓] Detailed_Reviews: {len(detailed_reviews) if detailed_reviews else 0} chars")
 
-                # Top mentions / Recommendation / AI Summary: GraphQL에서 획득 (re 파일과 동일)
-                if gql_top_mentions:
-                    top_mentions = gql_top_mentions
-                print(f"  [✓] Top_Mentions: {top_mentions}")
+                # Top mentions are excluded from collection; keep CSV column empty for compatibility.
+                top_mentions = None
+                print(f"  [INFO] Top_Mentions skipped (excluded from collection target)")
 
                 if gql_recommendation:
                     recommendation_intent = gql_recommendation

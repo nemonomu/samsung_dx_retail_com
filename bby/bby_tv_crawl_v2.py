@@ -10,12 +10,15 @@ import csv
 import importlib.util
 import os
 import random
+import shutil
 import sys
+import tempfile
 import time
 import traceback
 from datetime import datetime, timedelta
 
 import pytz
+from DrissionPage import ChromiumOptions, ChromiumPage
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(CURRENT_DIR)
@@ -280,7 +283,8 @@ class BestBuyTVTrendCsvCrawler(CsvListingMixin, BestBuyTVTrendCrawler):
 
 class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
     def __init__(
-        self, batch_id, csv_store, detail_csv, time_offset_hours=0, chunk_size=12,
+        self, batch_id, csv_store, detail_csv, time_offset_hours=0, chunk_size=None,
+        chunk_min=5, chunk_max=10,
         cooldown_min=300, cooldown_max=900, skip_reviews=True, skip_similar=True,
         deadline=None, start_order=None, end_order=None,
     ):
@@ -288,6 +292,8 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
         self.csv_store = csv_store
         self.detail_csv = detail_csv
         self.chunk_size = chunk_size
+        self.chunk_min = chunk_min
+        self.chunk_max = chunk_max
         self.cooldown_min = cooldown_min
         self.cooldown_max = cooldown_max
         self.skip_reviews = skip_reviews
@@ -295,8 +301,43 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
         self.deadline = deadline
         self.start_order = start_order
         self.end_order = end_order
+        self.profile_dirs = []
+        self.items_until_cooldown = self._next_chunk_size()
         self.standalone = False
         os.makedirs(os.path.dirname(self.detail_csv), exist_ok=True)
+
+    def _next_chunk_size(self):
+        if self.chunk_size:
+            return self.chunk_size
+        low = max(int(self.chunk_min or 5), 1)
+        high = max(int(self.chunk_max or low), low)
+        return random.randint(low, high)
+
+    def setup_drission_driver(self):
+        profile_root = os.path.join(os.path.dirname(self.detail_csv), "chrome_profiles")
+        os.makedirs(profile_root, exist_ok=True)
+        user_data_path = tempfile.mkdtemp(prefix="bby_dp_profile_", dir=profile_root)
+        cache_path = os.path.join(user_data_path, "cache")
+        os.makedirs(cache_path, exist_ok=True)
+        self.profile_dirs.append(user_data_path)
+
+        opts = ChromiumOptions()
+        opts.set_user_data_path(user_data_path)
+        opts.set_cache_path(cache_path)
+        opts.set_argument("--disable-application-cache")
+        opts.set_argument("--disk-cache-size", "1")
+        self.page = ChromiumPage(opts)
+        print(f"[SUCCESS] DrissionPage setup complete with fresh profile: {user_data_path}")
+
+    def _cleanup_profile_dirs(self):
+        for path in list(self.profile_dirs):
+            try:
+                if path and os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                    print(f"[CLEANUP] Removed Chrome profile: {path}")
+            except Exception as e:
+                print(f"[WARNING] Chrome profile cleanup failed: {path}: {e}")
+        self.profile_dirs.clear()
 
     def load_product_list(self):
         products = self.csv_store.product_list()
@@ -366,6 +407,7 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
             except Exception:
                 pass
             self.page = None
+        self._cleanup_profile_dirs()
         time.sleep(wait_seconds)
         self.setup_drission_driver()
 
@@ -407,8 +449,11 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
                 if combined_data and self.save_to_retail_com(combined_data):
                     total_saved += 1
 
-                if i < len(product_list) and self.chunk_size and i % self.chunk_size == 0:
-                    self._cooldown(f"chunk boundary after {i} products")
+                self.items_until_cooldown -= 1
+                if i < len(product_list) and self.items_until_cooldown <= 0:
+                    completed_chunk = self._next_chunk_size()
+                    self.items_until_cooldown = completed_chunk
+                    self._cooldown(f"random chunk boundary after order {actual_order}")
                 else:
                     time.sleep(random.uniform(5, 8))
 
@@ -423,12 +468,14 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
                 self.page.quit()
             if self.db_conn:
                 self.db_conn.close()
+            self._cleanup_profile_dirs()
 
 
 class BestBuyTVCsvOrchestrator:
     def __init__(
         self, resume_from=None, batch_id=None, time_offset_hours=0,
-        output_dir=DEFAULT_OUTPUT_DIR, chunk_size=12, cooldown_min=300,
+        output_dir=DEFAULT_OUTPUT_DIR, chunk_size=None, chunk_min=5, chunk_max=10,
+        cooldown_min=300,
         cooldown_max=900, skip_reviews=True, skip_similar=True,
         deadline=None, start_order=None, end_order=None,
     ):
@@ -441,6 +488,8 @@ class BestBuyTVCsvOrchestrator:
         )
         self.output_dir = output_dir
         self.chunk_size = chunk_size
+        self.chunk_min = chunk_min
+        self.chunk_max = chunk_max
         self.cooldown_min = cooldown_min
         self.cooldown_max = cooldown_max
         self.skip_reviews = skip_reviews
@@ -507,6 +556,8 @@ class BestBuyTVCsvOrchestrator:
                 detail_csv=self.detail_csv,
                 time_offset_hours=self.time_offset_hours,
                 chunk_size=self.chunk_size,
+                chunk_min=self.chunk_min,
+                chunk_max=self.chunk_max,
                 cooldown_min=self.cooldown_min,
                 cooldown_max=self.cooldown_max,
                 skip_reviews=self.skip_reviews,
@@ -606,7 +657,9 @@ def main():
     parser.add_argument("--batch-id")
     parser.add_argument("--time_offset", type=int, default=0)
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--chunk-size", type=int, default=12)
+    parser.add_argument("--chunk-size", type=int, help="fixed cooldown interval; overrides --chunk-min/--chunk-max")
+    parser.add_argument("--chunk-min", type=int, default=5, help="minimum random detail chunk size")
+    parser.add_argument("--chunk-max", type=int, default=10, help="maximum random detail chunk size")
     parser.add_argument("--cooldown-min", type=int, default=300)
     parser.add_argument("--cooldown-max", type=int, default=900)
     parser.add_argument("--with-reviews", action="store_true", help="review page actions are skipped by default")
@@ -639,6 +692,8 @@ def main():
         time_offset_hours=args.time_offset,
         output_dir=args.output_dir,
         chunk_size=args.chunk_size,
+        chunk_min=args.chunk_min,
+        chunk_max=args.chunk_max,
         cooldown_min=args.cooldown_min,
         cooldown_max=args.cooldown_max,
         skip_reviews=not args.with_reviews,

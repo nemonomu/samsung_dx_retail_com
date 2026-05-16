@@ -302,6 +302,10 @@ class BestBuyTVMainCrawler(BaseCrawler):
                     if len(direct_products) >= expected_page_products:
                         return direct_products
                     print(f"[WARNING] Page {page_number}: Direct GraphQL rows {len(direct_products)}/{expected_page_products}; falling back to browser discovery")
+                    if os.environ.get("BBY_LISTING_BROWSER_FALLBACK", "1").strip().lower() in {"0", "false", "no"}:
+                        raise RuntimeError(f"Direct GraphQL rows below minimum {len(direct_products)}/{expected_page_products}")
+                elif os.environ.get("BBY_LISTING_BROWSER_FALLBACK", "1").strip().lower() in {"0", "false", "no"}:
+                    raise RuntimeError("No reusable direct listing GraphQL operation captured")
             except Exception as exc:
                 print(f"[WARNING] Page {page_number}: Direct GraphQL listing failed: {exc}")
                 if os.environ.get("BBY_LISTING_BROWSER_FALLBACK", "1").strip().lower() in {"0", "false", "no"}:

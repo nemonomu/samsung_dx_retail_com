@@ -122,9 +122,11 @@ class GraphQLCollector:
                 await asyncio.sleep(decision.delay_seconds)
                 attempt += 1
 
-    async def collect_review_bundle(self, product_url, registry, cookies=None):
+    async def collect_review_bundle(self, product_url, registry, cookies=None, sku_map=None):
         """Run mapped review/rating operations for the product URL's skuId."""
-        sku_id = extract_bestbuy_sku_id(product_url)
+        sku_id = lookup_sku_id(product_url, sku_map)
+        if not sku_id:
+            sku_id = extract_bestbuy_sku_id(product_url)
         if not sku_id:
             sku_id = await asyncio.to_thread(resolve_sku_id_from_product_page, product_url, registry)
         if not sku_id:
@@ -149,8 +151,8 @@ class GraphQLCollector:
         bundle["parsed"] = parse_review_bundle(bundle)
         return bundle
 
-    def collect_review_bundle_sync(self, product_url, registry, cookies=None):
-        return asyncio.run(self.collect_review_bundle(product_url, registry, cookies=cookies))
+    def collect_review_bundle_sync(self, product_url, registry, cookies=None, sku_map=None):
+        return asyncio.run(self.collect_review_bundle(product_url, registry, cookies=cookies, sku_map=sku_map))
 
     def _log(self, event_type, payload):
         if self.audit_log:
@@ -170,6 +172,67 @@ def load_graphql_registry(base_dir):
             with open(path, encoding="utf-8") as f:
                 return json.load(f)
     return {}
+
+
+def load_sku_map(base_dir):
+    """Load URL -> numeric skuId cache produced during GraphQL discovery."""
+    candidates = [
+        os.path.join(base_dir, "graphql_sku_map.json"),
+        os.path.join(base_dir, "crawler", "discovery", "graphql_sku_map.json"),
+    ]
+    sku_map = {}
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    sku_map.update(json.load(f))
+            except Exception:
+                pass
+
+    for path in _operation_files(base_dir):
+        try:
+            with open(path, encoding="utf-8") as f:
+                operation = json.load(f)
+            payload = operation.get("request_payload") or operation.get("request_template") or {}
+            headers = operation.get("request_headers") or {}
+            referer = headers.get("Referer") or headers.get("referer")
+            variables = payload.get("variables") if isinstance(payload, dict) else {}
+            sku_id = variables.get("skuId") if isinstance(variables, dict) else None
+            if referer and sku_id:
+                sku_map.setdefault(referer, {"skuId": str(sku_id)})
+        except Exception:
+            continue
+    return sku_map
+
+
+def lookup_sku_id(product_url, sku_map):
+    if not product_url or not sku_map:
+        return None
+    normalized = _normalize_url(product_url)
+    for url, value in sku_map.items():
+        if _normalize_url(url) == normalized:
+            if isinstance(value, dict):
+                return value.get("skuId")
+            return value
+    return None
+
+
+def _operation_files(base_dir):
+    candidates = [
+        base_dir,
+        os.path.join(base_dir, "graphql_map"),
+        os.path.join(base_dir, "crawler", "discovery", "graphql_map"),
+    ]
+    for folder in candidates:
+        if not os.path.isdir(folder):
+            continue
+        for name in os.listdir(folder):
+            if name.startswith("graphql_operation_") and name.endswith(".json"):
+                yield os.path.join(folder, name)
+
+
+def _normalize_url(url):
+    return str(url or "").split("?", 1)[0].rstrip("/")
 
 
 def build_payload_for_sku(operation, sku_id):

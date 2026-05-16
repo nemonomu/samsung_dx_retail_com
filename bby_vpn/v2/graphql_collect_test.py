@@ -6,7 +6,12 @@ import json
 import os
 import sys
 
-from collectors.graphql_collector import GraphQLCollector, load_graphql_registry, resolve_sku_id_from_product_page
+from collectors.graphql_collector import (
+    GraphQLCollector,
+    load_graphql_registry,
+    load_sku_map,
+    resolve_sku_id_from_product_page,
+)
 
 
 def read_urls(args):
@@ -47,7 +52,7 @@ def main():
     with open(out_path, "w", encoding="utf-8") as outfile:
         for idx, url in enumerate(urls, 1):
             print(f"[{idx}/{len(urls)}] GraphQL collect: {url[:100]}")
-            result = collector.collect_review_bundle_sync(url, registry)
+            result = collector.collect_review_bundle_sync(url, registry, sku_map=sku_map)
             if result.get("errors"):
                 sku_id = resolve_sku_id_from_product_page(url, registry)
                 print(f"  [ERROR] {result.get('errors')} resolved_skuId={sku_id}")
@@ -70,3 +75,5 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+    sku_map = load_sku_map(args.registry_dir)
+    print(f"[INFO] Loaded sku map entries: {len(sku_map)}")

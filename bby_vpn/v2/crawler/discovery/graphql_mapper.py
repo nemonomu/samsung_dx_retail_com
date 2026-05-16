@@ -31,6 +31,7 @@ class GraphQLMapper:
         self.map_dir = os.path.join(base_dir, "graphql_map")
         os.makedirs(self.map_dir, exist_ok=True)
         self.registry = GraphQLOperationRegistry(base_dir)
+        self.sku_map_path = os.path.join(base_dir, "graphql_sku_map.json")
 
     def record(self, operation_name, endpoint_url, request_payload, request_headers, response_body, cookies=None):
         operation_name = operation_name or "unknown"
@@ -50,5 +51,31 @@ class GraphQLMapper:
             json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
 
         self.registry.upsert(operation_name, endpoint_url, request_payload, request_headers)
+        self._record_sku_map(endpoint_url, request_payload, request_headers, response_body)
         return path
 
+    def _record_sku_map(self, endpoint_url, request_payload, request_headers, response_body):
+        try:
+            headers = request_headers or {}
+            referer = headers.get("Referer") or headers.get("referer")
+            variables = request_payload.get("variables") if isinstance(request_payload, dict) else {}
+            sku_id = variables.get("skuId") if isinstance(variables, dict) else None
+            if not referer or not sku_id:
+                return
+
+            try:
+                with open(self.sku_map_path, encoding="utf-8") as f:
+                    sku_map = json.load(f)
+            except Exception:
+                sku_map = {}
+
+            sku_map[referer] = {
+                "skuId": str(sku_id),
+                "endpoint_url": endpoint_url,
+                "operationName": request_payload.get("operationName") if isinstance(request_payload, dict) else None,
+                "updated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            }
+            with open(self.sku_map_path, "w", encoding="utf-8") as f:
+                json.dump(sku_map, f, ensure_ascii=False, indent=2, default=str)
+        except Exception:
+            return

@@ -46,6 +46,9 @@ def main():
         print("[ERROR] Provide --url or --csv with product_url column")
         return 2
 
+    sku_map = load_sku_map(args.registry_dir)
+    print(f"[INFO] Loaded sku map entries: {len(sku_map)}")
+
     collector = GraphQLCollector(timeout=30, concurrency=2)
     out_path = os.path.abspath(args.out)
 
@@ -75,5 +78,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-    sku_map = load_sku_map(args.registry_dir)
-    print(f"[INFO] Loaded sku map entries: {len(sku_map)}")

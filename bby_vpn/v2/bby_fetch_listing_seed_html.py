@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import ssl
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -77,9 +79,23 @@ def fetch_html(target_url, timeout):
         },
         method="GET",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
+    def read_response(context=None):
+        with urllib.request.urlopen(req, timeout=timeout, context=context) as response:
             return response.read().decode("utf-8", errors="replace")
+
+    if not env_enabled("ZENROWS_SSL_VERIFY", default=True):
+        return read_response(ssl._create_unverified_context())
+
+    try:
+        return read_response()
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", None)
+        message = str(exc)
+        cert_failed = isinstance(reason, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in message
+        if cert_failed:
+            print("[WARNING] ZenRows SSL certificate verification failed; retrying without local CA verification")
+            return read_response(ssl._create_unverified_context())
+        raise RuntimeError(f"ZenRows seed HTML fetch failed: {exc}") from exc
     except Exception as exc:
         raise RuntimeError(f"ZenRows seed HTML fetch failed: {exc}") from exc
 

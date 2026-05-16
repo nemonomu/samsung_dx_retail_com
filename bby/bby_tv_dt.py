@@ -37,6 +37,11 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
+for proxy_env_name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+    proxy_env_value = os.environ.get(proxy_env_name, "")
+    if "127.0.0.1:9" in proxy_env_value:
+        os.environ.pop(proxy_env_name, None)
+
 # 공통 환경 설정 (작업 디렉토리, 한글 출력, 경로 설정)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from common.setup import setup_environment
@@ -47,8 +52,22 @@ from common.data_extractor import extract_numeric_value
 
 
 class UndetectedChromePage:
-    def __init__(self, user_data_dir=None, cache_dir=None, user_agent=None, disable_cache=False):
+    def __init__(self, user_data_dir=None, cache_dir=None, user_agent=None, disable_cache=False, proxy_server=None, profile_suffix=None):
+        if user_data_dir is None:
+            profile_name = "bestbuy"
+            if profile_suffix:
+                profile_name = f"bestbuy_{re.sub(r'[^A-Za-z0-9_.-]+', '_', str(profile_suffix))[:40]}"
+            user_data_dir = os.path.abspath(os.path.join(os.getcwd(), ".uc_profiles", profile_name))
+        if cache_dir is None:
+            cache_name = "bestbuy_cache"
+            if profile_suffix:
+                cache_name = f"bestbuy_cache_{re.sub(r'[^A-Za-z0-9_.-]+', '_', str(profile_suffix))[:40]}"
+            cache_dir = os.path.abspath(os.path.join(os.getcwd(), ".uc_profiles", cache_name))
+        os.makedirs(user_data_dir, exist_ok=True)
+        os.makedirs(cache_dir, exist_ok=True)
+
         options = webdriver.ChromeOptions()
+        options.page_load_strategy = "eager"
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_argument("--disable-features=IsolateOrigins,site-per-process")
         options.add_argument("--no-first-run")
@@ -57,6 +76,7 @@ class UndetectedChromePage:
         options.add_argument("--disable-infobars")
         options.add_argument("--disable-notifications")
         options.add_argument("--disable-software-rasterizer")
+        options.add_argument("--disable-quic")
         options.add_argument("--lang=en-US,en;q=0.9")
         options.add_argument("--window-size=1366,768")
         options.add_argument("--start-maximized")
@@ -67,6 +87,9 @@ class UndetectedChromePage:
             options.add_argument(f"--disk-cache-dir={cache_dir}")
         if user_agent:
             options.add_argument(f"--user-agent={user_agent}")
+        if proxy_server:
+            options.add_argument(f"--proxy-server={proxy_server}")
+            print(f"[INFO] Chrome proxy enabled: {proxy_server}")
         if disable_cache:
             options.add_argument("--disable-application-cache")
             options.add_argument("--disk-cache-size=1")
@@ -81,6 +104,29 @@ class UndetectedChromePage:
         self.driver.set_script_timeout(30)
         try:
             self.driver.execute_cdp_cmd("Network.enable", {})
+            self.driver.execute_cdp_cmd("Emulation.setLocaleOverride", {"locale": "en-US"})
+            self.driver.execute_cdp_cmd("Emulation.setTimezoneOverride", {"timezoneId": "America/Chicago"})
+            self.driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                "source": """
+                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                    Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                    Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+                    Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+                    const originalQuery = window.navigator.permissions.query;
+                    window.navigator.permissions.query = (parameters) => (
+                        parameters.name === 'notifications'
+                            ? Promise.resolve({state: Notification.permission})
+                            : originalQuery(parameters)
+                    );
+                    const getParameter = WebGLRenderingContext.prototype.getParameter;
+                    WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                        if (parameter === 37445) return 'Intel Inc.';
+                        if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+                        return getParameter.call(this, parameter);
+                    };
+                """
+            })
             if user_agent:
                 self.driver.execute_cdp_cmd("Network.setExtraHTTPHeaders", {"headers": {"User-Agent": user_agent}})
         except Exception:
@@ -101,7 +147,14 @@ class UndetectedChromePage:
         return ActionChains(self.driver)
 
     def get(self, url):
-        self.driver.get(url)
+        try:
+            self.driver.get(url)
+        except TimeoutException:
+            print(f"[WARNING] Page load timeout; continuing with current DOM: {url}")
+            try:
+                self.driver.execute_script("window.stop();")
+            except Exception:
+                pass
 
     def refresh(self):
         self.driver.refresh()
@@ -167,7 +220,7 @@ class BestBuyTVDetailCrawler(BaseCrawler):
     BestBuy TV Detail 페이지 크롤러
     """
 
-    def __init__(self, batch_id=None, test_mode=False, start_num=None, end_num=None, time_offset_hours=0):
+    def __init__(self, batch_id=None, test_mode=False, start_num=None, end_num=None, time_offset_hours=0, proxy_server=None, wait_on_block=False, block_wait_interval=60, block_wait_max_minutes=30, profile_suffix=None):
         """초기화. batch_id: 통합 크롤러에서 전달, test_mode: 테스트 모드 여부, start_num/end_num: 제품 순번 범위"""
         super().__init__()
         self.account_name = 'Bestbuy'
@@ -177,6 +230,11 @@ class BestBuyTVDetailCrawler(BaseCrawler):
         self.start_num = start_num
         self.end_num = end_num
         self.time_offset_hours = time_offset_hours
+        self.proxy_server = proxy_server
+        self.wait_on_block = wait_on_block
+        self.block_wait_interval = max(10, int(block_wait_interval or 60))
+        self.block_wait_max_minutes = max(1, int(block_wait_max_minutes or 30))
+        self.profile_suffix = profile_suffix
         # batch_id 없으면 개별 실행
         self.standalone = batch_id is None
 
@@ -186,9 +244,7 @@ class BestBuyTVDetailCrawler(BaseCrawler):
     def setup_drission_driver(self):
         """undetected-chromedriver 브라우저 설정"""
         try:
-            self.page = UndetectedChromePage(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            )
+            self.page = UndetectedChromePage(proxy_server=self.proxy_server, profile_suffix=self.profile_suffix)
             self.page.set.headers({
                 "Accept-Language": "en-US,en;q=0.9",
                 "Upgrade-Insecure-Requests": "1",
@@ -210,6 +266,127 @@ class BestBuyTVDetailCrawler(BaseCrawler):
                 time.sleep(1)
         except Exception:
             pass  # 팝업 없으면 무시
+
+    def dump_debug_page(self, label, item=None):
+        """Save the current browser HTML/screenshot for RDP diagnosis."""
+        if not self.page:
+            return
+        try:
+            debug_dir = os.path.abspath(os.path.join(os.getcwd(), "..", "log", "bby_dt_debug"))
+            os.makedirs(debug_dir, exist_ok=True)
+            safe_label = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(label or "page"))[:40]
+            safe_item = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(item or "no_item"))[:60]
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            base_path = os.path.join(debug_dir, f"{stamp}_{safe_label}_{safe_item}")
+            with open(base_path + ".html", "w", encoding="utf-8") as f:
+                f.write(self.page.html or "")
+            try:
+                self.page.driver.save_screenshot(base_path + ".png")
+            except Exception:
+                pass
+            print(f"[DEBUG] Saved page dump: {base_path}.html")
+        except Exception as e:
+            print(f"[DEBUG] Page dump failed: {e}")
+
+    def check_bestbuy_access(self):
+        """Fail fast when the current RDP/VPN route cannot reach BestBuy."""
+        test_url = "https://www.bestbuy.com/"
+        try:
+            print(f"[INFO] BestBuy access preflight: {test_url}")
+            self.page.get(test_url)
+            time.sleep(random.uniform(3, 5))
+            page_html = self.page.html or ""
+            bad_type = self.is_bad_page(page_html)
+            if bad_type:
+                self.dump_debug_page(f"preflight_bad_{bad_type}", "bestbuy_home")
+                print("[ERROR] BestBuy access preflight failed.")
+                print("[ERROR] 수동 Chrome에서도 BestBuy가 에러면 VPN/IP를 먼저 바꾼 뒤 재실행하세요.")
+                return False
+            print("[SUCCESS] BestBuy access preflight passed")
+            return True
+        except Exception as e:
+            self.dump_debug_page("preflight_exception", "bestbuy_home")
+            print(f"[ERROR] BestBuy access preflight failed: {e}")
+            print("[ERROR] 수동 Chrome에서도 BestBuy가 에러면 VPN/IP를 먼저 바꾼 뒤 재실행하세요.")
+            return False
+
+    def wait_for_bestbuy_access(self):
+        """Poll BestBuy access so the operator can change VPN manually in RDP."""
+        if not self.wait_on_block:
+            return False
+
+        deadline = time.time() + (self.block_wait_max_minutes * 60)
+        attempt = 1
+        print(
+            f"[INFO] BestBuy 접속 복구 대기 시작: "
+            f"{self.block_wait_interval}s 간격, 최대 {self.block_wait_max_minutes}분"
+        )
+        print("[INFO] RDP에서 Proton VPN 서버를 수동으로 바꾸면, 정상 접속 확인 후 자동 진행합니다.")
+
+        while time.time() < deadline:
+            remaining = int(deadline - time.time())
+            sleep_seconds = min(self.block_wait_interval, max(1, remaining))
+            print(f"[INFO] VPN/IP 변경 대기 중... {sleep_seconds}s 후 재확인 (attempt {attempt})")
+            time.sleep(sleep_seconds)
+
+            try:
+                if self.page:
+                    self.page.get("about:blank")
+                    time.sleep(1)
+                if self.check_bestbuy_access():
+                    print("[SUCCESS] BestBuy 접속 복구 감지 - 크롤링을 계속합니다.")
+                    return True
+            except Exception as e:
+                print(f"[WARNING] BestBuy 접속 재확인 실패: {e}")
+            attempt += 1
+
+        print("[ERROR] BestBuy 접속 복구 대기 시간이 초과되었습니다.")
+        return False
+
+    def click_review_control_fallback(self):
+        """Click a visible review link/button when DB XPath misses the current DOM."""
+        try:
+            result = self.page.run_js("""
+                const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+                const candidates = Array.from(document.querySelectorAll('a, button, [role="button"]'))
+                    .map((el, idx) => {
+                        const text = norm(el.innerText || el.textContent || el.getAttribute('aria-label') || '');
+                        const href = el.href || el.getAttribute('href') || '';
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        const visible = rect.width > 0 && rect.height > 0 &&
+                            style.visibility !== 'hidden' && style.display !== 'none';
+                        const reviewText = text.includes('review') || text.includes('customer rating');
+                        const reviewHref = href.includes('/reviews') || href.includes('/site/reviews/');
+                        const likelyAllReviews = text.includes('see all') || text.includes('read all') ||
+                            text.includes('customer reviews') || /\\d[\\d,]*\\s+reviews?/.test(text);
+                        return {el, idx, text, href, visible, score:
+                            (visible ? 10 : 0) + (reviewHref ? 20 : 0) +
+                            (reviewText ? 10 : 0) + (likelyAllReviews ? 10 : 0)};
+                    })
+                    .filter(c => c.visible && (c.href.includes('/reviews') || c.href.includes('/site/reviews/') ||
+                        (c.text.includes('review') && (c.text.includes('see all') || c.text.includes('read all') ||
+                         c.text.includes('customer reviews') || /\\d[\\d,]*\\s+reviews?/.test(c.text)))))
+                    .sort((a, b) => b.score - a.score);
+
+                if (!candidates.length) {
+                    return {clicked: false, reason: 'no candidates'};
+                }
+
+                const target = candidates[0];
+                target.el.scrollIntoView({behavior: 'instant', block: 'center'});
+                target.el.click();
+                return {clicked: true, text: target.text, href: target.href, score: target.score};
+            """)
+            if result and result.get("clicked"):
+                print(f"├─ 리뷰 컨트롤 클릭 성공 (fallback JS): text='{result.get('text')}', href='{result.get('href')}'")
+                time.sleep(2.5)
+                return True
+            print(f"[DEBUG] 리뷰 컨트롤 fallback 실패: {result}")
+            return False
+        except Exception as e:
+            print(f"[DEBUG] 리뷰 컨트롤 fallback 예외: {e}")
+            return False
 
     def extract_rating(self, text):
         """별점 텍스트에서 숫자 추출 (소수점 포함, 쉼표 제외)"""
@@ -240,11 +417,14 @@ class BestBuyTVDetailCrawler(BaseCrawler):
             traceback.print_exc()
             return False
 
+        if not self.check_bestbuy_access() and not self.wait_for_bestbuy_access():
+            return False
+
         self.cleanup_old_logs()
 
         return True
 
-    def load_product_list(self):
+    def load_product_list(self, retry_on_disconnect=True):
         """bby_tv_product_list 조회: batch_id 기준으로 제품 URL 및 기본 정보 조회"""
         try:
             cursor = self.db_conn.cursor()
@@ -296,6 +476,19 @@ class BestBuyTVDetailCrawler(BaseCrawler):
 
         except Exception as e:
             print(f"[ERROR] Failed to load product list: {e}")
+            if retry_on_disconnect and (
+                "server closed the connection" in str(e).lower()
+                or "connection already closed" in str(e).lower()
+                or "closed the connection unexpectedly" in str(e).lower()
+            ):
+                print("[INFO] DB connection closed; reconnecting and retrying product list load once")
+                try:
+                    if self.db_conn:
+                        self.db_conn.close()
+                except Exception:
+                    pass
+                if self.connect_db():
+                    return self.load_product_list(retry_on_disconnect=False)
             return []
 
     def extract_item_from_url(self, product_url):
@@ -351,6 +544,7 @@ class BestBuyTVDetailCrawler(BaseCrawler):
             current_url = self.page.url
             if previous_url and current_url == previous_url:
                 print(f"[WARNING] 페이지 로드 실패 감지 (URL 변경 없음)")
+                self.dump_debug_page("url_unchanged", self.extract_item_from_url(product_url))
                 raise Exception("Page load failed - URL unchanged")
 
             # 설문조사 팝업 닫기
@@ -360,8 +554,26 @@ class BestBuyTVDetailCrawler(BaseCrawler):
 
             # 에러 페이지 / 빈 페이지 감지
             bad_type = self.is_bad_page(page_html)
+            if bad_type == 'error' and 'err_http2_protocol_error' in page_html.lower():
+                for retry in range(1, 3):
+                    print(f"[WARNING] HTTP2 protocol error; retrying detail page ({retry}/2)")
+                    self.dump_debug_page(f"http2_retry_{retry}", self.extract_item_from_url(product_url))
+                    try:
+                        self.page.get("about:blank")
+                        time.sleep(random.uniform(1.0, 2.0))
+                        self.page.get(product_url)
+                        time.sleep(random.uniform(4.0, 6.0))
+                        self.close_survey_popup()
+                        page_html = self.page.html
+                        bad_type = self.is_bad_page(page_html)
+                        if not bad_type:
+                            break
+                    except Exception as retry_e:
+                        print(f"[WARNING] HTTP2 retry failed: {retry_e}")
+
             if bad_type:
                 print(f"[WARNING] {'에러' if bad_type == 'error' else '빈'} 페이지 감지")
+                self.dump_debug_page(f"bad_{bad_type}", self.extract_item_from_url(product_url))
                 raise Exception("Page load failed - error page detected")
 
             tree = html.fromstring(page_html)
@@ -809,27 +1021,18 @@ class BestBuyTVDetailCrawler(BaseCrawler):
                         self.page.run_js(f"window.scrollTo({{top: {current_position}, behavior: 'smooth'}});")
                         time.sleep(0.2)
 
-                # 3차: 리뷰 버튼 못 찾으면 URL로 직접 접속
-                if not review_button_found and target_review_url:
-                    try:
-                        self.page.get(target_review_url)
-                        time.sleep(random.uniform(2, 3))
+                if not review_button_found:
+                    review_button_found = self.click_review_control_fallback()
 
-                        review_button_found = True
-
-                        # 설문조사 팝업 닫기
-                        self.close_survey_popup()
-
-                        print(f"├─ 리뷰 URL 직접 접속 성공 (3차): {target_review_url}")
-                    except Exception as e:
-                        print(f"[WARNING] 리뷰 URL 직접 접속 실패 (3차): {e}")
-                        if "error page detected" in str(e).lower():
-                            raise e
-                elif not review_button_found and not target_review_url:
-                    print(f"[WARNING] 리뷰 URL 생성 실패 - URL 형식 미지원")
+                # Direct review URL navigation is intentionally disabled.
+                # BestBuy often returns ERR_HTTP2_PROTOCOL_ERROR for direct review URLs,
+                # while the product detail page can still be parsed normally.
+                if not review_button_found:
+                    print(f"[WARNING] 리뷰 버튼 클릭 실패 - 리뷰 URL 직접 접속은 비활성화되어 상세 리뷰 본문을 스킵합니다")
+                    self.dump_debug_page("review_button_not_found", item)
 
                 if not review_button_found:
-                    print(f"├─ 리뷰 버튼 찾기(1, 2차) 및 URL 직접 접속(3차) 모두 실패하여 진입 불가")
+                    print(f"├─ 리뷰 버튼 찾기(1, 2차) 실패 - 상세 리뷰 본문 진입 불가")
 
                 if review_button_found:
                     try:
@@ -859,8 +1062,26 @@ class BestBuyTVDetailCrawler(BaseCrawler):
                             # [단 1회 실행] 공통 에러 페이지 감지
                             page_html = self.page.html
                             bad_type = self.is_bad_page(page_html)
+                            if bad_type == 'error' and 'err_http2_protocol_error' in page_html.lower() and target_review_url:
+                                for retry in range(1, 3):
+                                    print(f"├─ [WARNING] 리뷰 페이지 HTTP2 오류 - 재시도 ({retry}/2)")
+                                    self.dump_debug_page(f"review_http2_retry_{retry}", item)
+                                    try:
+                                        self.page.get("about:blank")
+                                        time.sleep(random.uniform(1.0, 2.0))
+                                        self.page.get(target_review_url)
+                                        time.sleep(random.uniform(4.0, 6.0))
+                                        self.close_survey_popup()
+                                        page_html = self.page.html
+                                        bad_type = self.is_bad_page(page_html)
+                                        if not bad_type:
+                                            break
+                                    except Exception as retry_e:
+                                        print(f"├─ [WARNING] 리뷰 페이지 HTTP2 재시도 실패: {retry_e}")
+
                             if bad_type:
                                 print(f"├─ [WARNING] 접속된 리뷰 페이지가 {'에러' if bad_type == 'error' else '빈'} 페이지입니다. (전체 에러로 전환)")
+                                self.dump_debug_page(f"review_bad_{bad_type}", item)
                                 raise Exception("Page load failed - error page detected")
                                 
                             # 순수 파싱 및 렌더링 지연 대비 대기 루프
@@ -1129,8 +1350,6 @@ class BestBuyTVDetailCrawler(BaseCrawler):
                 self.page.quit()
             if self.db_conn:
                 self.db_conn.close()
-            if self.standalone:
-                input("Press Enter to exit...")
 
 
 def main():
@@ -1142,6 +1361,11 @@ def main():
     parser.add_argument('--end-num', type=int, help='종료 순번')
     parser.add_argument('--test', action='store_true', help='테스트 모드')
     parser.add_argument('--time_offset', type=int, default=None, help='시간 오프셋 (기본값: 0)')
+    parser.add_argument('--proxy-server', type=str, default=None, help='Chrome proxy server, e.g. http://host:port or socks5://host:port')
+    parser.add_argument('--wait-on-block', action='store_true', help='BestBuy 접속 오류 시 종료하지 않고 VPN 수동 변경을 기다린 뒤 재확인')
+    parser.add_argument('--block-wait-interval', type=int, default=60, help='wait-on-block 재확인 간격(초)')
+    parser.add_argument('--block-wait-max-minutes', type=int, default=30, help='wait-on-block 최대 대기 시간(분)')
+    parser.add_argument('--profile-suffix', type=str, default=None, help='UC 프로필 분리용 접미사. VPN/IP 변경 후 새 세션 테스트에 사용')
     args = parser.parse_args()
 
     batch_id = args.batch_id
@@ -1159,7 +1383,12 @@ def main():
     crawler = BestBuyTVDetailCrawler(
         batch_id=batch_id, test_mode=test_mode,
         start_num=args.start_num, end_num=args.end_num,
-        time_offset_hours=time_offset
+        time_offset_hours=time_offset,
+        proxy_server=args.proxy_server,
+        wait_on_block=args.wait_on_block,
+        block_wait_interval=args.block_wait_interval,
+        block_wait_max_minutes=args.block_wait_max_minutes,
+        profile_suffix=args.profile_suffix
     )
     crawler.run()
 

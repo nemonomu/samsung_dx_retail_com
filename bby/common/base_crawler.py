@@ -116,7 +116,9 @@ class BaseCrawler:
             bool: 연결 성공 시 True, 실패 시 False
         """
         try:
-            self.db_conn = psycopg2.connect(**DB_CONFIG, database='postgres')
+            db_config = dict(DB_CONFIG)
+            db_config.setdefault('database', 'postgres')
+            self.db_conn = psycopg2.connect(**db_config)
             print("[SUCCESS] Database connected")
             return True
         except Exception as e:
@@ -136,7 +138,9 @@ class BaseCrawler:
         batch_pattern = f"%{today_str}%"
 
         try:
-            conn = psycopg2.connect(**DB_CONFIG, database='postgres')
+            db_config = dict(DB_CONFIG)
+            db_config.setdefault('database', 'postgres')
+            conn = psycopg2.connect(**db_config)
             cursor = conn.cursor()
             cursor.execute(
                 f"SELECT DISTINCT batch_id FROM {table} "

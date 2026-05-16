@@ -134,6 +134,7 @@ class BestBuyDetailCrawler:
         self.browser_min_mode = os.environ.get('BBY_BROWSER_MIN_MODE', '1') == '1'
         self.review_extraction_enabled = os.environ.get('BBY_DT_SKIP_REVIEWS', '1') != '1'
         self.similar_extraction_enabled = os.environ.get('BBY_DT_SKIP_SIMILAR', '1') != '1'
+        self.review_dom_fallback_enabled = os.environ.get('BBY_DT_REVIEW_DOM_FALLBACK', '0') == '1'
         self.graphql_replay_enabled = os.environ.get('BBY_DT_GRAPHQL_REPLAY', '1') == '1'
         self.discovery_refresh_every = int(os.environ.get('BBY_DT_DISCOVERY_REFRESH_EVERY', '4'))
         self.proactive_restart_every = int(os.environ.get('BBY_DT_RESTART_EVERY', '8'))
@@ -2085,11 +2086,20 @@ class BestBuyDetailCrawler:
                 cookies=cookies,
                 sku_map=sku_map,
             )
-            captured_data['rating_card'] = bundle.get('CustomerRatingCard_Init')
-            captured_data['ai_summary'] = bundle.get('Ai_Review_Summary_Init')
-            captured_data['reviews'] = bundle.get('CustomerReviewList_Init')
+            def valid_payload(operation_name):
+                payload = bundle.get(operation_name)
+                if not payload or (isinstance(payload, dict) and payload.get('errors')):
+                    return None
+                return payload
+
+            captured_data['rating_card'] = valid_payload('CustomerRatingCard_Init')
+            captured_data['ai_summary'] = valid_payload('Ai_Review_Summary_Init')
+            captured_data['reviews'] = valid_payload('CustomerReviewList_Init')
             captured_count = sum(1 for key in ('rating_card', 'ai_summary', 'reviews') if captured_data.get(key))
-            print(f"  [OK] GraphQL replay via browser_fetch: {captured_count}/3 operations ({selected_dir})")
+            if bundle.get("errors"):
+                print(f"  [WARNING] GraphQL replay via browser_fetch: {captured_count}/3 operations, errors={bundle.get('errors')} ({selected_dir})")
+            else:
+                print(f"  [OK] GraphQL replay via browser_fetch: {captured_count}/3 operations ({selected_dir})")
             self.audit_log.write("graphql_replay_result", {
                 "product_url": product_url,
                 "registry_dir": selected_dir,
@@ -3104,17 +3114,20 @@ class BestBuyDetailCrawler:
 
                 gql_data = self.collect_review_data_via_graphql_replay(product_url)
                 if not any(gql_data.get(key) for key in ('rating_card', 'ai_summary', 'reviews')):
-                    print(f"  [INFO] Reloading product page for review GraphQL capture fallback...")
-                    self.rate_limiter.wait(product_url, reason='review_reload')
-                    self.page.get(product_url)
-                    self.browser_diagnostics.snapshot(self.page, product_url, 'review_reload_after_get')
-                    self.network_diagnostics.snapshot(self.page, product_url, 'review_reload_after_get')
-                    time.sleep(3)
-                    try:
-                        self.page.ele('xpath://h1', timeout=10)
-                    except:
+                    if self.review_dom_fallback_enabled:
+                        print(f"  [INFO] Reloading product page for review GraphQL capture fallback...")
+                        self.rate_limiter.wait(product_url, reason='review_reload')
+                        self.page.get(product_url)
+                        self.browser_diagnostics.snapshot(self.page, product_url, 'review_reload_after_get')
+                        self.network_diagnostics.snapshot(self.page, product_url, 'review_reload_after_get')
                         time.sleep(3)
-                    gql_data = self.capture_review_data_via_graphql()
+                        try:
+                            self.page.ele('xpath://h1', timeout=10)
+                        except:
+                            time.sleep(3)
+                        gql_data = self.capture_review_data_via_graphql()
+                    else:
+                        print(f"  [INFO] GraphQL review data unavailable; DOM review fallback disabled")
                 gql_top_mentions = None
                 gql_recommendation = self.parse_graphql_recommendation(gql_data)
                 gql_star_rating = self.parse_graphql_star_rating(gql_data)
@@ -3138,7 +3151,8 @@ class BestBuyDetailCrawler:
                     print(f"  [INFO] Using GraphQL reviews; skipping review page DOM wait")
 
                 # 3) "See All Customer Reviews" 클릭 (re 파일과 동일 - 단순 JS 클릭)
-                if not detailed_reviews:
+                see_all_result = 'not found'
+                if not detailed_reviews and self.review_dom_fallback_enabled:
                     self.page.run_js("window.scrollTo(0, document.body.scrollHeight * 0.7)")
                     time.sleep(1)
                     see_all_result = self.page.run_js('''

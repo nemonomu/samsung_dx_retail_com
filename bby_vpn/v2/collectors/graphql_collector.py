@@ -202,9 +202,16 @@ class GraphQLCollector:
             self._log("graphql_operation_start", {"operationName": operation_name, "skuId": sku_id})
             responses_by_operation[operation_name] = await self.execute(endpoint_url, payload, headers=headers, cookies=cookies)
 
+        operation_errors = {
+            operation_name: response.get("errors")
+            for operation_name, response in responses_by_operation.items()
+            if isinstance(response, dict) and response.get("errors")
+        }
         bundle = dict(responses_by_operation)
         bundle["skuId"] = sku_id
         bundle["product_url"] = product_url
+        if operation_errors:
+            bundle["errors"] = operation_errors
         bundle["parsed"] = parse_review_bundle(bundle)
         return bundle
 
@@ -438,7 +445,19 @@ def build_payload_for_sku(operation, sku_id):
     variables["skuId"] = str(sku_id)
     if payload.get("operationName") == "CustomerReviewList_Init":
         variables.setdefault("onlyIfRelated", True)
+        page_size = _review_page_size()
+        query = payload.get("query")
+        if isinstance(query, str):
+            payload["query"] = re.sub(r"pageSize:\s*\d+", f"pageSize: {page_size}", query)
     return payload
+
+
+def _review_page_size():
+    try:
+        value = int(os.environ.get("BBY_GRAPHQL_REVIEW_PAGE_SIZE", "20"))
+    except ValueError:
+        value = 20
+    return max(1, min(value, 20))
 
 
 def build_headers_for_url(operation, product_url):

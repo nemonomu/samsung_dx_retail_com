@@ -24,6 +24,9 @@ sys.path.insert(0, CURRENT_DIR)
 
 from common.setup import setup_environment
 setup_environment(__file__)
+if CURRENT_DIR in sys.path:
+    sys.path.remove(CURRENT_DIR)
+sys.path.insert(0, CURRENT_DIR)
 if REPO_DIR not in sys.path:
     sys.path.insert(1, REPO_DIR)
 

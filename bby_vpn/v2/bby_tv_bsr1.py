@@ -268,8 +268,17 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                     time.sleep(random.uniform(5, 8))
         raise last_error
 
+    def run_js_safely(self, script, default=None, context="run_js", timeout=8):
+        """Run JS without letting optional scroll checks fail the parsed page."""
+        try:
+            return self.page.run_js(script, timeout=timeout)
+        except Exception as exc:
+            print(f"[WARNING] JS failed during {context}: {exc}")
+            return default
+
     def crawl_page(self, page_number):
         """페이지 크롤링: 페이지 로드 → 제품 파싱 → URL 누락 시 1스텝 스크롤 로딩 → 반복 (스마트 스크롤)"""
+        products = []
         try:
             url = self.url_template.replace('{page}', str(page_number))
             base_container_xpath = self.xpaths.get('base_container', {}).get('xpath')
@@ -298,7 +307,6 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                 return []
 
             current_position = 0
-            products = []
             max_scroll_attempts = 30
             bottom_wait_count = 0
 
@@ -359,21 +367,28 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                 if total_found > 0 and null_url_count == 0:
                     print(f"[INFO] Page {page_number}: All {total_found} URLs loaded successfully! Quick scrolling to bottom...")
                     for _ in range(20):
-                        is_bottom = self.page.run_js("""
+                        is_bottom = self.run_js_safely("""
                             var elem = document.querySelector("div.pagination-container");
                             if (!elem) return false;
                             var rect = elem.getBoundingClientRect();
                             return (rect.top >= 0 && rect.top <= window.innerHeight);
-                        """)
+                        """, default=False, context=f"page {page_number} quick bottom check")
 
-                        total_height_check = self.page.run_js("return document.body.scrollHeight")
+                        total_height_check = self.run_js_safely(
+                            "return document.body.scrollHeight",
+                            default=current_position,
+                            context=f"page {page_number} quick height check",
+                        )
                         if is_bottom or current_position >= total_height_check:
                             break
 
                         # 남은 공간 빠르게 1~2초 간격으로 스크롤
                         scroll_step = random.randint(500, 800)
                         current_position += scroll_step
-                        self.page.run_js(f"window.scrollTo(0, {current_position});")
+                        self.run_js_safely(
+                            f"window.scrollTo(0, {current_position});",
+                            context=f"page {page_number} quick scroll",
+                        )
                         time.sleep(random.uniform(1.0, 2.0))
 
                     break
@@ -381,14 +396,18 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                 print(f"[INFO] Page {page_number}: Parsed {total_found} products, {null_url_count} URLs missing. Scrolling... ({scroll_attempt}/{max_scroll_attempts})")
 
                 # 하단 도달(페이지네이션 보임) 체크
-                is_pagination_visible = self.page.run_js("""
+                is_pagination_visible = self.run_js_safely("""
                     var elem = document.querySelector("div.pagination-container");
                     if (!elem) return false;
                     var rect = elem.getBoundingClientRect();
                     return (rect.top >= 0 && rect.top <= window.innerHeight);
-                """)
+                """, default=True, context=f"page {page_number} pagination check")
 
-                total_height = self.page.run_js("return document.body.scrollHeight")
+                total_height = self.run_js_safely(
+                    "return document.body.scrollHeight",
+                    default=current_position,
+                    context=f"page {page_number} height check",
+                )
 
                 if is_pagination_visible or current_position >= total_height:
                     # 바텀에 도달했는데 null_url이 있다면 맨 위로 올라가서 다시 스크롤을 내리며 훑어보기
@@ -399,14 +418,14 @@ class BestBuyTVBSRCrawler(BaseCrawler):
 
                     print(f"[WARNING] Page {page_number}: Reached bottom but {null_url_count} URLs missing. Scrolling back to TOP... ({bottom_wait_count}/3)")
                     current_position = 0
-                    self.page.run_js("window.scrollTo(0, 0);")
+                    self.run_js_safely("window.scrollTo(0, 0);", context=f"page {page_number} top scroll")
                     time.sleep(random.uniform(3, 5))
                     continue
 
                 # 스크롤 1회 내리고 5초 대기 (봇 탐지를 피하기 위해 4~6초 랜덤)
                 scroll_step = random.randint(400, 600)
                 current_position += scroll_step
-                self.page.run_js(f"window.scrollTo(0, {current_position});")
+                self.run_js_safely(f"window.scrollTo(0, {current_position});", context=f"page {page_number} scroll")
                 time.sleep(random.uniform(4, 6))
 
             print(f"[INFO] Page {page_number}: Final parsed products: {len(products)}")
@@ -415,6 +434,9 @@ class BestBuyTVBSRCrawler(BaseCrawler):
         except Exception as e:
             print(f"[ERROR] Page {page_number} failed: {e}")
             traceback.print_exc()
+            if products:
+                print(f"[WARNING] Page {page_number}: returning {len(products)} products parsed before failure")
+                return products
             return []
 
     def save_products(self, products):

@@ -62,6 +62,14 @@ class BestBuyTrendCrawler:
                     time.sleep(random.uniform(5, 8))
         raise last_error
 
+    def run_js_safely(self, script, default=None, context="run_js", timeout=8):
+        """Run JS without letting optional scroll checks fail the page."""
+        try:
+            return self.page.run_js(script, timeout=timeout)
+        except Exception as exc:
+            print(f"[WARNING] JS failed during {context}: {exc}")
+            return default
+
     def connect_db(self):
         """DB 연결"""
         try:
@@ -120,13 +128,17 @@ class BestBuyTrendCrawler:
             print("[INFO] Trending Deals 섹션 찾는 중...")
 
             # 페이지를 아래로 천천히 스크롤하여 Trending Deals 섹션 로드
-            scroll_height = self.page.run_js("return document.body.scrollHeight")
+            scroll_height = self.run_js_safely(
+                "return document.body.scrollHeight",
+                default=10000,
+                context="trend initial height",
+            )
             current_position = 0
 
             trending_found = False
             while current_position < scroll_height:
                 current_position += scroll_step
-                self.page.run_js(f"window.scrollTo(0, {current_position})")
+                self.run_js_safely(f"window.scrollTo(0, {current_position})", context="trend scroll")
                 time.sleep(scroll_wait)
 
                 # Trending Deals 섹션이 나타났는지 확인

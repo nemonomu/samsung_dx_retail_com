@@ -103,21 +103,29 @@ class BestBuyPromotionCrawler:
             scroll_wait = self.config.get_float('timing', 'scroll_wait', self.file_name, 0.8)
             scroll_limit = self.config.get_int('constant', 'scroll_limit_px', self.file_name, 10000)
             current_position = 0
-            last_height = self.page.run_js("return document.body.scrollHeight")
+            last_height = self.run_js_safely(
+                "return document.body.scrollHeight",
+                default=scroll_limit,
+                context="promotion initial height",
+            )
 
             while True:
                 current_position += scroll_step
-                self.page.run_js(f"window.scrollTo(0, {current_position})")
+                self.run_js_safely(f"window.scrollTo(0, {current_position})", context="promotion scroll")
                 time.sleep(scroll_wait)
 
-                new_height = self.page.run_js("return document.body.scrollHeight")
+                new_height = self.run_js_safely(
+                    "return document.body.scrollHeight",
+                    default=last_height,
+                    context="promotion height check",
+                )
                 if current_position >= new_height:
                     break
                 if current_position > scroll_limit:  # Safety limit
                     break
 
             # Scroll back to top
-            self.page.run_js("window.scrollTo(0, 0)")
+            self.run_js_safely("window.scrollTo(0, 0)", context="promotion top scroll")
             scroll_top_wait = self.config.get_float('timing', 'scroll_top_wait', self.file_name, 2)
             time.sleep(scroll_top_wait)
 
@@ -341,6 +349,14 @@ class BestBuyPromotionCrawler:
                         print(f"[WARNING] Refresh after HTML timeout failed: {refresh_exc}")
                     time.sleep(random.uniform(5, 8))
         raise last_error
+
+    def run_js_safely(self, script, default=None, context="run_js", timeout=8):
+        """Run JS without letting optional scroll checks fail the page."""
+        try:
+            return self.page.run_js(script, timeout=timeout)
+        except Exception as exc:
+            print(f"[WARNING] JS failed during {context}: {exc}")
+            return default
 
     def extract_products(self):
         """Extract product information (3 sections, max 18 SKUs)"""

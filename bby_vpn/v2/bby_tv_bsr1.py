@@ -43,7 +43,7 @@ from common.base_crawler import BaseCrawler
 from config import DB_CONFIG
 from core.db_readonly import connect_readonly
 from bby_listing_sku import extract_numeric_sku, extract_sponsored_status
-from bby_listing_graphql import ListingGraphQLSkuCollector
+from bby_listing_graphql import ListingGraphQLSkuCollector, extract_listing_products_from_html
 
 
 
@@ -293,25 +293,49 @@ class BestBuyTVBSRCrawler(BaseCrawler):
             time.sleep(random.uniform(3, 5))
             sku_collector.drain(4)
 
+            initial_html = self.get_page_html_safely(page_number, "initial HTML/API payload parse")
+            try:
+                initial_tree = html.fromstring(initial_html)
+                initial_card_count = len(initial_tree.xpath(base_container_xpath))
+            except Exception:
+                initial_tree = None
+                initial_card_count = 0
+
+            listing_defaults = {
+                'account_name': self.account_name,
+                'bsr_rank': 0,
+                'calendar_week': self.calendar_week,
+                'crawl_datetime': (datetime.now() + timedelta(hours=self.time_offset_hours)).strftime('%Y-%m-%d %H:%M:%S'),
+                'batch_id': self.batch_id,
+            }
             api_products = sku_collector.listing_products(
                 self.page_type,
                 page_number=page_number,
-                defaults={
-                    'account_name': self.account_name,
-                    'bsr_rank': 0,
-                    'calendar_week': self.calendar_week,
-                    'crawl_datetime': (datetime.now() + timedelta(hours=self.time_offset_hours)).strftime('%Y-%m-%d %H:%M:%S'),
-                    'batch_id': self.batch_id,
-                },
+                defaults=listing_defaults,
             )
             if api_products:
+                if initial_card_count and len(api_products) > initial_card_count:
+                    api_products = api_products[:initial_card_count]
                 print(f"[INFO] Page {page_number}: GraphQL listing rows collected: {len(api_products)}")
                 return api_products
 
+            payload_products = extract_listing_products_from_html(initial_html, self.page_type, page_number=page_number)
+            if payload_products:
+                if initial_card_count and len(payload_products) > initial_card_count:
+                    payload_products = payload_products[:initial_card_count]
+                for product in payload_products:
+                    for key, value in listing_defaults.items():
+                        product.setdefault(key, value)
+                print(f"[INFO] Page {page_number}: HTML/API listing rows collected: {len(payload_products)}")
+                return payload_products
+
             # 1. 0개인 경우 로드 실패 예외처리 (최대 3회 새로고침)
             for refresh_attempt in range(1, 4):
-                page_html = self.get_page_html_safely(page_number, f"initial parse {refresh_attempt}")
-                tree = html.fromstring(page_html)
+                if refresh_attempt == 1 and initial_tree is not None:
+                    tree = initial_tree
+                else:
+                    page_html = self.get_page_html_safely(page_number, f"initial parse {refresh_attempt}")
+                    tree = html.fromstring(page_html)
                 if len(tree.xpath(base_container_xpath)) == 0:
                     print(f"[WARNING] Page {page_number}: 0 products found, refresh attempt {refresh_attempt}/3")
                     if refresh_attempt < 3:
@@ -382,6 +406,13 @@ class BestBuyTVBSRCrawler(BaseCrawler):
 
                 null_url_count = sum(1 for p in products if not p.get('product_url'))
                 total_found = len(products)
+
+                if total_found > 0 and null_url_count > 0 and len(sku_collector.products) >= total_found:
+                    sku_collector.apply_by_order(products)
+                    null_url_count = sum(1 for p in products if not p.get('product_url'))
+                    if null_url_count == 0:
+                        print(f"[INFO] Page {page_number}: Completed listing rows from GraphQL order map: {total_found}")
+                        break
 
                 # 조건 1: 모두 찾았으면 바텀까지 가볍게 스크롤 후 반복문 종료 (자연스러운 봇 동작)
                 if total_found > 0 and null_url_count == 0:

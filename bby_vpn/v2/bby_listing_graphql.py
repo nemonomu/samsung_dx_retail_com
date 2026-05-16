@@ -9,6 +9,7 @@ GraphQL traffic during listing page loads and builds an item -> skuId map.
 from __future__ import annotations
 
 import json
+import html as html_lib
 import re
 import time
 
@@ -62,7 +63,7 @@ def extract_sku_from_text(text):
 def normalize_url(value):
     if not value:
         return None
-    text = str(value)
+    text = html_lib.unescape(str(value)).replace("\\/", "/")
     if text.startswith("/"):
         return "https://www.bestbuy.com" + text
     return text
@@ -256,14 +257,90 @@ def extract_listing_products_from_payload(payload, page_type, page_number=None):
     return rows
 
 
+def extract_listing_products_from_html(html_text, page_type, page_number=None):
+    """Extract listing rows from embedded HTML/JS payloads.
+
+    Best Buy listing pages do not always expose anchors in the first rendered
+    product-card DOM. The initial HTML/JS payload commonly still contains PDP
+    URLs and nearby numeric skuIds, so this is used before scroll-heavy DOM
+    fallback.
+    """
+    if not html_text:
+        return []
+    text = html_lib.unescape(str(html_text)).replace("\\u002F", "/").replace("\\/", "/")
+    url_pattern = re.compile(
+        r"(https?://www\.bestbuy\.com)?/(product|site)/[^\"'<>\\\s]+",
+        re.IGNORECASE,
+    )
+    rows = []
+    seen = set()
+    for match in url_pattern.finditer(text):
+        raw_url = match.group(0)
+        if "/openbox" in raw_url.lower():
+            continue
+        product_url = normalize_url(raw_url)
+        item = extract_item_from_url(product_url)
+        if not item or item.lower() in {"product", "site"}:
+            continue
+        if item in seen:
+            continue
+        window = text[max(0, match.start() - 2500): min(len(text), match.end() + 2500)]
+        sku = extract_sku_from_text(product_url) or extract_sku_from_text(window)
+        if not sku:
+            continue
+        seen.add(item)
+        rows.append({
+            "page_type": page_type,
+            "retailer_sku_name": extract_name_from_text_window(window),
+            "offer": None,
+            "pick_up_availability": None,
+            "fastest_delivery": None,
+            "delivery_availability": None,
+            "sku_status": None,
+            "product_url": product_url,
+            "numeric_sku": sku,
+            "page_number": page_number,
+            "final_sku_price": None,
+            "savings": None,
+        })
+    return rows
+
+
+def extract_name_from_text_window(text):
+    if not text:
+        return None
+    patterns = (
+        r'"short"\s*:\s*"([^"]{8,220})"',
+        r'"title"\s*:\s*"([^"]{8,220})"',
+        r'"productName"\s*:\s*"([^"]{8,220})"',
+        r'"name"\s*:\s*"([^"]{8,220})"',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            value = html_lib.unescape(match.group(1)).replace('\\"', '"').strip()
+            if value and "best buy" not in value.lower():
+                return value
+    return None
+
+
 class ListingGraphQLSkuCollector:
     def __init__(self, page=None):
         self.page = page
         self.item_to_sku = {}
         self.url_to_sku = {}
+        self.sku_to_url = {}
         self.products = []
         self._product_keys = set()
         self.packet_count = 0
+
+    def _remember_product_row(self, row):
+        key = extract_item_from_url(row.get("product_url")) or row.get("numeric_sku")
+        if key and key not in self._product_keys:
+            self._product_keys.add(key)
+            self.products.append(row)
+            return True
+        return False
 
     def start(self, page=None):
         self.page = page or self.page
@@ -313,14 +390,29 @@ class ListingGraphQLSkuCollector:
             item_map, url_map = extract_sku_map_from_payload(payload)
             product_rows = extract_listing_products_from_payload(payload, page_type="listing")
             for row in product_rows:
-                key = extract_item_from_url(row.get("product_url")) or row.get("numeric_sku")
-                if key and key not in self._product_keys:
-                    self._product_keys.add(key)
-                    self.products.append(row)
+                self._remember_product_row(row)
+            for url, sku in url_map.items():
+                self._remember_product_row({
+                    "page_type": "listing",
+                    "retailer_sku_name": None,
+                    "offer": None,
+                    "pick_up_availability": None,
+                    "fastest_delivery": None,
+                    "delivery_availability": None,
+                    "sku_status": None,
+                    "product_url": url,
+                    "numeric_sku": str(sku),
+                    "page_number": None,
+                    "final_sku_price": None,
+                    "savings": None,
+                })
             if not item_map and not url_map and not product_rows:
                 return False
             self.item_to_sku.update({k: str(v) for k, v in item_map.items() if v})
             self.url_to_sku.update({k: str(v) for k, v in url_map.items() if v})
+            for url, sku in url_map.items():
+                if url and sku:
+                    self.sku_to_url.setdefault(str(sku), url)
             self.packet_count += 1
             return True
         except Exception:
@@ -334,6 +426,11 @@ class ListingGraphQLSkuCollector:
         if normalized in self.url_to_sku:
             return self.url_to_sku[normalized]
         return extract_sku_from_text(product_url)
+
+    def resolve_url(self, numeric_sku):
+        if not numeric_sku:
+            return None
+        return self.sku_to_url.get(str(numeric_sku))
 
     def listing_products(self, page_type, page_number=None, defaults=None):
         rows = []
@@ -357,4 +454,22 @@ class ListingGraphQLSkuCollector:
                 filled += 1
         if filled:
             print(f"[INFO] Filled numeric_sku from listing GraphQL: {filled}")
+        return filled
+
+    def apply_by_order(self, products):
+        filled = 0
+        rows = self.products
+        for idx, product in enumerate(products or []):
+            if idx >= len(rows):
+                break
+            row = rows[idx]
+            if not product.get("product_url") and row.get("product_url"):
+                product["product_url"] = row.get("product_url")
+                filled += 1
+            if not product.get("numeric_sku") and row.get("numeric_sku"):
+                product["numeric_sku"] = row.get("numeric_sku")
+            if not product.get("retailer_sku_name") and row.get("retailer_sku_name"):
+                product["retailer_sku_name"] = row.get("retailer_sku_name")
+        if filled:
+            print(f"[INFO] Filled product_url from listing GraphQL order: {filled}")
         return filled

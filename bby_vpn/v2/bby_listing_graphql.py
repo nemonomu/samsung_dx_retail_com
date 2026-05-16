@@ -601,26 +601,13 @@ def is_reusable_listing_operation(request_payload, response_shape=None):
     if not isinstance(request_payload, dict):
         return False
     operation_name = str(request_payload.get("operationName") or "")
-    variables = request_payload.get("variables")
-    if not isinstance(variables, dict):
-        return False
-
-    # ProductListItem calls hydrate one visible card by skuId. Replaying them
-    # cannot return a full 24-product listing page.
-    if operation_name == "PlpView_ProductListItem_Init":
-        return False
+    # Only the Apollo product-list operation is reusable for page-level listing
+    # replay. Header/footer/config/intent/recommendation/card/price operations
+    # can expose paging-like keys or product URLs, but they are not the 24-item
+    # search listing contract.
     if operation_name == "PlpView_ProductList_Init":
         return True
-    if "skuId" in variables and not _has_paging_key(variables):
-        return False
-
-    shape_text = json.dumps(response_shape or {}, ensure_ascii=False).lower()
-    if "productbyskuid" in shape_text and "search" not in shape_text and not _has_paging_key(variables):
-        return False
-
-    return _has_paging_key(variables) or any(
-        key in variables for key in ("st", "q", "query", "keyword", "searchTerm", "categoryId", "id")
-    )
+    return False
 
 
 def count_product_urls(value):

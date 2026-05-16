@@ -561,6 +561,14 @@ class BestBuyTVMainCrawler(BaseCrawler):
         if not unique_products:
             return 0
 
+        expected_page_products = int(os.environ.get("BBY_LISTING_EXPECTED_PAGE_PRODUCTS", "24"))
+        if not self.test_mode and len(unique_products) < expected_page_products:
+            print(
+                f"[ERROR] Unique products below minimum "
+                f"{len(unique_products)}/{expected_page_products}; refusing partial page save"
+            )
+            return 0
+
         fieldnames = [
             'account_name', 'batch_id', 'page_type', 'main_rank', 'retailer_sku_name',
             'offer', 'pick_up_availability', 'shipping_availability',

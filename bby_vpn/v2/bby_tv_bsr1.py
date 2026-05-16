@@ -583,6 +583,14 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                 print("[INFO] No products to save")
                 return {'insert': 0, 'update': 0}
 
+            expected_page_products = int(os.environ.get("BBY_LISTING_EXPECTED_PAGE_PRODUCTS", "24"))
+            if not self.test_mode and len(csv_products) < expected_page_products:
+                print(
+                    f"[ERROR] Unique products below minimum "
+                    f"{len(csv_products)}/{expected_page_products}; refusing partial page save"
+                )
+                return {'insert': 0, 'update': 0}
+
             fieldnames = [
                 'account_name', 'batch_id', 'page_type', 'bsr_rank', 'retailer_sku_name',
                 'offer', 'pick_up_availability', 'shipping_availability',

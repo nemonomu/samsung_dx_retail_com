@@ -136,6 +136,8 @@ class BestBuyDetailCrawler:
         self.similar_extraction_enabled = os.environ.get('BBY_DT_SKIP_SIMILAR', '1') != '1'
         self.review_dom_fallback_enabled = os.environ.get('BBY_DT_REVIEW_DOM_FALLBACK', '0') == '1'
         self.graphql_replay_enabled = os.environ.get('BBY_DT_GRAPHQL_REPLAY', '1') == '1'
+        self.pdp_graphql_discovery_enabled = os.environ.get('BBY_DT_PDP_GRAPHQL_DISCOVERY', '1') == '1'
+        self.pdp_graphql_discovery_seconds = float(os.environ.get('BBY_DT_PDP_GRAPHQL_DISCOVERY_SECONDS', '8'))
         self.discovery_refresh_every = int(os.environ.get('BBY_DT_DISCOVERY_REFRESH_EVERY', '4'))
         self.proactive_restart_every = int(os.environ.get('BBY_DT_RESTART_EVERY', '8'))
         self.proactive_cooldown_every = int(os.environ.get('BBY_DT_COOLDOWN_EVERY', '8'))
@@ -157,6 +159,7 @@ class BestBuyDetailCrawler:
             "review_extraction_enabled": self.review_extraction_enabled,
             "similar_extraction_enabled": self.similar_extraction_enabled,
             "graphql_replay_enabled": self.graphql_replay_enabled,
+            "pdp_graphql_discovery_enabled": self.pdp_graphql_discovery_enabled,
             "discovery_refresh_every": self.discovery_refresh_every,
             "reactive_refresh_on_graphql_error": self.reactive_refresh_on_graphql_error,
         })
@@ -556,6 +559,7 @@ class BestBuyDetailCrawler:
                         url_data_map[item_key] = {
                             'page_type': row.get('page_type') or 'main',
                             'product_url': url,
+                            'numeric_sku': row.get('numeric_sku'),
                             'retailer_sku_name': row.get('retailer_sku_name'),
                             'final_sku_price': None,
                             'savings': None,
@@ -580,10 +584,13 @@ class BestBuyDetailCrawler:
                     item_key = _extract_item(url)
                     if item_key in url_data_map:
                         url_data_map[item_key]['bsr_rank'] = row.get('bsr_rank')
+                        if row.get('numeric_sku') and not url_data_map[item_key].get('numeric_sku'):
+                            url_data_map[item_key]['numeric_sku'] = row.get('numeric_sku')
                     else:
                         url_data_map[item_key] = {
                             'page_type': row.get('page_type') or 'bsr',
                             'product_url': url,
+                            'numeric_sku': row.get('numeric_sku'),
                             'retailer_sku_name': row.get('retailer_sku_name'),
                             'final_sku_price': None,
                             'savings': None,
@@ -609,10 +616,13 @@ class BestBuyDetailCrawler:
                     if item_key in url_data_map:
                         url_data_map[item_key]['promotion_position'] = row.get('promotion_rank')
                         url_data_map[item_key]['promotion_type'] = row.get('promotion_type')
+                        if row.get('numeric_sku') and not url_data_map[item_key].get('numeric_sku'):
+                            url_data_map[item_key]['numeric_sku'] = row.get('numeric_sku')
                     else:
                         url_data_map[item_key] = {
                             'page_type': row.get('page_type') or 'promotion',
                             'product_url': url,
+                            'numeric_sku': row.get('numeric_sku'),
                             'retailer_sku_name': row.get('retailer_sku_name'),
                             'final_sku_price': None,
                             'savings': None,
@@ -637,10 +647,13 @@ class BestBuyDetailCrawler:
                     item_key = _extract_item(url)
                     if item_key in url_data_map:
                         url_data_map[item_key]['trend_rank'] = row.get('rank')
+                        if row.get('numeric_sku') and not url_data_map[item_key].get('numeric_sku'):
+                            url_data_map[item_key]['numeric_sku'] = row.get('numeric_sku')
                     else:
                         url_data_map[item_key] = {
                             'page_type': row.get('page_type') or 'Trend',
                             'product_url': url,
+                            'numeric_sku': row.get('numeric_sku'),
                             'retailer_sku_name': row.get('product_name'),
                             'final_sku_price': None,
                             'savings': None,
@@ -2058,6 +2071,67 @@ class BestBuyDetailCrawler:
 
         return captured_data
 
+    def capture_pdp_graphql_discovery(self, product_url):
+        """Persist GraphQL operations emitted by the initial PDP load."""
+        if not self.pdp_graphql_discovery_enabled:
+            return 0
+
+        captured = 0
+        seen = set()
+        deadline = time.time() + max(1.0, self.pdp_graphql_discovery_seconds)
+        while time.time() < deadline:
+            try:
+                packet = self.page.listen.wait(timeout=0.5)
+            except Exception:
+                break
+            if not packet:
+                continue
+
+            try:
+                req_body = None
+                for attr in ['body', 'postData', 'data']:
+                    val = getattr(packet.request, attr, None)
+                    if val:
+                        req_body = val
+                        break
+                if not req_body:
+                    continue
+                req_data = json.loads(req_body) if isinstance(req_body, str) else req_body
+                if not isinstance(req_data, dict):
+                    continue
+                op_name = req_data.get('operationName')
+                if not op_name or op_name in seen:
+                    continue
+                resp_body = getattr(packet.response, 'body', None)
+                if not resp_body:
+                    continue
+
+                endpoint_url = getattr(packet.request, 'url', None) or getattr(packet, 'url', None)
+                status_code = getattr(packet.response, 'status', None) or getattr(packet.response, 'status_code', None)
+                gql_errors = resp_body.get('errors') if isinstance(resp_body, dict) else None
+                self.endpoint_metrics.record(endpoint_url, status_code=status_code, graphql_errors=gql_errors)
+                headers = minimal_headers_from_packet(packet)
+                cookies = cookies_from_drission_page(self.page)
+                self.graphql_mapper.record(op_name, endpoint_url, req_data, headers, resp_body, cookies=cookies)
+                seen.add(op_name)
+                captured += 1
+            except Exception as map_error:
+                self.audit_log.write("pdp_graphql_discovery_error", {
+                    "product_url": product_url,
+                    "error": str(map_error),
+                })
+
+        if captured:
+            print(f"  [OK] PDP GraphQL discovery captured: {captured} operations")
+        else:
+            print("  [INFO] PDP GraphQL discovery captured: 0 operations")
+        self.audit_log.write("pdp_graphql_discovery_result", {
+            "product_url": product_url,
+            "operation_count": captured,
+            "operation_names": sorted(seen),
+        })
+        return captured
+
     def collect_review_data_via_graphql_replay(self, product_url):
         """Replay saved GraphQL operations through the active Chromium session."""
         captured_data = {
@@ -2853,6 +2927,8 @@ class BestBuyDetailCrawler:
             self.order += 1
             page_type = url_data['page_type']
             product_url = url_data['product_url']
+            if url_data.get('numeric_sku'):
+                self.record_graphql_sku_map(product_url, url_data.get('numeric_sku'))
 
             print(f"\n{'='*80}")
             print(f"[{self.order}] [{page_type.upper()}] Accessing: {product_url[:80]}...")
@@ -2861,9 +2937,27 @@ class BestBuyDetailCrawler:
             # page 접속 (DrissionPage)
             print(f"  [INFO] Loading page...")
             self.rate_limiter.wait(product_url, reason='detail_page')
+            listen_started_for_pdp = False
+            if self.pdp_graphql_discovery_enabled:
+                try:
+                    self.page.listen.start('graphql')
+                    listen_started_for_pdp = True
+                except Exception as listen_error:
+                    self.audit_log.write("pdp_graphql_discovery_error", {
+                        "product_url": product_url,
+                        "error": f"listen_start_failed: {listen_error}",
+                    })
             self.page.get(product_url)
             self.browser_diagnostics.snapshot(self.page, product_url, 'detail_after_get')
             self.network_diagnostics.snapshot(self.page, product_url, 'detail_after_get')
+            if listen_started_for_pdp:
+                try:
+                    self.capture_pdp_graphql_discovery(product_url)
+                finally:
+                    try:
+                        self.page.listen.stop()
+                    except Exception:
+                        pass
 
             # ERR_HTTP2_PROTOCOL_ERROR 감지
             try:

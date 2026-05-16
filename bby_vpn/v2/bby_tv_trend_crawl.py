@@ -19,6 +19,7 @@ from config import DB_CONFIG
 from bby_config_loader import get_config
 from bby_utils import load_excluded_items, is_excluded_url
 from core.db_readonly import connect_readonly
+from bby_listing_sku import extract_numeric_sku
 
 class BestBuyTrendCrawler:
     def __init__(self):
@@ -260,6 +261,7 @@ class BestBuyTrendCrawler:
                             break
 
                     if product_name and product_url:
+                        numeric_sku = extract_numeric_sku(item, product_url)
                         # Skip is_product=false items
                         if is_excluded_url(product_url, self.excluded_items):
                             print(f"  [SKIP {rank}] is_product=false - excluded")
@@ -269,7 +271,8 @@ class BestBuyTrendCrawler:
                             'page_type': page_type,
                             'rank': int(rank) if rank.isdigit() else idx,
                             'product_name': product_name,
-                            'product_url': product_url
+                            'product_url': product_url,
+                            'numeric_sku': numeric_sku
                         }
                         products.append(product)
                         print(f"  [{rank}] {product_name[:50]}...")
@@ -303,7 +306,7 @@ class BestBuyTrendCrawler:
 
             fieldnames = [
                 'account_name', 'batch_id', 'page_type', 'rank', 'product_name',
-                'product_url', 'crawl_strdatetime', 'calendar_week'
+                'product_url', 'numeric_sku', 'crawl_strdatetime', 'calendar_week'
             ]
             success_count = 0
             with open(self.csv_output_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
@@ -317,6 +320,7 @@ class BestBuyTrendCrawler:
                         'rank': product['rank'],
                         'product_name': product['product_name'],
                         'product_url': product['product_url'],
+                        'numeric_sku': product.get('numeric_sku'),
                         'crawl_strdatetime': crawl_strdatetime,
                         'calendar_week': calendar_week
                     })

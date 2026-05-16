@@ -42,6 +42,7 @@ setup_environment(__file__)
 from common.base_crawler import BaseCrawler
 from config import DB_CONFIG
 from core.db_readonly import connect_readonly
+from bby_listing_sku import extract_numeric_sku, extract_sponsored_status
 
 
 
@@ -294,6 +295,7 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                         else:
                             product_url = product_url_raw
 
+                        numeric_sku = extract_numeric_sku(item, product_url)
                         offer_raw = self.safe_extract(item, 'offer')
                         offer = None
                         if offer_raw:
@@ -304,7 +306,7 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                         delivery = delivery_raw if delivery_raw and 'delivery' in delivery_raw.lower() else None
 
                         sku_status_raw = self.safe_extract(item, 'sku_status')
-                        sku_status = 'Sponsored' if sku_status_raw and 'sponsored' in sku_status_raw.lower() else None
+                        sku_status = extract_sponsored_status(item, sku_status_raw)
 
                         products.append({
                             'account_name': self.account_name,
@@ -318,6 +320,7 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                             'bsr_rank': 0,
                             'page_number': page_number,
                             'product_url': product_url,
+                            'numeric_sku': numeric_sku,
                             'calendar_week': self.calendar_week,
                             'crawl_datetime': (datetime.now() + timedelta(hours=self.time_offset_hours)).strftime('%Y-%m-%d %H:%M:%S'),
                             'batch_id': self.batch_id
@@ -443,7 +446,7 @@ class BestBuyTVBSRCrawler(BaseCrawler):
             fieldnames = [
                 'account_name', 'batch_id', 'page_type', 'bsr_rank', 'retailer_sku_name',
                 'offer', 'pick_up_availability', 'shipping_availability',
-                'delivery_availability', 'sku_status', 'product_url',
+                'delivery_availability', 'sku_status', 'product_url', 'numeric_sku',
                 'crawl_datetime', 'calendar_week', 'page_number', 'fastest_delivery'
             ]
             file_exists = os.path.exists(self.csv_output_path)

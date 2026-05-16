@@ -18,11 +18,18 @@ from datetime import datetime
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
-ROOT_DIR = BASE_DIR.parents[2]
-if str(BASE_DIR) not in sys.path:
-    sys.path.insert(0, str(BASE_DIR))
-if str(ROOT_DIR) not in sys.path:
-    sys.path.append(str(ROOT_DIR))
+BBY_VPN_DIR = BASE_DIR.parent
+PROJECT_DIR = BBY_VPN_DIR.parent
+
+for path in (
+    BASE_DIR,
+    BBY_VPN_DIR,
+    BBY_VPN_DIR / "running",
+    PROJECT_DIR,
+    PROJECT_DIR / "running",
+):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from bby_listing_sku import extract_numeric_sku_from_text
 from collectors.graphql_collector import BrowserFetchGraphQLCollector, load_graphql_cookies, load_graphql_registry, load_sku_map

@@ -28,6 +28,7 @@ import random
 import traceback
 import re
 import csv
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from datetime import datetime, timedelta
 from lxml import html
 from DrissionPage import ChromiumPage, ChromiumOptions
@@ -256,12 +257,26 @@ class BestBuyTVMainCrawler(BaseCrawler):
             print(f"[WARNING] JS failed during {context}: {exc}")
             return default
 
+    def ensure_24_results_url(self, url):
+        """Force Best Buy listing pages to request at least 24 products per page."""
+        if not url:
+            return url
+        try:
+            parts = urlsplit(url)
+            query = dict(parse_qsl(parts.query, keep_blank_values=True))
+            query["nrp"] = "24"
+            return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+        except Exception:
+            separator = "&" if "?" in url else "?"
+            return f"{url}{separator}nrp=24"
+
     def crawl_page(self, page_number):
         """페이지 크롤링: 페이지 로드 → 제품 파싱 → URL 누락 시 1스텝 스크롤 로딩 → 반복 (스마트 스크롤)"""
         products = []
         sku_collector = ListingGraphQLSkuCollector(self.page)
         try:
-            url = self.url_template.replace('{page}', str(page_number))
+            url = self.ensure_24_results_url(self.url_template.replace('{page}', str(page_number)))
+            expected_page_products = int(os.environ.get("BBY_LISTING_EXPECTED_PAGE_PRODUCTS", "24"))
             base_container_xpath = self.xpaths.get('base_container', {}).get('xpath')
             if not base_container_xpath:
                 print("[ERROR] base_container XPath not found")
@@ -293,20 +308,32 @@ class BestBuyTVMainCrawler(BaseCrawler):
                 defaults=listing_defaults,
             )
             if api_products:
-                if initial_card_count and len(api_products) > initial_card_count:
-                    api_products = api_products[:initial_card_count]
                 print(f"[INFO] Page {page_number}: GraphQL listing rows collected: {len(api_products)}")
-                return api_products
+                if len(api_products) >= expected_page_products:
+                    return api_products
+                print(f"[WARNING] Page {page_number}: GraphQL rows {len(api_products)}/{expected_page_products}; waiting for more GraphQL/API rows")
+                for attempt in range(1, 7):
+                    self.run_js_safely(f"window.scrollTo(0, {attempt * 900});", context=f"page {page_number} graphql scroll {attempt}")
+                    time.sleep(random.uniform(1.5, 2.5))
+                    sku_collector.drain(2)
+                    api_products = sku_collector.listing_products(
+                        self.page_type,
+                        page_number=page_number,
+                        defaults=listing_defaults,
+                    )
+                    print(f"[INFO] Page {page_number}: GraphQL rows after wait {attempt}: {len(api_products)}/{expected_page_products}")
+                    if len(api_products) >= expected_page_products:
+                        return api_products
 
             payload_products = extract_listing_products_from_html(initial_html, self.page_type, page_number=page_number)
             if payload_products:
-                if initial_card_count and len(payload_products) > initial_card_count:
-                    payload_products = payload_products[:initial_card_count]
                 for product in payload_products:
                     for key, value in listing_defaults.items():
                         product.setdefault(key, value)
                 print(f"[INFO] Page {page_number}: HTML/API listing rows collected: {len(payload_products)}")
-                return payload_products
+                if len(payload_products) >= expected_page_products:
+                    return payload_products
+                print(f"[WARNING] Page {page_number}: HTML/API rows {len(payload_products)}/{expected_page_products}; continuing GraphQL/API wait before DOM fallback")
 
             # 1. 0개인 경우 로드 실패 예외처리 (최대 3회 새로고침)
             for refresh_attempt in range(1, 4):
@@ -393,9 +420,9 @@ class BestBuyTVMainCrawler(BaseCrawler):
                         print(f"[INFO] Page {page_number}: Completed listing rows from GraphQL order map: {total_found}")
                         break
 
-                # 조건 1: 모두 찾았으면 바텀까지 가볍게 스크롤 후 반복문 종료 (자연스러운 봇 동작)
-                if total_found > 0 and null_url_count == 0:
-                    print(f"[INFO] Page {page_number}: All {total_found} URLs loaded successfully! Quick scrolling to bottom...")
+                # 조건 1: 목표 수량까지 모두 찾았으면 바텀까지 가볍게 스크롤 후 반복문 종료
+                if total_found >= expected_page_products and null_url_count == 0:
+                    print(f"[INFO] Page {page_number}: All {total_found}/{expected_page_products} URLs loaded successfully! Quick scrolling to bottom...")
                     for _ in range(20):
                         is_bottom = self.run_js_safely("""
                             var elem = document.querySelector("div.pagination-container");
@@ -423,6 +450,9 @@ class BestBuyTVMainCrawler(BaseCrawler):
                         sku_collector.drain(1.5)
 
                     break
+
+                if total_found > 0 and null_url_count == 0:
+                    print(f"[INFO] Page {page_number}: Parsed {total_found}/{expected_page_products} complete URLs; continuing scroll for remaining products")
 
                 print(f"[INFO] Page {page_number}: Parsed {total_found} products, {null_url_count} URLs missing. Scrolling... ({scroll_attempt}/{max_scroll_attempts})")
 
@@ -463,12 +493,17 @@ class BestBuyTVMainCrawler(BaseCrawler):
 
             sku_collector.apply(products)
             print(f"[INFO] Page {page_number}: Final parsed products: {len(products)}")
+            if len(products) < expected_page_products:
+                raise RuntimeError(
+                    f"Page {page_number}: listing products below minimum "
+                    f"{len(products)}/{expected_page_products}; refusing partial page save"
+                )
             return products
 
         except Exception as e:
             print(f"[ERROR] Page {page_number} failed: {e}")
             traceback.print_exc()
-            if products:
+            if products and len(products) >= int(os.environ.get("BBY_LISTING_EXPECTED_PAGE_PRODUCTS", "24")):
                 sku_collector.apply(products)
                 print(f"[WARNING] Page {page_number}: returning {len(products)} products parsed before failure")
                 return products

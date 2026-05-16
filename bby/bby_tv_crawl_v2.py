@@ -312,6 +312,7 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
         block_cooldown_min=900, block_cooldown_max=1800,
         skip_reviews=True, skip_similar=True,
         deadline=None, start_order=None, end_order=None,
+        target_count=None, stable_mode=False, profile_dir=None,
     ):
         super().__init__(batch_id=batch_id, test_mode=False, time_offset_hours=time_offset_hours)
         self.csv_store = csv_store
@@ -328,6 +329,10 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
         self.deadline = deadline
         self.start_order = start_order
         self.end_order = end_order
+        self.target_count = target_count
+        self.stable_mode = stable_mode
+        self.profile_dir = profile_dir
+        self.pending_csv = os.path.splitext(self.detail_csv)[0] + "_pending.csv"
         self.profile_dirs = []
         self.risk_chunks_remaining = 0
         self.items_until_cooldown = self._next_chunk_size()
@@ -347,18 +352,24 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
     def setup_drission_driver(self):
         profile_root = os.path.join(os.path.dirname(self.detail_csv), "chrome_profiles")
         os.makedirs(profile_root, exist_ok=True)
-        user_data_path = tempfile.mkdtemp(prefix="bby_dp_profile_", dir=profile_root)
+        if self.stable_mode:
+            user_data_path = self.profile_dir or os.path.join(profile_root, "stable_default")
+            os.makedirs(user_data_path, exist_ok=True)
+        else:
+            user_data_path = tempfile.mkdtemp(prefix="bby_dp_profile_", dir=profile_root)
+            self.profile_dirs.append(user_data_path)
         cache_path = os.path.join(user_data_path, "cache")
         os.makedirs(cache_path, exist_ok=True)
-        self.profile_dirs.append(user_data_path)
 
         opts = ChromiumOptions()
         opts.set_user_data_path(user_data_path)
         opts.set_cache_path(cache_path)
-        opts.set_argument("--disable-application-cache")
-        opts.set_argument("--disk-cache-size", "1")
+        if not self.stable_mode:
+            opts.set_argument("--disable-application-cache")
+            opts.set_argument("--disk-cache-size", "1")
         self.page = ChromiumPage(opts)
-        print(f"[SUCCESS] DrissionPage setup complete with fresh profile: {user_data_path}")
+        mode = "stable profile" if self.stable_mode else "fresh profile"
+        print(f"[SUCCESS] DrissionPage setup complete with {mode}: {user_data_path}")
 
     def _cleanup_profile_dirs(self):
         for path in list(self.profile_dirs):
@@ -377,6 +388,9 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
             end_idx = self.end_order if self.end_order else len(products)
             products = products[start_idx:end_idx]
             print(f"[INFO] Detail order filter applied: start_order={self.start_order or 1}, end_order={self.end_order or 'end'}")
+        if self.target_count:
+            products = products[:max(self.target_count, 0)]
+            print(f"[INFO] Detail target count applied: {len(products)} products")
         print(f"[INFO] Loaded {len(products)} products from CSV listing")
         return products
 
@@ -407,6 +421,39 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
         self._write_detail_row(product)
         print(f"[CSV] Saved detail row: {product.get('item') or product.get('product_url')}")
         return True
+
+    def _write_pending_row(self, product, actual_order, reason, pass_name):
+        exists = os.path.exists(self.pending_csv)
+        fields = LISTING_FIELDS + ["item", "order", "reason", "pass_name", "pending_datetime"]
+        row = {field: "" for field in fields}
+        for field in LISTING_FIELDS:
+            value = product.get(field)
+            if value is not None:
+                row[field] = value
+        row["item"] = product.get("item") or self.extract_item_from_url(product.get("product_url"))
+        row["order"] = actual_order
+        row["reason"] = reason
+        row["pass_name"] = pass_name
+        row["pending_datetime"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(self.pending_csv, "a", newline="", encoding="utf-8-sig") as f:
+            writer = csv.DictWriter(f, fieldnames=fields)
+            if not exists:
+                writer.writeheader()
+            writer.writerow(row)
+        print(f"[PENDING] {pass_name}: order={actual_order}, reason={reason}, url={product.get('product_url')}")
+
+    def _warm_up_session(self):
+        if not self.stable_mode or not self.page:
+            return
+        try:
+            print("[INFO] Stable mode warm-up: BestBuy home")
+            self.page.get("https://www.bestbuy.com/")
+            time.sleep(random.uniform(4, 7))
+            print("[INFO] Stable mode warm-up: TV search page")
+            self.page.get("https://www.bestbuy.com/site/searchpage.jsp?st=tv")
+            time.sleep(random.uniform(5, 9))
+        except Exception as e:
+            print(f"[WARNING] Stable warm-up failed; continuing: {e}")
 
     def crawl_detail(self, product):
         removed = {}
@@ -457,6 +504,50 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
         self.items_until_cooldown = self._next_chunk_size()
         self._restart_after_wait(reason, self.block_cooldown_min, self.block_cooldown_max)
 
+    def _process_detail_queue(self, product_list, pass_name, retry_incomplete):
+        total_saved = 0
+        pending = []
+        total_orders = self.end_order or ((self.start_order or 1) + len(product_list) - 1)
+
+        for i, product in enumerate(product_list, 1):
+            actual_order = product.get("_actual_order") or ((self.start_order or 1) + i - 1)
+            if self.deadline and datetime.now() >= self.deadline:
+                print(f"[TIME LIMIT] Detail deadline reached during {pass_name}. Stopping.")
+                break
+
+            sku_name = product.get("retailer_sku_name") or "N/A"
+            print(f"\n{'=' * 70}")
+            print(f"[{actual_order}/{total_orders}] {pass_name}: {sku_name[:60]}")
+            print(f"{'=' * 70}")
+
+            combined_data = self.crawl_detail(product)
+            if combined_data and self._looks_incomplete(combined_data) and retry_incomplete:
+                print("[WARNING] Detail data looks incomplete. Long block cooldown and retrying once.")
+                self._block_cooldown("incomplete detail / possible block")
+                combined_data = self.crawl_detail(product)
+
+            if not combined_data or self._looks_incomplete(combined_data):
+                reason = "no_data" if not combined_data else "incomplete"
+                self._write_pending_row(product, actual_order, reason, pass_name)
+                item = dict(product)
+                item["_actual_order"] = actual_order
+                pending.append(item)
+                continue
+
+            combined_data["order"] = actual_order
+            if self.save_to_retail_com(combined_data):
+                total_saved += 1
+
+            self.items_until_cooldown -= 1
+            if i < len(product_list) and self.items_until_cooldown <= 0:
+                completed_chunk = self._next_chunk_size()
+                self.items_until_cooldown = completed_chunk
+                self._chunk_cooldown(f"random chunk boundary after order {actual_order}")
+            else:
+                time.sleep(random.uniform(5, 8))
+
+        return total_saved, pending
+
     def run(self):
         try:
             if not self.initialize():
@@ -468,40 +559,26 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
                 print("[ERROR] No products found in listing CSV")
                 return False
 
-            total_saved = 0
-            for i, product in enumerate(product_list, 1):
-                actual_order = (self.start_order or 1) + i - 1
+            self._warm_up_session()
+            total_saved, pending = self._process_detail_queue(
+                product_list,
+                pass_name="pass1",
+                retry_incomplete=not self.stable_mode,
+            )
+
+            if self.stable_mode and pending:
                 if self.deadline and datetime.now() >= self.deadline:
-                    print("[TIME LIMIT] Detail deadline reached. Stopping detail stage.")
-                    break
-
-                sku_name = product.get("retailer_sku_name") or "N/A"
-                print(f"\n{'=' * 70}")
-                print(f"[{actual_order}/{(self.end_order or ((self.start_order or 1) + len(product_list) - 1))}] {sku_name[:60]}")
-                print(f"{'=' * 70}")
-
-                combined_data = self.crawl_detail(product)
-                if combined_data and self._looks_incomplete(combined_data):
-                    print("[WARNING] Detail data looks incomplete. Long block cooldown and retrying once.")
-                    self._block_cooldown("incomplete detail / possible block")
-                    combined_data = self.crawl_detail(product)
-
-                if not combined_data or self._looks_incomplete(combined_data):
-                    print("[SKIP] Detail data still incomplete after retry; row not saved")
-                    continue
-
-                if combined_data:
-                    combined_data["order"] = actual_order
-                if combined_data and self.save_to_retail_com(combined_data):
-                    total_saved += 1
-
-                self.items_until_cooldown -= 1
-                if i < len(product_list) and self.items_until_cooldown <= 0:
-                    completed_chunk = self._next_chunk_size()
-                    self.items_until_cooldown = completed_chunk
-                    self._chunk_cooldown(f"random chunk boundary after order {actual_order}")
+                    print("[TIME LIMIT] Deadline reached before stable pending retry pass.")
                 else:
-                    time.sleep(random.uniform(5, 8))
+                    print(f"[INFO] Stable mode pending retry pass queued: {len(pending)} products")
+                    self._block_cooldown("stable mode pending retry pass")
+                    saved_retry, still_pending = self._process_detail_queue(
+                        pending,
+                        pass_name="pending_retry",
+                        retry_incomplete=False,
+                    )
+                    total_saved += saved_retry
+                    print(f"[INFO] Stable mode pending retry unresolved: {len(still_pending)}")
 
             print(f"[DONE] Processed: {len(product_list)}, CSV saved: {total_saved}, batch_id: {self.batch_id}")
             return total_saved > 0
@@ -525,6 +602,7 @@ class BestBuyTVCsvOrchestrator:
         block_cooldown_min=900, block_cooldown_max=1800,
         skip_reviews=True, skip_similar=True,
         deadline=None, start_order=None, end_order=None,
+        target_count=None, stable_mode=False, profile_dir=None,
     ):
         self.account_name = "Bestbuy"
         self.resume_from = resume_from
@@ -546,9 +624,12 @@ class BestBuyTVCsvOrchestrator:
         self.deadline = deadline
         self.start_order = start_order
         self.end_order = end_order
+        self.target_count = target_count
+        self.stable_mode = stable_mode
         self.korea_tz = pytz.timezone("Asia/Seoul")
         self.listing_csv = os.path.join(self.output_dir, f"bby_tv_v2_listing_{self.batch_id}.csv")
         self.detail_csv = os.path.join(self.output_dir, f"bby_tv_v2_detail_{self.batch_id}.csv")
+        self.profile_dir = profile_dir or os.path.join(self.output_dir, "chrome_profiles", "stable_default")
         self.csv_store = CsvProductStore(self.listing_csv)
 
     def _should_run(self, stage):
@@ -616,6 +697,9 @@ class BestBuyTVCsvOrchestrator:
                 deadline=self.deadline,
                 start_order=self.start_order,
                 end_order=self.end_order,
+                target_count=self.target_count,
+                stable_mode=self.stable_mode,
+                profile_dir=self.profile_dir,
             )
             results["detail"] = detail.run()
         else:
@@ -719,6 +803,9 @@ def main():
     parser.add_argument("--with-similar", action="store_true", help="similar product actions are skipped by default")
     parser.add_argument("--start-order", type=int, help="detail stage starts from this 1-based listing order")
     parser.add_argument("--end-order", type=int, help="detail stage ends at this 1-based listing order")
+    parser.add_argument("--target-count", type=int, help="limit detail stage to this many products after order filtering")
+    parser.add_argument("--stable-mode", action="store_true", help="use a persistent profile, warm-up, and deferred retry for detail")
+    parser.add_argument("--profile-dir", help="persistent Chrome profile directory for --stable-mode")
     parser.add_argument("--latest-listing", action="store_true", help="use the most recently modified listing CSV")
     parser.add_argument("--select-listing", action="store_true", help="select a listing CSV from a numbered menu")
     parser.add_argument("max_runtime", nargs="*", help='optional duration such as "6 hours" or "6h"')
@@ -756,6 +843,9 @@ def main():
         deadline=deadline,
         start_order=args.start_order,
         end_order=args.end_order,
+        target_count=args.target_count,
+        stable_mode=args.stable_mode,
+        profile_dir=args.profile_dir,
     )
     success = crawler.run()
     sys.exit(0 if success else 1)

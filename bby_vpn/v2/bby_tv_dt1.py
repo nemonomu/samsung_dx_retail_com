@@ -54,7 +54,6 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from data_validator import DataValidator
-from alert_monitor import send_review_url_error_alert
 from bby_access_policy import detect_block_signal
 from bby_crawl_controls import (
     BrowserSessionDiagnostics,

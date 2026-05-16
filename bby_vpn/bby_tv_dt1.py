@@ -2618,7 +2618,7 @@ class BestBuyDetailCrawler:
                         pass
                     self.save_page_diagnostic('h1_timeout', product_url)
                     self.rate_limiter.register_outcome(product_url, 'failed')
-                    return False
+                    return 'manual_pause'
             except Exception as e:
                 print(f"  [ERROR] page loading timeout: {e}")
                 try:
@@ -2632,7 +2632,7 @@ class BestBuyDetailCrawler:
                     pass
                 self.save_page_diagnostic('h1_exception', product_url)
                 self.rate_limiter.register_outcome(product_url, 'failed')
-                return False
+                return 'manual_pause'
 
             # DOM 우선 탐색 + 조건부 스크롤 (최적화)
             # 주요 요소들이 DOM에 이미 있으면 스크롤 생략
@@ -3311,6 +3311,25 @@ class BestBuyDetailCrawler:
 
                     # 같은 URL 다시 시도 (i 증가 안 함)
                     self.order -= 1  # order 카운터 복원 (scrape_detail_page에서 증가했으므로)
+                    continue
+
+                elif result == 'manual_pause':
+                    self.save_checkpoint('h1_not_found_manual_pause', idx, url_data, success_count)
+                    print("\n" + "="*80)
+                    print("[PAUSE] h1 element not found. Collection is paused before the next item.")
+                    print("[PAUSE] Check the browser/session and diagnostic HTML, then press Enter to retry this URL.")
+                    print("="*80)
+                    try:
+                        input()
+                    except EOFError:
+                        print("[INFO] No interactive input available. Stopping collection.")
+                        break
+
+                    if not self.restart_browser():
+                        print("[ERROR] Browser restart failed after manual pause. Stopping.")
+                        break
+                    self._warmup_with_different_page()
+                    self.order -= 1
                     continue
 
                 elif result is True:

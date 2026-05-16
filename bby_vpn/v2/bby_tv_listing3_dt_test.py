@@ -1,10 +1,10 @@
-"""Run a bounded main/BSR listing test and feed the filtered result to dt1.
+"""Run bounded listing tests and feed the filtered result to dt1.
 
 Flow:
 1. Crawl main listing for 3 pages.
 2. Crawl BSR listing for 3 pages.
-3. Remove Open Box rows and duplicate numeric sku/item rows across both CSVs.
-4. Clear promo/trend listing CSVs so dt1 only consumes main+BSR test rows.
+3. Crawl promotion and trend listing using the existing running crawler logic.
+4. Remove Open Box rows and duplicate numeric sku/item rows across all listing CSVs.
 5. Write detail CSV through GraphQL replay without opening each PDP.
 """
 
@@ -84,6 +84,8 @@ def load_v2_class(module_filename, class_name):
 BestBuyDetailCrawler = load_v2_class("bby_tv_dt1.py", "BestBuyDetailCrawler")
 BestBuyTVBSRCrawler = load_v2_class("bby_tv_bsr1.py", "BestBuyTVBSRCrawler")
 BestBuyTVMainCrawler = load_v2_class("bby_tv_main1.py", "BestBuyTVMainCrawler")
+BestBuyTVPromotionCrawler = load_v2_class("bby_tv_pmt1.py", "BestBuyTVPromotionCrawler")
+BestBuyTVTrendCrawler = load_v2_class("bby_tv_trend_crawl.py", "BestBuyTVTrendCrawler")
 
 
 LISTING_FILES = {
@@ -167,7 +169,7 @@ def filter_listing_csvs():
         "duplicate": 0,
     }
 
-    for source in ("main", "bsr"):
+    for source in ("main", "bsr", "promotion", "trend"):
         path = LISTING_FILES[source]
         rows, fieldnames = read_rows(path)
         filtered = []
@@ -187,16 +189,6 @@ def filter_listing_csvs():
         write_rows(path, filtered, fieldnames)
         print(f"[FILTER] {source}: {len(rows)} -> {len(filtered)} rows")
 
-    clear_file(
-        LISTING_FILES["promotion"],
-        ["account_name", "batch_id", "page_type", "retailer_sku_name", "promotion_rank", "offer",
-         "promotion_type", "product_url", "numeric_sku", "crawl_datetime", "calendar_week"],
-    )
-    clear_file(
-        LISTING_FILES["trend"],
-        ["account_name", "batch_id", "page_type", "rank", "product_name", "product_url",
-         "numeric_sku", "crawl_strdatetime", "calendar_week"],
-    )
     print(
         "[FILTER] total: "
         f"input={stats['input']} kept={stats['kept']} "
@@ -207,7 +199,7 @@ def filter_listing_csvs():
 
 def filtered_listing_rows():
     rows = []
-    for source in ("main", "bsr"):
+    for source in ("main", "bsr", "promotion", "trend"):
         source_rows, _ = read_rows(LISTING_FILES[source])
         for row in source_rows:
             row["_source"] = source
@@ -222,6 +214,14 @@ def run_listing(crawler_cls, label, batch_id, pages):
     crawler = crawler_cls(test_mode=False, batch_id=batch_id)
     crawler.max_pages = pages
     crawler.max_products = 10000
+    crawler.run()
+
+
+def run_single_listing(crawler_cls, label, batch_id):
+    print("\n" + "=" * 80)
+    print(f"[RUN] {label}")
+    print("=" * 80)
+    crawler = crawler_cls(test_mode=False, batch_id=batch_id)
     crawler.run()
 
 
@@ -617,7 +617,7 @@ def run_api_only_detail(rows):
                 sku_status=row.get("sku_status"),
                 star_rating_source=parsed.get("star_rating"),
                 promotion_type=row.get("promotion_type"),
-                promotion_position=row.get("promotion_rank"),
+                promotion_position=row.get("promotion_position") or row.get("promotion_rank"),
                 bsr_rank=row.get("bsr_rank"),
                 main_rank=row.get("main_rank"),
                 trend_rank=row.get("trend_rank"),
@@ -642,6 +642,8 @@ def main():
 
     run_listing(BestBuyTVMainCrawler, "main listing", batch_id, pages)
     run_listing(BestBuyTVBSRCrawler, "bsr listing", batch_id, pages)
+    run_single_listing(BestBuyTVPromotionCrawler, "promotion listing", batch_id)
+    run_single_listing(BestBuyTVTrendCrawler, "trend listing", batch_id)
     stats = filter_listing_csvs()
     if stats["kept"] <= 0:
         print("[ERROR] No listing rows left after filtering. Detail crawl skipped.")

@@ -7,6 +7,7 @@ Listing and detail results are written to CSV files, not DB tables.
 
 import argparse
 import csv
+import importlib.util
 import os
 import random
 import sys
@@ -31,11 +32,23 @@ if REPO_DIR not in sys.path:
     sys.path.insert(1, REPO_DIR)
 
 from common.base_crawler import BaseCrawler
-from bby_tv_bsr import BestBuyTVBSRCrawler
-from bby_tv_dt import BestBuyTVDetailCrawler
-from bby_tv_main import BestBuyTVMainCrawler
-from bby_tv_pmt import BestBuyTVPromotionCrawler
-from bby_tv_trend import BestBuyTVTrendCrawler
+
+
+def load_local_class(module_name, class_name):
+    module_path = os.path.join(CURRENT_DIR, f"{module_name}.py")
+    if not os.path.exists(module_path):
+        raise FileNotFoundError(f"Required local module not found: {module_path}")
+    spec = importlib.util.spec_from_file_location(f"bby_local_{module_name}", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, class_name)
+
+
+BestBuyTVBSRCrawler = load_local_class("bby_tv_bsr", "BestBuyTVBSRCrawler")
+BestBuyTVDetailCrawler = load_local_class("bby_tv_dt", "BestBuyTVDetailCrawler")
+BestBuyTVMainCrawler = load_local_class("bby_tv_main", "BestBuyTVMainCrawler")
+BestBuyTVPromotionCrawler = load_local_class("bby_tv_pmt", "BestBuyTVPromotionCrawler")
+BestBuyTVTrendCrawler = load_local_class("bby_tv_trend", "BestBuyTVTrendCrawler")
 
 
 RESUME_STAGES = ["main", "bsr", "pmt", "trend", "detail"]

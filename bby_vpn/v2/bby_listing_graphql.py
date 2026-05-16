@@ -130,11 +130,139 @@ def extract_sku_map_from_payload(payload):
     return item_to_sku, url_to_sku
 
 
+def _direct_text_value(node, keys):
+    if not isinstance(node, dict):
+        return None
+    for key in keys:
+        value = node.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict):
+            for nested_key in ("short", "title", "text", "displayName", "name"):
+                nested = value.get(nested_key)
+                if isinstance(nested, str) and nested.strip():
+                    return nested.strip()
+    return None
+
+
+def _direct_price_value(node):
+    if not isinstance(node, dict):
+        return None
+    price = node.get("price")
+    if isinstance(price, dict):
+        for key in ("displayableCustomerPrice", "currentPrice", "customerPrice", "salePrice"):
+            value = price.get(key)
+            if value not in (None, ""):
+                try:
+                    return f"${float(value):,.2f}"
+                except Exception:
+                    return str(value)
+    return None
+
+
+def _direct_savings_value(node):
+    if not isinstance(node, dict):
+        return None
+    price = node.get("price")
+    if isinstance(price, dict):
+        value = price.get("totalSavings")
+        if value not in (None, ""):
+            try:
+                return f"${float(value):,.2f}"
+            except Exception:
+                return str(value)
+    return None
+
+
+def extract_listing_products_from_payload(payload, page_type, page_number=None):
+    """Extract listing rows from GraphQL payload product records.
+
+    A row is emitted only from a dict that directly exposes a numeric skuId and
+    contains a PDP URL under that same record. This avoids cross-product pairing
+    from large response containers.
+    """
+    rows = []
+    seen = set()
+
+    def add_record(node):
+        skus = []
+        for key, value in node.items():
+            if key in SKU_KEYS and value:
+                match = re.fullmatch(r"\s*(\d{5,})\s*", str(value))
+                if match:
+                    skus.append(match.group(1))
+            elif key == "sku" and isinstance(value, str):
+                match = re.fullmatch(r"\s*(\d{5,})\s*", value)
+                if match:
+                    skus.append(match.group(1))
+        if not skus:
+            return
+        urls = []
+        for key, value in node.items():
+            if key in URL_KEYS and value_is_product_url(value):
+                urls.append(normalize_url(value))
+            elif key in URL_KEYS and isinstance(value, dict):
+                urls.extend(product_urls(value))
+        if not urls:
+            return
+        product_url = urls[0]
+        item = extract_item_from_url(product_url)
+        key = item or skus[0] or product_url
+        if not key or key in seen:
+            return
+        seen.add(key)
+        row = {
+            "page_type": page_type,
+            "retailer_sku_name": _direct_text_value(
+                node,
+                ("name", "title", "productName", "shortName", "displayName"),
+            ),
+            "offer": None,
+            "pick_up_availability": None,
+            "fastest_delivery": None,
+            "delivery_availability": None,
+            "sku_status": None,
+            "product_url": product_url,
+            "numeric_sku": skus[0],
+            "page_number": page_number,
+            "final_sku_price": _direct_price_value(node),
+            "savings": _direct_savings_value(node),
+        }
+        rows.append(row)
+
+    def walk(node):
+        if isinstance(node, dict):
+            add_record(node)
+            for child in node.values():
+                walk(child)
+        elif isinstance(node, list):
+            for child in node:
+                walk(child)
+
+    def product_urls(node):
+        urls = []
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in URL_KEYS and value_is_product_url(value):
+                    urls.append(normalize_url(value))
+                elif isinstance(value, (dict, list)):
+                    urls.extend(product_urls(value))
+        elif isinstance(node, list):
+            for child in node:
+                urls.extend(product_urls(child))
+        return urls
+
+    walk(payload)
+    return rows
+
+
 class ListingGraphQLSkuCollector:
     def __init__(self, page=None):
         self.page = page
         self.item_to_sku = {}
         self.url_to_sku = {}
+        self.products = []
+        self._product_keys = set()
         self.packet_count = 0
 
     def start(self, page=None):
@@ -183,7 +311,13 @@ class ListingGraphQLSkuCollector:
             else:
                 payload = body
             item_map, url_map = extract_sku_map_from_payload(payload)
-            if not item_map and not url_map:
+            product_rows = extract_listing_products_from_payload(payload, page_type="listing")
+            for row in product_rows:
+                key = extract_item_from_url(row.get("product_url")) or row.get("numeric_sku")
+                if key and key not in self._product_keys:
+                    self._product_keys.add(key)
+                    self.products.append(row)
+            if not item_map and not url_map and not product_rows:
                 return False
             self.item_to_sku.update({k: str(v) for k, v in item_map.items() if v})
             self.url_to_sku.update({k: str(v) for k, v in url_map.items() if v})
@@ -200,6 +334,17 @@ class ListingGraphQLSkuCollector:
         if normalized in self.url_to_sku:
             return self.url_to_sku[normalized]
         return extract_sku_from_text(product_url)
+
+    def listing_products(self, page_type, page_number=None, defaults=None):
+        rows = []
+        defaults = dict(defaults or {})
+        for row in self.products:
+            merged = dict(defaults)
+            merged.update(row)
+            merged["page_type"] = page_type
+            merged["page_number"] = page_number
+            rows.append(merged)
+        return rows
 
     def apply(self, products):
         filled = 0

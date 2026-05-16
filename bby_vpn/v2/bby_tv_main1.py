@@ -272,6 +272,21 @@ class BestBuyTVMainCrawler(BaseCrawler):
             time.sleep(random.uniform(3, 5))
             sku_collector.drain(4)
 
+            api_products = sku_collector.listing_products(
+                self.page_type,
+                page_number=page_number,
+                defaults={
+                    'account_name': self.account_name,
+                    'main_rank': 0,
+                    'calendar_week': self.calendar_week,
+                    'crawl_datetime': (datetime.now() + timedelta(hours=self.time_offset_hours)).strftime('%Y-%m-%d %H:%M:%S'),
+                    'batch_id': self.batch_id,
+                },
+            )
+            if api_products:
+                print(f"[INFO] Page {page_number}: GraphQL listing rows collected: {len(api_products)}")
+                return api_products
+
             # 1. 0개인 경우 로드 실패 예외처리 (최대 3회 새로고침)
             for refresh_attempt in range(1, 4):
                 page_html = self.get_page_html_safely(page_number, f"initial parse {refresh_attempt}")

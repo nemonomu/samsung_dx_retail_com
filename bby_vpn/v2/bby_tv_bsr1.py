@@ -44,7 +44,12 @@ from common.base_crawler import BaseCrawler
 from config import DB_CONFIG
 from core.db_readonly import connect_readonly
 from bby_listing_sku import extract_numeric_sku, extract_sponsored_status
-from bby_listing_graphql import ListingGraphQLSkuCollector, direct_listing_products, extract_listing_products_from_html
+from bby_listing_graphql import (
+    ListingGraphQLSkuCollector,
+    direct_listing_products,
+    extract_listing_products_from_html,
+    save_listing_operation_from_html,
+)
 
 
 
@@ -338,6 +343,16 @@ class BestBuyTVBSRCrawler(BaseCrawler):
             sku_collector.drain(4)
 
             initial_html = self.get_page_html_safely(page_number, "initial HTML/API payload parse")
+            try:
+                cookies = {}
+                for cookie in self.page.cookies():
+                    if cookie.get("name"):
+                        cookies[cookie.get("name")] = cookie.get("value")
+                path = save_listing_operation_from_html(self.csv_output_dir, initial_html, cookies=cookies)
+                if path:
+                    print(f"[INFO] Saved Apollo listing GraphQL operation from HTML -> {path}")
+            except Exception as exc:
+                print(f"[WARNING] Page {page_number}: Apollo listing operation capture failed: {exc}")
             try:
                 initial_tree = html.fromstring(initial_html)
                 initial_card_count = len(initial_tree.xpath(base_container_xpath))

@@ -17,6 +17,7 @@ import socket
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlencode
 
 
 SKU_KEYS = {"skuId", "skuID", "sku_id"}
@@ -262,6 +263,97 @@ def extract_listing_products_from_payload(payload, page_type, page_number=None):
     return rows
 
 
+def nested_get(value, path, default=None):
+    current = value
+    for key in path:
+        if not isinstance(current, dict):
+            return default
+        current = current.get(key)
+    return default if current is None else current
+
+
+def product_row_from_graphql_product(product, page_type, page_number=None):
+    if not isinstance(product, dict) or not product.get("skuId"):
+        return None
+    price = product.get("price") if isinstance(product.get("price"), dict) else {}
+    review_info = product.get("reviewInfo") if isinstance(product.get("reviewInfo"), dict) else {}
+    product_url = (
+        nested_get(product, ["url", "skuSpecificUrl"])
+        or nested_get(product, ["url", "pdp"])
+        or nested_get(product, ["url", "relativePdp"])
+    )
+    product_url = normalize_url(product_url)
+    if not product_url:
+        return None
+    return {
+        "page_type": page_type,
+        "retailer_sku_name": nested_get(product, ["name", "short"]) or product.get("name") or product.get("title"),
+        "offer": None,
+        "pick_up_availability": nested_get(product, ["fulfillmentOptions", "ispuDetails", "ispuAvailability", "pickupEligible"]),
+        "fastest_delivery": None,
+        "delivery_availability": nested_get(product, ["fulfillmentOptions", "shippingDetails", "shippingAvailability", "shippingEligible"]),
+        "sku_status": product.get("dotComDisplayStatus"),
+        "product_url": product_url,
+        "numeric_sku": str(product.get("skuId")),
+        "page_number": page_number,
+        "final_sku_price": price.get("displayableCustomerPrice") or price.get("customerPrice") or price.get("currentPrice"),
+        "savings": price.get("totalSavings"),
+        "star_rating": normalize_listing_rating(review_info.get("averageRating")),
+        "review_count": review_info.get("reviewCount"),
+    }
+
+
+def normalize_listing_rating(value):
+    if value in (None, ""):
+        return None
+    try:
+        number = float(value)
+    except Exception:
+        return value
+    if number <= 0:
+        return "Not yet reviewed"
+    return number
+
+
+def extract_product_list_rows(payload, page_type, page_number=None):
+    data = payload.get("data", {}) if isinstance(payload, dict) else {}
+    rows = []
+    seen = set()
+
+    def add_product(product):
+        row = product_row_from_graphql_product(product, page_type, page_number=page_number)
+        if not row:
+            return
+        key = row.get("numeric_sku") or extract_item_from_url(row.get("product_url"))
+        if not key or key in seen:
+            return
+        seen.add(key)
+        rows.append(row)
+
+    documents = nested_get(data, ["detailedProductSearch", "documents"], [])
+    if isinstance(documents, list):
+        for document in documents:
+            product = document.get("product") if isinstance(document, dict) else None
+            add_product(product)
+
+    placements = nested_get(data, ["search", "withBestMedia", "placements"], [])
+    if isinstance(placements, list):
+        for placement in placements:
+            if not isinstance(placement, dict):
+                continue
+            sponsored_documents = nested_get(placement, ["documentsGridView", "sponsoredDocuments"], [])
+            if isinstance(sponsored_documents, list):
+                for document in sponsored_documents:
+                    product = document.get("product") if isinstance(document, dict) else None
+                    add_product(product)
+            documents = placement.get("documents", [])
+            if isinstance(documents, list):
+                for document in documents:
+                    product = document.get("product") if isinstance(document, dict) else None
+                    add_product(product)
+    return rows
+
+
 def extract_listing_products_from_html(html_text, page_type, page_number=None):
     """Extract listing rows from embedded HTML/JS payloads.
 
@@ -337,6 +429,15 @@ def _listing_candidates_path(base_dir):
     return os.path.join(base_dir or ".", "listing_graphql_candidates.jsonl")
 
 
+def build_search_url(page_number, search_term="tv", sort=""):
+    query = {"id": "pcat17071", "st": search_term, "intl": "nosplash"}
+    if sort:
+        query["sp"] = sort
+    if int(page_number or 1) > 1:
+        query["cp"] = int(page_number)
+    return "https://www.bestbuy.com/site/searchpage.jsp?" + urlencode(query)
+
+
 def load_listing_operation(base_dir):
     candidates = [
         _listing_registry_path(base_dir),
@@ -407,6 +508,62 @@ def save_listing_operation(base_dir, endpoint_url, request_payload, request_head
     return written
 
 
+def save_listing_operation_from_html(base_dir, html_text, cookies=None, headers=None):
+    operation = find_started_operation(html_text, "PlpView_ProductList_Init")
+    if not operation:
+        return None
+    return save_listing_operation(
+        base_dir,
+        os.environ.get("BBY_GRAPHQL_ENDPOINT", "https://www.bestbuy.com/gateway/graphql"),
+        operation,
+        headers or {},
+        cookies or {},
+        {"data": {"detailedProductSearch": {"documents": []}}},
+    )
+
+
+def operation_name(query):
+    if not isinstance(query, str):
+        return ""
+    match = re.search(r"\bquery\s+([A-Za-z0-9_]+)", query)
+    return match.group(1) if match else ""
+
+
+def extract_apollo_payloads(html_text):
+    payloads = []
+    if not html_text or "ApolloSSRDataTransport" not in str(html_text):
+        return payloads
+    pattern = re.compile(r"ApolloSSRDataTransport.*?\.push\((.*?)\)\s*(?:;|</script>)", re.S)
+    for match in pattern.finditer(str(html_text)):
+        raw_payload = match.group(1)
+        normalized = re.sub(r":\s*undefined(?=[,}])", ":null", raw_payload)
+        try:
+            payloads.append(json.loads(normalized))
+        except Exception:
+            continue
+    return payloads
+
+
+def find_started_operation(html_text, target_name):
+    for payload in extract_apollo_payloads(html_text):
+        events = payload.get("events", []) if isinstance(payload, dict) else []
+        for event in events:
+            if not isinstance(event, dict) or event.get("type") != "started":
+                continue
+            options = event.get("options", {})
+            if not isinstance(options, dict):
+                continue
+            query = options.get("query", "")
+            if operation_name(query) != target_name:
+                continue
+            return {
+                "operationName": target_name,
+                "query": query,
+                "variables": options.get("variables", {}),
+            }
+    return None
+
+
 def append_listing_candidate(base_dir, endpoint_url, request_payload, response_payload, request_headers=None):
     if not isinstance(request_payload, dict):
         return None
@@ -452,6 +609,8 @@ def is_reusable_listing_operation(request_payload, response_shape=None):
     # cannot return a full 24-product listing page.
     if operation_name == "PlpView_ProductListItem_Init":
         return False
+    if operation_name == "PlpView_ProductList_Init":
+        return True
     if "skuId" in variables and not _has_paging_key(variables):
         return False
 
@@ -541,6 +700,24 @@ def build_listing_payload(template, page_number, page_size=24):
     payload = copy.deepcopy(template or {})
     variables = payload.get("variables")
     if isinstance(variables, dict):
+        search_term = os.environ.get("BESTBUY_SEARCH_TERM", os.environ.get("BBY_LISTING_SEARCH_TERM", "tv"))
+        sort = os.environ.get("BESTBUY_SEARCH_SORT", os.environ.get("BBY_LISTING_SEARCH_SORT", ""))
+        organic_offset = int(os.environ.get("BESTBUY_MAIN_ORGANIC_OFFSET", os.environ.get("BBY_LISTING_ORGANIC_OFFSET", "18")))
+        for key in ("input", "detailedSearchInput"):
+            if isinstance(variables.get(key), dict):
+                variables[key]["query"] = search_term
+                variables[key]["queryType"] = "SEARCH"
+                variables[key]["site"] = "WWW"
+        variables["categoryId"] = search_term
+        variables["isBrowse"] = False
+        if isinstance(variables.get("sort"), dict):
+            variables["sort"]["sort"] = sort
+        elif "sort" in variables:
+            variables["sort"] = {"sort": sort}
+        for key in ("pagination", "paginationForDetailedProductSearch"):
+            if isinstance(variables.get(key), dict):
+                variables[key]["pageNumber"] = page_number
+                variables[key]["offset"] = organic_offset
         _set_first_existing(variables, ("page", "pageNumber", "currentPage", "cp"), page_number)
         _set_first_existing(variables, ("pageSize", "page_size", "nrp", "rows", "count", "limit"), page_size)
         _walk_mutate_paging(variables, page_number, page_size)
@@ -586,6 +763,15 @@ def direct_listing_products(base_dir, page_type, page_number, defaults=None, pag
     headers = _sanitize_headers(operation.get("request_headers") or {})
     headers.setdefault("content-type", "application/json")
     headers.setdefault("accept", "application/graphql-response+json,application/json;q=0.9")
+    headers.setdefault("origin", "https://www.bestbuy.com")
+    headers.setdefault(
+        "referer",
+        build_search_url(
+            page_number,
+            os.environ.get("BESTBUY_SEARCH_TERM", os.environ.get("BBY_LISTING_SEARCH_TERM", "tv")),
+            os.environ.get("BESTBUY_SEARCH_SORT", os.environ.get("BBY_LISTING_SEARCH_SORT", "")),
+        ),
+    )
     cookies = normalize_cookie_mapping(operation.get("cookies") or {})
     if cookies:
         headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
@@ -608,7 +794,9 @@ def direct_listing_products(base_dir, page_type, page_number, defaults=None, pag
             removed = remove_listing_operation(base_dir)
             raise RuntimeError(f"listing GraphQL request failed; removed stale operation files={removed}: {exc}") from exc
         raise RuntimeError(f"listing GraphQL request failed; operation file kept: {exc}") from exc
-    rows = extract_listing_products_from_payload(parsed, page_type, page_number=page_number)
+    rows = extract_product_list_rows(parsed, page_type, page_number=page_number)
+    if not rows:
+        rows = extract_listing_products_from_payload(parsed, page_type, page_number=page_number)
     merged_rows = []
     defaults = dict(defaults or {})
     for row in rows:

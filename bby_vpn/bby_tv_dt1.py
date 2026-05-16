@@ -111,9 +111,12 @@ class BestBuyDetailCrawler:
             os.remove(self.csv_output_path)
 
         self.max_skus = self.config.get_int('constant', 'max_products_detail', self.file_name, 300)
+        self.core_only = os.environ.get('BBY_DT_CORE_ONLY', '1') == '1'
         self.review_extraction_enabled = os.environ.get('BBY_DT_SKIP_REVIEWS', '1') != '1'
-        self.proactive_restart_every = int(os.environ.get('BBY_DT_RESTART_EVERY', '20'))
-        self.proactive_cooldown_every = int(os.environ.get('BBY_DT_COOLDOWN_EVERY', '20'))
+        self.similar_extraction_enabled = os.environ.get('BBY_DT_SKIP_SIMILAR', '1') != '1'
+        self.discovery_refresh_every = int(os.environ.get('BBY_DT_DISCOVERY_REFRESH_EVERY', '4'))
+        self.proactive_restart_every = int(os.environ.get('BBY_DT_RESTART_EVERY', '8'))
+        self.proactive_cooldown_every = int(os.environ.get('BBY_DT_COOLDOWN_EVERY', '8'))
         self.proactive_cooldown_min = int(os.environ.get('BBY_DT_COOLDOWN_MIN', '180'))
         self.proactive_cooldown_max = int(os.environ.get('BBY_DT_COOLDOWN_MAX', '360'))
 
@@ -122,7 +125,10 @@ class BestBuyDetailCrawler:
             "batch_id": self.batch_id,
             "output_dir": self.csv_output_dir,
             "csv_output_path": self.csv_output_path,
+            "core_only": self.core_only,
             "review_extraction_enabled": self.review_extraction_enabled,
+            "similar_extraction_enabled": self.similar_extraction_enabled,
+            "discovery_refresh_every": self.discovery_refresh_every,
         })
         self.rate_limiter = ConservativeRateLimiter(self.audit_log)
         self.browser_diagnostics = BrowserSessionDiagnostics(self.audit_log)
@@ -276,6 +282,72 @@ class BestBuyDetailCrawler:
             print("[OK] Session warmup complete")
         except Exception as e:
             print(f"[WARNING] Session warmup failed: {e}")
+
+    def refresh_discovery_page(self, success_count):
+        """Insert a real discovery-page refresh between PDP batches."""
+        if self.discovery_refresh_every <= 0 or success_count <= 0:
+            return
+        if success_count % self.discovery_refresh_every != 0:
+            return
+
+        discovery_urls = [
+            'https://www.bestbuy.com/site/searchpage.jsp?st=tv&nrp=24',
+            'https://www.bestbuy.com/site/tvs/all-flat-screen-tvs/abcat0101001.c',
+            'https://www.bestbuy.com/site/promo/tv-deals',
+        ]
+        url = random.choice(discovery_urls)
+        try:
+            print(f"[INFO] Discovery refresh after {success_count} successful PDPs: {url[:80]}...")
+            self.rate_limiter.wait(url, reason='discovery_refresh')
+            self.page.get(url)
+            time.sleep(random.uniform(4, 8))
+            try:
+                self.page.scroll.down(random.randint(300, 900))
+                time.sleep(random.uniform(1, 3))
+            except Exception:
+                pass
+            self.browser_diagnostics.snapshot(self.page, url, 'discovery_refresh')
+            self.network_diagnostics.snapshot(self.page, url, 'discovery_refresh')
+            print("[OK] Discovery refresh complete")
+        except Exception as e:
+            print(f"[WARNING] Discovery refresh failed: {e}")
+
+    def extract_embedded_product_data(self, tree):
+        """Extract lightweight product facts from embedded JSON-LD before DOM fallbacks."""
+        data = {}
+        try:
+            scripts = tree.xpath('//script[@type="application/ld+json"]/text()')
+            for script in scripts:
+                try:
+                    payload = json.loads(script)
+                except Exception:
+                    continue
+                items = payload if isinstance(payload, list) else [payload]
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    item_type = item.get('@type')
+                    if item_type != 'Product' and item_type != ['Product']:
+                        continue
+                    data.setdefault('retailer_sku_name', item.get('name'))
+                    aggregate = item.get('aggregateRating') or {}
+                    if isinstance(aggregate, dict):
+                        data.setdefault('star_rating', aggregate.get('ratingValue'))
+                        data.setdefault('count_of_reviews', aggregate.get('reviewCount'))
+                    offers = item.get('offers') or {}
+                    if isinstance(offers, list) and offers:
+                        offers = offers[0]
+                    if isinstance(offers, dict):
+                        price = offers.get('price')
+                        if price and not str(price).startswith('$'):
+                            price = f"${price}"
+                        data.setdefault('final_sku_price', price)
+                        data.setdefault('sku_status', offers.get('availability'))
+            if data:
+                print(f"  [INFO] Embedded data fallback available: {sorted(k for k, v in data.items() if v)}")
+        except Exception as e:
+            print(f"  [WARNING] Embedded data extraction failed: {e}")
+        return data
 
     def close_browser(self):
         """브라우저 안전 종료 + 해당 프로세스만 정리"""
@@ -2402,6 +2474,10 @@ class BestBuyDetailCrawler:
 
     def extract_compare_similar_products(self, current_url):
         """Compare similar products section data extraction (first page 로딩 items선) - DrissionPage"""
+        if self.core_only or not self.similar_extraction_enabled:
+            print("  [INFO] Similar Products skipped (core-only/default lightweight mode)")
+            return None
+
         max_retries = 2
 
         for retry in range(max_retries):
@@ -2639,6 +2715,7 @@ class BestBuyDetailCrawler:
             print(f"  [INFO] Checking DOM for key elements...")
             page_source = self.page.html
             tree = html.fromstring(page_source)
+            embedded_data = self.extract_embedded_product_data(tree)
 
             # 핵심 요소 존재 여부 확인
             key_elements = {
@@ -2673,6 +2750,8 @@ class BestBuyDetailCrawler:
 
             # 1. Retailer_SKU_Name - 소스 테이블에서 가져온 값 사용, 없으면 detail에서 추출
             retailer_sku_name = url_data.get('retailer_sku_name')
+            if not retailer_sku_name and embedded_data.get('retailer_sku_name'):
+                retailer_sku_name = embedded_data.get('retailer_sku_name')
             if not retailer_sku_name or len(retailer_sku_name) < 3:
                 print(f"  [INFO] retailer_sku_name 없음 - detail 페이지에서 추출 시도")
                 retailer_sku_name = self.extract_retailer_sku_name(tree)
@@ -2701,6 +2780,9 @@ class BestBuyDetailCrawler:
                 print(f"  [WARNING] price container loading timeout - attempting extraction anyway")
 
             final_sku_price = self.extract_final_sku_price(tree)
+            if final_sku_price is None and embedded_data.get('final_sku_price'):
+                final_sku_price = embedded_data.get('final_sku_price')
+                print(f"  [INFO] Final_SKU_Price from embedded data")
             print(f"  [✓] Final_SKU_Price: {final_sku_price}")
 
             original_sku_price = self.extract_original_sku_price(tree)
@@ -2711,11 +2793,17 @@ class BestBuyDetailCrawler:
 
             # 2-2. Star Rating 및 Reviews 정보 extraction (메인 page에서 직접 collected)
             star_rating = self.extract_star_rating(tree)
+            if star_rating is None and embedded_data.get('star_rating'):
+                star_rating = embedded_data.get('star_rating')
+                print(f"  [INFO] Star_Rating from embedded data")
             print(f"  [✓] Star_Rating: {star_rating}")
 
             count_of_reviews = self.extract_count_of_reviews_from_detail(tree)
             if count_of_reviews is None:
                 count_of_reviews = self.extract_count_of_reviews_from_page_js()
+            if count_of_reviews is None and embedded_data.get('count_of_reviews') is not None:
+                count_of_reviews = embedded_data.get('count_of_reviews')
+                print(f"  [INFO] Count_of_Reviews from embedded data")
 
             # 외부 리뷰 감지 시 (예: "reviews from Skyworth USA") 0으로 처리, star_rating도 변경
             is_external_reviews = (count_of_reviews == 'EXTERNAL_REVIEWS')
@@ -2736,9 +2824,13 @@ class BestBuyDetailCrawler:
                 print(f"  [✓] Similar Products: {len(similar_products)} items found")
             else:
                 print(f"  [INFO] Similar Products 추출 실패, 페이지 새로고침 후 재시도...")
-                self.page.refresh()
-                time.sleep(5)
-                similar_products = self.extract_compare_similar_products(product_url)
+                if self.core_only or not self.similar_extraction_enabled:
+                    print("  [INFO] Similar Products retry skipped")
+                else:
+                    self.page.refresh()
+                if not (self.core_only or not self.similar_extraction_enabled):
+                    time.sleep(5)
+                    similar_products = self.extract_compare_similar_products(product_url)
                 if similar_products:
                     print(f"  [✓] Similar Products (재시도 성공): {len(similar_products)} items found")
                 else:
@@ -2830,7 +2922,8 @@ class BestBuyDetailCrawler:
             except Exception:
                 review_count_for_decision = 0
             should_collect_reviews = (
-                self.review_extraction_enabled
+                not self.core_only
+                and self.review_extraction_enabled
                 and not is_external_reviews
                 and review_count_for_decision > 0
                 and "not yet reviewed" not in str(star_rating or '').lower()
@@ -3329,13 +3422,15 @@ class BestBuyDetailCrawler:
                         print("[ERROR] Browser restart failed after manual pause. Stopping.")
                         break
                     self._warmup_with_different_page()
-                    self.order -= 1
+                    print("[INFO] Skipping failed URL after manual pause; it remains in checkpoint for later retry.")
+                    i += 1
                     continue
 
                 elif result is True:
                     success_count += 1
                     consecutive_fails = 0
                     retry_count = 0
+                    self.refresh_discovery_page(success_count)
                     if not self.proactive_session_refresh(success_count):
                         print("[ERROR] Browser refresh failed. Stopping.")
                         break

@@ -8,11 +8,13 @@ import sys
 
 from collectors.graphql_collector import (
     GraphQLCollector,
+    REVIEW_OPERATIONS,
     load_graphql_cookies,
     load_graphql_registry,
     load_sku_map,
     resolve_sku_id_from_product_page,
 )
+from core.retry import ExponentialBackoff
 
 
 def read_urls(args):
@@ -36,6 +38,13 @@ def main():
     parser.add_argument("--limit", type=int, default=3)
     parser.add_argument("--out", default="graphql_collect_test_output.jsonl")
     parser.add_argument("--timeout", type=int, default=60)
+    parser.add_argument("--max-attempts", type=int, default=2)
+    parser.add_argument(
+        "--operation",
+        action="append",
+        choices=REVIEW_OPERATIONS,
+        help="Run only one GraphQL operation. Can be repeated.",
+    )
     args = parser.parse_args()
 
     registry = load_graphql_registry(args.registry_dir)
@@ -53,13 +62,22 @@ def main():
     cookies = load_graphql_cookies(args.registry_dir)
     print(f"[INFO] Loaded cookie entries: {len(cookies)}")
 
-    collector = GraphQLCollector(timeout=args.timeout, concurrency=1)
+    retry_policy = ExponentialBackoff(max_attempts=args.max_attempts, base_delay=1.0, max_delay=10.0)
+    collector = GraphQLCollector(timeout=args.timeout, concurrency=1, retry_policy=retry_policy)
     out_path = os.path.abspath(args.out)
+    operation_names = tuple(args.operation or REVIEW_OPERATIONS)
+    print(f"[INFO] Operations: {', '.join(operation_names)}")
 
     with open(out_path, "w", encoding="utf-8") as outfile:
         for idx, url in enumerate(urls, 1):
             print(f"[{idx}/{len(urls)}] GraphQL collect: {url[:100]}")
-            result = collector.collect_review_bundle_sync(url, registry, cookies=cookies, sku_map=sku_map)
+            result = collector.collect_review_bundle_sync(
+                url,
+                registry,
+                cookies=cookies,
+                sku_map=sku_map,
+                operation_names=operation_names,
+            )
             if result.get("errors"):
                 sku_id = resolve_sku_id_from_product_page(url, registry)
                 print(f"  [ERROR] {result.get('errors')} resolved_skuId={sku_id}")

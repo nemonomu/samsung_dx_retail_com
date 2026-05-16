@@ -125,7 +125,7 @@ class GraphQLCollector:
                 await asyncio.sleep(decision.delay_seconds)
                 attempt += 1
 
-    async def collect_review_bundle(self, product_url, registry, cookies=None, sku_map=None):
+    async def collect_review_bundle(self, product_url, registry, cookies=None, sku_map=None, operation_names=None):
         """Run mapped review/rating operations for the product URL's skuId."""
         sku_id = lookup_sku_id(product_url, sku_map)
         if not sku_id:
@@ -135,27 +135,33 @@ class GraphQLCollector:
         if not sku_id:
             return {"errors": [{"message": "skuId not found in product_url"}]}
 
-        tasks = []
-        operation_names = []
-        for operation_name in REVIEW_OPERATIONS:
+        requested_operations = tuple(operation_names or REVIEW_OPERATIONS)
+        responses_by_operation = {}
+        for operation_name in requested_operations:
             operation = registry.get(operation_name)
             if not operation:
+                self._log("graphql_operation_missing", {"operationName": operation_name})
                 continue
             endpoint_url = operation.get("endpoint_url")
             payload = build_payload_for_sku(operation, sku_id)
             headers = build_headers_for_url(operation, product_url)
-            tasks.append(self.execute(endpoint_url, payload, headers=headers, cookies=cookies))
-            operation_names.append(operation_name)
+            self._log("graphql_operation_start", {"operationName": operation_name, "skuId": sku_id})
+            responses_by_operation[operation_name] = await self.execute(endpoint_url, payload, headers=headers, cookies=cookies)
 
-        responses = await asyncio.gather(*tasks) if tasks else []
-        bundle = dict(zip(operation_names, responses))
+        bundle = dict(responses_by_operation)
         bundle["skuId"] = sku_id
         bundle["product_url"] = product_url
         bundle["parsed"] = parse_review_bundle(bundle)
         return bundle
 
-    def collect_review_bundle_sync(self, product_url, registry, cookies=None, sku_map=None):
-        return asyncio.run(self.collect_review_bundle(product_url, registry, cookies=cookies, sku_map=sku_map))
+    def collect_review_bundle_sync(self, product_url, registry, cookies=None, sku_map=None, operation_names=None):
+        return asyncio.run(self.collect_review_bundle(
+            product_url,
+            registry,
+            cookies=cookies,
+            sku_map=sku_map,
+            operation_names=operation_names,
+        ))
 
     def _log(self, event_type, payload):
         if self.audit_log:
@@ -325,9 +331,11 @@ def _first_value(payload, keys):
 
 
 def _post_json_with_urllib(endpoint_url, payload, headers, cookies, timeout):
-    request_headers = dict(headers or {})
-    request_headers.setdefault("content-type", "application/json")
-    request_headers.setdefault("accept", "application/graphql-response+json,application/json;q=0.9")
+    request_headers = _sanitize_request_headers(headers)
+    request_headers.setdefault("Content-Type", "application/json")
+    request_headers.setdefault("Accept", "application/graphql-response+json,application/json;q=0.9")
+    request_headers["Accept-Encoding"] = "identity"
+    request_headers["Connection"] = "close"
     if cookies:
         request_headers["Cookie"] = "; ".join(f"{key}={value}" for key, value in cookies.items())
 
@@ -344,6 +352,28 @@ def _post_json_with_urllib(endpoint_url, payload, headers, cookies, timeout):
         except Exception:
             body = {"errors": [{"message": raw[:500]}]}
         return exc.code, body
+
+
+def _sanitize_request_headers(headers):
+    skipped = {
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "cookie",
+        "host",
+        "sec-fetch-dest",
+        "sec-fetch-mode",
+        "sec-fetch-site",
+    }
+    normalized = {}
+    for key, value in (headers or {}).items():
+        if not key or value in (None, ""):
+            continue
+        key_text = str(key)
+        if key_text.lower().startswith(":") or key_text.lower() in skipped:
+            continue
+        normalized[key_text] = str(value)
+    return normalized
 
 
 def resolve_sku_id_from_product_page(product_url, registry=None, timeout=20):

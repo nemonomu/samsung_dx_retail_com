@@ -26,6 +26,7 @@ from common.setup import setup_environment
 setup_environment(__file__)
 
 from bby_listing_sku import extract_numeric_sku
+from bby_listing_graphql import ListingGraphQLSkuCollector
 from common.base_crawler import BaseCrawler
 from config import DB_CONFIG
 from core.db_readonly import connect_readonly
@@ -156,6 +157,8 @@ class BestBuyTVTrendCrawler(BaseCrawler):
         raise last_error
 
     def crawl_page(self):
+        sku_collector = ListingGraphQLSkuCollector(self.page)
+        products = []
         try:
             base_container_xpath = self.xpaths.get("base_container", {}).get("xpath")
             if not base_container_xpath:
@@ -163,8 +166,10 @@ class BestBuyTVTrendCrawler(BaseCrawler):
                 return []
 
             print(f"[INFO] Accessing trend page: {self.url_template}")
+            sku_collector.start()
             self.page.get(self.url_template)
             time.sleep(random.uniform(8, 12))
+            sku_collector.drain(5)
 
             base_containers = []
             expected_products = 10
@@ -177,13 +182,13 @@ class BestBuyTVTrendCrawler(BaseCrawler):
                     break
                 if attempt < 3:
                     time.sleep(random.uniform(5, 8))
+                    sku_collector.drain(2)
 
             if not base_containers:
                 print("[ERROR] No trend items found")
                 return []
 
             target_products = self.test_count if self.test_mode else min(len(base_containers), self.max_products)
-            products = []
             for item in base_containers[:target_products]:
                 try:
                     retailer_sku_name = self.safe_extract(item, "retailer_sku_name") or ""
@@ -226,12 +231,17 @@ class BestBuyTVTrendCrawler(BaseCrawler):
                     continue
 
             self.stats["collected"] = len(products)
+            sku_collector.apply(products)
             print(f"[OK] Trend products extracted: {len(products)}")
             return products
         except Exception as exc:
             print(f"[ERROR] Trend crawl failed: {exc}")
             traceback.print_exc()
+            if products:
+                sku_collector.apply(products)
             return []
+        finally:
+            sku_collector.stop()
 
     def save_to_db(self, products):
         if not products:

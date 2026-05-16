@@ -43,6 +43,7 @@ from common.base_crawler import BaseCrawler
 from config import DB_CONFIG
 from core.db_readonly import connect_readonly
 from bby_listing_sku import extract_numeric_sku, extract_sponsored_status
+from bby_listing_graphql import ListingGraphQLSkuCollector
 
 
 
@@ -279,6 +280,7 @@ class BestBuyTVBSRCrawler(BaseCrawler):
     def crawl_page(self, page_number):
         """페이지 크롤링: 페이지 로드 → 제품 파싱 → URL 누락 시 1스텝 스크롤 로딩 → 반복 (스마트 스크롤)"""
         products = []
+        sku_collector = ListingGraphQLSkuCollector(self.page)
         try:
             url = self.url_template.replace('{page}', str(page_number))
             base_container_xpath = self.xpaths.get('base_container', {}).get('xpath')
@@ -286,8 +288,10 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                 print("[ERROR] base_container XPath not found")
                 return []
 
+            sku_collector.start()
             self.page.get(url)
             time.sleep(random.uniform(3, 5))
+            sku_collector.drain(4)
 
             # 1. 0개인 경우 로드 실패 예외처리 (최대 3회 새로고침)
             for refresh_attempt in range(1, 4):
@@ -298,6 +302,7 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                     if refresh_attempt < 3:
                         self.page.refresh()
                         time.sleep(random.uniform(5, 8))
+                        sku_collector.drain(3)
                     continue
                 break
 
@@ -390,6 +395,7 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                             context=f"page {page_number} quick scroll",
                         )
                         time.sleep(random.uniform(1.0, 2.0))
+                        sku_collector.drain(1.5)
 
                     break
 
@@ -420,6 +426,7 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                     current_position = 0
                     self.run_js_safely("window.scrollTo(0, 0);", context=f"page {page_number} top scroll")
                     time.sleep(random.uniform(3, 5))
+                    sku_collector.drain(2)
                     continue
 
                 # 스크롤 1회 내리고 5초 대기 (봇 탐지를 피하기 위해 4~6초 랜덤)
@@ -427,7 +434,9 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                 current_position += scroll_step
                 self.run_js_safely(f"window.scrollTo(0, {current_position});", context=f"page {page_number} scroll")
                 time.sleep(random.uniform(4, 6))
+                sku_collector.drain(2)
 
+            sku_collector.apply(products)
             print(f"[INFO] Page {page_number}: Final parsed products: {len(products)}")
             return products
 
@@ -435,9 +444,12 @@ class BestBuyTVBSRCrawler(BaseCrawler):
             print(f"[ERROR] Page {page_number} failed: {e}")
             traceback.print_exc()
             if products:
+                sku_collector.apply(products)
                 print(f"[WARNING] Page {page_number}: returning {len(products)} products parsed before failure")
                 return products
             return []
+        finally:
+            sku_collector.stop()
 
     def save_products(self, products):
         """V2 저장: DB UPDATE/INSERT 없이 dt1 입력용 CSV에만 저장한다."""

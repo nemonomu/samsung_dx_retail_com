@@ -79,6 +79,11 @@ ORDER BY category, config_key, file_name, priority;
 
 Listing 값은 상품 식별의 기준이다. GraphQL의 product name은 검수/정합성 확인용이며, listing name을 무조건 덮어쓰지 않는다.
 
+Listing crawlers listen to Best Buy GraphQL traffic during page load/scroll and
+fill missing `numeric_sku` from response records that contain both `skuId` and a
+PDP URL. Existing DOM selectors remain the fallback source for product rows and
+non-GraphQL fields.
+
 ## Detail Fields
 
 | CSV field | 기존 selector/config key | GraphQL operation 후보 | GraphQL path 후보 | 처리 기준 |

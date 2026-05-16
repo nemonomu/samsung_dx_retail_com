@@ -27,6 +27,7 @@ from common.setup import setup_environment
 setup_environment(__file__)
 
 from bby_listing_sku import extract_numeric_sku
+from bby_listing_graphql import ListingGraphQLSkuCollector
 from common.base_crawler import BaseCrawler
 from config import DB_CONFIG
 from core.db_readonly import connect_readonly
@@ -173,6 +174,8 @@ class BestBuyTVPromotionCrawler(BaseCrawler):
         return " ".join(parts).strip() or None
 
     def crawl_page(self):
+        sku_collector = ListingGraphQLSkuCollector(self.page)
+        products = []
         try:
             section_container_xpath = self.xpaths.get("section_container", {}).get("xpath")
             base_container_xpath = self.xpaths.get("base_container", {}).get("xpath")
@@ -181,8 +184,10 @@ class BestBuyTVPromotionCrawler(BaseCrawler):
                 return []
 
             print(f"[INFO] Accessing promotion page: {self.url_template}")
+            sku_collector.start()
             self.page.get(self.url_template)
             time.sleep(random.uniform(8, 12))
+            sku_collector.drain(5)
 
             sections = []
             for attempt in range(1, 4):
@@ -194,13 +199,13 @@ class BestBuyTVPromotionCrawler(BaseCrawler):
                     break
                 if attempt < 3:
                     time.sleep(random.uniform(5, 8))
+                    sku_collector.drain(2)
 
             if not sections:
                 print("[ERROR] No promotion sections found")
                 return []
 
             section_limit = self.test_count if self.test_mode else self.max_sections
-            products = []
             for sec_idx, section in enumerate(sections[:section_limit], 1):
                 promotion_type = self.extract_promotion_type(section)
                 items = section.xpath(base_container_xpath)
@@ -253,12 +258,17 @@ class BestBuyTVPromotionCrawler(BaseCrawler):
                         continue
 
             self.stats["collected"] = len(products)
+            sku_collector.apply(products)
             print(f"[OK] Promotion products extracted: {len(products)}")
             return products
         except Exception as exc:
             print(f"[ERROR] Promotion crawl failed: {exc}")
             traceback.print_exc()
+            if products:
+                sku_collector.apply(products)
             return []
+        finally:
+            sku_collector.stop()
 
     def save_to_db(self, products):
         if not products:

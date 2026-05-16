@@ -68,8 +68,6 @@ class UndetectedChromePage:
         if disable_cache:
             options.add_argument("--disable-application-cache")
             options.add_argument("--disk-cache-size=1")
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option("useAutomationExtension", False)
 
         self.driver = uc.Chrome(options=options)
         try:

@@ -666,20 +666,11 @@ import argparse
 def main():
     """개별 실행 진입점 (테스트 모드)"""
     parser = argparse.ArgumentParser(description='BestBuy TV Main Crawler')
-    parser.add_argument('--time_offset', type=int, default=None, help='시간 오프셋 (기본값: 0)')
+    parser.add_argument('--time_offset', type=int, default=0, help='시간 오프셋 (기본값: 0)')
     args = parser.parse_args()
 
-    time_offset = args.time_offset
-    if time_offset is None:
-        from common.setup import get_input_with_timeout
-        try:
-            val = get_input_with_timeout("시간 오프셋을 입력하세요 (엔터 시 기본값 0) [10초 대기]: ", default="0", timeout=10.0)
-            time_offset = int(val)
-        except Exception:
-            time_offset = 0
-
     test_mode = os.environ.get('BBY_TEST_MODE', '0') == '1'
-    crawler = BestBuyTVMainCrawler(test_mode=test_mode, time_offset_hours=time_offset)
+    crawler = BestBuyTVMainCrawler(test_mode=test_mode, time_offset_hours=args.time_offset)
     crawler.run()
 
 if __name__ == '__main__':

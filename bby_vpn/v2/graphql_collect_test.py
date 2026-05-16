@@ -7,6 +7,7 @@ import os
 import sys
 
 from collectors.graphql_collector import (
+    BrowserFetchGraphQLCollector,
     GraphQLCollector,
     REVIEW_OPERATIONS,
     load_graphql_cookies,
@@ -39,6 +40,7 @@ def main():
     parser.add_argument("--out", default="graphql_collect_test_output.jsonl")
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument("--max-attempts", type=int, default=2)
+    parser.add_argument("--browser-fetch", action="store_true", help="Run GraphQL POST through Chromium fetch.")
     parser.add_argument(
         "--operation",
         action="append",
@@ -63,36 +65,43 @@ def main():
     print(f"[INFO] Loaded cookie entries: {len(cookies)}")
 
     retry_policy = ExponentialBackoff(max_attempts=args.max_attempts, base_delay=1.0, max_delay=10.0)
-    collector = GraphQLCollector(timeout=args.timeout, concurrency=1, retry_policy=retry_policy)
+    collector_cls = BrowserFetchGraphQLCollector if args.browser_fetch else GraphQLCollector
+    collector = collector_cls(timeout=args.timeout, concurrency=1, retry_policy=retry_policy)
     out_path = os.path.abspath(args.out)
     operation_names = tuple(args.operation or REVIEW_OPERATIONS)
     print(f"[INFO] Operations: {', '.join(operation_names)}")
+    print(f"[INFO] Client mode: {'browser_fetch' if args.browser_fetch else 'direct_http'}")
 
-    with open(out_path, "w", encoding="utf-8") as outfile:
-        for idx, url in enumerate(urls, 1):
-            print(f"[{idx}/{len(urls)}] GraphQL collect: {url[:100]}")
-            result = collector.collect_review_bundle_sync(
-                url,
-                registry,
-                cookies=cookies,
-                sku_map=sku_map,
-                operation_names=operation_names,
-            )
-            if result.get("errors"):
-                sku_id = resolve_sku_id_from_product_page(url, registry)
-                print(f"  [ERROR] {result.get('errors')} resolved_skuId={sku_id}")
-                outfile.write(json.dumps(result, ensure_ascii=False, default=str) + "\n")
-                continue
-            parsed = result.get("parsed") or {}
-            print(
-                "  skuId={skuId} rating={rating} reviews={reviews} collected_reviews={collected}".format(
-                    skuId=parsed.get("skuId") or result.get("skuId"),
-                    rating=parsed.get("star_rating"),
-                    reviews=parsed.get("count_of_reviews"),
-                    collected=parsed.get("review_count_collected"),
+    try:
+        with open(out_path, "w", encoding="utf-8") as outfile:
+            for idx, url in enumerate(urls, 1):
+                print(f"[{idx}/{len(urls)}] GraphQL collect: {url[:100]}")
+                result = collector.collect_review_bundle_sync(
+                    url,
+                    registry,
+                    cookies=cookies,
+                    sku_map=sku_map,
+                    operation_names=operation_names,
                 )
-            )
-            outfile.write(json.dumps(result, ensure_ascii=False, default=str) + "\n")
+                if result.get("errors"):
+                    sku_id = resolve_sku_id_from_product_page(url, registry)
+                    print(f"  [ERROR] {result.get('errors')} resolved_skuId={sku_id}")
+                    outfile.write(json.dumps(result, ensure_ascii=False, default=str) + "\n")
+                    continue
+                parsed = result.get("parsed") or {}
+                print(
+                    "  skuId={skuId} rating={rating} reviews={reviews} collected_reviews={collected}".format(
+                        skuId=parsed.get("skuId") or result.get("skuId"),
+                        rating=parsed.get("star_rating"),
+                        reviews=parsed.get("count_of_reviews"),
+                        collected=parsed.get("review_count_collected"),
+                    )
+                )
+                outfile.write(json.dumps(result, ensure_ascii=False, default=str) + "\n")
+    finally:
+        close = getattr(collector, "close", None)
+        if close:
+            close()
 
     print(f"[OK] Saved: {out_path}")
     return 0

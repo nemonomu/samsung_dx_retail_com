@@ -224,6 +224,114 @@ class GraphQLCollector:
             print(json.dumps({"event_type": event_type, **payload}, ensure_ascii=False))
 
 
+class BrowserFetchGraphQLCollector(GraphQLCollector):
+    """Run GraphQL POST through Chromium fetch when direct Python HTTP is reset."""
+
+    def __init__(self, *args, page=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.page = page
+        self._owns_page = page is None
+
+    async def execute(self, endpoint_url, payload, headers=None, cookies=None):
+        async with self.semaphore:
+            attempt = 1
+            while True:
+                await self.rate_limiter.wait(endpoint_url)
+                started = time.time()
+                try:
+                    status_code, body = await asyncio.to_thread(
+                        self._execute_fetch_sync,
+                        endpoint_url,
+                        payload,
+                        headers or {},
+                    )
+                    elapsed_ms = int((time.time() - started) * 1000)
+                    self._log("graphql_request", {
+                        "endpoint_url": endpoint_url,
+                        "operationName": payload.get("operationName") if isinstance(payload, dict) else None,
+                        "status_code": status_code,
+                        "elapsed_ms": elapsed_ms,
+                        "attempt": attempt,
+                        "client": "browser_fetch",
+                    })
+                    if status_code == 200:
+                        if isinstance(body, dict) and body.get("errors"):
+                            self._log("graphql_errors", {"errors": body.get("errors"), "operationName": payload.get("operationName")})
+                        return body
+                    decision = self.retry_policy.decide(attempt, status_code=status_code, error_kind="http_status")
+                except Exception as exc:
+                    self._log("graphql_exception", {"error": str(exc), "attempt": attempt, "client": "browser_fetch"})
+                    decision = self.retry_policy.decide(attempt, error_kind="exception")
+
+                if not decision.retry:
+                    return {"errors": [{"message": decision.reason, "terminal": decision.terminal}]}
+                await asyncio.sleep(decision.delay_seconds)
+                attempt += 1
+
+    def close(self):
+        if self._owns_page and self.page:
+            try:
+                self.page.quit()
+            except Exception:
+                try:
+                    self.page.close()
+                except Exception:
+                    pass
+
+    def _ensure_page(self):
+        if self.page:
+            return self.page
+        from DrissionPage import ChromiumOptions, ChromiumPage
+
+        options = ChromiumOptions()
+        options.auto_port()
+        options.no_imgs(True)
+        self.page = ChromiumPage(options)
+        return self.page
+
+    def _execute_fetch_sync(self, endpoint_url, payload, headers):
+        page = self._ensure_page()
+        referer = headers.get("Referer") or headers.get("referer") or "https://www.bestbuy.com/"
+        if not str(getattr(page, "url", "") or "").startswith("https://www.bestbuy.com"):
+            page.get(referer)
+
+        result_key = f"__bbyGraphqlFetchResult_{int(time.time() * 1000)}"
+        fetch_headers = _sanitize_request_headers(headers)
+        fetch_headers.setdefault("content-type", "application/json")
+        fetch_headers.setdefault("accept", "application/graphql-response+json,application/json;q=0.9")
+
+        js = f"""
+        window[{json.dumps(result_key)}] = null;
+        fetch({json.dumps(endpoint_url)}, {{
+            method: 'POST',
+            credentials: 'include',
+            headers: {json.dumps(fetch_headers)},
+            body: JSON.stringify({json.dumps(payload)})
+        }}).then(async response => {{
+            const text = await response.text();
+            let body = {{}};
+            try {{ body = text ? JSON.parse(text) : {{}}; }}
+            catch (error) {{ body = {{errors: [{{message: text.slice(0, 500)}}]}}; }}
+            window[{json.dumps(result_key)}] = {{ok: true, status: response.status, body}};
+        }}).catch(error => {{
+            window[{json.dumps(result_key)}] = {{ok: false, status: 0, error: String(error)}};
+        }});
+        return true;
+        """
+        page.run_js(js)
+
+        deadline = time.time() + self.timeout
+        while time.time() < deadline:
+            result = page.run_js(f"return window[{json.dumps(result_key)}] || null;")
+            if result:
+                page.run_js(f"delete window[{json.dumps(result_key)}];")
+                if not result.get("ok"):
+                    raise RuntimeError(result.get("error") or "browser fetch failed")
+                return int(result.get("status") or 0), result.get("body") or {}
+            time.sleep(0.25)
+        raise TimeoutError(f"browser fetch timed out after {self.timeout}s")
+
+
 def load_graphql_registry(base_dir):
     """Load registry from either mapping output root or crawler/discovery dir."""
     candidates = [

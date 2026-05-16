@@ -209,8 +209,10 @@ def lookup_sku_id(product_url, sku_map):
     if not product_url or not sku_map:
         return None
     normalized = _normalize_url(product_url)
+    item_key = _url_tail(normalized)
     for url, value in sku_map.items():
-        if _normalize_url(url) == normalized:
+        mapped_url = _normalize_url(url)
+        if mapped_url == normalized or (_url_tail(mapped_url) and _url_tail(mapped_url) == item_key):
             if isinstance(value, dict):
                 return value.get("skuId")
             return value
@@ -232,7 +234,12 @@ def _operation_files(base_dir):
 
 
 def _normalize_url(url):
-    return str(url or "").split("?", 1)[0].rstrip("/")
+    return str(url or "").replace("\u00a0", " ").split("?", 1)[0].rstrip("/").lower()
+
+
+def _url_tail(url):
+    clean = _normalize_url(url)
+    return clean.rsplit("/", 1)[-1] if clean else None
 
 
 def build_payload_for_sku(operation, sku_id):

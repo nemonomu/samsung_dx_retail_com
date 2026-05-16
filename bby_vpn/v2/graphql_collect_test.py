@@ -6,7 +6,7 @@ import json
 import os
 import sys
 
-from collectors.graphql_collector import GraphQLCollector, load_graphql_registry
+from collectors.graphql_collector import GraphQLCollector, load_graphql_registry, resolve_sku_id_from_product_page
 
 
 def read_urls(args):
@@ -48,6 +48,11 @@ def main():
         for idx, url in enumerate(urls, 1):
             print(f"[{idx}/{len(urls)}] GraphQL collect: {url[:100]}")
             result = collector.collect_review_bundle_sync(url, registry)
+            if result.get("errors"):
+                sku_id = resolve_sku_id_from_product_page(url, registry)
+                print(f"  [ERROR] {result.get('errors')} resolved_skuId={sku_id}")
+                outfile.write(json.dumps(result, ensure_ascii=False, default=str) + "\n")
+                continue
             parsed = result.get("parsed") or {}
             print(
                 "  skuId={skuId} rating={rating} reviews={reviews} collected_reviews={collected}".format(

@@ -6,6 +6,8 @@ import json
 import os
 import re
 import time
+import urllib.error
+import urllib.request
 
 from core.rate_limit import AsyncHostRateLimiter
 from core.retry import ExponentialBackoff
@@ -21,15 +23,14 @@ REVIEW_OPERATIONS = (
 
 
 def extract_bestbuy_sku_id(product_url):
-    """Extract Best Buy skuId from current product URL, not from captured sample."""
+    """Extract numeric Best Buy skuId from legacy URLs when available."""
     if not product_url:
         return None
     clean = str(product_url).split("?", 1)[0].rstrip("/")
     match = re.search(r"/(\d+)\.p$", clean)
     if match:
         return match.group(1)
-    tail = clean.rsplit("/", 1)[-1]
-    return tail or None
+    return None
 
 
 class GraphQLCollector:
@@ -43,8 +44,8 @@ class GraphQLCollector:
     async def execute(self, endpoint_url, payload, headers=None, cookies=None):
         try:
             import httpx
-        except ImportError as exc:
-            raise RuntimeError("httpx is required for GraphQLCollector") from exc
+        except ImportError:
+            return await self._execute_with_urllib(endpoint_url, payload, headers=headers, cookies=cookies)
 
         headers = headers or {}
         cookies = cookies or {}
@@ -83,9 +84,49 @@ class GraphQLCollector:
     def execute_sync(self, endpoint_url, payload, headers=None, cookies=None):
         return asyncio.run(self.execute(endpoint_url, payload, headers=headers, cookies=cookies))
 
+    async def _execute_with_urllib(self, endpoint_url, payload, headers=None, cookies=None):
+        async with self.semaphore:
+            attempt = 1
+            while True:
+                await self.rate_limiter.wait(endpoint_url)
+                started = time.time()
+                try:
+                    status_code, body = await asyncio.to_thread(
+                        _post_json_with_urllib,
+                        endpoint_url,
+                        payload,
+                        headers or {},
+                        cookies or {},
+                        self.timeout,
+                    )
+                    elapsed_ms = int((time.time() - started) * 1000)
+                    self._log("graphql_request", {
+                        "endpoint_url": endpoint_url,
+                        "operationName": payload.get("operationName") if isinstance(payload, dict) else None,
+                        "status_code": status_code,
+                        "elapsed_ms": elapsed_ms,
+                        "attempt": attempt,
+                        "client": "urllib",
+                    })
+                    if status_code == 200:
+                        if isinstance(body, dict) and body.get("errors"):
+                            self._log("graphql_errors", {"errors": body.get("errors"), "operationName": payload.get("operationName")})
+                        return body
+                    decision = self.retry_policy.decide(attempt, status_code=status_code, error_kind="http_status")
+                except Exception as exc:
+                    self._log("graphql_exception", {"error": str(exc), "attempt": attempt, "client": "urllib"})
+                    decision = self.retry_policy.decide(attempt, error_kind="exception")
+
+                if not decision.retry:
+                    return {"errors": [{"message": decision.reason, "terminal": decision.terminal}]}
+                await asyncio.sleep(decision.delay_seconds)
+                attempt += 1
+
     async def collect_review_bundle(self, product_url, registry, cookies=None):
         """Run mapped review/rating operations for the product URL's skuId."""
         sku_id = extract_bestbuy_sku_id(product_url)
+        if not sku_id:
+            sku_id = await asyncio.to_thread(resolve_sku_id_from_product_page, product_url, registry)
         if not sku_id:
             return {"errors": [{"message": "skuId not found in product_url"}]}
 
@@ -189,3 +230,67 @@ def _first_value(payload, keys):
 
     walk(payload)
     return found
+
+
+def _post_json_with_urllib(endpoint_url, payload, headers, cookies, timeout):
+    request_headers = dict(headers or {})
+    request_headers.setdefault("content-type", "application/json")
+    request_headers.setdefault("accept", "application/graphql-response+json,application/json;q=0.9")
+    if cookies:
+        request_headers["Cookie"] = "; ".join(f"{key}={value}" for key, value in cookies.items())
+
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(endpoint_url, data=data, headers=request_headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+            return response.status, json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        try:
+            body = json.loads(raw) if raw else {}
+        except Exception:
+            body = {"errors": [{"message": raw[:500]}]}
+        return exc.code, body
+
+
+def resolve_sku_id_from_product_page(product_url, registry=None, timeout=20):
+    """Resolve numeric skuId from PDP HTML for opaque /product/... URLs."""
+    if not product_url:
+        return None
+
+    headers = _headers_for_page_resolve(product_url, registry)
+    req = urllib.request.Request(product_url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            html = response.read().decode("utf-8", errors="replace")
+    except Exception:
+        return None
+
+    patterns = (
+        r'"skuId"\s*:\s*"(\d+)"',
+        r'"skuId"\s*:\s*(\d+)',
+        r'"sku"\s*:\s*\{\s*"skuId"\s*:\s*"(\d+)"',
+        r'"productId"\s*:\s*"(\d{6,})"',
+        r'"sku_id"\s*:\s*"(\d+)"',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, html)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _headers_for_page_resolve(product_url, registry=None):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+        "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Referer": product_url,
+    }
+    if registry:
+        for operation in registry.values():
+            request_headers = operation.get("request_headers") or {}
+            if request_headers.get("User-Agent"):
+                headers["User-Agent"] = request_headers["User-Agent"]
+                break
+    return headers

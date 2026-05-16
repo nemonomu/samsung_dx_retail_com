@@ -38,6 +38,30 @@ class BestBuyTrendCrawler:
         # Load excluded items (is_product=false)
         self.excluded_items = load_excluded_items()
 
+    def get_page_html_safely(self, context, max_attempts=3):
+        """Read page HTML with recovery for transient DrissionPage CDP stalls."""
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return self.page.html
+            except Exception as exc:
+                last_error = exc
+                print(f"[WARNING] HTML read failed during {context} ({attempt}/{max_attempts}): {exc}")
+                try:
+                    js_html = self.page.run_js("return document.documentElement.outerHTML;")
+                    if js_html:
+                        print("[INFO] Recovered HTML via JS outerHTML")
+                        return js_html
+                except Exception as js_exc:
+                    print(f"[WARNING] JS outerHTML fallback failed: {js_exc}")
+                if attempt < max_attempts:
+                    try:
+                        self.page.refresh()
+                    except Exception as refresh_exc:
+                        print(f"[WARNING] Refresh after HTML timeout failed: {refresh_exc}")
+                    time.sleep(random.uniform(5, 8))
+        raise last_error
+
     def connect_db(self):
         """DB 연결"""
         try:
@@ -85,7 +109,7 @@ class BestBuyTrendCrawler:
 
             # 페이지 소스 저장 (디버깅용)
             try:
-                page_source = self.page.html
+                page_source = self.get_page_html_safely("homepage debug dump")
                 with open('bby_homepage_debug.html', 'w', encoding='utf-8') as f:
                     f.write(page_source)
                 print("[DEBUG] 홈페이지 소스 저장: bby_homepage_debug.html")
@@ -193,7 +217,7 @@ class BestBuyTrendCrawler:
             time.sleep(extract_wait)
 
             # 페이지 소스 가져오기
-            page_source = self.page.html
+            page_source = self.get_page_html_safely("trending product extraction")
             tree = html.fromstring(page_source)
 
             # 디버깅용 HTML 저장

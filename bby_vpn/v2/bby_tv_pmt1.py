@@ -318,13 +318,37 @@ class BestBuyPromotionCrawler:
             return match.group(0)
         return None
 
+    def get_page_html_safely(self, context, max_attempts=3):
+        """Read page HTML with recovery for transient DrissionPage CDP stalls."""
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return self.page.html
+            except Exception as exc:
+                last_error = exc
+                print(f"[WARNING] HTML read failed during {context} ({attempt}/{max_attempts}): {exc}")
+                try:
+                    js_html = self.page.run_js("return document.documentElement.outerHTML;")
+                    if js_html:
+                        print("[INFO] Recovered HTML via JS outerHTML")
+                        return js_html
+                except Exception as js_exc:
+                    print(f"[WARNING] JS outerHTML fallback failed: {js_exc}")
+                if attempt < max_attempts:
+                    try:
+                        self.page.refresh()
+                    except Exception as refresh_exc:
+                        print(f"[WARNING] Refresh after HTML timeout failed: {refresh_exc}")
+                    time.sleep(random.uniform(5, 8))
+        raise last_error
+
     def extract_products(self):
         """Extract product information (3 sections, max 18 SKUs)"""
         try:
             print("\n[INFO] Starting product extraction...")
 
             # 페이지 소스 가져오기 (DrissionPage)
-            page_source = self.page.html
+            page_source = self.get_page_html_safely("promotion product extraction")
             tree = html.fromstring(page_source)
 
             # Find all promotion sections

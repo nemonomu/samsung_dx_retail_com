@@ -315,6 +315,30 @@ def contains_external_review_marker(payload):
     return found
 
 
+def contains_text(payload, patterns):
+    found = None
+
+    def walk(value):
+        nonlocal found
+        if found is not None:
+            return
+        if isinstance(value, str):
+            lower = value.lower()
+            for pattern, label in patterns:
+                if pattern in lower:
+                    found = label
+                    return
+        elif isinstance(value, dict):
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(payload)
+    return found
+
+
 def normalize_review_state(parsed, bundle):
     parsed = dict(parsed or {})
     star_rating = parsed.get("star_rating")
@@ -336,6 +360,17 @@ def normalize_review_state(parsed, bundle):
 
 
 def parse_price(bundle):
+    price_state = contains_text(
+        bundle,
+        (
+            ("no longer available", "no longer available"),
+            ("see price in cart", "See price in cart"),
+            ("see details in checkout", "See details in checkout"),
+        ),
+    )
+    if price_state == "no longer available":
+        return {"final_sku_price": price_state, "original_sku_price": None, "savings": None}
+
     for operation in ("getProduct", "getPDPProductBySkuId"):
         payload = bundle.get(operation) or {}
         price_payload = first_value(payload, ("price",))
@@ -347,6 +382,13 @@ def parse_price(bundle):
             or price_payload.get("customerPrice")
             or price_payload.get("salePrice")
         )
+        restricted_message = price_payload.get("restrictedPriceDisplayMessage") or price_payload.get("priceWithCart")
+        if not final_price and restricted_message:
+            marker = contains_text(restricted_message, (("see price in cart", "See price in cart"), ("see details in checkout", "See details in checkout")))
+            if marker:
+                final_price = marker
+        if not final_price and price_state:
+            final_price = price_state
         original_price = price_payload.get("displayableRegularPrice") or price_payload.get("regularPrice")
         savings = price_payload.get("totalSavings")
         return {
@@ -354,6 +396,8 @@ def parse_price(bundle):
             "original_sku_price": money(original_price),
             "savings": money(savings),
         }
+    if price_state:
+        return {"final_sku_price": price_state, "original_sku_price": None, "savings": None}
     return {"final_sku_price": None, "original_sku_price": None, "savings": None}
 
 

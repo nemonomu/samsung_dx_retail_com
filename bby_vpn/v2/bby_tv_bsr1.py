@@ -244,6 +244,30 @@ class BestBuyTVBSRCrawler(BaseCrawler):
             print(f"[ERROR] Scroll failed: {e}")
             traceback.print_exc()
 
+    def get_page_html_safely(self, page_number, context, max_attempts=3):
+        """Read page HTML with recovery for transient DrissionPage CDP stalls."""
+        last_error = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return self.page.html
+            except Exception as exc:
+                last_error = exc
+                print(f"[WARNING] Page {page_number}: html read failed during {context} ({attempt}/{max_attempts}): {exc}")
+                try:
+                    js_html = self.page.run_js("return document.documentElement.outerHTML;")
+                    if js_html:
+                        print(f"[INFO] Page {page_number}: recovered HTML via JS outerHTML")
+                        return js_html
+                except Exception as js_exc:
+                    print(f"[WARNING] Page {page_number}: JS outerHTML fallback failed: {js_exc}")
+                if attempt < max_attempts:
+                    try:
+                        self.page.refresh()
+                    except Exception as refresh_exc:
+                        print(f"[WARNING] Page {page_number}: refresh after HTML timeout failed: {refresh_exc}")
+                    time.sleep(random.uniform(5, 8))
+        raise last_error
+
     def crawl_page(self, page_number):
         """페이지 크롤링: 페이지 로드 → 제품 파싱 → URL 누락 시 1스텝 스크롤 로딩 → 반복 (스마트 스크롤)"""
         try:
@@ -258,7 +282,7 @@ class BestBuyTVBSRCrawler(BaseCrawler):
 
             # 1. 0개인 경우 로드 실패 예외처리 (최대 3회 새로고침)
             for refresh_attempt in range(1, 4):
-                page_html = self.page.html
+                page_html = self.get_page_html_safely(page_number, f"initial parse {refresh_attempt}")
                 tree = html.fromstring(page_html)
                 if len(tree.xpath(base_container_xpath)) == 0:
                     print(f"[WARNING] Page {page_number}: 0 products found, refresh attempt {refresh_attempt}/3")
@@ -280,7 +304,7 @@ class BestBuyTVBSRCrawler(BaseCrawler):
 
             # 2. 파싱 및 스크롤 루프 (url 못찾은거 있으면 스크롤 1회 > 약 5초 대기 > 재파싱 반복)
             for scroll_attempt in range(1, max_scroll_attempts + 1):
-                page_html = self.page.html
+                page_html = self.get_page_html_safely(page_number, f"scroll parse {scroll_attempt}")
                 tree = html.fromstring(page_html)
                 base_containers = tree.xpath(base_container_xpath)
 

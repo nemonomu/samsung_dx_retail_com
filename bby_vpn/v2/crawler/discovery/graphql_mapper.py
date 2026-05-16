@@ -32,6 +32,7 @@ class GraphQLMapper:
         os.makedirs(self.map_dir, exist_ok=True)
         self.registry = GraphQLOperationRegistry(base_dir)
         self.sku_map_path = os.path.join(base_dir, "graphql_sku_map.json")
+        self.cookies_path = os.path.join(base_dir, "graphql_cookies.json")
 
     def record(self, operation_name, endpoint_url, request_payload, request_headers, response_body, cookies=None):
         operation_name = operation_name or "unknown"
@@ -51,8 +52,22 @@ class GraphQLMapper:
             json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
 
         self.registry.upsert(operation_name, endpoint_url, request_payload, request_headers)
+        self._record_cookies(cookies)
         self._record_sku_map(endpoint_url, request_payload, request_headers, response_body)
         return path
+
+    def _record_cookies(self, cookies):
+        if not cookies:
+            return
+        try:
+            payload = {
+                "cookies": cookies,
+                "updated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            }
+            with open(self.cookies_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+        except Exception:
+            return
 
     def _record_sku_map(self, endpoint_url, request_payload, request_headers, response_body):
         try:

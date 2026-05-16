@@ -8,6 +8,7 @@ import sys
 
 from collectors.graphql_collector import (
     GraphQLCollector,
+    load_graphql_cookies,
     load_graphql_registry,
     load_sku_map,
     resolve_sku_id_from_product_page,
@@ -34,6 +35,7 @@ def main():
     parser.add_argument("--csv", help="CSV with product_url column.")
     parser.add_argument("--limit", type=int, default=3)
     parser.add_argument("--out", default="graphql_collect_test_output.jsonl")
+    parser.add_argument("--timeout", type=int, default=60)
     args = parser.parse_args()
 
     registry = load_graphql_registry(args.registry_dir)
@@ -48,14 +50,16 @@ def main():
 
     sku_map = load_sku_map(args.registry_dir)
     print(f"[INFO] Loaded sku map entries: {len(sku_map)}")
+    cookies = load_graphql_cookies(args.registry_dir)
+    print(f"[INFO] Loaded cookie entries: {len(cookies)}")
 
-    collector = GraphQLCollector(timeout=30, concurrency=2)
+    collector = GraphQLCollector(timeout=args.timeout, concurrency=1)
     out_path = os.path.abspath(args.out)
 
     with open(out_path, "w", encoding="utf-8") as outfile:
         for idx, url in enumerate(urls, 1):
             print(f"[{idx}/{len(urls)}] GraphQL collect: {url[:100]}")
-            result = collector.collect_review_bundle_sync(url, registry, sku_map=sku_map)
+            result = collector.collect_review_bundle_sync(url, registry, cookies=cookies, sku_map=sku_map)
             if result.get("errors"):
                 sku_id = resolve_sku_id_from_product_page(url, registry)
                 print(f"  [ERROR] {result.get('errors')} resolved_skuId={sku_id}")

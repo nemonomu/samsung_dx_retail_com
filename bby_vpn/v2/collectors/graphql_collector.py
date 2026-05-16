@@ -208,6 +208,25 @@ def load_sku_map(base_dir):
     return sku_map
 
 
+def load_graphql_cookies(base_dir):
+    """Load browser session cookies captured during GraphQL discovery."""
+    candidates = [
+        os.path.join(base_dir, "graphql_cookies.json"),
+        os.path.join(base_dir, "crawler", "discovery", "graphql_cookies.json"),
+    ]
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                payload = json.load(f)
+            cookies = payload.get("cookies") if isinstance(payload, dict) else payload
+            return cookies if isinstance(cookies, dict) else {}
+        except Exception:
+            continue
+    return {}
+
+
 def lookup_sku_id(product_url, sku_map):
     if not product_url or not sku_map:
         return None

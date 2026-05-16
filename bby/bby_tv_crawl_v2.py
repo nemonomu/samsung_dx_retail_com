@@ -282,7 +282,7 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
     def __init__(
         self, batch_id, csv_store, detail_csv, time_offset_hours=0, chunk_size=12,
         cooldown_min=300, cooldown_max=900, skip_reviews=True, skip_similar=True,
-        deadline=None,
+        deadline=None, start_order=None, end_order=None,
     ):
         super().__init__(batch_id=batch_id, test_mode=False, time_offset_hours=time_offset_hours)
         self.csv_store = csv_store
@@ -293,11 +293,18 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
         self.skip_reviews = skip_reviews
         self.skip_similar = skip_similar
         self.deadline = deadline
+        self.start_order = start_order
+        self.end_order = end_order
         self.standalone = False
         os.makedirs(os.path.dirname(self.detail_csv), exist_ok=True)
 
     def load_product_list(self):
         products = self.csv_store.product_list()
+        if self.start_order or self.end_order:
+            start_idx = max((self.start_order or 1) - 1, 0)
+            end_idx = self.end_order if self.end_order else len(products)
+            products = products[start_idx:end_idx]
+            print(f"[INFO] Detail order filter applied: start_order={self.start_order or 1}, end_order={self.end_order or 'end'}")
         print(f"[INFO] Loaded {len(products)} products from CSV listing")
         return products
 
@@ -375,13 +382,14 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
 
             total_saved = 0
             for i, product in enumerate(product_list, 1):
+                actual_order = (self.start_order or 1) + i - 1
                 if self.deadline and datetime.now() >= self.deadline:
                     print("[TIME LIMIT] Detail deadline reached. Stopping detail stage.")
                     break
 
                 sku_name = product.get("retailer_sku_name") or "N/A"
                 print(f"\n{'=' * 70}")
-                print(f"[{i}/{len(product_list)}] {sku_name[:60]}")
+                print(f"[{actual_order}/{(self.end_order or ((self.start_order or 1) + len(product_list) - 1))}] {sku_name[:60]}")
                 print(f"{'=' * 70}")
 
                 combined_data = self.crawl_detail(product)
@@ -395,7 +403,7 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
                     continue
 
                 if combined_data:
-                    combined_data["order"] = i
+                    combined_data["order"] = actual_order
                 if combined_data and self.save_to_retail_com(combined_data):
                     total_saved += 1
 
@@ -422,7 +430,7 @@ class BestBuyTVCsvOrchestrator:
         self, resume_from=None, batch_id=None, time_offset_hours=0,
         output_dir=DEFAULT_OUTPUT_DIR, chunk_size=12, cooldown_min=300,
         cooldown_max=900, skip_reviews=True, skip_similar=True,
-        deadline=None,
+        deadline=None, start_order=None, end_order=None,
     ):
         self.account_name = "Bestbuy"
         self.resume_from = resume_from
@@ -438,6 +446,8 @@ class BestBuyTVCsvOrchestrator:
         self.skip_reviews = skip_reviews
         self.skip_similar = skip_similar
         self.deadline = deadline
+        self.start_order = start_order
+        self.end_order = end_order
         self.korea_tz = pytz.timezone("Asia/Seoul")
         self.listing_csv = os.path.join(self.output_dir, f"bby_tv_v2_listing_{self.batch_id}.csv")
         self.detail_csv = os.path.join(self.output_dir, f"bby_tv_v2_detail_{self.batch_id}.csv")
@@ -502,6 +512,8 @@ class BestBuyTVCsvOrchestrator:
                 skip_reviews=self.skip_reviews,
                 skip_similar=self.skip_similar,
                 deadline=self.deadline,
+                start_order=self.start_order,
+                end_order=self.end_order,
             )
             results["detail"] = detail.run()
         else:
@@ -542,6 +554,8 @@ def main():
     parser.add_argument("--cooldown-max", type=int, default=900)
     parser.add_argument("--with-reviews", action="store_true", help="review page actions are skipped by default")
     parser.add_argument("--with-similar", action="store_true", help="similar product actions are skipped by default")
+    parser.add_argument("--start-order", type=int, help="detail stage starts from this 1-based listing order")
+    parser.add_argument("--end-order", type=int, help="detail stage ends at this 1-based listing order")
     parser.add_argument("max_runtime", nargs="*", help='optional duration such as "6 hours" or "6h"')
     args = parser.parse_args()
 
@@ -563,6 +577,8 @@ def main():
         skip_reviews=not args.with_reviews,
         skip_similar=not args.with_similar,
         deadline=deadline,
+        start_order=args.start_order,
+        end_order=args.end_order,
     )
     success = crawler.run()
     sys.exit(0 if success else 1)

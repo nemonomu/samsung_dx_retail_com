@@ -429,6 +429,63 @@ def _listing_candidates_path(base_dir):
     return os.path.join(base_dir or ".", "listing_graphql_candidates.jsonl")
 
 
+def _load_dotenv_once():
+    if getattr(_load_dotenv_once, "_loaded", False):
+        return
+    setattr(_load_dotenv_once, "_loaded", True)
+    candidates = [
+        os.path.join(os.getcwd(), ".env"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"),
+    ]
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    if key and key not in os.environ:
+                        os.environ[key] = value
+        except Exception:
+            continue
+
+
+def source_html_candidates(base_dir):
+    configured = os.environ.get("BESTBUY_MAIN_SOURCE_HTML") or os.environ.get("BBY_LISTING_SOURCE_HTML")
+    candidates = []
+    if configured:
+        candidates.append(configured)
+    candidates.extend([
+        os.path.join(base_dir or ".", "bestbuy_main_search_page_sample.html"),
+        os.path.join(base_dir or ".", "references", "bestbuy_main_search_page_sample.html"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "bestbuy_main_search_page_sample.html"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "references", "bestbuy_main_search_page_sample.html"),
+    ])
+    return candidates
+
+
+def ensure_listing_operation_from_source_html(base_dir):
+    for path in source_html_candidates(base_dir):
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                html_text = f.read()
+            saved = save_listing_operation_from_html(base_dir, html_text, cookies={}, headers={})
+            if saved:
+                print(f"[INFO] Saved Apollo listing GraphQL operation from source HTML {path} -> {saved}")
+                return load_listing_operation(base_dir)
+        except Exception as exc:
+            print(f"[WARNING] Source HTML listing operation load failed: {path}: {exc}")
+    return None
+
+
 def build_search_url(page_number, search_term="tv", sort=""):
     query = {"id": "pcat17071", "st": search_term, "intl": "nosplash"}
     if sort:
@@ -817,7 +874,10 @@ def _walk_mutate_paging(value, page_number, page_size):
 
 
 def direct_listing_products(base_dir, page_type, page_number, defaults=None, page_size=24, timeout=None):
+    _load_dotenv_once()
     operation = load_listing_operation(base_dir)
+    if not operation:
+        operation = ensure_listing_operation_from_source_html(base_dir)
     if not operation:
         return []
     if timeout is None:
@@ -839,12 +899,31 @@ def direct_listing_products(base_dir, page_type, page_number, defaults=None, pag
     cookies = normalize_cookie_mapping(operation.get("cookies") or {})
     if cookies:
         headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
+    if os.environ.get("ZENROWS_API_KEY") and os.environ.get("BBY_LISTING_USE_ZENROWS", "1").strip().lower() not in {"0", "false", "no"}:
+        parsed = post_listing_graphql_via_zenrows(endpoint_url, payload, headers, timeout)
+    else:
+        parsed = post_listing_graphql_direct(endpoint_url, payload, headers, timeout, base_dir)
+    rows = extract_product_list_rows(parsed, page_type, page_number=page_number)
+    if not rows:
+        rows = extract_listing_products_from_payload(parsed, page_type, page_number=page_number)
+    merged_rows = []
+    defaults = dict(defaults or {})
+    for row in rows:
+        merged = dict(defaults)
+        merged.update(row)
+        merged["page_type"] = page_type
+        merged["page_number"] = page_number
+        merged_rows.append(merged)
+    return merged_rows
+
+
+def post_listing_graphql_direct(endpoint_url, payload, headers, timeout, base_dir):
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(endpoint_url, data=body, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as response:
             raw = response.read().decode("utf-8", errors="replace")
-            parsed = json.loads(raw) if raw else {}
+            return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"listing GraphQL HTTP {exc.code}: {raw[:300]}") from exc
@@ -858,18 +937,38 @@ def direct_listing_products(base_dir, page_type, page_number, defaults=None, pag
             removed = remove_listing_operation(base_dir)
             raise RuntimeError(f"listing GraphQL request failed; removed stale operation files={removed}: {exc}") from exc
         raise RuntimeError(f"listing GraphQL request failed; operation file kept: {exc}") from exc
-    rows = extract_product_list_rows(parsed, page_type, page_number=page_number)
-    if not rows:
-        rows = extract_listing_products_from_payload(parsed, page_type, page_number=page_number)
-    merged_rows = []
-    defaults = dict(defaults or {})
-    for row in rows:
-        merged = dict(defaults)
-        merged.update(row)
-        merged["page_type"] = page_type
-        merged["page_number"] = page_number
-        merged_rows.append(merged)
-    return merged_rows
+
+
+def post_listing_graphql_via_zenrows(endpoint_url, payload, headers, timeout):
+    try:
+        from zenrows import ZenRowsClient
+    except Exception as exc:
+        raise RuntimeError("ZENROWS_API_KEY is set but zenrows package is not installed") from exc
+    api_key = os.environ.get("ZENROWS_API_KEY")
+    if not api_key:
+        raise RuntimeError("ZENROWS_API_KEY is required for ZenRows listing GraphQL replay")
+    params = {"custom_headers": "true"}
+    if os.environ.get("BESTBUY_GRAPHQL_PREMIUM_PROXY", "1").strip().lower() in {"1", "true", "yes"}:
+        params["premium_proxy"] = "true"
+        params["proxy_country"] = "us"
+    if os.environ.get("BESTBUY_GRAPHQL_JS_RENDER", "1").strip().lower() in {"1", "true", "yes"}:
+        params["js_render"] = "true"
+    if os.environ.get("BESTBUY_GRAPHQL_MODE_AUTO", "0").strip().lower() in {"1", "true", "yes"}:
+        params["mode"] = "auto"
+        params["proxy_country"] = "us"
+    response = ZenRowsClient(api_key).post(
+        endpoint_url,
+        params=params,
+        headers=headers,
+        data=json.dumps(payload),
+        timeout=timeout,
+    )
+    if getattr(response, "status_code", 0) != 200:
+        raise RuntimeError(f"ZenRows listing GraphQL HTTP {response.status_code}: {getattr(response, 'text', '')[:300]}")
+    try:
+        return response.json()
+    except Exception as exc:
+        raise RuntimeError(f"ZenRows listing GraphQL returned non-JSON: {getattr(response, 'text', '')[:300]}") from exc
 
 
 def _sanitize_headers(headers):

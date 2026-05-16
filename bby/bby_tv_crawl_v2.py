@@ -308,7 +308,9 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
     def __init__(
         self, batch_id, csv_store, detail_csv, time_offset_hours=0, chunk_size=None,
         chunk_min=5, chunk_max=10,
-        cooldown_min=300, cooldown_max=900, skip_reviews=True, skip_similar=True,
+        cooldown_min=60, cooldown_max=180,
+        block_cooldown_min=900, block_cooldown_max=1800,
+        skip_reviews=True, skip_similar=True,
         deadline=None, start_order=None, end_order=None,
     ):
         super().__init__(batch_id=batch_id, test_mode=False, time_offset_hours=time_offset_hours)
@@ -319,12 +321,15 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
         self.chunk_max = chunk_max
         self.cooldown_min = cooldown_min
         self.cooldown_max = cooldown_max
+        self.block_cooldown_min = block_cooldown_min
+        self.block_cooldown_max = block_cooldown_max
         self.skip_reviews = skip_reviews
         self.skip_similar = skip_similar
         self.deadline = deadline
         self.start_order = start_order
         self.end_order = end_order
         self.profile_dirs = []
+        self.risk_chunks_remaining = 0
         self.items_until_cooldown = self._next_chunk_size()
         self.standalone = False
         os.makedirs(os.path.dirname(self.detail_csv), exist_ok=True)
@@ -332,6 +337,9 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
     def _next_chunk_size(self):
         if self.chunk_size:
             return self.chunk_size
+        if self.risk_chunks_remaining > 0:
+            self.risk_chunks_remaining -= 1
+            return random.randint(2, 5)
         low = max(int(self.chunk_min or 5), 1)
         high = max(int(self.chunk_max or low), low)
         return random.randint(low, high)
@@ -428,8 +436,8 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
     def _looks_incomplete(self, data):
         return not any(data.get(k) for k in ("sku", "screen_size", "final_sku_price", "star_rating"))
 
-    def _cooldown(self, reason):
-        wait_seconds = random.randint(self.cooldown_min, self.cooldown_max)
+    def _restart_after_wait(self, reason, min_seconds, max_seconds):
+        wait_seconds = random.randint(min_seconds, max_seconds)
         print(f"[COOLDOWN] {reason}: waiting {wait_seconds // 60}m {wait_seconds % 60}s")
         if self.page:
             try:
@@ -440,6 +448,14 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
         self._cleanup_profile_dirs()
         time.sleep(wait_seconds)
         self.setup_drission_driver()
+
+    def _chunk_cooldown(self, reason):
+        self._restart_after_wait(reason, self.cooldown_min, self.cooldown_max)
+
+    def _block_cooldown(self, reason):
+        self.risk_chunks_remaining = max(self.risk_chunks_remaining, 2)
+        self.items_until_cooldown = self._next_chunk_size()
+        self._restart_after_wait(reason, self.block_cooldown_min, self.block_cooldown_max)
 
     def run(self):
         try:
@@ -466,8 +482,8 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
 
                 combined_data = self.crawl_detail(product)
                 if combined_data and self._looks_incomplete(combined_data):
-                    print("[WARNING] Detail data looks incomplete. Cooling down and retrying once.")
-                    self._cooldown("incomplete detail")
+                    print("[WARNING] Detail data looks incomplete. Long block cooldown and retrying once.")
+                    self._block_cooldown("incomplete detail / possible block")
                     combined_data = self.crawl_detail(product)
 
                 if not combined_data or self._looks_incomplete(combined_data):
@@ -483,7 +499,7 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
                 if i < len(product_list) and self.items_until_cooldown <= 0:
                     completed_chunk = self._next_chunk_size()
                     self.items_until_cooldown = completed_chunk
-                    self._cooldown(f"random chunk boundary after order {actual_order}")
+                    self._chunk_cooldown(f"random chunk boundary after order {actual_order}")
                 else:
                     time.sleep(random.uniform(5, 8))
 
@@ -505,8 +521,9 @@ class BestBuyTVCsvOrchestrator:
     def __init__(
         self, resume_from=None, batch_id=None, time_offset_hours=0,
         output_dir=DEFAULT_OUTPUT_DIR, chunk_size=None, chunk_min=5, chunk_max=10,
-        cooldown_min=300,
-        cooldown_max=900, skip_reviews=True, skip_similar=True,
+        cooldown_min=60, cooldown_max=180,
+        block_cooldown_min=900, block_cooldown_max=1800,
+        skip_reviews=True, skip_similar=True,
         deadline=None, start_order=None, end_order=None,
     ):
         self.account_name = "Bestbuy"
@@ -522,6 +539,8 @@ class BestBuyTVCsvOrchestrator:
         self.chunk_max = chunk_max
         self.cooldown_min = cooldown_min
         self.cooldown_max = cooldown_max
+        self.block_cooldown_min = block_cooldown_min
+        self.block_cooldown_max = block_cooldown_max
         self.skip_reviews = skip_reviews
         self.skip_similar = skip_similar
         self.deadline = deadline
@@ -590,6 +609,8 @@ class BestBuyTVCsvOrchestrator:
                 chunk_max=self.chunk_max,
                 cooldown_min=self.cooldown_min,
                 cooldown_max=self.cooldown_max,
+                block_cooldown_min=self.block_cooldown_min,
+                block_cooldown_max=self.block_cooldown_max,
                 skip_reviews=self.skip_reviews,
                 skip_similar=self.skip_similar,
                 deadline=self.deadline,
@@ -690,8 +711,10 @@ def main():
     parser.add_argument("--chunk-size", type=int, help="fixed cooldown interval; overrides --chunk-min/--chunk-max")
     parser.add_argument("--chunk-min", type=int, default=5, help="minimum random detail chunk size")
     parser.add_argument("--chunk-max", type=int, default=10, help="maximum random detail chunk size")
-    parser.add_argument("--cooldown-min", type=int, default=300)
-    parser.add_argument("--cooldown-max", type=int, default=900)
+    parser.add_argument("--cooldown-min", type=int, default=60, help="normal chunk cooldown minimum seconds")
+    parser.add_argument("--cooldown-max", type=int, default=180, help="normal chunk cooldown maximum seconds")
+    parser.add_argument("--block-cooldown-min", type=int, default=900, help="possible block cooldown minimum seconds")
+    parser.add_argument("--block-cooldown-max", type=int, default=1800, help="possible block cooldown maximum seconds")
     parser.add_argument("--with-reviews", action="store_true", help="review page actions are skipped by default")
     parser.add_argument("--with-similar", action="store_true", help="similar product actions are skipped by default")
     parser.add_argument("--start-order", type=int, help="detail stage starts from this 1-based listing order")
@@ -726,6 +749,8 @@ def main():
         chunk_max=args.chunk_max,
         cooldown_min=args.cooldown_min,
         cooldown_max=args.cooldown_max,
+        block_cooldown_min=args.block_cooldown_min,
+        block_cooldown_max=args.block_cooldown_max,
         skip_reviews=not args.with_reviews,
         skip_similar=not args.with_similar,
         deadline=deadline,

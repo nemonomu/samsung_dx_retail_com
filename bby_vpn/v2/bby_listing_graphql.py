@@ -356,8 +356,8 @@ def save_listing_operation(base_dir, endpoint_url, request_payload, request_head
     operation = {
         "endpoint_url": endpoint_url,
         "request_payload": request_payload,
-        "request_headers": request_headers or {},
-        "cookies": cookies or {},
+        "request_headers": normalize_header_mapping(request_headers),
+        "cookies": normalize_cookie_mapping(cookies),
         "sample_response_shape": _shape(sample_response),
         "updated_at": int(time.time()),
     }
@@ -433,7 +433,7 @@ def direct_listing_products(base_dir, page_type, page_number, defaults=None, pag
     headers = _sanitize_headers(operation.get("request_headers") or {})
     headers.setdefault("content-type", "application/json")
     headers.setdefault("accept", "application/graphql-response+json,application/json;q=0.9")
-    cookies = operation.get("cookies") or {}
+    cookies = normalize_cookie_mapping(operation.get("cookies") or {})
     if cookies:
         headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
     body = json.dumps(payload).encode("utf-8")
@@ -460,13 +460,61 @@ def direct_listing_products(base_dir, page_type, page_number, defaults=None, pag
 def _sanitize_headers(headers):
     skipped = {"accept-encoding", "content-length", "cookie", "host", "connection"}
     clean = {}
-    for key, value in (headers or {}).items():
+    for key, value in normalize_header_mapping(headers).items():
         if not key or value in (None, ""):
             continue
         if str(key).lower() in skipped or str(key).startswith(":"):
             continue
         clean[str(key)] = str(value)
     return clean
+
+
+def normalize_header_mapping(headers):
+    if isinstance(headers, dict):
+        return headers
+    if isinstance(headers, list):
+        result = {}
+        for item in headers:
+            if isinstance(item, dict):
+                key = item.get("name") or item.get("key")
+                value = item.get("value")
+                if key and value is not None:
+                    result[key] = value
+        return result
+    if isinstance(headers, str):
+        result = {}
+        for line in headers.splitlines():
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            if key.strip():
+                result[key.strip()] = value.strip()
+        return result
+    return {}
+
+
+def normalize_cookie_mapping(cookies):
+    if isinstance(cookies, dict):
+        return cookies
+    if isinstance(cookies, list):
+        result = {}
+        for item in cookies:
+            if isinstance(item, dict):
+                key = item.get("name") or item.get("key")
+                value = item.get("value")
+                if key and value is not None:
+                    result[key] = value
+        return result
+    if isinstance(cookies, str):
+        result = {}
+        for part in cookies.split(";"):
+            if "=" not in part:
+                continue
+            key, value = part.split("=", 1)
+            if key.strip():
+                result[key.strip()] = value.strip()
+        return result
+    return {}
 
 
 class ListingGraphQLSkuCollector:
@@ -555,7 +603,9 @@ class ListingGraphQLSkuCollector:
                             cookies[cookie.get("name")] = cookie.get("value")
                 except Exception:
                     pass
-                save_listing_operation(self.output_dir, endpoint_url, req_payload, headers, cookies, payload)
+                path = save_listing_operation(self.output_dir, endpoint_url, req_payload, headers, cookies, payload)
+                if path:
+                    print(f"[INFO] Saved listing GraphQL operation: {req_payload.get('operationName')} -> {path}")
             for row in product_rows:
                 self._remember_product_row(row)
             for url, sku in url_map.items():

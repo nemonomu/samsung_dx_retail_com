@@ -364,10 +364,23 @@ class BestBuyTVDetailCsvCrawler(BestBuyTVDetailCrawler):
         opts = ChromiumOptions()
         opts.set_user_data_path(user_data_path)
         opts.set_cache_path(cache_path)
+        opts.set_argument("--disable-blink-features=AutomationControlled")
+        opts.set_argument("--disable-features=IsolateOrigins,site-per-process")
+        opts.set_argument("--no-first-run")
+        opts.set_argument("--no-default-browser-check")
+        opts.set_argument("--disable-dev-shm-usage")
+        opts.set_argument("--lang=en-US,en;q=0.9")
+        opts.set_argument("--window-size=1366,768")
+        opts.set_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
         if not self.stable_mode:
             opts.set_argument("--disable-application-cache")
             opts.set_argument("--disk-cache-size", "1")
         self.page = ChromiumPage(opts)
+        self.page.set.headers({
+            "Accept-Language": "en-US,en;q=0.9",
+            "Upgrade-Insecure-Requests": "1",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        })
         mode = "stable profile" if self.stable_mode else "fresh profile"
         print(f"[SUCCESS] DrissionPage setup complete with {mode}: {user_data_path}")
 

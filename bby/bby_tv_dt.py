@@ -64,7 +64,21 @@ class BestBuyTVDetailCrawler(BaseCrawler):
     def setup_drission_driver(self):
         """DrissionPage 브라우저 설정 (봇 감지 우회 강화)"""
         try:
-            self.page = ChromiumPage()
+            opts = ChromiumOptions()
+            opts.set_argument("--disable-blink-features=AutomationControlled")
+            opts.set_argument("--disable-features=IsolateOrigins,site-per-process")
+            opts.set_argument("--no-first-run")
+            opts.set_argument("--no-default-browser-check")
+            opts.set_argument("--disable-dev-shm-usage")
+            opts.set_argument("--lang=en-US,en;q=0.9")
+            opts.set_argument("--window-size=1366,768")
+            opts.set_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36")
+            self.page = ChromiumPage(opts)
+            self.page.set.headers({
+                "Accept-Language": "en-US,en;q=0.9",
+                "Upgrade-Insecure-Requests": "1",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            })
             print("[SUCCESS] DrissionPage setup complete")
         except Exception as e:
             print(f"[ERROR] DrissionPage setup failed: {e}")
@@ -205,8 +219,13 @@ class BestBuyTVDetailCrawler(BaseCrawler):
                 return product
 
             # 현재 URL 저장 (로드 전)
-            # Referer 설정 (리스트 페이지에서 클릭한 것처럼 위장)
-            self.page.set.headers({'Referer': 'https://www.bestbuy.com/site/searchpage.jsp?st=tv'})
+            # Referer 및 브라우저 헤더 설정 (리스트 페이지에서 클릭한 것처럼 위장)
+            self.page.set.headers({
+                'Referer': 'https://www.bestbuy.com/site/searchpage.jsp?st=tv',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Upgrade-Insecure-Requests': '1',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            })
 
             previous_url = self.page.url if self.page else None
 

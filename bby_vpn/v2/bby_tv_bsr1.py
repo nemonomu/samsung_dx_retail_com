@@ -541,7 +541,9 @@ class BestBuyTVBSRCrawler(BaseCrawler):
 
         except Exception as e:
             print(f"[ERROR] Page {page_number} failed: {e}")
-            traceback.print_exc()
+            strict_direct = os.environ.get("BBY_LISTING_BROWSER_FALLBACK", "1").strip().lower() in {"0", "false", "no"}
+            if not (strict_direct and "listing GraphQL" in str(e)):
+                traceback.print_exc()
             if products and len(products) >= int(os.environ.get("BBY_LISTING_EXPECTED_PAGE_PRODUCTS", "24")):
                 sku_collector.apply(products)
                 print(f"[WARNING] Page {page_number}: returning {len(products)} products parsed before failure")

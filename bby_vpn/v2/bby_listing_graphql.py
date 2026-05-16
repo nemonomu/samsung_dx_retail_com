@@ -465,11 +465,15 @@ def direct_listing_products(base_dir, page_type, page_number, defaults=None, pag
         raw = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"listing GraphQL HTTP {exc.code}: {raw[:300]}") from exc
     except (socket.timeout, TimeoutError) as exc:
-        removed = remove_listing_operation(base_dir)
-        raise RuntimeError(f"listing GraphQL timeout; removed stale operation files={removed}") from exc
+        if os.environ.get("BBY_LISTING_REMOVE_STALE_OPERATION", "0").strip().lower() in {"1", "true", "yes"}:
+            removed = remove_listing_operation(base_dir)
+            raise RuntimeError(f"listing GraphQL timeout; removed stale operation files={removed}") from exc
+        raise RuntimeError(f"listing GraphQL timeout after {timeout}s; operation file kept") from exc
     except Exception as exc:
-        removed = remove_listing_operation(base_dir)
-        raise RuntimeError(f"listing GraphQL request failed; removed stale operation files={removed}: {exc}") from exc
+        if os.environ.get("BBY_LISTING_REMOVE_STALE_OPERATION", "0").strip().lower() in {"1", "true", "yes"}:
+            removed = remove_listing_operation(base_dir)
+            raise RuntimeError(f"listing GraphQL request failed; removed stale operation files={removed}: {exc}") from exc
+        raise RuntimeError(f"listing GraphQL request failed; operation file kept: {exc}") from exc
     rows = extract_listing_products_from_payload(parsed, page_type, page_number=page_number)
     merged_rows = []
     defaults = dict(defaults or {})

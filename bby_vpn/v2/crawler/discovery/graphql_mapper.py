@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import shutil
 from datetime import datetime
 
 from .graphql_registry import GraphQLOperationRegistry
@@ -33,6 +34,25 @@ class GraphQLMapper:
         self.registry = GraphQLOperationRegistry(base_dir)
         self.sku_map_path = os.path.join(base_dir, "graphql_sku_map.json")
         self.cookies_path = os.path.join(base_dir, "graphql_cookies.json")
+        self.mirror_dir = self._resolve_mirror_dir(base_dir)
+
+    @staticmethod
+    def _resolve_mirror_dir(base_dir):
+        if (
+            os.path.basename(base_dir).lower() == "discovery"
+            and os.path.basename(os.path.dirname(base_dir)).lower() == "crawler"
+        ):
+            return os.path.dirname(os.path.dirname(base_dir))
+        return None
+
+    def _mirror_file(self, source_path):
+        if not self.mirror_dir or not source_path or not os.path.exists(source_path):
+            return
+        try:
+            os.makedirs(self.mirror_dir, exist_ok=True)
+            shutil.copy2(source_path, os.path.join(self.mirror_dir, os.path.basename(source_path)))
+        except Exception:
+            return
 
     def record(self, operation_name, endpoint_url, request_payload, request_headers, response_body, cookies=None):
         operation_name = operation_name or "unknown"
@@ -50,8 +70,10 @@ class GraphQLMapper:
         path = os.path.join(self.map_dir, f"graphql_operation_{_safe_name(operation_name)}.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+        self._mirror_file(path)
 
         self.registry.upsert(operation_name, endpoint_url, request_payload, request_headers)
+        self._mirror_file(self.registry.registry_path)
         self._record_cookies(cookies)
         self._record_sku_map(endpoint_url, request_payload, request_headers, response_body)
         return path
@@ -66,6 +88,7 @@ class GraphQLMapper:
             }
             with open(self.cookies_path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+            self._mirror_file(self.cookies_path)
         except Exception:
             return
 
@@ -92,5 +115,6 @@ class GraphQLMapper:
             }
             with open(self.sku_map_path, "w", encoding="utf-8") as f:
                 json.dump(sku_map, f, ensure_ascii=False, indent=2, default=str)
+            self._mirror_file(self.sku_map_path)
         except Exception:
             return

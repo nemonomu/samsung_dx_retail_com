@@ -244,6 +244,10 @@ class BestBuyDetailCrawler:
             }
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(sku_map, f, ensure_ascii=False, indent=2)
+            mirror_path = os.path.join(self.csv_output_dir, "graphql_sku_map.json")
+            if os.path.abspath(mirror_path) != os.path.abspath(path):
+                with open(mirror_path, "w", encoding="utf-8") as f:
+                    json.dump(sku_map, f, ensure_ascii=False, indent=2)
             self.audit_log.write("graphql_sku_map", {"product_url": product_url, "skuId": str(sku_id)})
             print(f"  [INFO] GraphQL skuId mapped: {sku_id}")
         except Exception as e:

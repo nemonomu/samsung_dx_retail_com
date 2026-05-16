@@ -5,6 +5,7 @@ import copy
 import json
 import os
 import re
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -228,7 +229,11 @@ class GraphQLCollector:
         if self.audit_log:
             self.audit_log.write(event_type, payload)
         else:
-            print(json.dumps({"event_type": event_type, **payload}, ensure_ascii=False))
+            message = json.dumps({"event_type": event_type, **payload}, ensure_ascii=False)
+            try:
+                print(message)
+            except UnicodeEncodeError:
+                print(message.encode("ascii", errors="backslashreplace").decode("ascii"))
 
 
 class BrowserFetchGraphQLCollector(GraphQLCollector):
@@ -238,6 +243,7 @@ class BrowserFetchGraphQLCollector(GraphQLCollector):
         super().__init__(*args, **kwargs)
         self.page = page
         self._owns_page = page is None
+        self._user_data_path = None
 
     async def execute(self, endpoint_url, payload, headers=None, cookies=None):
         async with self.semaphore:
@@ -293,6 +299,14 @@ class BrowserFetchGraphQLCollector(GraphQLCollector):
         options = ChromiumOptions()
         options.auto_port()
         options.no_imgs(True)
+        user_data_path = os.environ.get("BBY_BROWSER_FETCH_USER_DATA_DIR")
+        if not user_data_path:
+            temp_root = "C:\\tmp" if os.path.isdir("C:\\tmp") else None
+            user_data_path = tempfile.mkdtemp(prefix="bby_graphql_fetch_", dir=temp_root)
+        self._user_data_path = user_data_path
+        options.set_user_data_path(user_data_path)
+        if os.environ.get("BBY_BROWSER_FETCH_HEADLESS", "1") == "1":
+            options.set_argument("--headless=new")
         self.page = ChromiumPage(options)
         return self.page
 

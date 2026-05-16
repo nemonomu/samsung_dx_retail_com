@@ -512,6 +512,25 @@ class BestBuyDetailCrawler:
                 self.db_conn = None
                 return True
 
+    def is_product_detail_url(self, url):
+        clean = str(url or "").split("?", 1)[0].lower()
+        return "/product/" in clean or re.search(r"/site/.+/\d+\.p$", clean) is not None
+
+    def normalize_star_rating(self, star_rating):
+        if star_rating is None:
+            return None
+        text = str(star_rating).strip()
+        if not text:
+            return None
+        if "not yet reviewed" in text.lower():
+            return "Not yet reviewed"
+        try:
+            if float(text) <= 0:
+                return "Not yet reviewed"
+        except Exception:
+            pass
+        return star_rating
+
     def get_recent_urls(self):
         """최신 batch_id의 product URLs와 추가 data 가져오기"""
         try:
@@ -677,6 +696,11 @@ class BestBuyDetailCrawler:
                 openbox_filtered = before_openbox_filter - len(all_urls)
                 if openbox_filtered > 0:
                     print(f"[INFO] Filtered out {openbox_filtered} Open Box products")
+                before_pdp_filter = len(all_urls)
+                all_urls = [u for u in all_urls if self.is_product_detail_url(u.get('product_url'))]
+                non_pdp_filtered = before_pdp_filter - len(all_urls)
+                if non_pdp_filtered > 0:
+                    print(f"[INFO] Filtered out {non_pdp_filtered} non-PDP URLs")
                 print(f"[OK] Total unique items from listing CSV files: {len(all_urls)}")
                 return all_urls
 
@@ -911,6 +935,11 @@ class BestBuyDetailCrawler:
             openbox_filtered = before_openbox_filter - len(all_urls)
             if openbox_filtered > 0:
                 print(f"[INFO] Filtered out {openbox_filtered} Open Box products")
+            before_pdp_filter = len(all_urls)
+            all_urls = [u for u in all_urls if self.is_product_detail_url(u.get('product_url'))]
+            non_pdp_filtered = before_pdp_filter - len(all_urls)
+            if non_pdp_filtered > 0:
+                print(f"[INFO] Filtered out {non_pdp_filtered} non-PDP URLs")
 
             # Count duplicates from source tables
             total_loaded = 0
@@ -2338,7 +2367,7 @@ class BestBuyDetailCrawler:
             return None
         try:
             facts = parse_product_facts(rating_data)
-            return facts.get('star_rating')
+            return self.normalize_star_rating(facts.get('star_rating'))
         except Exception:
             return None
 
@@ -3048,9 +3077,7 @@ class BestBuyDetailCrawler:
             tree = html.fromstring(page_source)
 
             # 1. Retailer_SKU_Name - 소스 테이블에서 가져온 값 사용, 없으면 detail에서 추출
-            retailer_sku_name = url_data.get('retailer_sku_name')
-            if not retailer_sku_name and embedded_data.get('retailer_sku_name'):
-                retailer_sku_name = embedded_data.get('retailer_sku_name')
+            retailer_sku_name = embedded_data.get('retailer_sku_name') or url_data.get('retailer_sku_name')
             if not retailer_sku_name or len(retailer_sku_name) < 3:
                 print(f"  [INFO] retailer_sku_name 없음 - detail 페이지에서 추출 시도")
                 retailer_sku_name = self.extract_retailer_sku_name(tree)
@@ -3096,6 +3123,9 @@ class BestBuyDetailCrawler:
                 star_rating = embedded_data.get('star_rating')
                 print(f"  [INFO] Star_Rating from embedded data")
             print(f"  [✓] Star_Rating: {star_rating}")
+
+            star_rating = self.normalize_star_rating(star_rating)
+            print(f"  [INFO] Star_Rating normalized: {star_rating}")
 
             count_of_reviews = self.extract_count_of_reviews_from_detail(tree)
             if count_of_reviews is None:
@@ -3512,6 +3542,7 @@ class BestBuyDetailCrawler:
             account_name = self.config.get_constant('account_name', None, 'Bestbuy')
             calendar_week = f"w{datetime.now().isocalendar().week}"
             crawl_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            star_rating_source = self.normalize_star_rating(star_rating_source)
 
             if star_rating_source == "Not yet reviewed":
                 count_of_star_ratings = 0

@@ -11,6 +11,7 @@ Flow:
 from __future__ import annotations
 
 import csv
+import importlib.util
 import os
 import sys
 from datetime import datetime
@@ -23,12 +24,25 @@ if str(BASE_DIR) not in sys.path:
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
-from bby_tv_dt1 import BestBuyDetailCrawler
 from bby_listing_sku import extract_numeric_sku_from_text
-from bby_tv_bsr1 import BestBuyTVBSRCrawler
-from bby_tv_main1 import BestBuyTVMainCrawler
 from collectors.graphql_collector import BrowserFetchGraphQLCollector, load_graphql_cookies, load_graphql_registry, load_sku_map
 from core.retry import ExponentialBackoff
+
+
+def load_v2_class(module_filename, class_name):
+    module_path = BASE_DIR / module_filename
+    module_name = f"_v2_{module_path.stem}"
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if not spec or not spec.loader:
+        raise ImportError(f"Cannot load {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, class_name)
+
+
+BestBuyDetailCrawler = load_v2_class("bby_tv_dt1.py", "BestBuyDetailCrawler")
+BestBuyTVBSRCrawler = load_v2_class("bby_tv_bsr1.py", "BestBuyTVBSRCrawler")
+BestBuyTVMainCrawler = load_v2_class("bby_tv_main1.py", "BestBuyTVMainCrawler")
 
 
 LISTING_FILES = {

@@ -566,7 +566,7 @@ class BestBuyDetailCrawler:
                             'original_sku_price': None,
                             'offer': row.get('offer'),
                             'pick_up_availability': row.get('pick_up_availability'),
-                            'shipping_availability': row.get('shipping_availability'),
+                            'shipping_availability': row.get('fastest_delivery') or row.get('shipping_availability'),
                             'delivery_availability': row.get('delivery_availability'),
                             'sku_status': row.get('sku_status'),
                             'star_rating': None,
@@ -597,7 +597,7 @@ class BestBuyDetailCrawler:
                             'original_sku_price': None,
                             'offer': row.get('offer'),
                             'pick_up_availability': row.get('pick_up_availability'),
-                            'shipping_availability': row.get('shipping_availability'),
+                            'shipping_availability': row.get('fastest_delivery') or row.get('shipping_availability'),
                             'delivery_availability': row.get('delivery_availability'),
                             'sku_status': row.get('sku_status'),
                             'star_rating': None,
@@ -614,7 +614,7 @@ class BestBuyDetailCrawler:
                         continue
                     item_key = _extract_item(url)
                     if item_key in url_data_map:
-                        url_data_map[item_key]['promotion_position'] = row.get('promotion_rank')
+                        url_data_map[item_key]['promotion_position'] = row.get('promotion_position') or row.get('promotion_rank')
                         url_data_map[item_key]['promotion_type'] = row.get('promotion_type')
                         if row.get('numeric_sku') and not url_data_map[item_key].get('numeric_sku'):
                             url_data_map[item_key]['numeric_sku'] = row.get('numeric_sku')
@@ -636,7 +636,7 @@ class BestBuyDetailCrawler:
                             'main_rank': None,
                             'bsr_rank': None,
                             'trend_rank': None,
-                            'promotion_position': row.get('promotion_rank'),
+                            'promotion_position': row.get('promotion_position') or row.get('promotion_rank'),
                             'promotion_type': row.get('promotion_type')
                         }
 
@@ -646,7 +646,7 @@ class BestBuyDetailCrawler:
                         continue
                     item_key = _extract_item(url)
                     if item_key in url_data_map:
-                        url_data_map[item_key]['trend_rank'] = row.get('rank')
+                        url_data_map[item_key]['trend_rank'] = row.get('trend_rank') or row.get('rank')
                         if row.get('numeric_sku') and not url_data_map[item_key].get('numeric_sku'):
                             url_data_map[item_key]['numeric_sku'] = row.get('numeric_sku')
                     else:
@@ -654,7 +654,7 @@ class BestBuyDetailCrawler:
                             'page_type': row.get('page_type') or 'Trend',
                             'product_url': url,
                             'numeric_sku': row.get('numeric_sku'),
-                            'retailer_sku_name': row.get('product_name'),
+                            'retailer_sku_name': row.get('retailer_sku_name') or row.get('product_name'),
                             'final_sku_price': None,
                             'savings': None,
                             'original_sku_price': None,
@@ -666,7 +666,7 @@ class BestBuyDetailCrawler:
                             'star_rating': None,
                             'main_rank': None,
                             'bsr_rank': None,
-                            'trend_rank': row.get('rank'),
+                            'trend_rank': row.get('trend_rank') or row.get('rank'),
                             'promotion_position': None,
                             'promotion_type': None
                         }
@@ -3209,7 +3209,7 @@ class BestBuyDetailCrawler:
                 electricity_use = None
 
             # 8. See All Customer Reviews click 및 data collected
-            # count_of_star_ratings는 count_of_reviews와 동일 값 사용
+            # 기존 BestBuy 로직 기준: count_of_star_ratings는 count_of_reviews와 동일 값 사용
             count_of_star_ratings = count_of_reviews
             print(f"  [✓] count_of_star_ratings: {count_of_star_ratings} (= count_of_reviews)")
 
@@ -3532,22 +3532,43 @@ class BestBuyDetailCrawler:
 
             similar_names = None
             if similar_products:
-                similar_names = ' ||| '.join([p.get('product_name', '') for p in similar_products if p.get('product_name')]) or None
+                blocked_similar_labels = {
+                    'picture quality',
+                    'key specs',
+                    'dimensions',
+                    'features',
+                    'specifications',
+                    'pros',
+                    'cons',
+                }
+                clean_similar_names = []
+                seen_similar_names = set()
+                for product in similar_products:
+                    name = (product.get('product_name') or '').strip()
+                    if not name:
+                        continue
+                    key = name.lower()
+                    if key in blocked_similar_labels or key in seen_similar_names:
+                        continue
+                    seen_similar_names.add(key)
+                    clean_similar_names.append(name)
+                similar_names = ' ||| '.join(clean_similar_names) or None
 
             fieldnames = [
-                'account_name', 'batch_id', 'page_type', 'order', 'retailer_sku_name',
+                'account_name', 'country_code', 'batch_id', 'page_type', 'order', 'retailer_sku_name',
                 'item', 'sku', 'product_url', 'crawl_datetime', 'calendar_week',
-                'star_rating', 'count_of_reviews', 'count_of_reviews_int',
+                'star_rating', 'count_of_reviews',
                 'count_of_star_ratings', 'screen_size', 'estimated_annual_electricity_use',
                 'final_sku_price', 'original_sku_price', 'savings', 'offer',
-                'pick_up_availability', 'shipping_availability', 'delivery_availability',
-                'sku_status', 'top_mentions', 'detailed_review_content',
-                'summarized_review_content', 'recommendation_intent', 'main_rank',
+                'pick_up_availability', 'fastest_delivery', 'delivery_availability',
+                'sku_status', 'detailed_review_content',
+                'recommendation_intent', 'main_rank',
                 'bsr_rank', 'trend_rank', 'promotion_position', 'promotion_type',
                 'model_year', 'retailer_sku_name_similar'
             ]
             row = {
                 'account_name': account_name,
+                'country_code': 'SEA',
                 'batch_id': self.batch_id,
                 'page_type': page_type,
                 'order': order,
@@ -3559,7 +3580,6 @@ class BestBuyDetailCrawler:
                 'calendar_week': calendar_week,
                 'star_rating': star_rating_source,
                 'count_of_reviews': count_of_reviews,
-                'count_of_reviews_int': count_of_reviews_int,
                 'count_of_star_ratings': count_of_star_ratings,
                 'screen_size': screen_size,
                 'estimated_annual_electricity_use': electricity_use,
@@ -3568,12 +3588,10 @@ class BestBuyDetailCrawler:
                 'savings': savings,
                 'offer': offer,
                 'pick_up_availability': pick_up_availability,
-                'shipping_availability': shipping_availability,
+                'fastest_delivery': shipping_availability,
                 'delivery_availability': delivery_availability,
                 'sku_status': sku_status,
-                'top_mentions': top_mentions,
                 'detailed_review_content': detailed_reviews,
-                'summarized_review_content': summarized_review_content,
                 'recommendation_intent': recommendation_intent,
                 'main_rank': main_rank,
                 'bsr_rank': bsr_rank,
@@ -3591,6 +3609,17 @@ class BestBuyDetailCrawler:
                     print(f"       - {issue['severity']} {issue['field']}: {issue['reason']}")
 
             file_exists = os.path.exists(self.csv_output_path)
+            if file_exists and os.path.getsize(self.csv_output_path) > 0:
+                try:
+                    with open(self.csv_output_path, newline='', encoding='utf-8-sig') as existing_csv:
+                        existing_header = next(csv.reader(existing_csv), [])
+                    if existing_header != fieldnames:
+                        print("  [INFO] Existing CSV header differs from current schema; starting a new CSV")
+                        os.remove(self.csv_output_path)
+                        file_exists = False
+                except Exception as header_error:
+                    print(f"  [WARNING] Failed to inspect existing CSV header: {header_error}")
+
             with open(self.csv_output_path, 'a', newline='', encoding='utf-8-sig') as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 if not file_exists or os.path.getsize(self.csv_output_path) == 0:

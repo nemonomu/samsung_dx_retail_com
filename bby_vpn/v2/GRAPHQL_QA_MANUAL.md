@@ -68,7 +68,7 @@ ORDER BY category, config_key, file_name, priority;
 | `numeric_sku` | listing DOM/URL/text | `bby_listing_sku.py` | GraphQL key로 사용 |
 | `offer` | listing DOM | `offer` | listing 값 사용 |
 | `pick_up_availability` | listing DOM | `pick_up_availability`, `pickup_availability` | listing 값 사용 |
-| `shipping_availability` | listing DOM | `fastest_delivery`, `shipping_availability` | listing 값 사용 |
+| `fastest_delivery` | listing DOM | `fastest_delivery`, legacy `shipping_availability` | listing 값 사용 |
 | `delivery_availability` | listing DOM | `delivery_availability` | listing 값 사용 |
 | `sku_status` | listing DOM | `sku_status`, `sponsored` | listing 값 사용 |
 | `main_rank` | listing order | code | listing 값 사용 |
@@ -94,9 +94,9 @@ Listing 값은 상품 식별의 기준이다. GraphQL의 product name은 검수/
 | `star_rating` | `star_rating_*`, `top_star_rating` | `CustomerRatingCard_Init`, `ReviewStats_Init`, `ProductSchema_init` | `averageRating`, `ratingValue` | Best Buy 자체 rating만 저장 |
 | `count_of_reviews` | `count_of_reviews_*`, `top_count_of_reviews` | `CustomerRatingCard_Init`, `ReviewStats_Init`, `ProductSchema_init` | `reviewCount`, `totalReviewCount` | Best Buy 자체 review count만 저장 |
 | `detailed_review_content` | `review_items`, `detailed_review_content*` | `CustomerReviewList_Init` | review text/body/content fields | 최대 20개 |
-| `summarized_review_content` | `summarized_review*` | `Ai_Review_Summary_Init` | review summary text | 있으면 저장 |
+| `summarized_review_content` | `summarized_review*` | `Ai_Review_Summary_Init` | review summary text | current CSV target excludes this column |
 | `recommendation_intent` | `recommendation_intent*` | `CustomerRatingCard_Init` | `recommendedPercent` | `% would recommend to a friend` 형식 |
-| `top_mentions` | `top_mentions*` | `Reviews_Pros_Cons_Init` | pros/cons feature fields | 현재 collection target 제외, CSV empty 유지 |
+| `top_mentions` | `top_mentions*` | `Reviews_Pros_Cons_Init` | pros/cons feature fields | current CSV target excludes this column |
 | `retailer_sku_name_similar` | `similar_product_names`, `similar_products_container` | `GetCompareProduct`, `ProductCarousel_Recommendations`, `URE_FetchRecommendations` | recommendation product names | 있으면 ` ||| ` join |
 
 ## Price State Rules
@@ -121,7 +121,6 @@ GraphQL/API-only 파서도 raw response 안에서 위 텍스트가 관측되면 
 - `count_of_reviews = 0`
 - `count_of_star_ratings = 0`
 - `detailed_review_content = None`
-- `summarized_review_content = None`
 - `recommendation_intent = None`
 
 ### External reviews
@@ -189,7 +188,7 @@ CSV fill-rate:
 $p='C:\samsung_dx_retail_com\bby_vpn\v2\mapping_run\bby_tv_vpn_test.csv'
 $rows=Import-Csv -LiteralPath $p
 'rows=' + $rows.Count
-foreach($c in 'star_rating','count_of_reviews','detailed_review_content','summarized_review_content','recommendation_intent','sku','final_sku_price','original_sku_price','savings','screen_size','estimated_annual_electricity_use','retailer_sku_name_similar'){
+foreach($c in 'star_rating','count_of_reviews','detailed_review_content','recommendation_intent','sku','final_sku_price','original_sku_price','savings','screen_size','estimated_annual_electricity_use','retailer_sku_name_similar'){
   $n=($rows | Where-Object { $_.$c -and $_.$c.Trim() }).Count
   "$c=$n/$($rows.Count)"
 }
@@ -205,7 +204,7 @@ $rows | Where-Object { -not $_.final_sku_price -and ($_.savings -or $_.original_
 Review partial check:
 
 ```powershell
-$rows | Where-Object { [int]($_.count_of_reviews_int -as [int]) -gt 0 -and -not $_.detailed_review_content } |
+$rows | Where-Object { [int]($_.count_of_reviews -as [int]) -gt 0 -and -not $_.detailed_review_content } |
   Select-Object order,item,retailer_sku_name,star_rating,count_of_reviews
 ```
 

@@ -50,6 +50,8 @@ for path in (
 
 from bby_listing_sku import extract_numeric_sku_from_text
 from collectors.graphql_collector import BrowserFetchGraphQLCollector, load_graphql_cookies, load_graphql_registry, load_sku_map
+from config import DB_CONFIG
+from core.db_readonly import connect_readonly
 from core.retry import ExponentialBackoff
 
 
@@ -67,6 +69,7 @@ DETAIL_OPERATION_NAMES = (
     "ProductHeader_Init",
     "GetCompareProduct",
     "ProductCarousel_Recommendations",
+    "URE_FetchRecommendations",
 )
 
 
@@ -158,6 +161,88 @@ def resolve_numeric_sku(row, sku_map=None):
         if value:
             return str(value)
     return None
+
+
+def load_db_numeric_sku_url_map():
+    """Load item -> numeric skuId from existing DB URLs that already include /sku/<id>."""
+    result = {}
+    try:
+        conn = connect_readonly({**DB_CONFIG, "database": "postgres"})
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT item, product_url FROM tv_item_mst
+            WHERE item IS NOT NULL AND product_url IS NOT NULL
+            UNION
+            SELECT substring(product_url from '/product/[^/]+/([^/?]+)') AS item, product_url
+            FROM bby_tv_product_list
+            WHERE product_url IS NOT NULL
+            """
+        )
+        for item, product_url in cursor.fetchall():
+            sku = extract_numeric_sku_from_text(product_url)
+            if item and sku:
+                result.setdefault(str(item), str(sku))
+        cursor.close()
+        conn.close()
+    except Exception as exc:
+        print(f"[WARNING] DB numeric sku URL map unavailable: {exc}")
+    if result:
+        print(f"[INFO] Loaded DB numeric sku URL map: {len(result)} items")
+    return result
+
+
+def discover_numeric_sku_from_pdp(collector, product_url, item):
+    """Last-mile skuId recovery for rows whose listing card did not expose numeric skuId."""
+    if os.environ.get("BBY_API_ONLY_SKU_DISCOVERY_ON_MISSING", "1") != "1":
+        return None
+    if not product_url:
+        return None
+    try:
+        page = collector._ensure_page()
+        page.get(product_url)
+        candidates = [str(getattr(page, "url", "") or "")]
+        try:
+            candidates.append(page.run_js("return document.documentElement.outerHTML || '';", timeout=8) or "")
+        except Exception:
+            pass
+        try:
+            candidates.append(page.run_js("return document.body ? document.body.innerText : '';", timeout=8) or "")
+        except Exception:
+            pass
+        for text in candidates:
+            sku = extract_numeric_sku_from_text(text)
+            if sku:
+                print(f"[INFO] Recovered numeric skuId via minimal PDP discovery: item={item} skuId={sku}")
+                return sku
+    except Exception as exc:
+        print(f"[WARNING] Minimal PDP sku discovery failed for {item}: {exc}")
+    return None
+
+
+def filter_noncritical_graphql_errors(errors):
+    """Ignore optional GraphQL field misses that do not block detail collection."""
+    if not isinstance(errors, dict):
+        return errors
+    filtered = {}
+    for operation, operation_errors in errors.items():
+        kept = []
+        for error in operation_errors or []:
+            path = error.get("path") if isinstance(error, dict) else None
+            message = str(error.get("message") if isinstance(error, dict) else error)
+            path_text = ".".join(str(part) for part in path) if isinstance(path, list) else str(path or "")
+            optional_feature_missing = (
+                "not found" in message.lower()
+                and (
+                    "reviewInfo.conFeatures" in path_text
+                    or "reviewInfo.proFeatures" in path_text
+                )
+            )
+            if not optional_feature_missing:
+                kept.append(error)
+        if kept:
+            filtered[operation] = kept
+    return filtered or None
 
 
 def filter_listing_csvs():
@@ -487,13 +572,25 @@ def parse_similar_products(bundle, current_name=None, limit=4):
             return
         if current_name and text == current_name:
             return
+        lower = text.lower()
+        blocked_labels = {
+            "picture quality",
+            "key specs",
+            "dimensions",
+            "features",
+            "specifications",
+            "pros",
+            "cons",
+        }
+        if lower in blocked_labels:
+            return
         key = text.lower()
         if key in seen:
             return
         seen.add(key)
         names.append(text)
 
-    def walk(value):
+    def walk_recommendation_node(value):
         if len(names) >= limit:
             return
         if isinstance(value, dict):
@@ -502,15 +599,37 @@ def parse_similar_products(bundle, current_name=None, limit=4):
                 add_name(name_obj.get("short") or name_obj.get("title"))
             elif isinstance(name_obj, str):
                 add_name(name_obj)
-            add_name(value.get("productName") or value.get("title"))
-            for child in value.values():
-                walk(child)
+            add_name(
+                value.get("productName")
+                or value.get("title")
+                or value.get("shortName")
+                or value.get("displayName")
+            )
+            product = value.get("product")
+            if isinstance(product, dict):
+                walk_recommendation_node(product)
         elif isinstance(value, list):
             for child in value:
-                walk(child)
+                walk_recommendation_node(child)
 
-    walk(bundle.get("GetCompareProduct") or {})
-    walk(bundle.get("ProductCarousel_Recommendations") or {})
+    def walk_recommendation_containers(value):
+        if len(names) >= limit:
+            return
+        if isinstance(value, dict):
+            for key in ("recommendations", "items", "products", "results"):
+                child = value.get(key)
+                if isinstance(child, list):
+                    walk_recommendation_node(child)
+            for key in ("subPlacements", "placements", "recommendationsV2", "recommendations"):
+                child = value.get(key)
+                if isinstance(child, (dict, list)):
+                    walk_recommendation_containers(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk_recommendation_containers(child)
+
+    for operation in ("GetCompareProduct", "ProductCarousel_Recommendations", "URE_FetchRecommendations"):
+        walk_recommendation_containers(bundle.get(operation) or {})
     return [{"product_name": name} for name in names[:limit]]
 
 
@@ -528,6 +647,7 @@ def run_api_only_detail(rows):
     registry = load_graphql_registry(registry_dir)
     cookies = load_graphql_cookies(registry_dir)
     saved_sku_map = load_sku_map(registry_dir)
+    db_numeric_sku_map = load_db_numeric_sku_url_map()
     if not registry:
         print(f"[WARNING] GraphQL registry not found: {registry_dir}")
     operation_names = detail_operation_names(registry)
@@ -557,8 +677,11 @@ def run_api_only_detail(rows):
             product_url = row.get("product_url")
             item = extract_item_from_url(product_url)
             numeric_sku = resolve_numeric_sku(row, saved_sku_map)
+            if not numeric_sku and item:
+                numeric_sku = db_numeric_sku_map.get(item)
             parsed = {}
             errors = None
+            ignored_errors = None
             if registry and product_url and numeric_sku:
                 bundle = collector.collect_review_bundle_sync(
                     product_url,
@@ -576,13 +699,38 @@ def run_api_only_detail(rows):
                 price_data = parse_price(bundle)
                 spec_data = parse_specs(bundle, row.get("retailer_sku_name") or row.get("product_name"))
                 similar_products = parse_similar_products(bundle, row.get("retailer_sku_name") or row.get("product_name"))
-                errors = bundle.get("errors")
+                raw_errors = bundle.get("errors")
+                errors = filter_noncritical_graphql_errors(raw_errors)
+                ignored_errors = raw_errors if raw_errors and not errors else None
                 crawler.record_graphql_sku_map(product_url, numeric_sku)
             elif not numeric_sku:
-                errors = {"skuId": "numeric_sku missing from listing"}
-                price_data = {}
-                spec_data = {}
-                similar_products = []
+                numeric_sku = discover_numeric_sku_from_pdp(collector, product_url, item)
+                if numeric_sku and registry and product_url:
+                    bundle = collector.collect_review_bundle_sync(
+                        product_url,
+                        registry,
+                        cookies=cookies,
+                        sku_map={product_url: numeric_sku, item: numeric_sku},
+                        operation_names=operation_names,
+                    )
+                    parsed = bundle.get("parsed") or {}
+                    if parsed.get("count_of_reviews") is None:
+                        parsed["count_of_reviews"] = first_value(bundle, ("reviewCount", "totalReviewCount", "numberOfReviews"))
+                    if parsed.get("star_rating") is None:
+                        parsed["star_rating"] = first_value(bundle, ("averageRating", "ratingValue", "starRating"))
+                    parsed = normalize_review_state(parsed, bundle)
+                    price_data = parse_price(bundle)
+                    spec_data = parse_specs(bundle, row.get("retailer_sku_name") or row.get("product_name"))
+                    similar_products = parse_similar_products(bundle, row.get("retailer_sku_name") or row.get("product_name"))
+                    raw_errors = bundle.get("errors")
+                    errors = filter_noncritical_graphql_errors(raw_errors)
+                    ignored_errors = raw_errors if raw_errors and not errors else None
+                    crawler.record_graphql_sku_map(product_url, numeric_sku)
+                else:
+                    errors = {"skuId": "numeric_sku missing from listing and recovery failed"}
+                    price_data = {}
+                    spec_data = {}
+                    similar_products = []
             else:
                 price_data = {}
                 spec_data = {}
@@ -590,6 +738,8 @@ def run_api_only_detail(rows):
 
             if errors:
                 print(f"[API-ONLY] {order}/{len(rows)} {item}: GraphQL partial/failed: {errors}")
+            elif ignored_errors:
+                print(f"[API-ONLY] {order}/{len(rows)} {item}: GraphQL ok (ignored optional feature errors)")
             else:
                 print(f"[API-ONLY] {order}/{len(rows)} {item}: GraphQL ok")
 
@@ -604,7 +754,7 @@ def run_api_only_detail(rows):
                 count_of_star_ratings=parsed.get("count_of_reviews"),
                 top_mentions=None,
                 detailed_reviews=parsed.get("detailed_review_content"),
-                summarized_review_content=parsed.get("summarized_review_content"),
+                summarized_review_content=None,
                 recommendation_intent=format_recommendation(parsed.get("recommendation_intent")),
                 product_url=product_url,
                 final_sku_price=price_data.get("final_sku_price"),
@@ -612,7 +762,7 @@ def run_api_only_detail(rows):
                 original_sku_price=price_data.get("original_sku_price"),
                 offer=row.get("offer"),
                 pick_up_availability=row.get("pick_up_availability"),
-                shipping_availability=row.get("shipping_availability") or row.get("fastest_delivery"),
+                shipping_availability=row.get("fastest_delivery") or row.get("shipping_availability"),
                 delivery_availability=row.get("delivery_availability"),
                 sku_status=row.get("sku_status"),
                 star_rating_source=parsed.get("star_rating"),

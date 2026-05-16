@@ -267,6 +267,8 @@ class RowQualityAuditor:
                 issues.append({"severity": "warning", "field": "star_rating", "reason": "not_numeric"})
 
         count = row.get("count_of_reviews_int")
+        if count is None:
+            count = row.get("count_of_reviews")
         if count is not None:
             try:
                 if int(count) < 0:
@@ -274,8 +276,8 @@ class RowQualityAuditor:
             except Exception:
                 issues.append({"severity": "warning", "field": "count_of_reviews_int", "reason": "not_integer"})
 
-        if row.get("star_rating") == "Not yet reviewed" and row.get("count_of_reviews_int") not in (0, None):
-            issues.append({"severity": "warning", "field": "count_of_reviews_int", "reason": "not_reviewed_but_nonzero"})
+        if row.get("star_rating") == "Not yet reviewed" and count not in (0, "0", None, ""):
+            issues.append({"severity": "warning", "field": "count_of_reviews", "reason": "not_reviewed_but_nonzero"})
 
         self.audit_log.write("row_quality", {
             "product_url": row.get("product_url"),

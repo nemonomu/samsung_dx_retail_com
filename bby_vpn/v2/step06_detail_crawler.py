@@ -128,7 +128,13 @@ class BestBuyDetailCrawler:
         os.makedirs(self.discovery_dir, exist_ok=True)
         self.clear_output_on_start = os.environ.get('BBY_DT_CLEAR_OUTPUT', '0') == '1'
         if self.clear_output_on_start and os.path.exists(self.csv_output_path):
-            os.remove(self.csv_output_path)
+            try:
+                os.remove(self.csv_output_path)
+            except PermissionError:
+                locked_path = self.csv_output_path
+                stem, ext = os.path.splitext(locked_path)
+                self.csv_output_path = f"{stem}_{self.batch_id}{ext}"
+                print(f"[WARNING] Output CSV is locked; writing to {self.csv_output_path} instead")
 
         self.max_skus = self.config.get_int('constant', 'max_products_detail', self.file_name, 300)
         self.core_only = os.environ.get('BBY_DT_CORE_ONLY', '1') == '1'

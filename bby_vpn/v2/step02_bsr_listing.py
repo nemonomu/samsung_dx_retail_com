@@ -52,6 +52,7 @@ from listing_graphql import (
     save_listing_operation_from_html,
 )
 from data_paths import graphql_registry_dir, listing_parsed_dir
+from step01_main_listing import BestBuyTVMainCrawler as GraphQLListingCrawlerBase
 
 
 
@@ -742,6 +743,144 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                 self.page.quit()
             if self.db_conn:
                 self.db_conn.close()
+
+
+class BestBuyTVBSRCrawler(GraphQLListingCrawlerBase):
+    """BSR listing crawler using the same direct GraphQL replay path as main."""
+
+    def __init__(self, test_mode=True, batch_id=None, time_offset_hours=0):
+        BaseCrawler.__init__(self)
+        self.test_mode = test_mode
+        self.account_name = 'Bestbuy'
+        self.page_type = 'bsr'
+        self.batch_id = batch_id
+        self.time_offset_hours = time_offset_hours
+        self.calendar_week = None
+        self.url_template = None
+
+        self.test_count = 1
+        self.max_products = 100
+        self.max_pages = 20
+        self.current_rank = 0
+        self.saved_urls = set()
+        self.csv_output_dir = str(listing_parsed_dir("bsr"))
+        self.graphql_output_dir = str(graphql_registry_dir())
+        self.csv_output_path = os.path.join(self.csv_output_dir, 'bby_tv_bsr1_vpn_test.csv')
+        self.raw_target_output_path = os.path.join(self.csv_output_dir, 'bby_tv_bsr_raw_target_list.csv')
+        self.main_data_dir = os.path.dirname(self.csv_output_dir)
+        self.graphql_raw_dir = os.path.join(self.main_data_dir, "raw_graphql")
+        self.benchmarks_dir = os.path.join(self.main_data_dir, "benchmarks")
+        self.page_benchmarks_path = os.path.join(self.benchmarks_dir, "page_benchmarks.csv")
+        self.page_summary_path = os.path.join(self.csv_output_dir, "bsr_page_summary.json")
+        self.raw_search_summary_path = os.path.join(self.main_data_dir, "raw_search_summary.json")
+        self.manifest_path = os.path.join(self.main_data_dir, "manifest.json")
+        self.graphql_operation = None
+        self.graphql_endpoint = None
+        self.zenrows_client = None
+        self.page_benchmarks = []
+        self.raw_search = []
+        self.run_started_at = None
+        self.run_start_perf = None
+
+        if os.path.exists(self.csv_output_path):
+            os.remove(self.csv_output_path)
+        if os.path.exists(self.raw_target_output_path):
+            os.remove(self.raw_target_output_path)
+
+        self.stats = {
+            'collected': 0,
+            'duplicates': 0,
+            'openbox_filtered': 0,
+            'non_product': 0,
+            'inserted': 0,
+            'skipped_by_target': 0,
+        }
+
+    def prepare_graphql_payload(self, page_number, referer_url):
+        payload = super().prepare_graphql_payload(page_number, referer_url)
+        variables = payload.setdefault("variables", {})
+        variables.setdefault("sort", {})
+        variables["sort"]["sort"] = os.getenv("BESTBUY_BSR_SORT", "Best-Selling")
+        return payload
+
+    def parse_graphql_product(self, product, page_number, extra=None):
+        row = super().parse_graphql_product(product, page_number, extra)
+        if row:
+            row.pop("main_rank", None)
+            row["bsr_rank"] = 0
+        return row
+
+    def save_products(self, products):
+        """V2 저장: DB INSERT 없이 dt 입력용 BSR CSV에만 저장한다."""
+        if not products:
+            return 0
+
+        self.stats['collected'] += len(products)
+        unique_products = []
+        for idx, product in enumerate(products):
+            retailer_sku_name = product.get('retailer_sku_name') or ''
+            product_url = product.get('product_url')
+            item = self.extract_item_from_url(product_url)
+
+            if product_url and 'openbox' in product_url.lower():
+                print(f"[SKIP] Open Box 상품 제외: {product_url}")
+                self.stats['openbox_filtered'] += 1
+                continue
+
+            if self.is_product_excluded(item):
+                print(f"[SKIP] 비제품(is_product=FALSE): {retailer_sku_name[:40] if retailer_sku_name else 'N/A'}...")
+                self.stats['non_product'] += 1
+                continue
+
+            if item and item in self.saved_urls:
+                print(f"[SKIP] 중복 item={item}: {retailer_sku_name[:40] if retailer_sku_name else 'N/A'}... url={product_url}")
+                self.stats['duplicates'] += 1
+                continue
+
+            if item:
+                self.saved_urls.add(item)
+
+            self.current_rank += 1
+            target = self.test_count if self.test_mode else self.max_products
+            if self.current_rank > target:
+                self.stats['skipped_by_target'] += len(products) - idx
+                break
+            product['bsr_rank'] = self.current_rank
+            unique_products.append(product)
+
+        if not unique_products:
+            return 0
+
+        fieldnames = [
+            'account_name', 'batch_id', 'page_type', 'bsr_rank', 'retailer_sku_name',
+            'offer', 'pick_up_availability', 'shipping_availability',
+            'delivery_availability', 'sku_status', 'product_url', 'numeric_sku',
+            'sku_id', 'bsin', 'source_product_url',
+            'final_sku_price', 'original_sku_price', 'savings',
+            'crawl_datetime', 'calendar_week', 'page_number', 'fastest_delivery'
+        ]
+        try:
+            file_exists = os.path.exists(self.csv_output_path)
+            with open(self.csv_output_path, 'a', newline='', encoding='utf-8-sig') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                if not file_exists or os.path.getsize(self.csv_output_path) == 0:
+                    writer.writeheader()
+                for product in unique_products:
+                    row = {field: product.get(field) for field in fieldnames}
+                    row['shipping_availability'] = product.get('fastest_delivery')
+                    writer.writerow(row)
+
+            saved_count = len(unique_products)
+            self.stats['inserted'] += saved_count
+            print(f"[CSV] Saved {saved_count} rows to {self.csv_output_path}")
+            return saved_count
+        except Exception as e:
+            print(f"[ERROR] Failed to save products to CSV: {e}")
+            traceback.print_exc()
+            return 0
+
+    def write_benchmark_outputs(self, total_products):
+        super().write_benchmark_outputs(total_products)
 
 
 import argparse

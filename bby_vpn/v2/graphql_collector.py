@@ -5,6 +5,7 @@ import copy
 import json
 import os
 import re
+import socket
 import tempfile
 import time
 import urllib.error
@@ -298,7 +299,7 @@ class BrowserFetchGraphQLCollector(GraphQLCollector):
         from DrissionPage import ChromiumOptions, ChromiumPage
 
         options = ChromiumOptions()
-        options.auto_port()
+        options.set_local_port(_free_local_port())
         options.no_imgs(True)
         user_data_path = os.environ.get("BBY_BROWSER_FETCH_USER_DATA_DIR")
         if not user_data_path:
@@ -306,7 +307,7 @@ class BrowserFetchGraphQLCollector(GraphQLCollector):
             user_data_path = tempfile.mkdtemp(prefix="bby_graphql_fetch_", dir=temp_root)
         self._user_data_path = user_data_path
         options.set_user_data_path(user_data_path)
-        if os.environ.get("BBY_BROWSER_FETCH_HEADLESS", "1") == "1":
+        if os.environ.get("BBY_BROWSER_FETCH_HEADLESS", "0") == "1":
             options.set_argument("--headless=new")
         self.page = ChromiumPage(options)
         return self.page
@@ -315,7 +316,7 @@ class BrowserFetchGraphQLCollector(GraphQLCollector):
         page = self._ensure_page()
         referer = headers.get("Referer") or headers.get("referer") or "https://www.bestbuy.com/"
         if not str(getattr(page, "url", "") or "").startswith("https://www.bestbuy.com"):
-            page.get(referer)
+            page.get(os.environ.get("BBY_BROWSER_FETCH_ORIGIN_URL", "https://www.bestbuy.com/"))
 
         result_key = f"__bbyGraphqlFetchResult_{int(time.time() * 1000)}"
         fetch_headers = _sanitize_request_headers(headers)
@@ -478,6 +479,18 @@ def _review_page_size():
     except ValueError:
         value = 20
     return max(1, min(value, 20))
+
+
+def _free_local_port():
+    configured = os.environ.get("BBY_BROWSER_FETCH_PORT")
+    if configured:
+        try:
+            return int(configured)
+        except ValueError:
+            pass
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
 
 
 def build_headers_for_url(operation, product_url):

@@ -42,14 +42,15 @@ setup_environment(__file__)
 
 from common.base_crawler import BaseCrawler
 from config import DB_CONFIG
-from core.db_readonly import connect_readonly
-from bby_listing_sku import extract_numeric_sku, extract_sponsored_status
-from bby_listing_graphql import (
+from db_readonly import connect_readonly
+from listing_sku import extract_numeric_sku, extract_sponsored_status
+from listing_graphql import (
     ListingGraphQLSkuCollector,
     direct_listing_products,
     extract_listing_products_from_html,
     save_listing_operation_from_html,
 )
+from data_paths import graphql_registry_dir, listing_parsed_dir
 
 
 
@@ -110,7 +111,8 @@ class BestBuyTVBSRCrawler(BaseCrawler):
         self.current_rank = 0
         self.db_url_map = {}       # {정규화URL: 원본URL} - Main에서 저장된 URL
         self.crawled_urls = set()  # BSR에서 수집한 정규화 URL (페이지 간 중복 방지)
-        self.csv_output_dir = os.path.dirname(os.path.abspath(__file__))
+        self.csv_output_dir = str(listing_parsed_dir("bsr"))
+        self.graphql_output_dir = str(graphql_registry_dir())
         self.csv_output_path = os.path.join(self.csv_output_dir, 'bby_tv_bsr1_vpn_test.csv')
 
         if os.path.exists(self.csv_output_path):
@@ -299,7 +301,7 @@ class BestBuyTVBSRCrawler(BaseCrawler):
     def crawl_page(self, page_number):
         """페이지 크롤링: 페이지 로드 → 제품 파싱 → URL 누락 시 1스텝 스크롤 로딩 → 반복 (스마트 스크롤)"""
         products = []
-        sku_collector = ListingGraphQLSkuCollector(self.page, output_dir=self.csv_output_dir)
+        sku_collector = ListingGraphQLSkuCollector(self.page, output_dir=self.graphql_output_dir)
         try:
             url = self.ensure_24_results_url(self.url_template.replace('{page}', str(page_number)))
             expected_page_products = int(os.environ.get("BBY_LISTING_EXPECTED_PAGE_PRODUCTS", "24"))
@@ -317,7 +319,7 @@ class BestBuyTVBSRCrawler(BaseCrawler):
             }
             try:
                 direct_products = direct_listing_products(
-                    self.csv_output_dir,
+                    self.graphql_output_dir,
                     self.page_type,
                     page_number,
                     defaults=listing_defaults,
@@ -348,7 +350,7 @@ class BestBuyTVBSRCrawler(BaseCrawler):
                 for cookie in self.page.cookies():
                     if cookie.get("name"):
                         cookies[cookie.get("name")] = cookie.get("value")
-                path = save_listing_operation_from_html(self.csv_output_dir, initial_html, cookies=cookies)
+                path = save_listing_operation_from_html(self.graphql_output_dir, initial_html, cookies=cookies)
                 if path:
                     print(f"[INFO] Saved Apollo listing GraphQL operation from HTML -> {path}")
             except Exception as exc:
@@ -750,3 +752,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+

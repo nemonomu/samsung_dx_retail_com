@@ -1,0 +1,5 @@
+__pycache__/
+log/
+archive/
+graphql_collect_test_local.jsonl
+*.diagnostics.json

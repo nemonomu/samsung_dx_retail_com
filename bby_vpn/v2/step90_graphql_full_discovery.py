@@ -1,8 +1,8 @@
-"""Discover Best Buy PDP GraphQL operations for API-first detail collection.
+﻿"""Discover Best Buy PDP GraphQL operations for API-first detail collection.
 
 This is a short, bounded discovery runner. It opens a small representative set
 of PDP URLs, triggers the expensive UI surfaces once, and persists every
-GraphQL operation it observes into mapping_run/graphql_registry.json.
+GraphQL operation it observes into data/graphql/registry.
 """
 
 from __future__ import annotations
@@ -41,17 +41,18 @@ for ancestor in (BASE_DIR, *BASE_DIR.parents):
         if (path / "common" / "setup.py").exists():
             add_import_path(path)
 
-from bby_listing_sku import extract_numeric_sku_from_text
-from core.session_pool import cookies_from_drission_page, minimal_headers_from_packet
-from crawler.discovery.graphql_mapper import GraphQLMapper
+from listing_sku import extract_numeric_sku_from_text
+from session_pool import cookies_from_drission_page, minimal_headers_from_packet
+from graphql_mapper import GraphQLMapper
+from data_paths import detail_parsed_dir, graphql_registry_dir, listing_csv_path
 
 
 LISTING_FILES = (
-    BASE_DIR / "bby_tv_main1_vpn_test.csv",
-    BASE_DIR / "bby_tv_bsr1_vpn_test.csv",
-    BASE_DIR / "bby_tv_pmt1_vpn_test.csv",
-    BASE_DIR / "bby_tv_trend_crawl_vpn_test.csv",
-    BASE_DIR / "mapping_run" / "bby_tv_vpn_test.csv",
+    listing_csv_path("main"),
+    listing_csv_path("bsr"),
+    listing_csv_path("promotion"),
+    listing_csv_path("trend"),
+    detail_parsed_dir() / "bby_tv_vpn_test.csv",
 )
 
 
@@ -121,9 +122,9 @@ def choose_representative_rows(rows, limit):
 
 class FullDiscovery:
     def __init__(self):
-        self.output_dir = Path(os.environ.get("BBY_GRAPHQL_REGISTRY_DIR", BASE_DIR / "mapping_run"))
+        self.output_dir = Path(os.environ.get("BBY_GRAPHQL_REGISTRY_DIR", graphql_registry_dir()))
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.discovery_dir = self.output_dir / "crawler" / "discovery"
+        self.discovery_dir = self.output_dir
         self.discovery_dir.mkdir(parents=True, exist_ok=True)
         self.mapper = GraphQLMapper(str(self.discovery_dir))
         self.page = None
@@ -322,3 +323,5 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

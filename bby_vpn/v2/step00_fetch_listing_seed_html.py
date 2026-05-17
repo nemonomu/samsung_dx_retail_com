@@ -1,4 +1,4 @@
-"""Fetch Best Buy listing seed HTML through ZenRows.
+﻿"""Fetch Best Buy listing seed HTML through ZenRows.
 
 The API-only listing replay needs the Apollo ``PlpView_ProductList_Init``
 operation embedded in a rendered Best Buy search page. This script follows the
@@ -21,7 +21,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from bby_listing_graphql import extract_apollo_payloads, find_started_operation, operation_name
+from listing_graphql import extract_apollo_payloads, find_started_operation, operation_name
 
 
 BESTBUY_SEARCH_URL = "https://www.bestbuy.com/site/searchpage.jsp?id=pcat17071&st=tv&intl=nosplash"
@@ -229,3 +229,4 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

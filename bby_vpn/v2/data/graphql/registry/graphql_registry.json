@@ -1,0 +1,91 @@
+{
+  "CustomerRatingCard_Init": {
+    "operationName": "CustomerRatingCard_Init",
+    "endpoint_url": "https://www.bestbuy.com/gateway/graphql",
+    "request_template": {
+      "operationName": "CustomerRatingCard_Init",
+      "variables": {
+        "skuId": "6623797"
+      },
+      "extensions": {
+        "clientLibrary": {
+          "name": "@apollo/client",
+          "version": "4.1.6"
+        }
+      },
+      "query": "query CustomerRatingCard_Init($skuId: String!) {\n  ...CustomerRatingCard_Fragment\n}\n\nfragment CustomerRatingCard_Fragment on Query {\n  productBySkuId(skuId: $skuId) {\n    skuId\n    reviewInfo {\n      averageRating\n      recommendedPercent\n      reviewCount\n      starRatingDistribution {\n        count\n        percent\n        value\n        __typename\n      }\n      __typename\n    }\n    __typename\n    openBoxCondition\n  }\n  __typename\n}"
+    },
+    "required_variables": [
+      "skuId"
+    ],
+    "persisted_query_hash": null,
+    "request_headers": {
+      "Referer": "https://www.bestbuy.com/product/pioneer-65-class-led-4k-uhd-smart-roku-tv/J2FPJK9SG8",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+      "accept": "application/graphql-response+json,application/json;q=0.9",
+      "content-type": "application/json",
+      "origin": "https://www.bestbuy.com"
+    },
+    "updated_at": "2026-05-16T16:45:58Z"
+  },
+  "Ai_Review_Summary_Init": {
+    "operationName": "Ai_Review_Summary_Init",
+    "endpoint_url": "https://www.bestbuy.com/gateway/graphql",
+    "request_template": {
+      "operationName": "Ai_Review_Summary_Init",
+      "variables": {
+        "skuId": "6623797"
+      },
+      "extensions": {
+        "clientLibrary": {
+          "name": "@apollo/client",
+          "version": "4.1.6"
+        }
+      },
+      "query": "query Ai_Review_Summary_Init($skuId: String!) {\n  ...AiReviewSummary_Fragment\n}\n\nfragment AiReviewSummary_Fragment on Query {\n  productBySkuId(skuId: $skuId) {\n    reviewInfo {\n      reviewSummary\n      __typename\n    }\n    __typename\n    skuId\n    openBoxCondition\n  }\n  __typename\n}"
+    },
+    "required_variables": [
+      "skuId"
+    ],
+    "persisted_query_hash": null,
+    "request_headers": {
+      "Referer": "https://www.bestbuy.com/product/pioneer-65-class-led-4k-uhd-smart-roku-tv/J2FPJK9SG8",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+      "accept": "application/graphql-response+json,application/json;q=0.9",
+      "content-type": "application/json",
+      "origin": "https://www.bestbuy.com"
+    },
+    "updated_at": "2026-05-16T16:45:59Z"
+  },
+  "CustomerReviewList_Init": {
+    "operationName": "CustomerReviewList_Init",
+    "endpoint_url": "https://www.bestbuy.com/gateway/graphql",
+    "request_template": {
+      "operationName": "CustomerReviewList_Init",
+      "variables": {
+        "onlyIfRelated": true,
+        "skuId": "6623797"
+      },
+      "extensions": {
+        "clientLibrary": {
+          "name": "@apollo/client",
+          "version": "4.1.6"
+        }
+      },
+      "query": "query CustomerReviewList_Init($skuId: String!, $onlyIfRelated: Boolean = true) {\n  ...CustomerReviewList_Fragment\n}\n\nfragment CustomerReviewList_Fragment on Query {\n  productBySkuId(skuId: $skuId) {\n    reviews(filter: {page: 1, pageSize: 3, sortBy: BEST_MATCH}) {\n      results {\n        badges {\n          code\n          description\n          name\n          __typename\n        }\n        daysOfOwnership\n        id\n        images {\n          id\n          piscesUrl\n          __typename\n        }\n        rating\n        submissionTime\n        text\n        title\n        userNickname\n        reviewedProduct(onlyIfRelated: $onlyIfRelated) {\n          dotComDisplayStatus\n          name {\n            short\n            __typename\n          }\n          skuId\n          url {\n            relativePdp\n            __typename\n          }\n          __typename\n          openBoxCondition\n        }\n        __typename\n      }\n      __typename\n    }\n    __typename\n    skuId\n    openBoxCondition\n  }\n  __typename\n}"
+    },
+    "required_variables": [
+      "onlyIfRelated",
+      "skuId"
+    ],
+    "persisted_query_hash": null,
+    "request_headers": {
+      "Referer": "https://www.bestbuy.com/product/pioneer-65-class-led-4k-uhd-smart-roku-tv/J2FPJK9SG8",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+      "accept": "application/graphql-response+json,application/json;q=0.9",
+      "content-type": "application/json",
+      "origin": "https://www.bestbuy.com"
+    },
+    "updated_at": "2026-05-16T16:45:59Z"
+  }
+}

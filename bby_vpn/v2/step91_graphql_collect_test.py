@@ -1,4 +1,4 @@
-"""Small CLI to verify API-first GraphQL collection from captured mappings."""
+﻿"""Small CLI to verify API-first GraphQL collection from captured mappings."""
 
 import argparse
 import csv
@@ -6,7 +6,7 @@ import json
 import os
 import sys
 
-from collectors.graphql_collector import (
+from graphql_collector import (
     BrowserFetchGraphQLCollector,
     GraphQLCollector,
     REVIEW_OPERATIONS,
@@ -15,7 +15,7 @@ from collectors.graphql_collector import (
     load_sku_map,
     resolve_sku_id_from_product_page,
 )
-from core.retry import ExponentialBackoff
+from retry_policy import ExponentialBackoff
 
 
 def read_urls(args):
@@ -109,3 +109,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+

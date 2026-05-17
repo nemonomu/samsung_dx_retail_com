@@ -6,7 +6,7 @@ import re
 import shutil
 from datetime import datetime
 
-from .graphql_registry import GraphQLOperationRegistry
+from graphql_registry import GraphQLOperationRegistry
 
 
 def _safe_name(value):

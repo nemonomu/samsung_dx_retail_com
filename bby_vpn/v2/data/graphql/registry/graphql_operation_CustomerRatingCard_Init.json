@@ -1,0 +1,140 @@
+{
+  "operationName": "CustomerRatingCard_Init",
+  "endpoint_url": "https://www.bestbuy.com/gateway/graphql",
+  "request_payload": {
+    "operationName": "CustomerRatingCard_Init",
+    "variables": {
+      "skuId": "6623797"
+    },
+    "extensions": {
+      "clientLibrary": {
+        "name": "@apollo/client",
+        "version": "4.1.6"
+      }
+    },
+    "query": "query CustomerRatingCard_Init($skuId: String!) {\n  ...CustomerRatingCard_Fragment\n}\n\nfragment CustomerRatingCard_Fragment on Query {\n  productBySkuId(skuId: $skuId) {\n    skuId\n    reviewInfo {\n      averageRating\n      recommendedPercent\n      reviewCount\n      starRatingDistribution {\n        count\n        percent\n        value\n        __typename\n      }\n      __typename\n    }\n    __typename\n    openBoxCondition\n  }\n  __typename\n}"
+  },
+  "request_headers": {
+    "Referer": "https://www.bestbuy.com/product/pioneer-65-class-led-4k-uhd-smart-roku-tv/J2FPJK9SG8",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "accept": "application/graphql-response+json,application/json;q=0.9",
+    "content-type": "application/json",
+    "origin": "https://www.bestbuy.com"
+  },
+  "response_schema": {
+    "data": {
+      "productBySkuId": {
+        "skuId": "str",
+        "reviewInfo": {
+          "averageRating": "float",
+          "recommendedPercent": "int",
+          "reviewCount": "int",
+          "starRatingDistribution": [
+            "dict"
+          ],
+          "__typename": "str"
+        },
+        "__typename": "str",
+        "openBoxCondition": "NoneType"
+      },
+      "__typename": "str"
+    }
+  },
+  "sample_response": {
+    "data": {
+      "productBySkuId": {
+        "skuId": "6623797",
+        "reviewInfo": {
+          "averageRating": 4.8,
+          "recommendedPercent": 96,
+          "reviewCount": 351,
+          "starRatingDistribution": [
+            {
+              "count": 7,
+              "percent": 2,
+              "value": "1",
+              "__typename": "RatingDistributionItem"
+            },
+            {
+              "count": 6,
+              "percent": 2,
+              "value": "2",
+              "__typename": "RatingDistributionItem"
+            },
+            {
+              "count": 2,
+              "percent": 0,
+              "value": "3",
+              "__typename": "RatingDistributionItem"
+            },
+            {
+              "count": 35,
+              "percent": 10,
+              "value": "4",
+              "__typename": "RatingDistributionItem"
+            },
+            {
+              "count": 301,
+              "percent": 86,
+              "value": "5",
+              "__typename": "RatingDistributionItem"
+            }
+          ],
+          "__typename": "ProductReviewInfo"
+        },
+        "__typename": "Product",
+        "openBoxCondition": null
+      },
+      "__typename": "Query"
+    }
+  },
+  "required_cookies": [
+    "AMCVS_F6301253512D2BDB0A490D45%40AdobeOrg",
+    "AMCV_F6301253512D2BDB0A490D45%40AdobeOrg",
+    "AWSELB",
+    "AWSELBCORS",
+    "CTT",
+    "CartItemCount",
+    "NID",
+    "SID",
+    "_GRECAPTCHA",
+    "__Secure-ENID",
+    "_abck",
+    "_cs_c",
+    "_cs_id",
+    "_cs_s",
+    "ak_bmsc",
+    "akacd_PR_www_bestbuy_com",
+    "askBlueViewMode",
+    "basketTimestamp",
+    "bby_cbc_lb",
+    "bby_rdp",
+    "blue-assist-banner-shown",
+    "bm_lso",
+    "bm_s",
+    "bm_so",
+    "bm_ss",
+    "bm_sz",
+    "c2",
+    "customerZipCode",
+    "dtCookie",
+    "dtPC",
+    "dtSa",
+    "intl_splash",
+    "isGridViewEnabled",
+    "locDestZip",
+    "locStoreId",
+    "ltc",
+    "lux_uid",
+    "physical_dma",
+    "pst2",
+    "rxVisitor",
+    "rxvt",
+    "surveyDisabled",
+    "vt"
+  ],
+  "variables": {
+    "skuId": "6623797"
+  },
+  "captured_at": "2026-05-16T16:45:58Z"
+}

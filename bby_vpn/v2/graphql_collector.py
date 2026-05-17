@@ -1,4 +1,4 @@
-"""API-first GraphQL collector using httpx when available."""
+﻿"""API-first GraphQL collector using httpx when available."""
 
 import asyncio
 import copy
@@ -10,10 +10,11 @@ import time
 import urllib.error
 import urllib.request
 
-from core.rate_limit import AsyncHostRateLimiter
-from core.retry import ExponentialBackoff
-from parsers.graphql_product_parser import parse_product_facts
-from parsers.graphql_review_parser import collect_reviews
+from rate_limit import AsyncHostRateLimiter
+from retry_policy import ExponentialBackoff
+from graphql_product_parser import parse_product_facts
+from graphql_review_parser import collect_reviews
+from data_paths import graphql_registry_dir
 
 
 REVIEW_OPERATIONS = (
@@ -356,6 +357,7 @@ class BrowserFetchGraphQLCollector(GraphQLCollector):
 def load_graphql_registry(base_dir):
     """Load registry from either mapping output root or crawler/discovery dir."""
     candidates = [
+        os.path.join(str(graphql_registry_dir()), "graphql_registry.json"),
         os.path.join(base_dir, "graphql_registry.json"),
         os.path.join(base_dir, "crawler", "discovery", "graphql_registry.json"),
     ]
@@ -369,6 +371,7 @@ def load_graphql_registry(base_dir):
 def load_sku_map(base_dir):
     """Load URL -> numeric skuId cache produced during GraphQL discovery."""
     candidates = [
+        os.path.join(str(graphql_registry_dir()), "graphql_sku_map.json"),
         os.path.join(base_dir, "graphql_sku_map.json"),
         os.path.join(base_dir, "crawler", "discovery", "graphql_sku_map.json"),
     ]
@@ -400,6 +403,7 @@ def load_sku_map(base_dir):
 def load_graphql_cookies(base_dir):
     """Load browser session cookies captured during GraphQL discovery."""
     candidates = [
+        os.path.join(str(graphql_registry_dir()), "graphql_cookies.json"),
         os.path.join(base_dir, "graphql_cookies.json"),
         os.path.join(base_dir, "crawler", "discovery", "graphql_cookies.json"),
     ]
@@ -432,6 +436,8 @@ def lookup_sku_id(product_url, sku_map):
 
 def _operation_files(base_dir):
     candidates = [
+        str(graphql_registry_dir()),
+        os.path.join(str(graphql_registry_dir()), "graphql_map"),
         base_dir,
         os.path.join(base_dir, "graphql_map"),
         os.path.join(base_dir, "crawler", "discovery", "graphql_map"),
@@ -636,3 +642,4 @@ def _headers_for_page_resolve(product_url, registry=None):
                 headers["User-Agent"] = request_headers["User-Agent"]
                 break
     return headers
+

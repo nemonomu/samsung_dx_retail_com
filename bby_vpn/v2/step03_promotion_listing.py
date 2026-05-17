@@ -1,7 +1,8 @@
-"""Best Buy TV trend listing crawler for the v2 GraphQL test flow.
+﻿"""Best Buy TV promotion listing crawler for the v2 GraphQL test flow.
 
-This follows ``running/bby_tv_trend.py`` for selector source and output
-semantics, while keeping the v2 behavior CSV-only.
+This file intentionally follows the existing production crawler in
+``running/bby_tv_pmt.py`` for page source, selectors, and field semantics.
+The v2 test variant only writes CSV and never writes listing rows to DB.
 """
 
 import csv
@@ -25,30 +26,32 @@ from common.setup import setup_environment
 
 setup_environment(__file__)
 
-from bby_listing_sku import extract_numeric_sku
-from bby_listing_graphql import ListingGraphQLSkuCollector
+from listing_sku import extract_numeric_sku
+from listing_graphql import ListingGraphQLSkuCollector
 from common.base_crawler import BaseCrawler
 from config import DB_CONFIG
-from core.db_readonly import connect_readonly
+from db_readonly import connect_readonly
+from data_paths import graphql_registry_dir, listing_parsed_dir
 
 
-class BestBuyTVTrendCrawler(BaseCrawler):
-    """Trend listing crawler based on the existing running implementation."""
+class BestBuyTVPromotionCrawler(BaseCrawler):
+    """Promotion listing crawler based on the existing running implementation."""
 
     def __init__(self, test_mode=True, batch_id=None, time_offset_hours=0):
         super().__init__()
         self.test_mode = test_mode
         self.account_name = "Bestbuy"
-        self.page_type = "trend"
+        self.page_type = "promotion"
         self.batch_id = batch_id
         self.time_offset_hours = time_offset_hours
         self.calendar_week = None
         self.url_template = None
         self.current_rank = 0
         self.test_count = 1
-        self.max_products = 100
-        self.csv_output_dir = os.path.dirname(os.path.abspath(__file__))
-        self.csv_output_path = os.path.join(self.csv_output_dir, "bby_tv_trend_crawl_vpn_test.csv")
+        self.max_sections = 100
+        self.csv_output_dir = str(listing_parsed_dir("promotion"))
+        self.graphql_output_dir = str(graphql_registry_dir())
+        self.csv_output_path = os.path.join(self.csv_output_dir, "bby_tv_pmt1_vpn_test.csv")
         self.page = None
         self.stats = {
             "collected": 0,
@@ -156,86 +159,112 @@ class BestBuyTVTrendCrawler(BaseCrawler):
                     time.sleep(random.uniform(5, 8))
         raise last_error
 
+    def extract_promotion_type(self, section):
+        parts = []
+        for field in ("promotion_type_h2", "promotion_type_h3", "promotion_type_p", "promotion_type_sub"):
+            xpath = self.xpaths.get(field, {}).get("xpath")
+            if not xpath:
+                continue
+            try:
+                elems = section.xpath(xpath)
+                if elems:
+                    text = " ".join(elems[0].text_content().split()).strip()
+                    if text:
+                        parts.append(text)
+            except Exception:
+                continue
+        return " ".join(parts).strip() or None
+
     def crawl_page(self):
-        sku_collector = ListingGraphQLSkuCollector(self.page)
+        sku_collector = ListingGraphQLSkuCollector(self.page, output_dir=self.graphql_output_dir)
         products = []
         try:
+            section_container_xpath = self.xpaths.get("section_container", {}).get("xpath")
             base_container_xpath = self.xpaths.get("base_container", {}).get("xpath")
-            if not base_container_xpath:
-                print("[ERROR] base_container XPath not found")
+            if not section_container_xpath or not base_container_xpath:
+                print("[ERROR] section_container or base_container XPath not found")
                 return []
 
-            print(f"[INFO] Accessing trend page: {self.url_template}")
+            print(f"[INFO] Accessing promotion page: {self.url_template}")
             sku_collector.start()
             self.page.get(self.url_template)
             time.sleep(random.uniform(8, 12))
             sku_collector.drain(5)
 
-            base_containers = []
-            expected_products = 10
+            sections = []
             for attempt in range(1, 4):
-                page_html = self.get_page_html_safely(f"trend attempt {attempt}")
+                page_html = self.get_page_html_safely(f"promotion attempt {attempt}")
                 tree = html.fromstring(page_html)
-                base_containers = tree.xpath(base_container_xpath)
-                print(f"[INFO] Attempt {attempt}: Found {len(base_containers)} items")
-                if len(base_containers) >= expected_products:
+                sections = tree.xpath(section_container_xpath)
+                print(f"[INFO] Attempt {attempt}: Found {len(sections)} sections")
+                if sections:
                     break
                 if attempt < 3:
                     time.sleep(random.uniform(5, 8))
                     sku_collector.drain(2)
 
-            if not base_containers:
-                print("[ERROR] No trend items found")
+            if not sections:
+                print("[ERROR] No promotion sections found")
                 return []
 
-            target_products = self.test_count if self.test_mode else min(len(base_containers), self.max_products)
-            for item in base_containers[:target_products]:
-                try:
-                    retailer_sku_name = self.safe_extract(item, "retailer_sku_name") or ""
-                    product_url_raw = self.safe_extract(item, "product_url")
-                    product_url = (
-                        f"https://www.bestbuy.com{product_url_raw}"
-                        if product_url_raw and product_url_raw.startswith("/")
-                        else product_url_raw
-                    )
-                    if not retailer_sku_name or not product_url:
-                        continue
-                    if "openbox" in product_url.lower():
-                        self.stats["openbox_filtered"] += 1
-                        continue
-                    item_id = self.extract_item_from_url(product_url)
-                    if self.is_product_excluded(item_id):
-                        self.stats["non_product"] += 1
-                        continue
+            section_limit = self.test_count if self.test_mode else self.max_sections
+            for sec_idx, section in enumerate(sections[:section_limit], 1):
+                promotion_type = self.extract_promotion_type(section)
+                items = section.xpath(base_container_xpath)
+                print(f"[INFO] Section {sec_idx}: type={promotion_type}, items={len(items)}")
 
-                    self.current_rank += 1
-                    numeric_sku = extract_numeric_sku(item, product_url)
-                    products.append(
-                        {
-                            "account_name": self.account_name,
-                            "page_type": self.page_type,
-                            "retailer_sku_name": retailer_sku_name,
-                            "trend_rank": self.current_rank,
-                            "product_url": product_url,
-                            "numeric_sku": numeric_sku,
-                            "calendar_week": self.calendar_week,
-                            "crawl_datetime": (
-                                datetime.now() + timedelta(hours=self.time_offset_hours)
-                            ).strftime("%Y-%m-%d %H:%M:%S"),
-                            "batch_id": self.batch_id,
-                        }
-                    )
-                    print(f"  [{self.current_rank}] {retailer_sku_name[:60]}...")
-                except Exception as exc:
-                    print(f"[WARNING] Trend item extraction failed: {exc}")
-                    continue
+                for pos, item in enumerate(items, 1):
+                    try:
+                        retailer_sku_name = self.safe_extract(item, "retailer_sku_name") or ""
+                        product_url_raw = self.safe_extract(item, "product_url")
+                        product_url = (
+                            f"https://www.bestbuy.com{product_url_raw}"
+                            if product_url_raw and product_url_raw.startswith("/")
+                            else product_url_raw
+                        )
+                        if not retailer_sku_name or not product_url:
+                            continue
+                        if "openbox" in product_url.lower():
+                            self.stats["openbox_filtered"] += 1
+                            continue
+                        item_id = self.extract_item_from_url(product_url)
+                        if self.is_product_excluded(item_id):
+                            self.stats["non_product"] += 1
+                            continue
+
+                        offer_raw = self.safe_extract(item, "offer")
+                        offer_match = re.search(r"\d+", offer_raw or "")
+                        offer = offer_match.group() if offer_match else offer_raw
+                        numeric_sku = extract_numeric_sku(item, product_url)
+
+                        products.append(
+                            {
+                                "account_name": self.account_name,
+                                "page_type": self.page_type,
+                                "retailer_sku_name": retailer_sku_name,
+                                "promotion_position": pos,
+                                "offer": offer,
+                                "promotion_type": promotion_type,
+                                "product_url": product_url,
+                                "numeric_sku": numeric_sku,
+                                "calendar_week": self.calendar_week,
+                                "crawl_datetime": (
+                                    datetime.now() + timedelta(hours=self.time_offset_hours)
+                                ).strftime("%Y-%m-%d %H:%M:%S"),
+                                "batch_id": self.batch_id,
+                            }
+                        )
+                        print(f"  [S{sec_idx}-{pos}] {retailer_sku_name[:60]}...")
+                    except Exception as exc:
+                        print(f"[WARNING] Promotion item extraction failed: {exc}")
+                        continue
 
             self.stats["collected"] = len(products)
             sku_collector.apply(products)
-            print(f"[OK] Trend products extracted: {len(products)}")
+            print(f"[OK] Promotion products extracted: {len(products)}")
             return products
         except Exception as exc:
-            print(f"[ERROR] Trend crawl failed: {exc}")
+            print(f"[ERROR] Promotion crawl failed: {exc}")
             traceback.print_exc()
             if products:
                 sku_collector.apply(products)
@@ -252,7 +281,9 @@ class BestBuyTVTrendCrawler(BaseCrawler):
             "batch_id",
             "page_type",
             "retailer_sku_name",
-            "trend_rank",
+            "promotion_position",
+            "offer",
+            "promotion_type",
             "product_url",
             "numeric_sku",
             "crawl_datetime",
@@ -274,7 +305,7 @@ class BestBuyTVTrendCrawler(BaseCrawler):
     def run(self):
         try:
             print("=" * 80)
-            print(f"BestBuy TV Trend Listing Crawler (Batch ID: {self.batch_id})")
+            print(f"BestBuy TV Promotion Listing Crawler (Batch ID: {self.batch_id})")
             print("=" * 80)
             if not self.initialize():
                 return
@@ -282,7 +313,7 @@ class BestBuyTVTrendCrawler(BaseCrawler):
             if products:
                 self.save_to_db(products)
             else:
-                print("[ERROR] No trend products collected")
+                print("[ERROR] No promotion products collected")
         finally:
             if self.page:
                 self.page.quit()
@@ -292,12 +323,14 @@ class BestBuyTVTrendCrawler(BaseCrawler):
                 print("[INFO] DB connection closed")
 
 
-BestBuyTrendCrawler = BestBuyTVTrendCrawler
+BestBuyPromotionCrawler = BestBuyTVPromotionCrawler
 
 
 def main():
-    BestBuyTVTrendCrawler().run()
+    BestBuyTVPromotionCrawler().run()
 
 
 if __name__ == "__main__":
     main()
+
+

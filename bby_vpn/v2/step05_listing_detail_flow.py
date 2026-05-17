@@ -1,11 +1,8 @@
-"""Run bounded listing tests and feed the filtered result to dt1.
+﻿"""Shared listing/detail step implementation used by the V2 orchestrator.
 
-Flow:
-1. Crawl main listing for 3 pages.
-2. Crawl BSR listing for 3 pages.
-3. Crawl promotion and trend listing using the existing running crawler logic.
-4. Remove Open Box rows and duplicate numeric sku/item rows across all listing CSVs.
-5. Write detail CSV through GraphQL replay without opening each PDP.
+The public execution order lives in ``pipeline.steps``. This module keeps the
+older helper functions in one importable place while the crawler classes are
+being split further.
 """
 
 from __future__ import annotations
@@ -48,11 +45,12 @@ for path in (
     if str(path) not in sys.path:
         add_import_path(path)
 
-from bby_listing_sku import extract_numeric_sku_from_text
-from collectors.graphql_collector import BrowserFetchGraphQLCollector, load_graphql_cookies, load_graphql_registry, load_sku_map
+from listing_sku import extract_numeric_sku_from_text
+from graphql_collector import BrowserFetchGraphQLCollector, load_graphql_cookies, load_graphql_registry, load_sku_map
 from config import DB_CONFIG
-from core.db_readonly import connect_readonly
-from core.retry import ExponentialBackoff
+from db_readonly import connect_readonly
+from retry_policy import ExponentialBackoff
+from data_paths import ensure_data_layout, graphql_registry_dir, listing_csv_path
 
 
 DETAIL_OPERATION_NAMES = (
@@ -84,18 +82,20 @@ def load_v2_class(module_filename, class_name):
     return getattr(module, class_name)
 
 
-BestBuyDetailCrawler = load_v2_class("bby_tv_dt1.py", "BestBuyDetailCrawler")
-BestBuyTVBSRCrawler = load_v2_class("bby_tv_bsr1.py", "BestBuyTVBSRCrawler")
-BestBuyTVMainCrawler = load_v2_class("bby_tv_main1.py", "BestBuyTVMainCrawler")
-BestBuyTVPromotionCrawler = load_v2_class("bby_tv_pmt1.py", "BestBuyTVPromotionCrawler")
-BestBuyTVTrendCrawler = load_v2_class("bby_tv_trend_crawl.py", "BestBuyTVTrendCrawler")
+BestBuyDetailCrawler = load_v2_class("step06_detail_crawler.py", "BestBuyDetailCrawler")
+BestBuyTVBSRCrawler = load_v2_class("step02_bsr_listing.py", "BestBuyTVBSRCrawler")
+BestBuyTVMainCrawler = load_v2_class("step01_main_listing.py", "BestBuyTVMainCrawler")
+BestBuyTVPromotionCrawler = load_v2_class("step03_promotion_listing.py", "BestBuyTVPromotionCrawler")
+BestBuyTVTrendCrawler = load_v2_class("step04_trend_listing.py", "BestBuyTVTrendCrawler")
 
+
+ensure_data_layout()
 
 LISTING_FILES = {
-    "main": BASE_DIR / "bby_tv_main1_vpn_test.csv",
-    "bsr": BASE_DIR / "bby_tv_bsr1_vpn_test.csv",
-    "promotion": BASE_DIR / "bby_tv_pmt1_vpn_test.csv",
-    "trend": BASE_DIR / "bby_tv_trend_crawl_vpn_test.csv",
+    "main": listing_csv_path("main"),
+    "bsr": listing_csv_path("bsr"),
+    "promotion": listing_csv_path("promotion"),
+    "trend": listing_csv_path("trend"),
 }
 
 
@@ -128,11 +128,6 @@ def write_rows(path, rows, fieldnames):
         writer.writeheader()
         for row in rows:
             writer.writerow({field: row.get(field) for field in fieldnames})
-
-
-def clear_file(path, fieldnames):
-    with path.open("w", newline="", encoding="utf-8-sig") as csvfile:
-        csv.DictWriter(csvfile, fieldnames=fieldnames).writeheader()
 
 
 def row_dedupe_key(row):
@@ -312,7 +307,7 @@ def run_single_listing(crawler_cls, label, batch_id):
 
 def configure_dt_env():
     defaults = {
-        "BBY_GRAPHQL_REGISTRY_DIR": str(BASE_DIR / "mapping_run"),
+        "BBY_GRAPHQL_REGISTRY_DIR": str(graphql_registry_dir()),
         "BBY_DT_CORE_ONLY": "0",
         "BBY_DT_SKIP_REVIEWS": "0",
         "BBY_DT_GRAPHQL_REPLAY": "1",
@@ -805,3 +800,5 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

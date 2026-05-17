@@ -1,4 +1,4 @@
-"""
+﻿"""
 Best Buy TV Detail Page Crawler (Modified v1)
 collected table: bby_tv_main1, bby_tv_bsr1, bby_tv_pmt1, bby_tv_Trend_crawl
 save table: bby_tv_crawl, tv_retail_com
@@ -54,32 +54,33 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from data_validator import DataValidator
-from bby_access_policy import detect_block_signal
-from bby_crawl_controls import (
+from access_policy import detect_block_signal
+from crawl_controls import (
     BrowserSessionDiagnostics,
     ConservativeRateLimiter,
     JsonlAuditLog,
     NetworkDiagnostics,
     RowQualityAuditor,
 )
-from crawler.discovery.embedded_payload_mapper import EmbeddedPayloadMapper
-from crawler.discovery.graphql_mapper import GraphQLMapper
-from collectors.graphql_collector import (
+from embedded_payload_mapper import EmbeddedPayloadMapper
+from graphql_mapper import GraphQLMapper
+from graphql_collector import (
     BrowserFetchGraphQLCollector,
     load_graphql_cookies,
     load_graphql_registry,
     load_sku_map,
 )
-from core.session_pool import cookies_from_drission_page, minimal_headers_from_packet
-from core.retry import ExponentialBackoff
-from diagnostics.endpoint_metrics import EndpointMetrics
-from parsers.graphql_review_parser import collect_reviews as collect_graphql_reviews
-from parsers.graphql_product_parser import parse_product_facts
+from session_pool import cookies_from_drission_page, minimal_headers_from_packet
+from retry_policy import ExponentialBackoff
+from endpoint_metrics import EndpointMetrics
+from graphql_review_parser import collect_reviews as collect_graphql_reviews
+from graphql_product_parser import parse_product_facts
+from data_paths import detail_parsed_dir, detail_raw_dir, graphql_registry_dir
 
 # Import database configuration
 from config import DB_CONFIG
 from bby_config_loader import get_config
-from core.db_readonly import connect_readonly
+from db_readonly import connect_readonly
 
 
 class Tee:
@@ -116,15 +117,15 @@ class BestBuyDetailCrawler:
         # Config loader 초기화
         self.config = get_config()
         self.file_name = 'bby_tv_dt1'
-        self.csv_output_dir = os.environ.get(
-            'BBY_OUTPUT_DIR',
-            os.path.dirname(os.path.abspath(__file__))
-        )
+        self.csv_output_dir = os.environ.get('BBY_OUTPUT_DIR', str(detail_parsed_dir()))
+        self.raw_output_dir = os.environ.get('BBY_DETAIL_RAW_DIR', str(detail_raw_dir()))
         os.makedirs(self.csv_output_dir, exist_ok=True)
+        os.makedirs(self.raw_output_dir, exist_ok=True)
         self.csv_output_path = os.path.join(self.csv_output_dir, 'bby_tv_vpn_test.csv')
-        self.checkpoint_path = os.path.join(self.csv_output_dir, 'bby_tv_dt1_checkpoint.json')
-        self.audit_log_path = os.path.join(self.csv_output_dir, 'bby_tv_dt1_audit.jsonl')
-        self.discovery_dir = os.path.join(self.csv_output_dir, 'crawler', 'discovery')
+        self.checkpoint_path = os.path.join(self.raw_output_dir, 'bby_tv_dt1_checkpoint.json')
+        self.audit_log_path = os.path.join(self.raw_output_dir, 'bby_tv_dt1_audit.jsonl')
+        self.discovery_dir = os.environ.get('BBY_GRAPHQL_REGISTRY_DIR', str(graphql_registry_dir()))
+        os.makedirs(self.discovery_dir, exist_ok=True)
         self.clear_output_on_start = os.environ.get('BBY_DT_CLEAR_OUTPUT', '0') == '1'
         if self.clear_output_on_start and os.path.exists(self.csv_output_path):
             os.remove(self.csv_output_path)
@@ -277,7 +278,7 @@ class BestBuyDetailCrawler:
         try:
             safe_reason = re.sub(r'[^A-Za-z0-9_.-]+', '_', reason or 'unknown')[:80]
             stamp = datetime.now(self.korea_tz).strftime('%Y%m%d_%H%M%S')
-            diag_path = os.path.join(self.csv_output_dir, f'bby_dt_diag_{stamp}_{safe_reason}.html')
+            diag_path = os.path.join(self.raw_output_dir, f'bby_dt_diag_{stamp}_{safe_reason}.html')
             page_html = self.page.html if self.page else ''
             page_title = self.page.title if self.page else ''
             current_url = self.page.url if self.page else ''
@@ -3761,7 +3762,7 @@ class BestBuyDetailCrawler:
                     retry_count += 1
                     self.save_checkpoint('blocked', idx, url_data, success_count)
                     print(f"[ERROR] Block signal detected. Stopping to avoid repeated access.")
-                    print(f"[INFO] Resume later with: python bby_tv_dt1.py")
+                    print(f"[INFO] Resume later with: python step06_detail_crawler.py")
                     break
 
                     self.check_db_connection()
@@ -3823,7 +3824,7 @@ class BestBuyDetailCrawler:
                         if retry_count > MAX_RETRIES:
                             print(f"\n{'='*80}")
                             print(f"[ERROR] Max retries ({MAX_RETRIES}) exceeded. Stopping.")
-                            print(f"[INFO] Resume later with: python bby_tv_dt1.py {idx}")
+                            print(f"[INFO] Resume later with: python step06_detail_crawler.py {idx}")
                             break
 
                         if retry_count == 1:
@@ -3914,10 +3915,10 @@ class BestBuyDetailCrawler:
 
 def main():
     # Parse arguments:
-    #   python bby_tv_dt1.py                       # 처음부터
-    #   python bby_tv_dt1.py 39                    # 39번부터
-    #   python bby_tv_dt1.py until 20260228060000  # 지정 시각까지 수집 후 종료
-    #   python bby_tv_dt1.py 39 until 20260228060000  # 39번부터 + 시간 제한
+    #   python step06_detail_crawler.py                       # 처음부터
+    #   python step06_detail_crawler.py 39                    # 39번부터
+    #   python step06_detail_crawler.py until 20260228060000  # 지정 시각까지 수집 후 종료
+    #   python step06_detail_crawler.py 39 until 20260228060000  # 39번부터 + 시간 제한
     start_from = 0
     stop_at = None
 
@@ -3946,3 +3947,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

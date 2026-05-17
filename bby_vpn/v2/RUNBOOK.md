@@ -70,3 +70,4 @@ data/detail/raw/bby_tv_dt1_checkpoint.json
 - `archive/` contains old docs, legacy batch files, old module folders, and previous runtime outputs.
 - DB writes are still controlled inside the crawler implementation. Listing steps write CSV/API artifacts first.
 - `BBY_DATA_DIR` can override the whole `data/` root.
+- Listing steps are GraphQL-only by default (`BBY_LISTING_GRAPHQL_ONLY=1`). The browser may still be opened to capture GraphQL network packets, but HTML/DOM rows are not accepted as listing output unless `BBY_LISTING_GRAPHQL_ONLY=0` is explicitly set.

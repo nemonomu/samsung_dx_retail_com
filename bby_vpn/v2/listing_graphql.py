@@ -32,6 +32,17 @@ URL_KEYS = {
 }
 
 
+def env_flag(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return bool(default)
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def listing_graphql_only_enabled():
+    return env_flag("BBY_LISTING_GRAPHQL_ONLY", True)
+
+
 def extract_item_from_url(product_url):
     if not product_url:
         return None

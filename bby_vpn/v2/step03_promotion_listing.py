@@ -27,7 +27,7 @@ from common.setup import setup_environment
 setup_environment(__file__)
 
 from listing_sku import extract_numeric_sku
-from listing_graphql import ListingGraphQLSkuCollector
+from listing_graphql import ListingGraphQLSkuCollector, listing_graphql_only_enabled
 from common.base_crawler import BaseCrawler
 from config import DB_CONFIG
 from db_readonly import connect_readonly
@@ -190,6 +190,46 @@ class BestBuyTVPromotionCrawler(BaseCrawler):
             self.page.get(self.url_template)
             time.sleep(random.uniform(8, 12))
             sku_collector.drain(5)
+
+            graphql_defaults = {
+                "account_name": self.account_name,
+                "calendar_week": self.calendar_week,
+                "crawl_datetime": (
+                    datetime.now() + timedelta(hours=self.time_offset_hours)
+                ).strftime("%Y-%m-%d %H:%M:%S"),
+                "batch_id": self.batch_id,
+            }
+            api_products = sku_collector.listing_products(
+                self.page_type,
+                defaults=graphql_defaults,
+            )
+            if api_products:
+                graph_products = []
+                for pos, row in enumerate(api_products, 1):
+                    product_url = row.get("product_url")
+                    if product_url and "openbox" in product_url.lower():
+                        self.stats["openbox_filtered"] += 1
+                        continue
+                    item_id = self.extract_item_from_url(product_url)
+                    if self.is_product_excluded(item_id):
+                        self.stats["non_product"] += 1
+                        continue
+                    product = dict(row)
+                    product.setdefault("account_name", self.account_name)
+                    product["page_type"] = self.page_type
+                    product["promotion_position"] = pos
+                    product.setdefault("promotion_type", None)
+                    product.setdefault("offer", row.get("offer"))
+                    product.setdefault("calendar_week", self.calendar_week)
+                    product.setdefault("crawl_datetime", graphql_defaults["crawl_datetime"])
+                    product.setdefault("batch_id", self.batch_id)
+                    graph_products.append(product)
+                self.stats["collected"] = len(graph_products)
+                print(f"[OK] Promotion GraphQL products extracted: {len(graph_products)}")
+                return graph_products
+
+            if listing_graphql_only_enabled():
+                raise RuntimeError("GraphQL-only promotion listing did not produce rows; DOM fallback disabled")
 
             sections = []
             for attempt in range(1, 4):

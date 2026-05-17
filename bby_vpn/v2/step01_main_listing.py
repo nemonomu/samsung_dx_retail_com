@@ -49,6 +49,7 @@ from listing_graphql import (
     ListingGraphQLSkuCollector,
     direct_listing_products,
     extract_listing_products_from_html,
+    listing_graphql_only_enabled,
     save_listing_operation_from_html,
 )
 from data_paths import graphql_registry_dir, listing_parsed_dir
@@ -363,6 +364,11 @@ class BestBuyTVMainCrawler(BaseCrawler):
                     print(f"[INFO] Page {page_number}: GraphQL rows after wait {attempt}: {len(api_products)}/{expected_page_products}")
                     if len(api_products) >= expected_page_products:
                         return api_products
+
+            if listing_graphql_only_enabled():
+                if api_products:
+                    raise RuntimeError(f"GraphQL-only listing rows below minimum {len(api_products)}/{expected_page_products}")
+                raise RuntimeError("GraphQL-only listing did not produce rows; DOM/HTML fallback disabled")
 
             payload_products = extract_listing_products_from_html(initial_html, self.page_type, page_number=page_number)
             if payload_products:

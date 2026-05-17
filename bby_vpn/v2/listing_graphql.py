@@ -1020,24 +1020,42 @@ def post_listing_graphql_via_zenrows(endpoint_url, payload, headers, timeout):
     api_key = os.environ.get("ZENROWS_API_KEY")
     if not api_key:
         raise RuntimeError("ZENROWS_API_KEY is required for ZenRows listing GraphQL replay")
-    params = {"custom_headers": "true"}
-    if os.environ.get("BESTBUY_GRAPHQL_PREMIUM_PROXY", "1").strip().lower() in {"1", "true", "yes"}:
-        params["premium_proxy"] = "true"
-        params["proxy_country"] = "us"
-    if os.environ.get("BBY_LISTING_GRAPHQL_JS_RENDER", "0").strip().lower() in {"1", "true", "yes"}:
-        params["js_render"] = "true"
-    if os.environ.get("BESTBUY_GRAPHQL_MODE_AUTO", "0").strip().lower() in {"1", "true", "yes"}:
-        params["mode"] = "auto"
-        params["proxy_country"] = "us"
-    response = ZenRowsClient(api_key).post(
+    client = ZenRowsClient(api_key)
+    body = json.dumps(payload)
+
+    def build_params(js_render=False):
+        params = {"custom_headers": "true"}
+        if os.environ.get("BESTBUY_GRAPHQL_PREMIUM_PROXY", "1").strip().lower() in {"1", "true", "yes"}:
+            params["premium_proxy"] = "true"
+            params["proxy_country"] = "us"
+        if js_render or os.environ.get("BBY_LISTING_GRAPHQL_JS_RENDER", "0").strip().lower() in {"1", "true", "yes"}:
+            params["js_render"] = "true"
+        if os.environ.get("BESTBUY_GRAPHQL_MODE_AUTO", "0").strip().lower() in {"1", "true", "yes"}:
+            params["mode"] = "auto"
+            params["proxy_country"] = "us"
+        return params
+
+    response = client.post(
         endpoint_url,
-        params=params,
+        params=build_params(),
         headers=headers,
-        data=json.dumps(payload),
+        data=body,
         timeout=timeout,
     )
     if getattr(response, "status_code", 0) != 200:
-        raise RuntimeError(f"ZenRows listing GraphQL HTTP {response.status_code}: {getattr(response, 'text', '')[:300]}")
+        response_text = getattr(response, "text", "")
+        if response.status_code == 400 and "REQS002" in response_text and "js_render" not in build_params():
+            print("[WARNING] ZenRows requested JS rendering for listing GraphQL; retrying with js_render=true")
+            response = client.post(
+                endpoint_url,
+                params=build_params(js_render=True),
+                headers=headers,
+                data=body,
+                timeout=timeout,
+            )
+            response_text = getattr(response, "text", "")
+        if getattr(response, "status_code", 0) != 200:
+            raise RuntimeError(f"ZenRows listing GraphQL HTTP {response.status_code}: {response_text[:300]}")
     try:
         return response.json()
     except Exception as exc:

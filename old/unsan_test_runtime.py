@@ -75,8 +75,24 @@ def install_sql_table_rewrite(table_map: dict[str, str]) -> None:
     psycopg2.connect = connect_with_rewrite
 
 
+def normalize_db_config_for_archived_crawlers() -> None:
+    """Archived Unsan code passes ``database='postgres'`` explicitly."""
+    try:
+        import config
+    except Exception:
+        return
+    db_config = getattr(config, "DB_CONFIG", None)
+    if not isinstance(db_config, dict):
+        return
+    for key in ("database", "dbname"):
+        if key in db_config:
+            db_config.pop(key, None)
+            print(f"[UNSAN-TEST] removed DB_CONFIG.{key}; archived crawler sets database explicitly")
+
+
 def install_test_runtime(table_map: dict[str, str]) -> None:
     install_old_common_package()
+    normalize_db_config_for_archived_crawlers()
     install_sql_table_rewrite(table_map)
     os.environ.setdefault("UNSAN_TEST_TABLE_MODE", "1")
     print("[UNSAN-TEST] SQL table routing:")

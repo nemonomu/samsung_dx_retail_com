@@ -20,7 +20,7 @@ def default_unsan_root():
         ROOT.parent.parent / "unsan-retail-crawler-platform",
     ]
     for path in candidates:
-        if (path / "bestbuy").is_dir() and (path / "common_settings").is_dir():
+        if (path / "bestbuy" / "step08_detail_enrichment.py").exists():
             return path
     return ROOT.parent / "unsan-retail-crawler-platform"
 
@@ -119,6 +119,34 @@ def write_schema(path, fields):
     write_csv(path, [], fields)
 
 
+def load_env_files():
+    for env_path in (ROOT.parent / ".env", ROOT / ".env"):
+        if not env_path.exists():
+            continue
+        lines = env_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            i += 1
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if value == "{":
+                collected = ["{"]
+                depth = 1
+                while i < len(lines) and depth > 0:
+                    part = lines[i]
+                    i += 1
+                    collected.append(part)
+                    depth += part.count("{") - part.count("}")
+                value = "\n".join(collected)
+            else:
+                value = value.strip().strip('"').strip("'")
+            os.environ.setdefault(key, value)
+
+
 def patch_unsan_detail(enrich):
     original_event_data = enrich.event_data
 
@@ -153,6 +181,7 @@ def patch_unsan_detail(enrich):
 
 
 def run_unsan_detail(category, run_root, target_csv, schema_csv, enriched_csv, unsan_root, workers):
+    load_env_files()
     env = os.environ
     env["BESTBUY_CATEGORY"] = category
     env["BESTBUY_RUN_DATE"] = datetime.now().strftime("%Y%m%d")

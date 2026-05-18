@@ -1,5 +1,6 @@
 import argparse
 import csv
+import importlib.util
 import json
 import os
 import subprocess
@@ -7,7 +8,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, bestbuy_dated_run_root, has_target_url
+from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, bestbuy_dated_run_root, db_config, has_target_url
 
 
 PYTHON = sys.executable
@@ -403,6 +404,39 @@ def print_steps():
         print(f"  {step.key} {step.name:<18} {status:<7} {step.module}")
 
 
+def require_module(module_name):
+    if importlib.util.find_spec(module_name) is None:
+        raise SystemExit(f"[preflight] missing Python package: {module_name}. Install requirements_bestbuy_new.txt")
+
+
+def preflight(steps, dry_run=False):
+    selected_names = {step.name for step in steps}
+    network_steps = {
+        "main_list",
+        "main_targets",
+        "bsr_list",
+        "promotion_deals",
+        "trending_deals",
+        "detail_html",
+        "review20",
+    }
+    if selected_names & network_steps:
+        require_module("zenrows")
+        if not dry_run and not os.getenv("ZENROWS_API_KEY"):
+            raise SystemExit("[preflight] ZENROWS_API_KEY is missing in .env")
+    if selected_names & {"detail_html", "trending_deals"}:
+        require_module("bs4")
+        require_module("lxml")
+    if selected_names & {"db_prepare", "db_load"}:
+        require_module("psycopg2")
+        if not dry_run and not db_config():
+            raise SystemExit("[preflight] DB_CONFIG is missing in .env")
+    if "detail_html" in selected_names:
+        schema_path = os.getenv("BESTBUY_OUTPUT_SCHEMA_CSV", "references/tv_retail_com_202605170513.csv")
+        if os.environ.get("BESTBUY_CATEGORY", "TV").upper() == "TV" and not Path(schema_path).exists():
+            raise SystemExit(f"[preflight] missing output schema CSV: {schema_path}")
+
+
 def main():
     args = parse_args()
     os.environ["BESTBUY_CATEGORY"] = str(args.category).strip().upper()
@@ -411,6 +445,7 @@ def main():
     if not steps:
         print_steps()
         return
+    preflight(steps, dry_run=args.dry_run)
     for step in steps:
         run_step(step, dry_run=args.dry_run, resume=args.resume)
 

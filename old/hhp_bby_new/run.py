@@ -52,6 +52,10 @@ def bsin_from_url(url):
     return match.group(1).strip() if match else ""
 
 
+def is_bestbuy(row):
+    return str(row.get("account_name") or "").strip().lower() == "bestbuy"
+
+
 def repair_item(rows):
     changed = 0
     unresolved = []
@@ -216,6 +220,8 @@ def main():
     log(f"Final CSV rows: {len(rows)}")
     changed, unresolved = repair_item(rows)
     log(f"BestBuy item backfilled: {changed}; unresolved: {len(unresolved)}")
+    output_rows = [row for row in rows if is_bestbuy(row)]
+    log(f"BestBuy final output rows: {len(output_rows)} of {len(rows)} source rows")
     log(f"Reading product list CSV: {args.product_list_csv}")
     product_rows, product_fields = read_csv(args.product_list_csv)
     log(f"Product list CSV rows: {len(product_rows)}")
@@ -224,7 +230,7 @@ def main():
     final_out = OUTPUT_DIR / f"hhp_retail_com_bestbuy_complete_{stamp}.csv"
     product_out = OUTPUT_DIR / f"bby_hhp_product_list_{stamp}.csv"
     log(f"Writing output final CSV: {final_out}")
-    write_csv(final_out, rows, fields)
+    write_csv(final_out, output_rows, fields)
     log(f"Writing output product list CSV: {product_out}")
     write_csv(product_out, product_rows, product_fields)
 
@@ -234,6 +240,8 @@ def main():
         "source_product_list_csv": str(Path(args.product_list_csv).resolve()),
         "output_final_csv": str(final_out.resolve()),
         "output_product_list_csv": str(product_out.resolve()),
+        "source_final_rows": len(rows),
+        "output_final_rows": len(output_rows),
         "bestbuy_item_backfilled": changed,
         "unresolved_item_urls": unresolved,
         "load_db": None,

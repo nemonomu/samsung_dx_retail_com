@@ -12,13 +12,8 @@ from urllib.parse import urlencode
 
 from bs4 import BeautifulSoup
 from lxml import html as lxml_html
-import requests
 from requests import RequestException
-
-try:
-    from zenrows import ZenRowsClient
-except ImportError:
-    ZenRowsClient = None
+from zenrows import ZenRowsClient
 
 from .step00_config import (
     DEFAULT_BESTBUY_RUN_ROOT,
@@ -47,8 +42,6 @@ REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "240"))
 WORKERS = int(os.getenv("BESTBUY_DETAIL_WORKERS", "1"))
 STAGE = os.getenv("BESTBUY_DETAIL_STAGE", "detail").lower()
 SAVE_HTML_MODE = os.getenv("BESTBUY_SAVE_HTML_MODE", "slim").lower()
-USE_ZENROWS = os.getenv("BESTBUY_USE_ZENROWS", "0").strip().lower() in {"1", "true", "yes", "y"}
-DIRECT_REQUEST_STRICT = os.getenv("BESTBUY_DIRECT_REQUEST_STRICT", "1").strip().lower() in {"1", "true", "yes", "y"}
 
 RAW_DETAIL_DIR = DETAIL_ROOT / "raw" / "detail_html"
 RAW_REVIEW_DIR = DETAIL_ROOT / "raw" / "review20"
@@ -422,34 +415,6 @@ def graphql_params():
         "proxy_country": "us",
         "js_render": "true",
     }
-
-
-class DirectBestBuyClient:
-    def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "accept-language": "en-US,en;q=0.9",
-                "cache-control": "no-cache",
-                "pragma": "no-cache",
-                "user-agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
-            }
-        )
-
-    def get(self, url, params=None, timeout=None):
-        # ZenRows-only params are intentionally ignored for direct BestBuy requests.
-        return self.session.get(url, timeout=timeout)
-
-    def post(self, url, params=None, headers=None, data=None, timeout=None):
-        request_headers = dict(headers or {})
-        request_headers.setdefault("user-agent", self.session.headers.get("user-agent", ""))
-        request_headers.setdefault("accept-language", "en-US,en;q=0.9")
-        return self.session.post(url, headers=request_headers, data=data, timeout=timeout)
 
 
 def load_csv(path):
@@ -1301,19 +1266,7 @@ def main():
     targets = target_rows(apply_filters=True)
     output_targets = target_rows(apply_filters=False)
     api_key = "" if REBUILD_ONLY else os.getenv("ZENROWS_API_KEY")
-    if REBUILD_ONLY:
-        client = None
-        client_name = "cache"
-    elif USE_ZENROWS:
-        if not api_key:
-            raise RuntimeError("BESTBUY_USE_ZENROWS=1 requires ZENROWS_API_KEY")
-        if ZenRowsClient is None:
-            raise RuntimeError("BESTBUY_USE_ZENROWS=1 requires the zenrows package")
-        client = ZenRowsClient(api_key)
-        client_name = "zenrows"
-    else:
-        client = DirectBestBuyClient()
-        client_name = "direct"
+    client = ZenRowsClient(api_key) if api_key else None
 
     RAW_DETAIL_DIR.mkdir(parents=True, exist_ok=True)
     RAW_REVIEW_DIR.mkdir(parents=True, exist_ok=True)
@@ -1353,17 +1306,6 @@ def main():
             fetched_review = bool(should_fetch_review)
         else:
             rmeta = read_json(review_paths(sku)["meta"])
-        if DIRECT_REQUEST_STRICT and client_name == "direct":
-            if STAGE in {"all", "detail"} and not dmeta.get("success"):
-                raise RuntimeError(
-                    f"Direct detail request failed for sku={sku} "
-                    f"status={dmeta.get('status_code')} error={dmeta.get('error')}"
-                )
-            if STAGE in {"all", "review"} and not rmeta.get("success"):
-                raise RuntimeError(
-                    f"Direct review request failed for sku={sku} "
-                    f"status={rmeta.get('status_code')} error={rmeta.get('error')}"
-                )
         return index, sku, dmeta, rmeta, fetched_detail, fetched_review
 
     detail_cost = 0.0
@@ -1420,8 +1362,6 @@ def main():
         "rebuild_only": REBUILD_ONLY,
         "stage": STAGE,
         "workers": WORKERS,
-        "client": client_name,
-        "direct_request_strict": DIRECT_REQUEST_STRICT,
         "max_attempts": MAX_ATTEMPTS,
         "target_count": len(output_targets),
         "processed_count": len(targets),

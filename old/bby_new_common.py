@@ -197,6 +197,8 @@ def run_unsan_detail(category, run_root, target_csv, schema_csv, enriched_csv, u
     env.setdefault("BESTBUY_DETAIL_STAGE", "all")
     env.setdefault("BESTBUY_DETAIL_WORKERS", str(workers))
     env.setdefault("BESTBUY_SAVE_HTML_MODE", "slim")
+    env.setdefault("BESTBUY_USE_ZENROWS", "0")
+    env.setdefault("BESTBUY_DIRECT_REQUEST_STRICT", "1")
 
     sys.path.insert(0, str(unsan_root))
     import bestbuy.step08_detail_enrichment as enrich

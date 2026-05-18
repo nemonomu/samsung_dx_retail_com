@@ -21,6 +21,10 @@ PRODUCT_LIST_PATTERN = "bby_hhp_product_list_*.csv"
 BSIN_RE = re.compile(r"/product/[^/]+/([^/?#]+)(?:/sku/\d+)?(?:[?#].*)?$")
 
 
+def log(message):
+    print(f"[HHP {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+
+
 def latest_file(pattern):
     files = sorted(SAMPLE_DIR.glob(pattern), key=lambda path: path.stat().st_mtime, reverse=True)
     if not files:
@@ -135,19 +139,26 @@ def normalize_value(value, data_type):
 
 
 def load_table(cur, csv_path, table_name):
+    log(f"Reading CSV for public.{table_name}: {csv_path}")
     rows, _ = read_csv(csv_path)
+    log(f"CSV rows for public.{table_name}: {len(rows)}")
+    log(f"Loading table columns for public.{table_name}")
     columns = table_columns(cur, table_name)
     if not columns:
         raise RuntimeError(f"Target table not found: public.{table_name}")
+    log(f"DB columns for public.{table_name}: {len(columns)}")
     batch_ids = sorted({row.get("batch_id", "").strip() for row in rows if row.get("batch_id")})
     if batch_ids and any(name == "batch_id" for name, _ in columns):
+        log(f"Deleting existing rows from public.{table_name} for {len(batch_ids)} batch_id values")
         cur.execute(
             f"DELETE FROM public.{quote_ident(table_name)} WHERE batch_id = ANY(%s)",
             (batch_ids,),
         )
+        log(f"Deleted rows from public.{table_name}: {cur.rowcount}")
     csv_fields = set(rows[0].keys()) if rows else set()
     insert_columns = [(name, dtype) for name, dtype in columns if name != "id" and name in csv_fields]
     if not rows or not insert_columns:
+        log(f"Skipping insert for public.{table_name}: rows={len(rows)}, insert_columns={len(insert_columns)}")
         return {"table": table_name, "inserted": 0}
     sql = (
         f"INSERT INTO public.{quote_ident(table_name)} "
@@ -158,7 +169,9 @@ def load_table(cur, csv_path, table_name):
         tuple(normalize_value(row.get(name), dtype) for name, dtype in insert_columns)
         for row in rows
     ]
+    log(f"Inserting {len(values)} rows into public.{table_name} with {len(insert_columns)} columns")
     cur.executemany(sql, values)
+    log(f"Finished insert for public.{table_name}")
     return {"table": table_name, "inserted": len(values), "columns": [name for name, _ in insert_columns]}
 
 
@@ -169,6 +182,7 @@ def load_db(final_csv, product_list_csv):
     config = db_config()
     if not config:
         raise RuntimeError("DB_CONFIG is missing. Put it in .env on the RDP machine.")
+    log(f"Connecting to DB host={config.get('host')} db={config.get('database')}")
     conn = psycopg2.connect(
         host=config.get("host"),
         port=int(config.get("port") or 5432),
@@ -177,11 +191,16 @@ def load_db(final_csv, product_list_csv):
         dbname=config.get("database"),
         connect_timeout=10,
     )
+    log("DB connected")
     with conn:
         with conn.cursor() as cur:
+            log(f"Starting final table load: public.{FINAL_TABLE}")
             final_result = load_table(cur, final_csv, FINAL_TABLE)
+            log(f"Starting product list table load: public.{PRODUCT_LIST_TABLE}")
             product_result = load_table(cur, product_list_csv, PRODUCT_LIST_TABLE)
+            log("DB transaction work finished; committing on context exit")
     conn.close()
+    log("DB connection closed")
     return {"final": final_result, "product_list": product_result}
 
 
@@ -192,14 +211,21 @@ def main():
     parser.add_argument("--load-db", action="store_true")
     args = parser.parse_args()
 
+    log(f"Reading final CSV: {args.final_csv}")
     rows, fields = read_csv(args.final_csv)
+    log(f"Final CSV rows: {len(rows)}")
     changed, unresolved = repair_item(rows)
+    log(f"BestBuy item backfilled: {changed}; unresolved: {len(unresolved)}")
+    log(f"Reading product list CSV: {args.product_list_csv}")
     product_rows, product_fields = read_csv(args.product_list_csv)
+    log(f"Product list CSV rows: {len(product_rows)}")
 
     stamp = datetime.now().strftime("%Y%m%d%H%M%S")
     final_out = OUTPUT_DIR / f"hhp_retail_com_bestbuy_complete_{stamp}.csv"
     product_out = OUTPUT_DIR / f"bby_hhp_product_list_{stamp}.csv"
+    log(f"Writing output final CSV: {final_out}")
     write_csv(final_out, rows, fields)
+    log(f"Writing output product list CSV: {product_out}")
     write_csv(product_out, product_rows, product_fields)
 
     result = {
@@ -213,10 +239,11 @@ def main():
         "load_db": None,
     }
     if args.load_db:
+        log("Starting DB load")
         result["load_db"] = load_db(final_out, product_out)
+        log("DB load finished")
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
     main()
-

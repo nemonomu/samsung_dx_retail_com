@@ -53,6 +53,10 @@ def write_csv(path, rows, fields):
         writer.writerows(rows)
 
 
+def log(category, message):
+    print(f"[{category} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+
+
 def bsin_from_url(url):
     match = BSIN_RE.search(str(url or "").strip())
     return match.group(1).strip() if match else ""
@@ -182,6 +186,7 @@ def patch_unsan_detail(enrich):
 
 def run_unsan_detail(category, run_root, target_csv, schema_csv, enriched_csv, unsan_root, workers):
     load_env_files()
+    log(category, f"Starting detail enrichment with root: {unsan_root}")
     env = os.environ
     env["BESTBUY_CATEGORY"] = category
     env["BESTBUY_RUN_DATE"] = datetime.now().strftime("%Y%m%d")
@@ -198,6 +203,7 @@ def run_unsan_detail(category, run_root, target_csv, schema_csv, enriched_csv, u
 
     patch_unsan_detail(enrich)
     enrich.main()
+    log(category, "Detail enrichment finished")
 
 
 def merge_enriched(source_rows, selected_rows, enriched_rows, fields, overwrite):
@@ -246,10 +252,15 @@ def run_category(
     run_output = run_root / "output"
     run_output.mkdir(parents=True, exist_ok=True)
 
+    log(category, f"Reading final CSV: {args.source_final_csv}")
     rows, fields = read_csv(args.source_final_csv)
+    log(category, f"Final CSV rows: {len(rows)}")
+    log(category, f"Reading product list CSV: {args.source_product_list_csv}")
     product_rows, product_fields = read_csv(args.source_product_list_csv)
+    log(category, f"Product list CSV rows: {len(product_rows)}")
     selected = select_rows(rows, args.mode, category)
     targets = [target_row(row, category) for row in selected if row.get("product_url")]
+    log(category, f"Selected BestBuy rows: {len(selected)}; target rows: {len(targets)}; mode={args.mode}")
 
     target_csv = run_output / f"{category.lower()}_targets.csv"
     schema_csv = run_output / f"{category.lower()}_schema.csv"
@@ -264,7 +275,9 @@ def run_category(
         "promotion_position", "promotion_type", "review_count", "rating", "customer_price",
         "regular_price", "total_savings", "offer_count", "is_sponsored",
     ]
+    log(category, f"Writing target CSV: {target_csv}")
     write_csv(target_csv, targets, target_fields)
+    log(category, f"Writing schema CSV: {schema_csv}")
     write_schema(schema_csv, fields)
 
     if not args.prepare_only and targets:
@@ -278,18 +291,25 @@ def run_category(
             workers=args.workers,
         )
     elif not enriched_csv.exists():
+        log(category, f"Writing empty enriched CSV: {enriched_csv}")
         write_csv(enriched_csv, [], fields)
 
+    log(category, f"Reading enriched CSV: {enriched_csv}")
     enriched_rows, _ = read_csv(enriched_csv)
+    log(category, f"Enriched rows: {len(enriched_rows)}")
     merge_enriched(rows, selected, enriched_rows, fields, args.overwrite)
 
     output_rows = rows if args.include_all_retailers else [row for row in rows if is_bestbuy(row)]
+    log(category, f"Writing final output CSV: {final_out} rows={len(output_rows)}")
     write_csv(final_out, output_rows, fields)
+    log(category, f"Writing product list output CSV: {product_out} rows={len(product_rows)}")
     write_csv(product_out, product_rows, product_fields)
 
     load_result = None
     if args.load_db:
+        log(category, "Starting DB load")
         load_result = load_db_func(final_out, product_out)
+        log(category, "DB load finished")
 
     manifest = {
         "category": category,
@@ -310,4 +330,5 @@ def run_category(
         "load_db": load_result,
     }
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    log(category, f"Wrote manifest: {manifest_path}")
     print(json.dumps(manifest, indent=2, ensure_ascii=False))

@@ -5,8 +5,9 @@ from datetime import datetime
 from pathlib import Path
 
 from bs4 import BeautifulSoup
+from zenrows import ZenRowsClient
 
-from .step00_config import BESTBUY_BASE_URL, DEFAULT_BESTBUY_RUN_ROOT, has_target_url
+from .step00_config import BESTBUY_BASE_URL, DEFAULT_BESTBUY_RUN_ROOT, has_target_url, load_initial_urls
 
 
 RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
@@ -18,6 +19,7 @@ OUTPUT_CSV = Path(
     )
 )
 LIMIT = int(os.getenv("BESTBUY_TRENDING_LIMIT", "6"))
+REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "180"))
 
 
 def clean_text(value):
@@ -79,6 +81,30 @@ def parse_trending_cards(html_text, limit=6):
     return cards
 
 
+def fetch_trending_html():
+    api_key = os.getenv("ZENROWS_API_KEY")
+    if not api_key:
+        raise RuntimeError("Set ZENROWS_API_KEY in .env")
+    url = load_initial_urls().get("trending_tvs_projectors", "")
+    if not url:
+        raise RuntimeError("Missing BestBuy trend URL")
+    INPUT_HTML.parent.mkdir(parents=True, exist_ok=True)
+    response = ZenRowsClient(api_key).get(
+        url,
+        params={
+            "custom_headers": "true",
+            "premium_proxy": "true",
+            "proxy_country": "us",
+            "js_render": "true",
+        },
+        timeout=REQUEST_TIMEOUT,
+    )
+    INPUT_HTML.write_text(response.text or "", encoding="utf-8", errors="replace")
+    if response.status_code != 200:
+        raise RuntimeError(f"Failed to fetch trending HTML: status={response.status_code} path={INPUT_HTML}")
+    return response.text or ""
+
+
 def main():
     if not has_target_url("trend"):
         OUTPUT_CSV.parent.mkdir(parents=True, exist_ok=True)
@@ -90,7 +116,11 @@ def main():
             writer.writeheader()
         print(f"skipped trending: no trend URL for category -> {OUTPUT_CSV}")
         return
-    html_text = INPUT_HTML.read_text(encoding="utf-8", errors="ignore")
+    if INPUT_HTML.exists():
+        html_text = INPUT_HTML.read_text(encoding="utf-8", errors="ignore")
+    else:
+        print(f"trending_source_html_missing={INPUT_HTML}; fetching with ZenRows")
+        html_text = fetch_trending_html()
     rows = parse_trending_cards(html_text, LIMIT)
     OUTPUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     with OUTPUT_CSV.open("w", newline="", encoding="utf-8-sig") as f:

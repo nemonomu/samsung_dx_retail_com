@@ -121,6 +121,22 @@ def zenrows_params():
     return params
 
 
+def fetch_source_html(api_key):
+    SOURCE_HTML_PATH.parent.mkdir(parents=True, exist_ok=True)
+    client = ZenRowsClient(api_key)
+    response = client.get(
+        build_search_url(1),
+        params=zenrows_params(),
+        timeout=REQUEST_TIMEOUT,
+    )
+    SOURCE_HTML_PATH.write_text(response.text or "", encoding="utf-8", errors="replace")
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"Failed to fetch source HTML for Apollo query: status={response.status_code} path={SOURCE_HTML_PATH}"
+        )
+    return response.text or ""
+
+
 def post_graphql(client, payload, page):
     headers = {
         "accept": "application/json, text/plain, */*",
@@ -469,7 +485,11 @@ def main():
     run_started_at = now()
     run_start = time.perf_counter()
 
-    html_text = SOURCE_HTML_PATH.read_text(encoding="utf-8", errors="replace")
+    if SOURCE_HTML_PATH.exists():
+        html_text = SOURCE_HTML_PATH.read_text(encoding="utf-8", errors="replace")
+    else:
+        print(f"source_html_missing={SOURCE_HTML_PATH}; fetching with ZenRows")
+        html_text = fetch_source_html(api_key)
     operation = find_started_operation(html_text, "PlpView_ProductList_Init")
     client = ZenRowsClient(api_key)
 

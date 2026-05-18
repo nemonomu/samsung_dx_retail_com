@@ -158,6 +158,26 @@ def run_one(client, html_text, placement):
     }
 
 
+def fetch_template_html(client):
+    QUERY_TEMPLATE_HTML.parent.mkdir(parents=True, exist_ok=True)
+    response = client.get(
+        REFERER,
+        params={
+            "custom_headers": "true",
+            "premium_proxy": "true",
+            "proxy_country": "us",
+            "js_render": "true",
+        },
+        timeout=REQUEST_TIMEOUT,
+    )
+    QUERY_TEMPLATE_HTML.write_text(response.text or "", encoding="utf-8", errors="replace")
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"Failed to fetch promotion source HTML: status={response.status_code} path={QUERY_TEMPLATE_HTML}"
+        )
+    return response.text or ""
+
+
 def write_rows(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8-sig") as f:
@@ -195,8 +215,12 @@ def main():
     api_key = os.getenv("ZENROWS_API_KEY")
     if not api_key:
         raise RuntimeError("Set ZENROWS_API_KEY in .env")
-    html_text = QUERY_TEMPLATE_HTML.read_text(encoding="utf-8", errors="ignore")
     client = ZenRowsClient(api_key)
+    if QUERY_TEMPLATE_HTML.exists():
+        html_text = QUERY_TEMPLATE_HTML.read_text(encoding="utf-8", errors="ignore")
+    else:
+        print(f"promotion_source_html_missing={QUERY_TEMPLATE_HTML}; fetching with ZenRows")
+        html_text = fetch_template_html(client)
     placements = list(PROMOTION_LABELS) if PLACEMENT.lower() == "all" else [PLACEMENT]
 
     all_rows = []

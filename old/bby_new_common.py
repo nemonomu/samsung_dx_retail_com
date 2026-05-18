@@ -244,6 +244,11 @@ def run_category(
     parser.add_argument("--include-all-retailers", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument(
+        "--allow-bestbuy-network",
+        action="store_true",
+        help="Allow detail/review collection from BestBuy URLs. Disabled by default.",
+    )
     parser.add_argument("--load-db", action="store_true")
     parser.add_argument("--workers", type=int, default=1)
     args = parser.parse_args()
@@ -283,6 +288,11 @@ def run_category(
     write_schema(schema_csv, fields)
 
     if not args.prepare_only and targets:
+        if not args.allow_bestbuy_network:
+            raise RuntimeError(
+                "BestBuy URL access is disabled. Use '*_bby_new.run --load-db' for CSV-only repair, "
+                "or rerun collect_remaining with --prepare-only to write target/schema files only."
+            )
         run_unsan_detail(
             category=category,
             run_root=run_root,

@@ -412,7 +412,12 @@ def recommendation_from_html(html_text):
 
 
 def fastest_delivery_from_html(html_text):
-    for pattern in (r'aria-label="(Get it by[^"]+)"', r'aria-label="(Shipping[^"]+)"'):
+    for pattern in (
+        r'aria-label="(Get it tomorrow[^"]*)"',
+        r'aria-label="(Get it by[^"]+)"',
+        r'aria-label="(Shipping[^"]+)"',
+        r">(Get it tomorrow\s+Free)<",
+    ):
         value = html_match(pattern, html_text)
         if value:
             return compact_text(value)
@@ -1221,12 +1226,13 @@ def first_spec_value(products, names):
     return ""
 
 
-def offer_count(products):
-    offers = first_path(products, ["offers", "offers"]) or []
-    if offers:
-        return str(len(offers))
-    buying = first_value(products, "buyingOptions") or []
-    return str(len(buying)) if buying else ""
+def offer_value(selector_values, target):
+    for key in ("offer", "special_offer", "retailer_offer"):
+        value = str(selector_values.get(key) or "").strip()
+        if value and value != "0":
+            return value
+    value = str(target.get("offer") or "").strip()
+    return "" if value in {"", "0"} else value
 
 
 def recommendation(products):
@@ -1292,6 +1298,24 @@ def output_row(target):
     selector_values = detail_selector_values(html_text)
     products, variations = products_from_detail(sku)
     price = best_price(products)
+    final_price = first_non_empty(
+        money(price.get("displayableCustomerPrice") or price.get("customerPrice") or target.get("customer_price")),
+        price_policy_message(price),
+        target.get("restricted_price_message"),
+        selector_values.get("final_sku_price"),
+        selector_values.get("final_sku_price_see_price_in_cart"),
+        selector_values.get("final_sku_price_no_longer_available"),
+    )
+    original_price = first_non_empty(
+        money(price.get("displayableRegularPrice") or price.get("regularPrice") or target.get("regular_price")),
+        selector_values.get("original_sku_price"),
+    )
+    savings = ""
+    if final_price and original_price:
+        savings = first_non_empty(
+            money_int(price.get("totalSavings") or target.get("total_savings")),
+            selector_values.get("savings"),
+        )
     review_info = first_value(products, "reviewInfo") or {}
     pickup = best_path(products, ["fulfillmentOptions", "ispuDetails", 0, "ispuAvailability", 0], ("maxDate",))
     delivery = best_path(
@@ -1338,23 +1362,10 @@ def output_row(target):
         ),
         "count_of_star_ratings": int_commas(review_info.get("reviewCount") or target.get("review_count")),
         "screen_size": first_non_empty(screen, selector_values.get("screen_size")),
-        "final_sku_price": first_non_empty(
-            money(price.get("displayableCustomerPrice") or price.get("customerPrice") or target.get("customer_price")),
-            price_policy_message(price),
-            target.get("restricted_price_message"),
-            selector_values.get("final_sku_price"),
-            selector_values.get("final_sku_price_see_price_in_cart"),
-            selector_values.get("final_sku_price_no_longer_available"),
-        ),
-        "original_sku_price": first_non_empty(
-            money(price.get("displayableRegularPrice") or price.get("regularPrice") or target.get("regular_price")),
-            selector_values.get("original_sku_price"),
-        ),
-        "savings": first_non_empty(
-            money_int(price.get("totalSavings") or target.get("total_savings")),
-            selector_values.get("savings"),
-        ),
-        "offer": offer_count(products) or target.get("offer_count", ""),
+        "final_sku_price": final_price,
+        "original_sku_price": original_price,
+        "savings": savings,
+        "offer": offer_value(selector_values, target),
         "pick_up_availability": first_non_empty(
             selector_values.get("pick_up_availability"),
             date_to_phrase("Pick up", pickup.get("maxDate") if isinstance(pickup, dict) else ""),
@@ -1364,9 +1375,9 @@ def output_row(target):
             fastest_delivery_from_html(html_text),
         ),
         "delivery_availability": first_non_empty(
-            selector_values.get("delivery_availability"),
-            delivery_from_html(html_text),
-            date_to_phrase("Delivery as soon as", delivery_slot),
+            "" if CATEGORY == "HHP" else selector_values.get("delivery_availability"),
+            "" if CATEGORY == "HHP" else delivery_from_html(html_text),
+            "" if CATEGORY == "HHP" else date_to_phrase("Delivery as soon as", delivery_slot),
         ),
         "shipping_info": "",
         "sku_status": "Sponsored" if target.get("is_sponsored") in {"1", "true", "True"} else "",

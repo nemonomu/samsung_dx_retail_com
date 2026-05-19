@@ -296,11 +296,18 @@ def run_step(step, dry_run=False, resume=False):
         return
 
     env = os.environ.copy()
-    for key, value in step.env.items():
-        env.setdefault(key, value)
-    if resume:
-        for key, value in step.resume_env.items():
+    force_step_env = os.getenv("BESTBUY_FORCE_STEP_ENV", "0").lower() in {"1", "true", "yes", "y"}
+    if force_step_env:
+        env.update(step.env)
+    else:
+        for key, value in step.env.items():
             env.setdefault(key, value)
+    if resume:
+        if force_step_env:
+            env.update(step.resume_env)
+        else:
+            for key, value in step.resume_env.items():
+                env.setdefault(key, value)
     command = [PYTHON, "-m", step.module]
     print(f"[run] step {step.key} {step.name}: {' '.join(command)}")
     effective_env = {key: env.get(key, value) for key, value in step.env.items()}

@@ -341,7 +341,12 @@ def available_url_keys(path=INITIAL_URLS_CSV, category=None, retailer=DEFAULT_RE
 
 
 def has_target_url(page_type, category=None, retailer=DEFAULT_RETAILER):
-    return _target_url_key(page_type) in available_url_keys(category=category, retailer=retailer)
+    key = _target_url_key(page_type)
+    keys = available_url_keys(category=category, retailer=retailer)
+    if key in keys:
+        return True
+    category_key = (category or bestbuy_category()).strip().upper()
+    return category_key == "TV" and key in BESTBUY_URLS
 
 
 def target_url(page_type, category=None, retailer=DEFAULT_RETAILER):

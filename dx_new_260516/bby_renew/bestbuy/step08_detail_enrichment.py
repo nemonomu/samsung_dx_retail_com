@@ -53,6 +53,54 @@ DETAIL_BENCHMARKS_CSV = BENCHMARKS_DIR / "detail_benchmarks.csv"
 FINAL_OUTPUT_CSV = Path(os.getenv("BESTBUY_FINAL_OUTPUT_CSV", OUTPUT_ROOT / "final_output.csv"))
 MANIFEST_PATH = DETAIL_ROOT / "manifest_detail_enrichment.json"
 
+TV_FINAL_FIELDS = [
+    "id",
+    "item",
+    "account_name",
+    "page_type",
+    "count_of_reviews",
+    "retailer_sku_name",
+    "product_url",
+    "star_rating",
+    "count_of_star_ratings",
+    "screen_size",
+    "sku_popularity",
+    "final_sku_price",
+    "original_sku_price",
+    "savings",
+    "discount_type",
+    "offer",
+    "pick_up_availability",
+    "fastest_delivery",
+    "delivery_availability",
+    "shipping_info",
+    "available_quantity_for_purchase",
+    "inventory_status",
+    "sku_status",
+    "retailer_membership_discounts",
+    "detailed_review_content",
+    "summarized_review_content",
+    "top_mentions",
+    "recommendation_intent",
+    "main_rank",
+    "bsr_rank",
+    "rank_1",
+    "rank_2",
+    "promotion_position",
+    "trend_rank",
+    "number_of_ppl_purchased_yesterday",
+    "number_of_ppl_added_to_carts",
+    "retailer_sku_name_similar",
+    "estimated_annual_electricity_use",
+    "promotion_type",
+    "calendar_week",
+    "crawl_datetime",
+    "number_of_units_purchased_past_month",
+    "model_year",
+    "batch_id",
+    "country",
+]
+
 HHP_FINAL_FIELDS = [
     "id",
     "country",
@@ -104,6 +152,7 @@ HHP_FINAL_FIELDS = [
 ]
 
 FALLBACK_FINAL_FIELDS = {
+    "TV": TV_FINAL_FIELDS,
     "HHP": HHP_FINAL_FIELDS,
 }
 
@@ -1094,6 +1143,8 @@ def review20_content(sku):
 
 
 def sample_fields():
+    if CATEGORY in FALLBACK_FINAL_FIELDS:
+        return FALLBACK_FINAL_FIELDS[CATEGORY]
     config = db_config()
     table_name = bestbuy_output_table()
     if config and table_name:
@@ -1124,8 +1175,6 @@ def sample_fields():
                         return fields
         except Exception:
             pass
-    if CATEGORY in FALLBACK_FINAL_FIELDS:
-        return FALLBACK_FINAL_FIELDS[CATEGORY]
     with SAMPLE_SCHEMA_CSV.open("r", encoding="utf-8-sig", newline="") as f:
         return next(csv.reader(f))
 
@@ -1155,9 +1204,10 @@ def output_row(target):
     hhp_attrs = hhp_attributes_from_product(primary_product, product_name) if CATEGORY == "HHP" else {}
 
     crawl_dt = datetime.now()
+    category_key = (target.get("category_key") or CATEGORY).upper()
     row = {
         "id": "",
-        "product": (target.get("category_key") or CATEGORY).lower(),
+        "product": category_key,
         "item": bsin,
         "account_name": "Bestbuy",
         "page_type": "bsr" if target.get("target_source") == "bsr_only_backfill" else "main",

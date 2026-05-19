@@ -84,10 +84,24 @@ PROMOTION_LABELS = {
 }
 
 DEFAULT_BESTBUY_RUNS_BASE = PACKAGE_DIR / "data"
+DEFAULT_MAIN_SEARCH_HTML = REPO_ROOT / "references" / "bestbuy_main_search_page_sample.html"
 
 
 def bestbuy_category():
     return os.getenv("BESTBUY_CATEGORY", DEFAULT_CATEGORY).strip().upper() or DEFAULT_CATEGORY
+
+
+def bestbuy_main_source_html(category=None):
+    override = os.getenv("BESTBUY_MAIN_SOURCE_HTML")
+    if override:
+        return Path(override)
+
+    category_key = (category or bestbuy_category()).strip().lower()
+    category_path = REPO_ROOT / "references" / f"bestbuy_{category_key}_main_search_page_sample.html"
+    if category_path.exists():
+        return category_path
+
+    return DEFAULT_MAIN_SEARCH_HTML
 
 
 def bestbuy_output_table(category=None):

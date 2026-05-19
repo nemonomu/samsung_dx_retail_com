@@ -12,6 +12,7 @@ from zenrows import ZenRowsClient
 from .step00_config import (
     DEFAULT_BESTBUY_RUN_ROOT,
     bestbuy_category,
+    bestbuy_main_source_html,
     load_initial_urls,
     rel_path,
     search_term_from_url,
@@ -30,7 +31,7 @@ REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "120"))
 RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
 RUN_ID = os.getenv("BESTBUY_MAIN_RUN_ID", "main")
 RUN_ROOT = Path(os.getenv("BESTBUY_RUN_ROOT", DEFAULT_BESTBUY_RUN_ROOT)) / RUN_ID
-SOURCE_HTML_PATH = Path(os.getenv("BESTBUY_MAIN_SOURCE_HTML", "references/bestbuy_main_search_page_sample.html"))
+SOURCE_HTML_PATH = bestbuy_main_source_html()
 FORCE_REFRESH = os.getenv("BESTBUY_FORCE_REFRESH", "0").lower() in {"1", "true", "yes", "y"}
 CATEGORY = bestbuy_category()
 URLS = load_initial_urls()

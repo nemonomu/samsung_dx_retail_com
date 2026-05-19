@@ -4,6 +4,7 @@ import re
 import sys
 from pathlib import Path
 
+from .step00_config import bestbuy_main_source_html
 from .step00_parse_pdp import (
     absolute_bestbuy_url,
     compact_json,
@@ -12,7 +13,7 @@ from .step00_parse_pdp import (
     nested_get,
 )
 
-DEFAULT_HTML_PATH = Path("references/bestbuy_main_search_page_sample.html")
+DEFAULT_HTML_PATH = bestbuy_main_source_html()
 DEFAULT_CSV_PATH = Path("bestbuy_search_parsed.csv")
 DEFAULT_JSON_PATH = Path("bestbuy_search_raw_products.json")
 

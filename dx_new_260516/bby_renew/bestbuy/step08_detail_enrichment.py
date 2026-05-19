@@ -904,6 +904,12 @@ def review_result_count_from_json(data):
     reviews = (product.get("reviews") or {}).get("results")
     if isinstance(reviews, list):
         return len(reviews)
+    review_count = (product.get("reviewInfo") or {}).get("reviewCount")
+    try:
+        if int(str(review_count).replace(",", "").strip()) == 0:
+            return 0
+    except (TypeError, ValueError):
+        pass
     return None
 
 

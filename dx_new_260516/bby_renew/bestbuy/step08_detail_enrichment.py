@@ -413,10 +413,9 @@ def recommendation_from_html(html_text):
 
 def fastest_delivery_from_html(html_text):
     for pattern in (
-        r'aria-label="(Get it tomorrow[^"]*)"',
-        r'aria-label="(Get it by[^"]+)"',
+        r'aria-label="(Get it[^"]*)"',
         r'aria-label="(Shipping[^"]+)"',
-        r">(Get it tomorrow\s+Free)<",
+        r">(Get it[^<]*)<",
     ):
         value = html_match(pattern, html_text)
         if value:
@@ -427,6 +426,44 @@ def fastest_delivery_from_html(html_text):
 def delivery_from_html(html_text):
     value = html_match(r'aria-label="(Delivery\s+As soon as[^"]+)"', html_text)
     return compact_text(value).replace("Delivery As soon as", "Delivery as soon as")
+
+
+def price_policy_from_html(html_text):
+    for pattern in (
+        r"(See price in cart)",
+        r"(No longer available)",
+        r"(Sold Out)",
+        r"(Coming Soon)",
+        r"(Unavailable)",
+    ):
+        value = html_match(pattern, html_text)
+        if value:
+            return value
+    return ""
+
+
+def price_policy_value(price, selector_values, target, html_text):
+    candidates = [
+        selector_values.get("final_sku_price_see_price_in_cart"),
+        selector_values.get("final_sku_price_no_longer_available"),
+        selector_values.get("price_policy_message"),
+        price_policy_message(price),
+        target.get("restricted_price_message"),
+        price_policy_from_html(html_text),
+    ]
+    for value in candidates:
+        text = compact_text(value)
+        if not text:
+            continue
+        lowered = text.lower()
+        if any(needle in lowered for needle in ("see price in cart", "no longer available", "sold out", "coming soon", "unavailable")):
+            return text
+    return ""
+
+
+def is_policy_price(value):
+    lowered = compact_text(value).lower()
+    return any(needle in lowered for needle in ("see price in cart", "no longer available", "sold out", "coming soon", "unavailable"))
 
 
 def clean_energy(value):
@@ -1298,23 +1335,21 @@ def output_row(target):
     selector_values = detail_selector_values(html_text)
     products, variations = products_from_detail(sku)
     price = best_price(products)
+    policy_price = price_policy_value(price, selector_values, target, html_text)
     final_price = first_non_empty(
-        money(price.get("displayableCustomerPrice") or price.get("customerPrice") or target.get("customer_price")),
-        price_policy_message(price),
-        target.get("restricted_price_message"),
+        policy_price,
         selector_values.get("final_sku_price"),
-        selector_values.get("final_sku_price_see_price_in_cart"),
-        selector_values.get("final_sku_price_no_longer_available"),
+        money(price.get("displayableCustomerPrice") or price.get("customerPrice") or target.get("customer_price")),
     )
-    original_price = first_non_empty(
-        money(price.get("displayableRegularPrice") or price.get("regularPrice") or target.get("regular_price")),
+    original_price = "" if is_policy_price(final_price) else first_non_empty(
         selector_values.get("original_sku_price"),
+        money(price.get("displayableRegularPrice") or price.get("regularPrice") or target.get("regular_price")),
     )
     savings = ""
-    if final_price and original_price:
+    if final_price and original_price and not is_policy_price(final_price):
         savings = first_non_empty(
-            money_int(price.get("totalSavings") or target.get("total_savings")),
             selector_values.get("savings"),
+            money_int(price.get("totalSavings") or target.get("total_savings")),
         )
     review_info = first_value(products, "reviewInfo") or {}
     pickup = best_path(products, ["fulfillmentOptions", "ispuDetails", 0, "ispuAvailability", 0], ("maxDate",))

@@ -449,7 +449,7 @@ def normalize_fastest_delivery(value):
     if re.match(r"(?i)^get it\b", text):
         return re.sub(r"(?i)^get it\b", "Get it", text, count=1)
     if re.match(r"(?i)^unavailable\b", text):
-        return "Unavailable"
+        return ""
     return text
 
 
@@ -1196,6 +1196,11 @@ def products_from_detail(sku):
     def add_product(product):
         if not isinstance(product, dict) or str(product.get("skuId")) != str(sku):
             return
+        if product.get("openBoxCondition") not in (None, "", [], {}):
+            return
+        condition_type = ((product.get("condition") or {}).get("type") or "").lower()
+        if condition_type and condition_type != "new":
+            return
         marker = id(product)
         if marker in seen_products:
             return
@@ -1288,14 +1293,48 @@ def best_price(products):
     best = {}
     best_score = -1
     for product in products:
-        price = product.get("price")
-        if not isinstance(price, dict):
+        embedded_price = product.get("price")
+        if isinstance(embedded_price, dict):
+            price = embedded_price
+        elif any(
+            key in product
+            for key in (
+                "displayableCustomerPrice",
+                "customerPrice",
+                "displayableRegularPrice",
+                "regularPrice",
+                "totalSavings",
+                "restrictedPriceDisplayMessage",
+                "financeOption",
+            )
+        ):
+            price = product
+        else:
             continue
-        score = sum(
-            1
-            for key in ("displayableCustomerPrice", "customerPrice", "displayableRegularPrice", "regularPrice", "totalSavings")
-            if price.get(key) not in (None, "", [], {})
-        )
+        score = 0
+        open_box_condition = first_non_empty(product.get("openBoxCondition"), price.get("openBoxCondition"))
+        if open_box_condition in (None, "", [], {}):
+            score += 1000
+        else:
+            score -= 1000
+        condition_type = ((product.get("condition") or {}).get("type") or "").lower()
+        if condition_type == "new":
+            score += 100
+        if price.get("displayableCustomerPrice") not in (None, "", [], {}):
+            score += 100
+        if price.get("customerPrice") not in (None, "", [], {}):
+            score += 90
+        finance_option = price.get("financeOption") if isinstance(price.get("financeOption"), dict) else {}
+        if finance_option.get("totalCost") not in (None, "", [], {}):
+            score += 80
+        if price.get("displayableRegularPrice") not in (None, "", [], {}):
+            score += 30
+        if price.get("regularPrice") not in (None, "", [], {}):
+            score += 25
+        if price.get("totalSavings") not in (None, "", [], {}):
+            score += 10
+        if price_policy_message(price):
+            score += 1
         if score > best_score:
             best = price
             best_score = score
@@ -1344,10 +1383,7 @@ def offer_value(selector_values, target, html_text):
     value = offer_count_from_html(html_text)
     if value:
         return value
-    return first_non_empty(
-        offer_count_value(target.get("offer")),
-        offer_count_value(target.get("offer_count")),
-    )
+    return ""
 
 
 def recommendation(products):
@@ -1414,10 +1450,19 @@ def output_row(target):
     products, variations = products_from_detail(sku)
     price = best_price(products)
     policy_price = price_policy_value(price, selector_values, target, html_text)
+    selector_final_price = selector_values.get("final_sku_price")
+    finance_option = price.get("financeOption") if isinstance(price.get("financeOption"), dict) else {}
+    numeric_final_price = money(
+        price.get("displayableCustomerPrice")
+        or price.get("customerPrice")
+        or finance_option.get("totalCost")
+        or target.get("customer_price")
+    )
     final_price = first_non_empty(
+        "" if is_policy_price(selector_final_price) else selector_final_price,
+        numeric_final_price,
         policy_price,
-        selector_values.get("final_sku_price"),
-        money(price.get("displayableCustomerPrice") or price.get("customerPrice") or target.get("customer_price")),
+        selector_final_price,
     )
     original_price = "" if is_policy_price(final_price) else first_non_empty(
         selector_values.get("original_sku_price"),
@@ -1433,6 +1478,9 @@ def output_row(target):
             savings = ""
         else:
             savings = normalize_savings(savings)
+    if final_price and original_price and final_price == original_price:
+        original_price = ""
+        savings = ""
     review_info = first_value(products, "reviewInfo") or {}
     pickup = best_path(products, ["fulfillmentOptions", "ispuDetails", 0, "ispuAvailability", 0], ("maxDate",))
     delivery = best_path(

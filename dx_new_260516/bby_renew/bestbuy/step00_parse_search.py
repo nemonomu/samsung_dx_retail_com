@@ -182,13 +182,29 @@ def display_price_or_policy(price):
     return price_value(price, "restrictedPriceDisplayMessage")
 
 
+def visible_offer_count(value):
+    if isinstance(value, str):
+        match = re.search(r"\+?\s*(\d+)\s+offers?\s+for\s+you\b", value, re.I)
+        return match.group(1) if match else ""
+    if isinstance(value, dict):
+        for child in value.values():
+            result = visible_offer_count(child)
+            if result:
+                return result
+    elif isinstance(value, list):
+        for child in value:
+            result = visible_offer_count(child)
+            if result:
+                return result
+    return ""
+
+
 def parse_product(product, occurrence):
     price = product.get("price", {}) if isinstance(product.get("price"), dict) else {}
     review_info = product.get("reviewInfo", {}) if isinstance(product.get("reviewInfo"), dict) else {}
     primary_image = product.get("primaryImage", {}) if isinstance(product.get("primaryImage"), dict) else {}
     shipping = nested_get(product, ["fulfillmentOptions", "shippingDetails", "shippingAvailability"], {})
     pickup = nested_get(product, ["fulfillmentOptions", "ispuDetails", "ispuAvailability"], {})
-    offers = nested_get(product, ["offers", "offers"], [])
 
     return {
         "page": occurrence.get("page", 1),
@@ -220,7 +236,7 @@ def parse_product(product, occurrence):
         "shipping_eligible": shipping.get("shippingEligible", "") if isinstance(shipping, dict) else "",
         "pickup_eligible": pickup.get("pickupEligible", "") if isinstance(pickup, dict) else "",
         "pickup_quantity": pickup.get("quantity", "") if isinstance(pickup, dict) else "",
-        "offer_count": len(offers) if isinstance(offers, list) else "",
+        "offer_count": visible_offer_count(product),
         "buying_options_json": compact_json(product.get("buyingOptions")),
         "syndicated_review_summary_json": compact_json(review_info.get("syndicatedReviewSummary")),
         "raw_product_json": compact_json(product),

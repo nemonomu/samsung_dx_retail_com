@@ -179,7 +179,7 @@ REF_FINAL_FIELDS = [
     "sku_status",
     "retailer_membership_discounts",
     "ref_capacity",
-    "ref_refri",
+    "ref_refrigerator_type",
     "detailed_review_content",
     "summarized_review_content",
     "top_mentions",
@@ -1305,7 +1305,7 @@ def output_row(target):
     model_year = spec_value(products, "Model Year")
     model_number = first_spec_value(products, ["Model Number"]) or first_path(products, ["manufacturer", "modelNumber"])
     ref_capacity = first_spec_value(products, ["Capacity", "Total Capacity", "Refrigerator Capacity"])
-    ref_refri = first_spec_value(products, ["Refrigerator Style", "Refrigerator Type", "Configuration"])
+    ref_refrigerator_type = first_spec_value(products, ["Refrigerator Style", "Refrigerator Type", "Configuration"])
     ldy_capacity = first_spec_value(
         products,
         ["Washer Capacity", "Dryer Capacity", "Capacity", "Total Capacity"],
@@ -1374,7 +1374,7 @@ def output_row(target):
         "hhp_color": hhp_attrs.get("hhp_color", ""),
         "hhp_carrier": hhp_attrs.get("hhp_carrier", ""),
         "ref_capacity": ref_capacity,
-        "ref_refri": ref_refri,
+        "ref_refrigerator_type": ref_refrigerator_type,
         "ldy_capacity": ldy_capacity,
         "ldy_loading_type": ldy_loading_type,
         "detailed_review_content": review20_content(sku),

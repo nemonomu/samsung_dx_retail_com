@@ -174,6 +174,13 @@ def price_value(price, *keys):
     return ""
 
 
+def display_price_or_policy(price):
+    customer_price = price_value(price, "displayableCustomerPrice", "customerPrice")
+    if customer_price:
+        return customer_price
+    return price_value(price, "restrictedPriceDisplayMessage")
+
+
 def parse_product(product, occurrence):
     price = product.get("price", {}) if isinstance(product.get("price"), dict) else {}
     review_info = product.get("reviewInfo", {}) if isinstance(product.get("reviewInfo"), dict) else {}
@@ -203,7 +210,7 @@ def parse_product(product, occurrence):
         "rating": review_info.get("averageRating", ""),
         "review_count": review_info.get("reviewCount", ""),
         "is_reviewable": review_info.get("isReviewable", ""),
-        "customer_price": price_value(price, "displayableCustomerPrice", "customerPrice"),
+        "customer_price": display_price_or_policy(price),
         "regular_price": price_value(price, "displayableRegularPrice"),
         "total_savings": price_value(price, "totalSavings"),
         "total_savings_percent": price_value(price, "totalSavingsPercent"),

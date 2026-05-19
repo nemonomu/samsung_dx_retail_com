@@ -211,6 +211,15 @@ def money(value):
         return str(value)
 
 
+def price_policy_message(price):
+    if not isinstance(price, dict):
+        return ""
+    return first_non_empty(
+        price.get("restrictedPriceDisplayMessage"),
+        price.get("priceDisplayMessage"),
+    )
+
+
 def money_int(value):
     if value in ("", None):
         return ""
@@ -1166,6 +1175,8 @@ def output_row(target):
         "screen_size": first_non_empty(screen, selector_values.get("screen_size")),
         "final_sku_price": first_non_empty(
             money(price.get("displayableCustomerPrice") or price.get("customerPrice") or target.get("customer_price")),
+            price_policy_message(price),
+            target.get("restricted_price_message"),
             selector_values.get("final_sku_price"),
             selector_values.get("final_sku_price_see_price_in_cart"),
             selector_values.get("final_sku_price_no_longer_available"),

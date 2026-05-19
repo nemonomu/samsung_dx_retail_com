@@ -123,6 +123,7 @@ def main_attribute_map(rows):
         "regular_price",
         "total_savings",
         "total_savings_percent",
+        "restricted_price_message",
         "buying_options_json",
         "is_reviewable",
         "syndicated_review_summary_json",

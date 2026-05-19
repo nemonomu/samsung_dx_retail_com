@@ -1344,7 +1344,10 @@ def offer_value(selector_values, target, html_text):
     value = offer_count_from_html(html_text)
     if value:
         return value
-    return offer_count_value(target.get("offer"))
+    return first_non_empty(
+        offer_count_value(target.get("offer")),
+        offer_count_value(target.get("offer_count")),
+    )
 
 
 def recommendation(products):

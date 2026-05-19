@@ -1319,11 +1319,18 @@ def first_spec_value(products, names):
     return ""
 
 
-def offer_value(selector_values, target):
+def offer_value(selector_values, target, price):
     for key in ("offer", "special_offer", "retailer_offer"):
         value = str(selector_values.get(key) or "").strip()
         if value and value != "0":
             return value
+    if isinstance(price, dict):
+        value = first_non_empty(
+            price.get("puckDisplayMessage"),
+            price.get("preferredBadging"),
+        )
+        if value and str(value).strip() != "0":
+            return compact_text(value)
     value = str(target.get("offer") or "").strip()
     return "" if value in {"", "0"} else value
 
@@ -1460,7 +1467,7 @@ def output_row(target):
         "final_sku_price": final_price,
         "original_sku_price": original_price,
         "savings": savings,
-        "offer": offer_value(selector_values, target),
+        "offer": offer_value(selector_values, target, price),
         "pick_up_availability": first_non_empty(
             selector_values.get("pick_up_availability"),
             date_to_phrase("Pick up", pickup.get("maxDate") if isinstance(pickup, dict) else ""),

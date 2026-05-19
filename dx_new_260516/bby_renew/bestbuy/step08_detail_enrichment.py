@@ -151,9 +151,107 @@ HHP_FINAL_FIELDS = [
     "batch_id",
 ]
 
+REF_FINAL_FIELDS = [
+    "id",
+    "country",
+    "product",
+    "item",
+    "sku",
+    "account_name",
+    "page_type",
+    "count_of_reviews",
+    "retailer_sku_name",
+    "product_url",
+    "star_rating",
+    "count_of_star_ratings",
+    "sku_popularity",
+    "final_sku_price",
+    "original_sku_price",
+    "savings",
+    "discount_type",
+    "offer",
+    "pick_up_availability",
+    "fastest_delivery",
+    "delivery_availability",
+    "shipping_info",
+    "available_quantity_for_purchase",
+    "inventory_status",
+    "sku_status",
+    "retailer_membership_discounts",
+    "ref_capacity",
+    "ref_refri",
+    "detailed_review_content",
+    "summarized_review_content",
+    "top_mentions",
+    "recommendation_intent",
+    "main_rank",
+    "bsr_rank",
+    "rank_1",
+    "rank_2",
+    "trend_rank",
+    "number_of_ppl_purchased_yesterday",
+    "number_of_ppl_added_to_carts",
+    "number_of_units_purchased_past_month",
+    "retailer_sku_name_similar",
+    "promotion_type",
+    "calendar_week",
+    "crawl_datetime",
+    "batch_id",
+]
+
+LDY_FINAL_FIELDS = [
+    "id",
+    "country",
+    "product",
+    "item",
+    "sku",
+    "account_name",
+    "page_type",
+    "count_of_reviews",
+    "retailer_sku_name",
+    "product_url",
+    "star_rating",
+    "count_of_star_ratings",
+    "sku_popularity",
+    "final_sku_price",
+    "original_sku_price",
+    "savings",
+    "discount_type",
+    "offer",
+    "pick_up_availability",
+    "fastest_delivery",
+    "delivery_availability",
+    "shipping_info",
+    "available_quantity_for_purchase",
+    "inventory_status",
+    "sku_status",
+    "retailer_membership_discounts",
+    "ldy_capacity",
+    "ldy_loading_type",
+    "detailed_review_content",
+    "summarized_review_content",
+    "top_mentions",
+    "recommendation_intent",
+    "main_rank",
+    "bsr_rank",
+    "rank_1",
+    "rank_2",
+    "trend_rank",
+    "number_of_ppl_purchased_yesterday",
+    "number_of_ppl_added_to_carts",
+    "number_of_units_purchased_past_month",
+    "retailer_sku_name_similar",
+    "promotion_type",
+    "calendar_week",
+    "crawl_datetime",
+    "batch_id",
+]
+
 FALLBACK_FINAL_FIELDS = {
     "TV": TV_FINAL_FIELDS,
     "HHP": HHP_FINAL_FIELDS,
+    "REF": REF_FINAL_FIELDS,
+    "LDY": LDY_FINAL_FIELDS,
 }
 
 
@@ -1115,6 +1213,14 @@ def spec_value(products, display_name):
     return ""
 
 
+def first_spec_value(products, names):
+    for name in names:
+        value = spec_value(products, name)
+        if value:
+            return compact_text(value)
+    return ""
+
+
 def offer_count(products):
     offers = first_path(products, ["offers", "offers"]) or []
     if offers:
@@ -1197,6 +1303,14 @@ def output_row(target):
     screen = spec_value(products, "Screen Size Class") or spec_value(products, "Screen Size")
     energy = spec_value(products, "Estimated Annual Electricity Use")
     model_year = spec_value(products, "Model Year")
+    model_number = first_spec_value(products, ["Model Number"]) or first_path(products, ["manufacturer", "modelNumber"])
+    ref_capacity = first_spec_value(products, ["Capacity", "Total Capacity", "Refrigerator Capacity"])
+    ref_refri = first_spec_value(products, ["Refrigerator Style", "Refrigerator Type", "Configuration"])
+    ldy_capacity = first_spec_value(
+        products,
+        ["Washer Capacity", "Dryer Capacity", "Capacity", "Total Capacity"],
+    )
+    ldy_loading_type = first_spec_value(products, ["Load Type", "Washer Load Type", "Loading Type"])
     product_name = first_path(products, ["name", "short"]) or target.get("product_name", "")
     product_url = first_path(products, ["url", "pdp"]) or target.get("product_url", "")
     bsin = first_value(products, "bsin") or target.get("bsin", "")
@@ -1209,6 +1323,7 @@ def output_row(target):
         "id": "",
         "product": category_key,
         "item": bsin,
+        "sku": model_number,
         "account_name": "Bestbuy",
         "page_type": "bsr" if target.get("target_source") == "bsr_only_backfill" else "main",
         "count_of_reviews": int_commas(review_info.get("reviewCount") or target.get("review_count")),
@@ -1258,6 +1373,10 @@ def output_row(target):
         "hhp_storage": hhp_attrs.get("hhp_storage", ""),
         "hhp_color": hhp_attrs.get("hhp_color", ""),
         "hhp_carrier": hhp_attrs.get("hhp_carrier", ""),
+        "ref_capacity": ref_capacity,
+        "ref_refri": ref_refri,
+        "ldy_capacity": ldy_capacity,
+        "ldy_loading_type": ldy_loading_type,
         "detailed_review_content": review20_content(sku),
         "summarized_review_content": "",
         "top_mentions": "",

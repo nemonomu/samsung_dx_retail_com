@@ -1375,7 +1375,21 @@ def offer_count_from_html(html_text):
     return match.group(1) if match else ""
 
 
-def offer_value(selector_values, target, html_text):
+def offer_count_from_products(products):
+    counts = []
+    for product in products:
+        offers = ((product.get("offers") or {}).get("offers") or []) if isinstance(product.get("offers"), dict) else []
+        hot_offer_count = sum(1 for offer in offers if isinstance(offer, dict) and offer.get("hotOffer"))
+        price = product.get("price") if isinstance(product.get("price"), dict) else {}
+        gift_skus = price.get("giftSkus") if isinstance(price, dict) else []
+        gift_count = len(gift_skus) if isinstance(gift_skus, list) else 0
+        total = hot_offer_count + gift_count
+        if total > 0:
+            counts.append(total)
+    return str(max(counts)) if counts else ""
+
+
+def offer_value(selector_values, products, html_text):
     for key in ("offer", "special_offer", "retailer_offer"):
         value = offer_count_value(selector_values.get(key))
         if value:
@@ -1383,7 +1397,7 @@ def offer_value(selector_values, target, html_text):
     value = offer_count_from_html(html_text)
     if value:
         return value
-    return ""
+    return offer_count_from_products(products)
 
 
 def recommendation(products):
@@ -1530,7 +1544,7 @@ def output_row(target):
         "final_sku_price": final_price,
         "original_sku_price": original_price,
         "savings": savings,
-        "offer": offer_value(selector_values, target, html_text),
+        "offer": offer_value(selector_values, products, html_text),
         "pick_up_availability": first_non_empty(
             selector_values.get("pick_up_availability"),
             date_to_phrase("Pick up", pickup.get("maxDate") if isinstance(pickup, dict) else ""),

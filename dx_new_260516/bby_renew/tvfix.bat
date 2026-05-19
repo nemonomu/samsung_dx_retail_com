@@ -8,6 +8,7 @@ set RUN_DATE=%~1
 if "%RUN_DATE%"=="" set RUN_DATE=20260519
 
 set BESTBUY_RUN_DATE=%RUN_DATE%
+set BESTBUY_FINAL_TARGET_SIZE=300
 set BESTBUY_DETAIL_REBUILD_ONLY=1
 set BESTBUY_DETAIL_RETRY_ONLY=
 set BESTBUY_DETAIL_LIMIT=
@@ -22,7 +23,7 @@ echo log=%LOG%
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Continue';" ^
-  "$cmd='python -u -m bestbuy.bestbuy_orchestrator --category TV 08 10 14';" ^
+  "$cmd='python -u -m bestbuy.bestbuy_orchestrator --category TV 07 08 10 14';" ^
   "Write-Output ('[cmd] ' + $cmd);" ^
   "cmd /c $cmd 2>&1 | Tee-Object -FilePath '%LOG%';" ^
   "exit $LASTEXITCODE"

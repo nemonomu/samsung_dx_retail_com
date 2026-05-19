@@ -17,6 +17,14 @@ DEFAULT_HEADERS = {
     "accept-language": "pt-BR,pt;q=0.9,en-US;q=0.7,en;q=0.6",
     "cache-control": "no-cache",
     "pragma": "no-cache",
+    "sec-ch-ua": '"Chromium";v="125", "Google Chrome";v="125", "Not.A/Brand";v="24"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "sec-fetch-dest": "document",
+    "sec-fetch-mode": "navigate",
+    "sec-fetch-site": "none",
+    "sec-fetch-user": "?1",
+    "upgrade-insecure-requests": "1",
     "user-agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -34,9 +42,41 @@ def ensure_dirs(subject_root):
         (subject_root / child).mkdir(parents=True, exist_ok=True)
 
 
-def fetch_url(url, timeout):
+def env_headers(retailer_key):
+    headers = dict(DEFAULT_HEADERS)
+    variant = os.getenv(f"{retailer_key}_REQUEST_VARIANT", "default").strip().lower()
+    if variant in {"magalu_browser", "browser", "browser_headers"}:
+        headers.update(
+            {
+                "accept": (
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "image/avif,image/webp,image/apng,*/*;q=0.8,"
+                    "application/signed-exchange;v=b3;q=0.7"
+                ),
+                "priority": "u=0, i",
+            }
+        )
+    referer = os.getenv(f"{retailer_key}_REFERER", "").strip()
+    if referer:
+        headers["referer"] = referer
+        headers["sec-fetch-site"] = "same-origin"
+    cookie = os.getenv(f"{retailer_key}_COOKIE", "").strip()
+    if cookie:
+        headers["cookie"] = cookie
+    extra_raw = os.getenv(f"{retailer_key}_HEADERS_JSON", "").strip()
+    if extra_raw:
+        try:
+            extra = json.loads(extra_raw)
+            if isinstance(extra, dict):
+                headers.update({str(key): str(value) for key, value in extra.items()})
+        except ValueError:
+            pass
+    return headers
+
+
+def fetch_url(url, timeout, retailer_key):
     started = time.monotonic()
-    request = Request(url, headers=DEFAULT_HEADERS)
+    request = Request(url, headers=env_headers(retailer_key))
     try:
         with urlopen(request, timeout=timeout) as response:
             body = response.read()
@@ -228,7 +268,7 @@ def run_main_list(
 
     for page in range(1, page_count + 1):
         url = url_for_page(url_template, page)
-        result = fetch_url(url, timeout)
+        result = fetch_url(url, timeout, retailer_key)
         raw_path = subject_root / "raw" / f"main_page_{page:03d}.html"
         raw_path.write_bytes(result["body"])
         text = text_from_body(result["body"], result["headers"]) if result["body"] else ""

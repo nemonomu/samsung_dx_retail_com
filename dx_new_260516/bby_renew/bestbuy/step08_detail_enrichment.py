@@ -51,6 +51,7 @@ DETAIL_ROWS_CSV = PARSED_DIR / "detail_enriched_rows.csv"
 FAILURES_CSV = PARSED_DIR / "detail_failures.csv"
 DETAIL_BENCHMARKS_CSV = BENCHMARKS_DIR / "detail_benchmarks.csv"
 FINAL_OUTPUT_CSV = Path(os.getenv("BESTBUY_FINAL_OUTPUT_CSV", OUTPUT_ROOT / "final_output.csv"))
+PRODUCT_LIST_CSV = Path(os.getenv("BESTBUY_PRODUCT_LIST_OUTPUT", OUTPUT_ROOT / "bestbuy_product_list.csv"))
 MANIFEST_PATH = DETAIL_ROOT / "manifest_detail_enrichment.json"
 
 TV_FINAL_FIELDS = [
@@ -663,6 +664,48 @@ def write_csv(path, rows, preferred=None):
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def sync_product_list(final_rows):
+    if not PRODUCT_LIST_CSV.exists():
+        return 0
+    with PRODUCT_LIST_CSV.open("r", encoding="utf-8-sig", newline="") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+        fields = reader.fieldnames or []
+    if not rows or not fields:
+        return 0
+
+    by_url = {
+        compact_text(row.get("product_url")): row
+        for row in final_rows
+        if compact_text(row.get("product_url"))
+    }
+    sync_fields = [
+        "offer",
+        "pick_up_availability",
+        "fastest_delivery",
+        "delivery_availability",
+        "sku_status",
+        "promotion_type",
+        "trend_rank",
+        "main_rank",
+        "bsr_rank",
+        "promotion_position",
+    ]
+    changed = 0
+    for row in rows:
+        source = by_url.get(compact_text(row.get("product_url")))
+        if not source:
+            continue
+        for field in sync_fields:
+            if field in fields and field in source:
+                new_value = source.get(field, "")
+                if row.get(field, "") != new_value:
+                    row[field] = new_value
+                    changed += 1
+    write_csv(PRODUCT_LIST_CSV, rows, fields)
+    return changed
 
 
 def read_json(path):
@@ -1720,6 +1763,7 @@ def main():
             row.setdefault(field, "")
     final_rows = [{field: row.get(field, "") for field in fields} for row in enriched_rows]
     write_csv(FINAL_OUTPUT_CSV, final_rows, fields)
+    product_list_updates = sync_product_list(final_rows)
     benchmark_rows = write_detail_benchmarks(TARGET_CSV, DETAIL_ROOT, DETAIL_BENCHMARKS_CSV)
 
     manifest = {
@@ -1746,6 +1790,8 @@ def main():
         "detail_benchmarks_csv": rel_path(DETAIL_BENCHMARKS_CSV),
         "detail_benchmark_rows": len(benchmark_rows),
         "final_output_csv": rel_path(FINAL_OUTPUT_CSV),
+        "product_list_csv": rel_path(PRODUCT_LIST_CSV),
+        "product_list_updates": product_list_updates,
     }
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(manifest, indent=2, ensure_ascii=False))

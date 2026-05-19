@@ -27,7 +27,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "  $env:BESTBUY_DETAIL_LIMIT='';" ^
   "  $env:BESTBUY_DETAIL_WORKERS='3';" ^
   "  $env:ZENROWS_TIMEOUT='240';" ^
-  "  python -u -m bestbuy.bestbuy_orchestrator --category $cat 01 02 03 04 05 06 07 08 09 10 13 14 2>&1 | Tee-Object -FilePath $catLog | Tee-Object -FilePath $allLog -Append;" ^
+  "  if ($cat -eq 'TV') { $steps=@('01','02','03','04','05','06','07','08','09','10','13','14') } elseif ($cat -eq 'HHP') { $steps=@('01','02','03','04','06','07','08','09','10','13','14') } else { $steps=@('01','02','03','04','07','08','09','10','13','14') }" ^
+  "  & python -u -m bestbuy.bestbuy_orchestrator --category $cat @steps 2>&1 | Tee-Object -FilePath $catLog | Tee-Object -FilePath $allLog -Append;" ^
   "  if ($LASTEXITCODE -ne 0) { throw ('pipeline failed for ' + $cat + ' exit=' + $LASTEXITCODE) }" ^
   "  $catElapsed=(Get-Date)-$catStart;" ^
   "  ('===== ' + $cat + ' elapsed=' + $catElapsed.ToString() + ' =====') | Tee-Object -FilePath $allLog -Append;" ^

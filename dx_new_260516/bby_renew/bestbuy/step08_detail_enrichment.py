@@ -376,6 +376,22 @@ def money_int(value):
         return str(value)
 
 
+def normalize_savings(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    match = re.search(r"\$?\s*([0-9][0-9,]*(?:\.\d+)?)", text)
+    if not match:
+        return text
+    try:
+        amount = float(match.group(1).replace(",", ""))
+    except ValueError:
+        return text
+    if amount <= 0:
+        return ""
+    return f"${int(round(amount)):,}"
+
+
 def int_commas(value):
     if value in ("", None):
         return ""
@@ -421,6 +437,20 @@ def fastest_delivery_from_html(html_text):
         if value:
             return compact_text(value)
     return ""
+
+
+def normalize_fastest_delivery(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    text = re.sub(r"^(Shipping|Delivery|Pickup)\s+", "", text, flags=re.I).strip()
+    if re.match(r"(?i)^get it tomorrow\b", text):
+        return re.sub(r"(?i)^get it tomorrow\b", "Get it tomorrow", text, count=1)
+    if re.match(r"(?i)^get it\b", text):
+        return re.sub(r"(?i)^get it\b", "Get it", text, count=1)
+    if re.match(r"(?i)^unavailable\b", text):
+        return "Unavailable"
+    return text
 
 
 def delivery_from_html(html_text):
@@ -1161,12 +1191,32 @@ def fetch_review20(client, target):
 def products_from_detail(sku):
     products = []
     variations = []
+    seen_products = set()
+
+    def add_product(product):
+        if not isinstance(product, dict) or str(product.get("skuId")) != str(sku):
+            return
+        marker = id(product)
+        if marker in seen_products:
+            return
+        seen_products.add(marker)
+        products.append(product)
+
+    def walk(value):
+        if isinstance(value, dict):
+            add_product(value)
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
     for payload in detail_payloads(sku):
         for event in payload.get("events", []):
             data = event_data(event)
             product = data.get("productBySkuId") if isinstance(data, dict) else None
-            if isinstance(product, dict) and str(product.get("skuId")) == str(sku):
-                products.append(product)
+            add_product(product)
+            walk(data)
             bsin_product = data.get("bsinProduct") if isinstance(data, dict) else None
             if isinstance(bsin_product, dict):
                 variation_display = bsin_product.get("productVariationDetailDisplay") or {}
@@ -1357,6 +1407,10 @@ def output_row(target):
             selector_values.get("savings"),
             money_int(price.get("totalSavings") or target.get("total_savings")),
         )
+        if final_price == original_price:
+            savings = ""
+        else:
+            savings = normalize_savings(savings)
     review_info = first_value(products, "reviewInfo") or {}
     pickup = best_path(products, ["fulfillmentOptions", "ispuDetails", 0, "ispuAvailability", 0], ("maxDate",))
     delivery = best_path(
@@ -1412,8 +1466,8 @@ def output_row(target):
             date_to_phrase("Pick up", pickup.get("maxDate") if isinstance(pickup, dict) else ""),
         ),
         "fastest_delivery": first_non_empty(
-            selector_values.get("fastest_delivery"),
-            fastest_delivery_from_html(html_text),
+            normalize_fastest_delivery(selector_values.get("fastest_delivery")),
+            normalize_fastest_delivery(fastest_delivery_from_html(html_text)),
         ),
         "delivery_availability": first_non_empty(
             "" if CATEGORY == "HHP" else selector_values.get("delivery_availability"),

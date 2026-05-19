@@ -1319,20 +1319,30 @@ def first_spec_value(products, names):
     return ""
 
 
-def offer_value(selector_values, target, price):
+def offer_count_value(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    match = re.search(r"\+?\s*(\d+)\s+offers?\s+for\s+you\b", text, re.I)
+    return match.group(1) if match else ""
+
+
+def offer_count_from_html(html_text):
+    if not html_text:
+        return ""
+    match = re.search(r"\+?\s*(\d+)\s+offers?\s+for\s+you\b", html.unescape(html_text), re.I)
+    return match.group(1) if match else ""
+
+
+def offer_value(selector_values, target, html_text):
     for key in ("offer", "special_offer", "retailer_offer"):
-        value = str(selector_values.get(key) or "").strip()
-        if value and value != "0":
+        value = offer_count_value(selector_values.get(key))
+        if value:
             return value
-    if isinstance(price, dict):
-        value = first_non_empty(
-            price.get("puckDisplayMessage"),
-            price.get("preferredBadging"),
-        )
-        if value and str(value).strip() != "0":
-            return compact_text(value)
-    value = str(target.get("offer") or "").strip()
-    return "" if value in {"", "0"} else value
+    value = offer_count_from_html(html_text)
+    if value:
+        return value
+    return offer_count_value(target.get("offer"))
 
 
 def recommendation(products):
@@ -1467,7 +1477,7 @@ def output_row(target):
         "final_sku_price": final_price,
         "original_sku_price": original_price,
         "savings": savings,
-        "offer": offer_value(selector_values, target, price),
+        "offer": offer_value(selector_values, target, html_text),
         "pick_up_availability": first_non_empty(
             selector_values.get("pick_up_availability"),
             date_to_phrase("Pick up", pickup.get("maxDate") if isinstance(pickup, dict) else ""),

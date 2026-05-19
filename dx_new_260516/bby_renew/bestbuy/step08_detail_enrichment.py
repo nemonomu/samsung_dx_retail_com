@@ -1323,6 +1323,8 @@ def offer_count_value(value):
     text = compact_text(value)
     if not text:
         return ""
+    if re.fullmatch(r"\d+", text):
+        return "" if text == "0" else text
     match = re.search(r"\+?\s*(\d+)\s+offers?\s+for\s+you\b", text, re.I)
     return match.group(1) if match else ""
 

@@ -761,11 +761,26 @@ def sync_product_list(final_rows):
     if not rows or not fields:
         return 0
 
-    by_url = {
-        compact_text(row.get("product_url")): row
-        for row in final_rows
-        if compact_text(row.get("product_url"))
-    }
+    def canonical_product_url(row):
+        url = compact_text(row.get("product_url"))
+        if "/sku/" in url:
+            url = url.split("/sku/", 1)[0]
+        return url.rstrip("/")
+
+    def product_list_keys(row):
+        keys = []
+        item = compact_text(row.get("item") or row.get("bsin"))
+        if item:
+            keys.append(item)
+        url = canonical_product_url(row)
+        if url:
+            keys.append(url)
+        return keys
+
+    by_url = {}
+    for row in final_rows:
+        for key in product_list_keys(row):
+            by_url[key] = row
     sync_fields = [
         "offer",
         "pick_up_availability",
@@ -784,7 +799,11 @@ def sync_product_list(final_rows):
     ]
     changed = 0
     for row in rows:
-        source = by_url.get(compact_text(row.get("product_url")))
+        source = None
+        for key in product_list_keys(row):
+            source = by_url.get(key)
+            if source:
+                break
         if not source:
             continue
         for field in sync_fields:

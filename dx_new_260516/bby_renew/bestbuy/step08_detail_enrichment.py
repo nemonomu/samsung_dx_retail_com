@@ -1881,30 +1881,54 @@ def similar_products_from_html(html_text):
         re.I,
     )
     if CATEGORY == "HHP":
-        for element in section.find_all(class_=re.compile(r"\bproduct-title\b", re.I)):
-            text = compact_text(element.get_text(" "))
-            if (
-                text
-                and product_name_re.search(text)
-                and not skip_re.search(text)
-                and text not in names
-            ):
-                names.append(text)
-        for card in section.find_all(attrs={"data-skuid": True}):
-            text = ""
+        card_class_re = re.compile(r"iGwFlzJSiWoSSERR|compare", re.I)
+        cards = section.find_all("div", class_=card_class_re)
+        if not cards:
+            cards = []
+            for element in section.find_all(class_=re.compile(r"\bproduct-title\b", re.I)):
+                card = element.find_parent("div")
+                for _ in range(4):
+                    if not card or card is section:
+                        break
+                    if card.find("img", alt=True) or card.find("a", href=re.compile(r"/product/", re.I)):
+                        break
+                    card = card.find_parent("div")
+                if card and card is not section and card not in cards:
+                    cards.append(card)
+            for element in section.find_all(attrs={"data-skuid": True}):
+                card = element.find_parent("div") or element
+                if card and card is not section and card not in cards:
+                    cards.append(card)
+        for card in cards:
+            candidates = []
+            title_element = card.find(class_=re.compile(r"\bproduct-title\b", re.I))
+            if title_element:
+                candidates.append(compact_text(title_element.get_text(" ")))
+            compare_link = card.find("a", id=re.compile(r"^compare-title-", re.I))
+            if compare_link:
+                candidates.append(compact_text(compare_link.get_text(" ", strip=True)))
             heading_element = card.find(["h2", "h3", "h4"])
             if heading_element:
-                text = compact_text(heading_element.get_text(" "))
-            if not text:
-                link_element = card.find("a", href=re.compile(r"/product/", re.I))
-                if link_element:
-                    text = compact_text(link_element.get("aria-label") or link_element.get_text(" ", strip=True))
-            if (
-                text
-                and product_name_re.search(text)
-                and not skip_re.search(text)
-                and text not in names
-            ):
+                candidates.append(compact_text(heading_element.get_text(" ")))
+            product_link = card.find("a", href=re.compile(r"/product/", re.I))
+            if product_link:
+                candidates.append(compact_text(product_link.get("aria-label") or product_link.get_text(" ", strip=True)))
+            image = card.find("img", alt=True)
+            if image:
+                candidates.append(compact_text(image.get("alt")))
+
+            text = next(
+                (
+                    candidate
+                    for candidate in candidates
+                    if candidate
+                    and len(candidate) >= 20
+                    and product_name_re.search(candidate)
+                    and not skip_re.search(candidate)
+                ),
+                "",
+            )
+            if text and text not in names:
                 names.append(text)
             if len(names) >= 4:
                 break

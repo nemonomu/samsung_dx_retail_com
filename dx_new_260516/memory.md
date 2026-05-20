@@ -70,6 +70,7 @@ This repository is used with an RDP runtime for BestBuy collection. Before chang
 - Use `BESTBUY_DETAIL_JS_PROFILE=similar` only for small SKU tests when checking whether slower incremental scrolling/waiting can make BestBuy's Compare carousel appear in ZenRows detail HTML. Do not apply it to broad runs until a 1-SKU test proves `html_has_compare_marker=true` or `html_parsed_similar_count>0`.
 - All HHP similar-product retry/diagnostic/preservation behavior in shared steps must be category-guarded with `CATEGORY == "HHP"`. Do not let HHP-specific retry env vars or fallback preservation change TV/REF/LDY behavior.
 - HHP rendered/reference Compare HTML can use `data-skuid` product cards with `h3` titles instead of the older `product-title` class. The earlier parser missed these cards even when `Compare similar products` was present. HHP similar parsing must read `data-skuid` card headings or product-link `aria-label` before falling back to generic image/link text.
+- HHP Compare similar products can also render the current product as the first card with only an image `alt` and no `product-title` link, while the following comparison products have `compare-title-*` links. Do not collect all `product-title` nodes first because that drops or reorders the current product. Parse Compare cards in DOM order and choose title/link/heading/aria-label/img-alt candidates per card, then keep the first 4 page-visible names.
 
 ## Change Workflow
 

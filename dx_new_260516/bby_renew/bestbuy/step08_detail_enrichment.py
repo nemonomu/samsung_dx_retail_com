@@ -2417,6 +2417,15 @@ def main():
     if STAGE not in {"all", "detail", "review"}:
         raise RuntimeError("BESTBUY_DETAIL_STAGE must be one of: all, detail, review")
 
+    if RETRY_MISSING_SIMILAR and STAGE in {"all", "detail"}:
+        if SAVE_HTML_MODE != "full":
+            raise RuntimeError("BESTBUY_DETAIL_RETRY_MISSING_SIMILAR=1 requires BESTBUY_SAVE_HTML_MODE=full")
+        if targets and len(targets) >= len(output_targets):
+            raise RuntimeError(
+                "Refusing similar backfill because every output target was selected; "
+                "check existing final_output/detail_enriched_rows before paid refresh"
+            )
+
     if not client and not REBUILD_ONLY:
         # Cached parse-only mode is useful during local development.
         if STAGE == "detail":

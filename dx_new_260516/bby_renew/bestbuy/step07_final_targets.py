@@ -1,6 +1,7 @@
 import csv
 import json
 import os
+import re
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -49,6 +50,11 @@ TARGET_SIZE_RAW = os.getenv("BESTBUY_FINAL_TARGET_SIZE", "").strip()
 TARGET_SIZE = int(TARGET_SIZE_RAW) if TARGET_SIZE_RAW else 0
 CATEGORY = bestbuy_category()
 BATCH_ID = bestbuy_batch_id(CATEGORY)
+EXCLUDED_PROMOTION_TYPES = {
+    value.strip().lower()
+    for value in re.split(r"\s*\|\|\|\s*|\s*,\s*", os.getenv("BESTBUY_EXCLUDED_PROMOTION_TYPES", "Featured deals"))
+    if value.strip()
+}
 
 PROMOTION_FALLBACK_INPUT = (
     RUN_ROOT / "promotion" / "parsed" / "all_promotion_products.csv"
@@ -173,6 +179,8 @@ def promotion_map(rows):
     for row in rows:
         sku = str(row.get("sku_id") or "").strip()
         promo = str(row.get("promotion_type") or "").strip()
+        if promo.lower() in EXCLUDED_PROMOTION_TYPES:
+            continue
         if not sku or not promo:
             continue
         position = str(row.get("promotion_position") or "").strip()
@@ -450,6 +458,11 @@ def main():
     promotion_input = existing_path(PROMOTION_INPUT, PROMOTION_FALLBACK_INPUT)
     trending_input = existing_path(TRENDING_INPUT, TRENDING_FALLBACK_INPUT)
     promotion_rows = load_rows(promotion_input)
+    included_promotion_rows = [
+        row
+        for row in promotion_rows
+        if str(row.get("promotion_type") or "").strip().lower() not in EXCLUDED_PROMOTION_TYPES
+    ]
     trending_rows = load_rows(trending_input)
 
     main_rows = unique_main_rows(main_input_rows)
@@ -457,7 +470,7 @@ def main():
     final_rows = enrich_rows(
         selected_rows,
         bsr,
-        promotion_map(promotion_rows),
+        promotion_map(included_promotion_rows),
         trending_map(trending_rows),
         main_attribute_map(main_input_rows),
     )
@@ -473,12 +486,15 @@ def main():
         "main_input": rel_path(MAIN_INPUT),
         "bsr_input": rel_path(BSR_INPUT),
         "promotion_input": rel_path(promotion_input),
+        "excluded_promotion_types": sorted(EXCLUDED_PROMOTION_TYPES),
+        "promotion_input_row_count": len(promotion_rows),
+        "promotion_included_row_count": len(included_promotion_rows),
         "trending_input": rel_path(trending_input),
         "output_csv": rel_path(OUTPUT_CSV),
         "product_list_csv": rel_path(PRODUCT_LIST_CSV),
         "main_unique_count": len(main_rows),
         "bsr_count": len(bsr),
-        "promotion_unique_count": len({row.get("sku_id") for row in promotion_rows if row.get("sku_id")}),
+        "promotion_unique_count": len({row.get("sku_id") for row in included_promotion_rows if row.get("sku_id")}),
         "trending_unique_count": len({row.get("sku_id") for row in trending_rows if row.get("sku_id")}),
         "final_row_count": len(final_rows),
         "final_unique_sku_count": len({row.get("sku_id") for row in final_rows if row.get("sku_id")}),

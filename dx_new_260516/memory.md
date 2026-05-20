@@ -9,6 +9,7 @@ This repository is used with an RDP runtime for BestBuy collection. Before chang
 - Avoid one-symptom fixes. Trace the affected field through listing, target selection, detail enrichment, final CSV, product list CSV, and DB load.
 - Keep open-box products out of the collection path. They are not targets and must not influence price, offer, availability, review, or spec fields.
 - For `offer`, do not use raw `offers.offers.length`. The visible `+N offers for you` count must come from page text or a validated equivalent such as `hotOffer` plus gift offer count.
+- For TV promotion collection, exclude `Featured deals` by default. It is not part of the promotion target set; expected promotion rows are the other TV promo placements.
 - For price fields, prefer validated new-product numeric prices over policy text when both exist. If `See price in cart` uses hidden numeric data, verify with RDP/browser samples before treating it as final truth.
 - If `final_sku_price == original_sku_price`, assume original price is not visibly distinct and leave `original_sku_price` and `savings` blank.
 - `Unavailable` is not a useful `fastest_delivery` value; leave it blank.

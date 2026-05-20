@@ -1,6 +1,7 @@
 import csv
 import json
 import os
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -19,10 +20,29 @@ REFERER = os.getenv("BESTBUY_PROMOTION_REFERER", load_initial_urls().get("promot
 QUERY_TEMPLATE_HTML = Path(
     os.getenv("BESTBUY_PROMOTION_QUERY_TEMPLATE_HTML", "references/bestbuy_promotion_page_sample.html")
 )
+EXCLUDED_PROMOTION_TYPES = {
+    value.strip().lower()
+    for value in re.split(r"\s*\|\|\|\s*|\s*,\s*", os.getenv("BESTBUY_EXCLUDED_PROMOTION_TYPES", "Featured deals"))
+    if value.strip()
+}
+EXCLUDED_PROMOTION_PLACEMENTS = {
+    value.strip()
+    for value in re.split(r"\s*\|\|\|\s*|\s*,\s*", os.getenv("BESTBUY_EXCLUDED_PROMOTION_PLACEMENTS", ""))
+    if value.strip()
+}
 
 
 def now():
     return datetime.now().isoformat(timespec="seconds")
+
+
+def promotion_type_for(placement):
+    return PROMOTION_LABELS.get(placement, placement)
+
+
+def is_excluded_promotion(placement):
+    promotion_type = promotion_type_for(placement).strip().lower()
+    return placement in EXCLUDED_PROMOTION_PLACEMENTS or promotion_type in EXCLUDED_PROMOTION_TYPES
 
 
 def find_started_operation_for_placement(html_text, placement):
@@ -44,7 +64,7 @@ def find_started_operation_for_placement(html_text, placement):
 
 
 def extract_rows_from_response(response_json, placement):
-    promotion_type = PROMOTION_LABELS.get(placement, placement)
+    promotion_type = promotion_type_for(placement)
     rows = []
     deals = (((response_json.get("data") or {}).get("customer") or {}).get("deals") or {})
     for position, item in enumerate(deals.get("items") or [], 1):
@@ -197,7 +217,13 @@ def main():
         raise RuntimeError("Set ZENROWS_API_KEY in .env")
     html_text = QUERY_TEMPLATE_HTML.read_text(encoding="utf-8", errors="ignore")
     client = ZenRowsClient(api_key)
-    placements = list(PROMOTION_LABELS) if PLACEMENT.lower() == "all" else [PLACEMENT]
+    requested_placements = list(PROMOTION_LABELS) if PLACEMENT.lower() == "all" else [PLACEMENT]
+    excluded_placements = [
+        {"placement": placement, "promotion_type": promotion_type_for(placement)}
+        for placement in requested_placements
+        if is_excluded_promotion(placement)
+    ]
+    placements = [placement for placement in requested_placements if not is_excluded_promotion(placement)]
 
     all_rows = []
     summaries = []
@@ -211,7 +237,9 @@ def main():
     write_rows(out_csv, all_rows)
     summary = {
         "started_at": now(),
+        "requested_placements": requested_placements,
         "placements": placements,
+        "excluded_placements": excluded_placements,
         "call_count": len(placements),
         "row_count": len(all_rows),
         "total_x_request_cost": sum(float(s["x_request_cost"] or 0) for s in summaries),

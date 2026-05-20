@@ -1186,11 +1186,52 @@ def expected_review_count_from_detail(sku):
     return max(counts) if counts else 0
 
 
+def sku_from_product_url(url):
+    match = re.search(r"/sku/(\d+)", str(url or ""))
+    return match.group(1) if match else ""
+
+
+@lru_cache(maxsize=1)
+def review_counts_from_existing_outputs():
+    counts = {}
+    for path in (DETAIL_ROWS_CSV, FINAL_OUTPUT_CSV):
+        for row in load_csv(path):
+            keys = [
+                str(row.get("sku_id") or "").strip(),
+                sku_from_product_url(row.get("product_url")),
+                str(row.get("item") or row.get("bsin") or "").strip(),
+            ]
+            count = review_count_value({"reviewCount": row.get("count_of_reviews")})
+            if count is None:
+                continue
+            for key in keys:
+                if not key:
+                    continue
+                counts[key] = max(counts.get(key, 0), count)
+    return counts
+
+
+def expected_review_count_from_outputs(target):
+    if CATEGORY != "HHP":
+        return 0
+    keys = [
+        str(target.get("sku_id") or "").strip(),
+        sku_from_product_url(target.get("product_url") or target_url(target, target.get("sku_id"))),
+        str(target.get("item") or target.get("bsin") or "").strip(),
+    ]
+    counts = review_counts_from_existing_outputs()
+    return max((counts.get(key, 0) for key in keys if key), default=0)
+
+
 def review_needs_retry(target):
     sku = str(target.get("sku_id") or "").strip()
     if not review_success(sku):
         return True
-    if max(expected_review_count(target), expected_review_count_from_detail(sku)) <= 0:
+    if max(
+        expected_review_count(target),
+        expected_review_count_from_detail(sku),
+        expected_review_count_from_outputs(target),
+    ) <= 0:
         return False
     if not review_has_recommended_percent(sku):
         return True

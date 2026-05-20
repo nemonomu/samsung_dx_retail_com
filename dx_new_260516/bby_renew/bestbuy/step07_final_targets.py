@@ -45,7 +45,8 @@ OUTPUT_CSV = Path(
 PRODUCT_LIST_CSV = Path(
     os.getenv("BESTBUY_PRODUCT_LIST_OUTPUT", OUTPUT_ROOT / "bestbuy_product_list.csv")
 )
-TARGET_SIZE = int(os.getenv("BESTBUY_FINAL_TARGET_SIZE", "300"))
+TARGET_SIZE_RAW = os.getenv("BESTBUY_FINAL_TARGET_SIZE", "").strip()
+TARGET_SIZE = int(TARGET_SIZE_RAW) if TARGET_SIZE_RAW else 0
 CATEGORY = bestbuy_category()
 BATCH_ID = bestbuy_batch_id(CATEGORY)
 
@@ -210,6 +211,11 @@ def choose_final_rows(main_rows, bsr_rows, target_size):
     bsr = build_bsr_map(bsr_rows)
     main_by_sku = {str(row.get("sku_id")): row for row in main_rows if row.get("sku_id")}
     bsr_only = [row for sku, row in bsr.items() if sku not in main_by_sku]
+
+    if not target_size:
+        final_rows = list(main_rows)
+        final_rows.extend(row_from_bsr_only(row) for row in bsr_only)
+        return final_rows, bsr
 
     if len(main_rows) >= target_size:
         keep_main_count = max(0, target_size - len(bsr_only))
@@ -477,7 +483,7 @@ def main():
         "final_row_count": len(final_rows),
         "final_unique_sku_count": len({row.get("sku_id") for row in final_rows if row.get("sku_id")}),
         "product_list_row_count": len(listing_rows),
-        "needs_more_main_candidates": len(final_rows) < TARGET_SIZE,
+        "needs_more_main_candidates": bool(TARGET_SIZE and len(final_rows) < TARGET_SIZE),
         "krw_per_usd": KRW_PER_USD,
     }
     manifest_path = OUTPUT_CSV.with_suffix(".manifest.json")

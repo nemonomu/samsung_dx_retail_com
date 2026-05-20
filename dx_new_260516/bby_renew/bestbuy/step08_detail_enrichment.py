@@ -487,6 +487,20 @@ def normalize_delivery_availability(value):
     return re.sub(r"(?i)^Delivery\s+As soon as", "Delivery as soon as", text, count=1)
 
 
+def has_visible_free_fulfillment(html_text):
+    text = compact_text(re.sub(r"<[^>]+>", " ", html_text or ""))
+    return bool(re.search(r"(?i)\bFREE\b\s+(?:delivery|shipping|pickup)\b", text))
+
+
+def append_free_if_visible(value, html_text):
+    text = compact_text(value)
+    if not text or re.search(r"(?i)(?:^|\s)FREE(?:\s|$)|•", text):
+        return text
+    if has_visible_free_fulfillment(html_text):
+        return f"{text} • FREE"
+    return text
+
+
 def visible_shipping_value(selector_value, html_value, fallback_value="", normalize_func=compact_text):
     selector_text = normalize_func(selector_value)
     html_text = normalize_func(html_value)
@@ -1767,6 +1781,9 @@ def output_row(target):
         "batch_id": BATCH_ID,
         "country": "SEA",
     }
+    row["fastest_delivery"] = append_free_if_visible(row["fastest_delivery"], html_text)
+    if CATEGORY != "HHP":
+        row["delivery_availability"] = append_free_if_visible(row["delivery_availability"], html_text)
     external_reviews = has_external_reviews(products, target, html_text, selector_values)
     if should_mark_not_yet_reviewed(row, external_reviews):
         row["star_rating"] = "Not yet reviewed"

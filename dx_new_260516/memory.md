@@ -33,6 +33,7 @@ This repository is used with an RDP runtime for BestBuy collection. Before chang
 - Numeric zero is a real value, not blank. Do not normalize with `value or ""` in parsing helpers because it can hide `0` ratings/review counts and skip required review normalization.
 - `retailer_sku_name_similar` must come from page/raw sources such as PDP `Compare similar products` or validated variation payloads. Do not synthesize similar names from brand/series matching across collected rows.
 - For BestBuy TV, removing the final target size cap does not mean `main_rank` can exceed 300. Keep listing main ranks capped at 300, and include BSR/promotion/trending extras as backfill rows with blank `main_rank`.
+- BestBuy backfill page types must reflect their source. If both `main_rank` and `bsr_rank` are blank, `page_type` must be `promotion` or `trend`, not `main`/`bsr`. `item` must never be blank; fall back from target `bsin` or PDP URL BSIN when detail payload lacks it.
 
 ## Change Workflow
 

@@ -233,6 +233,29 @@ def source_only_row(row, source):
     return output
 
 
+def merge_missing_attrs(row, attrs):
+    for key in (
+        "bsin",
+        "brand",
+        "product_name",
+        "product_url",
+        "image_url",
+        "rating",
+        "review_count",
+        "customer_price",
+        "regular_price",
+        "total_savings",
+        "total_savings_percent",
+        "restricted_price_message",
+        "buying_options_json",
+        "is_reviewable",
+        "syndicated_review_summary_json",
+    ):
+        if not row.get(key) and attrs.get(key):
+            row[key] = attrs.get(key)
+    return row
+
+
 def append_missing_source_rows(final_rows, source_rows, source):
     seen = {str(row.get("sku_id") or "").strip() for row in final_rows if row.get("sku_id")}
     for row in source_rows:
@@ -243,7 +266,8 @@ def append_missing_source_rows(final_rows, source_rows, source):
         seen.add(sku)
 
 
-def choose_final_rows(main_rows, bsr_rows, target_size, promotion_rows=None, trending_rows=None):
+def choose_final_rows(main_rows, bsr_rows, target_size, promotion_rows=None, trending_rows=None, main_attrs=None):
+    main_attrs = main_attrs or {}
     bsr = build_bsr_map(bsr_rows)
     main_by_sku = {str(row.get("sku_id")): row for row in main_rows if row.get("sku_id")}
     bsr_only = [row for sku, row in bsr.items() if sku not in main_by_sku]
@@ -251,8 +275,16 @@ def choose_final_rows(main_rows, bsr_rows, target_size, promotion_rows=None, tre
     if not target_size:
         final_rows = list(main_rows[:MAIN_RANK_LIMIT])
         final_rows.extend(row_from_bsr_only(row) for row in bsr_only)
-        append_missing_source_rows(final_rows, promotion_rows or [], "promotion_backfill")
-        append_missing_source_rows(final_rows, trending_rows or [], "trending_backfill")
+        append_missing_source_rows(
+            final_rows,
+            [merge_missing_attrs(dict(row), main_attrs.get(str(row.get("sku_id") or "").strip()) or {}) for row in (promotion_rows or [])],
+            "promotion_backfill",
+        )
+        append_missing_source_rows(
+            final_rows,
+            [merge_missing_attrs(dict(row), main_attrs.get(str(row.get("sku_id") or "").strip()) or {}) for row in (trending_rows or [])],
+            "trending_backfill",
+        )
         return final_rows, bsr
 
     if len(main_rows) >= target_size:
@@ -385,7 +417,14 @@ def calendar_week():
 
 
 def page_type(row):
-    return "bsr" if row.get("target_source") == "bsr_only_backfill" else "main"
+    source = row.get("target_source")
+    if source == "bsr_only_backfill":
+        return "bsr"
+    if source == "promotion_backfill":
+        return "promotion"
+    if source == "trending_backfill":
+        return "trend"
+    return "main"
 
 
 def product_list_rows(rows, bsr_pages):
@@ -496,19 +535,21 @@ def main():
     trending_rows = load_rows(trending_input)
 
     main_rows = unique_main_rows(main_input_rows)
+    main_attrs = main_attribute_map(main_input_rows)
     selected_rows, bsr = choose_final_rows(
         main_rows,
         bsr_rows,
         TARGET_SIZE,
         included_promotion_rows,
         trending_rows,
+        main_attrs,
     )
     final_rows = enrich_rows(
         selected_rows,
         bsr,
         promotion_map(included_promotion_rows),
         trending_map(trending_rows),
-        main_attribute_map(main_input_rows),
+        main_attrs,
     )
     write_csv(OUTPUT_CSV, final_rows)
     listing_rows = product_list_rows(final_rows, bsr_page_map(bsr_rows))

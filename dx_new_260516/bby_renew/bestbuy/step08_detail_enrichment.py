@@ -942,6 +942,11 @@ def target_url(target, sku):
     return url or old_pdp_url(sku)
 
 
+def old_pdp_bsin(url):
+    match = re.search(r"/product/[^/]+/([^/?#]+)", str(url or ""))
+    return match.group(1) if match else ""
+
+
 def has_product_schema(html_text):
     return "ProductSchema_init" in html_text and "productBySkuId" in html_text
 
@@ -1378,6 +1383,17 @@ def similar_products_from_html(html_text):
     return names
 
 
+def target_page_type(target):
+    source = target.get("target_source")
+    if source == "bsr_only_backfill":
+        return "bsr"
+    if source == "promotion_backfill":
+        return "promotion"
+    if source == "trending_backfill":
+        return "trend"
+    return "main"
+
+
 def first_value(products, key):
     for product in reversed(products):
         value = product.get(key)
@@ -1737,7 +1753,7 @@ def output_row(target):
     ldy_loading_type = first_spec_value(products, ["Load Type", "Washer Load Type", "Loading Type"])
     product_name = first_path(products, ["name", "short"]) or target.get("product_name", "")
     product_url = first_path(products, ["url", "pdp"]) or target.get("product_url", "")
-    bsin = first_value(products, "bsin") or target.get("bsin", "")
+    bsin = first_value(products, "bsin") or target.get("bsin") or old_pdp_bsin(product_url) or ""
     primary_product = products[-1] if products else {}
     hhp_attrs = hhp_attributes_from_product(primary_product, product_name) if CATEGORY == "HHP" else {}
 
@@ -1749,7 +1765,7 @@ def output_row(target):
         "item": bsin,
         "sku": model_number,
         "account_name": "Bestbuy",
-        "page_type": "bsr" if target.get("target_source") == "bsr_only_backfill" else "main",
+        "page_type": target_page_type(target),
         "count_of_reviews": int_commas(review_info.get("reviewCount") or target.get("review_count")),
         "retailer_sku_name": first_non_empty(product_name, selector_values.get("retailer_sku_name")),
         "product_url": product_url,

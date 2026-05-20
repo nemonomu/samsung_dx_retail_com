@@ -1668,6 +1668,18 @@ def is_zero_review_value(value):
         return False
 
 
+def usable_rating(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    if text.lower() == "not yet reviewed":
+        return text
+    try:
+        return "" if float(text) <= 0 else text
+    except ValueError:
+        return text
+
+
 def should_mark_not_yet_reviewed(row, external_reviews):
     rating = compact_text(row.get("star_rating")).lower()
     if external_reviews:
@@ -1806,8 +1818,8 @@ def output_row(target):
         "retailer_sku_name": first_non_empty(product_name, selector_values.get("retailer_sku_name")),
         "product_url": product_url,
         "star_rating": first_non_empty(
-            review_info.get("averageRating"),
-            target.get("rating"),
+            usable_rating(review_info.get("averageRating")),
+            usable_rating(target.get("rating")),
             selector_values.get("top_star_rating"),
             selector_values.get("star_rating"),
             "Not yet reviewed",

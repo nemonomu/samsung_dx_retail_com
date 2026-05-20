@@ -335,6 +335,19 @@ def clean_hhp_carrier(value):
     return ""
 
 
+def clean_hhp_carrier_compatibility(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    parts = [compact_text(part) for part in re.split(r"\s*,\s*|\s*\|\|\|\s*", text) if compact_text(part)]
+    cleaned = []
+    for part in parts:
+        carrier = clean_hhp_carrier(part) or part
+        if carrier and carrier not in cleaned:
+            cleaned.append(carrier)
+    return ", ".join(cleaned)
+
+
 def clean_hhp_color(value):
     text = compact_text(value)
     if not text:
@@ -405,7 +418,6 @@ def hhp_attributes_from_product(product, product_name):
     spec_candidates = {
         "hhp_storage": ["Internal Storage", "Storage Capacity", "Built-In Storage", "Total Storage Capacity"],
         "hhp_color": ["Color", "Color Category"],
-        "hhp_carrier": ["Carrier Compatibility", "Carrier", "Wireless Carrier"],
     }
     for field, names in spec_candidates.items():
         for name in names:
@@ -417,6 +429,15 @@ def hhp_attributes_from_product(product, product_name):
                     attrs[field] = clean_hhp_storage(value)
                 else:
                     attrs[field] = clean_hhp_color(value)
+                break
+    carrier_compatibility = spec_value([product], "Carrier Compatibility")
+    if carrier_compatibility:
+        attrs["hhp_carrier"] = clean_hhp_carrier_compatibility(carrier_compatibility)
+    else:
+        for name in ("Carrier", "Wireless Carrier"):
+            value = spec_value([product], name)
+            if value:
+                attrs["hhp_carrier"] = clean_hhp_carrier(value)
                 break
     return attrs
 

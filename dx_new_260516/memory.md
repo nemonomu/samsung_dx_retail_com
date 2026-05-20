@@ -64,6 +64,7 @@ This repository is used with an RDP runtime for BestBuy collection. Before chang
 - If a targeted retry run reports `processed_count=0` while the DB/output still has blanks, treat it as a selector bug, not success. Add manifest counters for blank output rows and retry candidates, and fail before paid calls when blank rows exist but no target matches.
 - Before running a broad paid retry for repeated same-type issues, run a maximum of 3 representative SKUs first: usually two affected rows and one known-good comparison row. Verify raw capture, parsed output, final CSV, and DB load behavior on that small set before scaling to all affected rows.
 - For RDP validation loops, print a final `COPY_PASTE_SUMMARY` in the log so the user can paste one block instead of uploading multiple files. Include paid-call cost, processed counts, DB/CSV nonblank counts, and targeted SKU field values.
+- For small paid SKU tests, avoid step14 DB load until parsing is proven. Step08 must print enough `COPY_PASTE_SUMMARY` detail to validate targeted SKU values and paid-call cost without reloading the full batch into DB.
 
 ## Change Workflow
 

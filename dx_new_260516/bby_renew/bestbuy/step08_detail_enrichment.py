@@ -1351,6 +1351,72 @@ def output_similar_blank_row_count():
     return count
 
 
+def target_sku_list():
+    return [value.strip() for value in re.split(r"[\s,;]+", os.getenv("BESTBUY_DETAIL_SKUS", "")) if value.strip()]
+
+
+def row_match_keys(row):
+    return {
+        retry_key(row.get("sku_id")),
+        retry_key(sku_from_product_url(row.get("product_url"))),
+        retry_key(canonical_pdp_url(row.get("product_url"))),
+        retry_key(row.get("item") or row.get("bsin")),
+    }
+
+
+def target_match_keys(target):
+    sku = str(target.get("sku_id") or "").strip()
+    return {
+        retry_key(sku),
+        retry_key(target.get("bsin") or target.get("item")),
+        retry_key(sku_from_product_url(target.get("product_url") or target_url(target, sku))),
+        retry_key(sku_from_product_url(target.get("detail_url"))),
+        retry_key(canonical_pdp_url(target.get("product_url") or target.get("detail_url") or target_url(target, sku))),
+    }
+
+
+def copy_paste_summary(manifest, final_rows, output_targets):
+    target_by_key = {}
+    for target in output_targets:
+        for key in target_match_keys(target):
+            if key:
+                target_by_key.setdefault(key, target)
+
+    rows = []
+    for sku in target_sku_list()[:10]:
+        target = target_by_key.get(retry_key(sku), {})
+        keys = {key for key in target_match_keys(target) if key} if target else {retry_key(sku)}
+        matched = next((row for row in final_rows if row_match_keys(row) & keys), {})
+        rows.append(
+            {
+                "sku_id": sku,
+                "item": compact_text(matched.get("item") or target.get("bsin")),
+                "retailer_sku_name": compact_text(matched.get("retailer_sku_name") or target.get("product_name")),
+                "retailer_sku_name_similar": compact_text(matched.get("retailer_sku_name_similar")),
+            }
+        )
+
+    similar_nonblank = sum(1 for row in final_rows if compact_text(row.get("retailer_sku_name_similar")))
+    return {
+        "copy_paste_summary": True,
+        "stage": "step08_detail_enrichment",
+        "category": CATEGORY,
+        "run_date": RUN_DATE,
+        "batch_id": BATCH_ID,
+        "target_skus": target_sku_list(),
+        "processed_count": manifest.get("processed_count"),
+        "force_refresh": manifest.get("force_refresh"),
+        "rebuild_only": manifest.get("rebuild_only"),
+        "retry_missing_similar": manifest.get("retry_missing_similar"),
+        "detail_cost_usd_this_run": manifest.get("detail_cost_usd_this_run"),
+        "review_cost_usd_this_run": manifest.get("review_cost_usd_this_run"),
+        "total_cost_krw_1550_this_run": manifest.get("total_cost_krw_1550_this_run"),
+        "final_output_rows": len(final_rows),
+        "final_output_retailer_sku_name_similar_nonblank": similar_nonblank,
+        "targeted_rows": rows,
+    }
+
+
 def review_needs_retry(target):
     sku = str(target.get("sku_id") or "").strip()
     if not review_success(sku):
@@ -2568,6 +2634,8 @@ def main():
     }
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(manifest, indent=2, ensure_ascii=False))
+    print("COPY_PASTE_SUMMARY")
+    print(json.dumps(copy_paste_summary(manifest, final_rows, output_targets), indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

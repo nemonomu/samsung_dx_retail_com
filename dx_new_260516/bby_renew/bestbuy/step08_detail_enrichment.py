@@ -1240,9 +1240,52 @@ def expected_review_count_from_outputs(target):
     return max((counts.get(key, 0) for key in keys if key), default=0)
 
 
+def _int_value(value):
+    text = str(value or "").replace(",", "").strip()
+    try:
+        return int(float(text))
+    except (TypeError, ValueError):
+        return 0
+
+
+@lru_cache(maxsize=1)
+def output_review_blank_keys():
+    keys = set()
+    for path in (DETAIL_ROWS_CSV, FINAL_OUTPUT_CSV):
+        for row in load_csv(path):
+            rating = compact_text(row.get("star_rating"))
+            review_count = _int_value(row.get("count_of_reviews"))
+            if not rating or rating.lower() == "not yet reviewed" or review_count <= 0:
+                continue
+            if compact_text(row.get("detailed_review_content")) and compact_text(row.get("recommendation_intent")):
+                continue
+            for key in (
+                str(row.get("sku_id") or "").strip(),
+                sku_from_product_url(row.get("product_url")),
+                str(row.get("item") or row.get("bsin") or "").strip(),
+            ):
+                if key:
+                    keys.add(key)
+    return keys
+
+
+def output_review_needs_retry(target):
+    if CATEGORY != "HHP":
+        return False
+    keys = [
+        str(target.get("sku_id") or "").strip(),
+        sku_from_product_url(target.get("product_url") or target_url(target, target.get("sku_id"))),
+        str(target.get("item") or target.get("bsin") or "").strip(),
+    ]
+    blank_keys = output_review_blank_keys()
+    return any(key in blank_keys for key in keys if key)
+
+
 def review_needs_retry(target):
     sku = str(target.get("sku_id") or "").strip()
     if not review_success(sku):
+        return True
+    if output_review_needs_retry(target):
         return True
     if max(
         expected_review_count(target),

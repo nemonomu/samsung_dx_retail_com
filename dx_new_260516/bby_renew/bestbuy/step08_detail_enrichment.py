@@ -2070,27 +2070,60 @@ def output_row(target):
     policy_price = price_policy_value(price, selector_values, target, html_text)
     selector_final_price = selector_values.get("final_sku_price")
     finance_option = price.get("financeOption") if isinstance(price.get("financeOption"), dict) else {}
-    numeric_final_price = money(
-        price.get("displayableCustomerPrice")
-        or price.get("customerPrice")
-        or finance_option.get("totalCost")
-        or target.get("customer_price")
-    )
-    final_price = first_non_empty(
-        "" if is_policy_price(selector_final_price) else selector_final_price,
-        numeric_final_price,
-        policy_price,
-        selector_final_price,
-    )
+    is_sponsored_target = str(target.get("is_sponsored") or "").strip().lower() in {"1", "true", "yes", "y"}
+    price_candidates = [
+        price.get("displayableCustomerPrice"),
+        price.get("customerPrice"),
+        finance_option.get("totalCost"),
+        target.get("customer_price"),
+    ]
+    original_price_candidates = [
+        price.get("displayableRegularPrice") or price.get("regularPrice"),
+        target.get("regular_price"),
+    ]
+    savings_candidates = [
+        price.get("totalSavings"),
+        target.get("total_savings"),
+    ]
+    if CATEGORY == "HHP" and is_sponsored_target:
+        price_candidates = [
+            target.get("customer_price"),
+            price.get("displayableCustomerPrice"),
+            price.get("customerPrice"),
+            finance_option.get("totalCost"),
+        ]
+        original_price_candidates = [
+            target.get("regular_price"),
+            price.get("displayableRegularPrice") or price.get("regularPrice"),
+        ]
+        savings_candidates = [
+            target.get("total_savings"),
+            price.get("totalSavings"),
+        ]
+    numeric_final_price = money(first_non_empty(*price_candidates))
+    if CATEGORY == "HHP" and is_sponsored_target:
+        final_price = first_non_empty(
+            numeric_final_price,
+            policy_price,
+            "" if is_policy_price(selector_final_price) else selector_final_price,
+            selector_final_price,
+        )
+    else:
+        final_price = first_non_empty(
+            "" if is_policy_price(selector_final_price) else selector_final_price,
+            numeric_final_price,
+            policy_price,
+            selector_final_price,
+        )
     original_price = "" if is_policy_price(final_price) else first_non_empty(
         selector_values.get("original_sku_price"),
-        money(price.get("displayableRegularPrice") or price.get("regularPrice") or target.get("regular_price")),
+        money(first_non_empty(*original_price_candidates)),
     )
     savings = ""
     if final_price and original_price and not is_policy_price(final_price):
         savings = first_non_empty(
             selector_values.get("savings"),
-            money_int(price.get("totalSavings") or target.get("total_savings")),
+            money_int(first_non_empty(*savings_candidates)),
         )
         if final_price == original_price:
             savings = ""
@@ -2120,7 +2153,11 @@ def output_row(target):
     )
     ldy_loading_type = first_spec_value(products, ["Load Type", "Washer Load Type", "Loading Type"])
     product_name = first_path(products, ["name", "short"]) or target.get("product_name", "")
-    product_url = first_path(products, ["url", "pdp"]) or target.get("product_url", "")
+    product_url = (
+        target.get("product_url", "")
+        if CATEGORY == "HHP" and is_sponsored_target
+        else first_path(products, ["url", "pdp"]) or target.get("product_url", "")
+    )
     bsin = first_value(products, "bsin") or target.get("bsin") or old_pdp_bsin(product_url) or ""
     hhp_attrs = hhp_attributes_from_product(products, product_name) if CATEGORY == "HHP" else {}
 

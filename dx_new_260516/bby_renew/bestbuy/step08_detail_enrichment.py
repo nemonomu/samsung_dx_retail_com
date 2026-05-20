@@ -814,22 +814,37 @@ def request_cost(headers):
 
 
 def detail_params():
+    js_profile = os.getenv("BESTBUY_DETAIL_JS_PROFILE", "").strip().lower()
+    if js_profile == "similar":
+        instructions = [
+            {"wait": 3500},
+            {"scroll_y": 800},
+            {"wait": 1200},
+            {"scroll_y": 800},
+            {"wait": 1200},
+            {"scroll_y": 800},
+            {"wait": 1200},
+            {"scroll_y": 800},
+            {"wait": 1200},
+            {"scroll_y": 800},
+            {"wait": 2000},
+        ]
+    else:
+        instructions = [
+            {"wait": 2000},
+            {"scroll_y": 1800},
+            {"wait": 800},
+            {"scroll_y": 1800},
+            {"wait": 800},
+            {"scroll_y": 1800},
+            {"wait": 800},
+            {"wait": 1500},
+        ]
     return {
         "js_render": "true",
         "premium_proxy": "true",
         "proxy_country": "us",
-        "js_instructions": json.dumps(
-            [
-                {"wait": 2000},
-                {"scroll_y": 1800},
-                {"wait": 800},
-                {"scroll_y": 1800},
-                {"wait": 800},
-                {"scroll_y": 1800},
-                {"wait": 800},
-                {"wait": 1500},
-            ]
-        ),
+        "js_instructions": json.dumps(instructions),
     }
 
 

@@ -67,6 +67,7 @@ This repository is used with an RDP runtime for BestBuy collection. Before chang
 - For small paid SKU tests, avoid step14 DB load until parsing is proven. Step08 must print enough `COPY_PASTE_SUMMARY` detail to validate targeted SKU values and paid-call cost without reloading the full batch into DB.
 - For `retailer_sku_name_similar` diagnosis, include raw diagnostics in `COPY_PASTE_SUMMARY`: detail html mode/bytes, Apollo payload count, whether the stored HTML contains `Compare similar products`, `product-title` count, HTML parser count, and variation fallback count. This prevents asking the user for raw folders just to distinguish source absence from parser failure.
 - TV reference code collected `retailer_sku_name_similar` from rendered browser DOM via XPath after scrolling, while the current step08 pipeline reads ZenRows HTML/Apollo snapshots. Do not assume TV's high fill rate proves the same raw source is present in HHP ZenRows snapshots. If a refresh returns blank similar for a row that already had a nonblank similar value, preserve the existing nonblank value instead of overwriting it with blank.
+- Use `BESTBUY_DETAIL_JS_PROFILE=similar` only for small SKU tests when checking whether slower incremental scrolling/waiting can make BestBuy's Compare carousel appear in ZenRows detail HTML. Do not apply it to broad runs until a 1-SKU test proves `html_has_compare_marker=true` or `html_parsed_similar_count>0`.
 
 ## Change Workflow
 

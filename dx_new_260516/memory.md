@@ -7,6 +7,7 @@ This repository is used with an RDP runtime for BestBuy collection. Before chang
 - Treat page-visible values as the source of truth. Do not store internal API counts or hidden structures unless they are validated against visible page behavior.
 - Do not use local direct BestBuy network tests as proof. The local IP may be blocked. If runtime verification is needed, ask for RDP results or raw files.
 - Avoid one-symptom fixes. Trace the affected field through listing, target selection, detail enrichment, final CSV, product list CSV, and DB load.
+- Before answering with code/run guidance, review the change or diagnosis from five angles: syntax/import/runtime errors, business logic and fallback behavior, function boundaries and env propagation, file/log/output persistence, and DB schema/load/upsert effects. Report both confirmed fixes and remaining potential risks instead of only the immediate symptom.
 - Keep open-box products out of the collection path. They are not targets and must not influence price, offer, availability, review, or spec fields.
 - For `offer`, do not use raw `offers.offers.length`. The visible `+N offers for you` count must come from page text or a validated equivalent such as `hotOffer` plus gift offer count.
 - For TV promotion collection, exclude `Featured deals` by default. It is not part of the promotion target set; expected promotion rows are the other TV promo placements.

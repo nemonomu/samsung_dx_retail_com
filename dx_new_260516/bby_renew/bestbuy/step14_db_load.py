@@ -20,6 +20,14 @@ OUTPUT_ROOT = RUN_ROOT / "output"
 FINAL_OUTPUT_CSV = OUTPUT_ROOT / "final_output.csv"
 PRODUCT_LIST_CSV = OUTPUT_ROOT / "bestbuy_product_list.csv"
 MANIFEST_PATH = OUTPUT_ROOT / "db_load_manifest.json"
+VERIFY_COLUMNS = [
+    "promotion_type",
+    "retailer_sku_name_similar",
+    "recommendation_intent",
+    "fastest_delivery",
+    "offer",
+    "pick_up_availability",
+]
 
 
 def now():
@@ -77,6 +85,47 @@ def delete_existing_batch(cur, table_name, columns, rows):
     return cur.rowcount
 
 
+def nonblank_count(rows, column):
+    return sum(1 for row in rows if str(row.get(column) or "").strip())
+
+
+def csv_nonblank_counts(rows):
+    if not rows:
+        return {}
+    fields = set(rows[0].keys())
+    return {column: nonblank_count(rows, column) for column in VERIFY_COLUMNS if column in fields}
+
+
+def db_nonblank_counts(cur, table_name, columns, rows):
+    column_names = {name for name, _ in columns}
+    if "batch_id" not in column_names:
+        return {}
+    batch_ids = sorted({str(row.get("batch_id") or "").strip() for row in rows if row.get("batch_id")})
+    if not batch_ids:
+        return {}
+
+    select_parts = ["COUNT(*) AS rows"]
+    verify_columns = [column for column in VERIFY_COLUMNS if column in column_names]
+    for column in verify_columns:
+        quoted = quote_ident(column)
+        select_parts.append(
+            f"COUNT(*) FILTER (WHERE {quoted} IS NOT NULL AND BTRIM({quoted}::text) <> '') AS {quote_ident(column)}"
+        )
+    cur.execute(
+        f"""
+        SELECT {", ".join(select_parts)}
+        FROM {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)}
+        WHERE batch_id = ANY(%s)
+        """,
+        (batch_ids,),
+    )
+    values = cur.fetchone()
+    result = {"batch_ids": batch_ids, "rows": values[0] if values else 0}
+    for idx, column in enumerate(verify_columns, start=1):
+        result[column] = values[idx] if values else 0
+    return result
+
+
 def insert_rows(cur, table_name, columns, rows):
     if not rows:
         return {"inserted": 0, "deleted_existing": 0, "columns": []}
@@ -99,6 +148,8 @@ def insert_rows(cur, table_name, columns, rows):
         "inserted": len(values),
         "deleted_existing": deleted,
         "columns": [name for name, _ in insert_columns],
+        "csv_nonblank_counts": csv_nonblank_counts(rows),
+        "db_nonblank_counts": db_nonblank_counts(cur, table_name, columns, rows),
     }
 
 

@@ -163,6 +163,23 @@ def enrich_sponsored_row(row, product):
     return row
 
 
+def refresh_listing_fields(row):
+    row = dict(row)
+    try:
+        raw_product = json.loads(row.get("raw_product_json") or "{}")
+    except ValueError:
+        raw_product = {}
+    if not isinstance(raw_product, dict):
+        return row
+    price = raw_product.get("price", {}) if isinstance(raw_product.get("price"), dict) else {}
+    row["customer_price"] = row.get("customer_price") or display_price_or_policy(price)
+    row["regular_price"] = row.get("regular_price") or price_value(price, "displayableRegularPrice")
+    row["total_savings"] = row.get("total_savings") or price_value(price, "totalSavings")
+    row["total_savings_percent"] = row.get("total_savings_percent") or price_value(price, "totalSavingsPercent")
+    row["offer_count"] = row.get("offer_count") or offer_count(raw_product)
+    return row
+
+
 def write_csv(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     keys = set()
@@ -212,6 +229,7 @@ def main():
     for row in target_rows:
         if row.get("container_type") == "sponsored_ingrid":
             row = enrich_sponsored_row(row, products.get(str(row.get("sku_id"))))
+        row = refresh_listing_fields(row)
         enriched.append(row)
     write_csv(OUTPUT_CSV, enriched)
 

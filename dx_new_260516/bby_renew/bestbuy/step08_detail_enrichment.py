@@ -1161,7 +1161,7 @@ def review_needs_retry(target):
         return True
     if expected_review_count(target) <= 0:
         return False
-    if CATEGORY == "HHP" and not hhp_review_has_recommended_percent(sku):
+    if not review_has_recommended_percent(sku):
         return True
     return not bool(review20_content(sku))
 
@@ -1830,9 +1830,7 @@ def recommendation_from_review20(sku):
     return f"{value}% would recommend to a friend"
 
 
-def hhp_review_has_recommended_percent(sku):
-    if CATEGORY != "HHP":
-        return True
+def review_has_recommended_percent(sku):
     value = review20_review_info(sku).get("recommendedPercent")
     return value not in (None, "", [], {})
 
@@ -2113,7 +2111,7 @@ def output_row(target):
             recommendation_phrase(selector_values.get("reviewpage_recommendation_intent_fallback3")),
             recommendation_phrase(selector_values.get("reviewpage_recommendation_intent_fallback4")),
             recommendation_from_html(html_text),
-            recommendation_from_review20(sku) if CATEGORY == "HHP" else "",
+            recommendation_from_review20(sku),
             recommendation(products, target),
         ),
         "main_rank": target.get("main_rank", ""),

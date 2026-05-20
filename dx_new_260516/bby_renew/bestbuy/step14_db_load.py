@@ -1,5 +1,7 @@
 import csv
 import json
+import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +22,8 @@ RUN_ROOT = Path(DEFAULT_BESTBUY_RUN_ROOT)
 OUTPUT_ROOT = RUN_ROOT / "output"
 FINAL_OUTPUT_CSV = OUTPUT_ROOT / "final_output.csv"
 PRODUCT_LIST_CSV = OUTPUT_ROOT / "bestbuy_product_list.csv"
+FINAL_TARGETS_CSV = OUTPUT_ROOT / "bestbuy_final_targets.csv"
+DETAIL_MANIFEST_PATH = RUN_ROOT / "detail" / "manifest_detail_enrichment.json"
 MANIFEST_PATH = OUTPUT_ROOT / "db_load_manifest.json"
 VERIFY_COLUMNS = [
     "promotion_type",
@@ -45,6 +49,126 @@ def read_csv(path):
         return []
     with path.open("r", encoding="utf-8-sig", newline="") as f:
         return list(csv.DictReader(f))
+
+
+def compact_text(value):
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def sku_from_url(url):
+    match = re.search(r"/sku/(\d+)", str(url or ""))
+    return match.group(1) if match else ""
+
+
+def canonical_url(url):
+    text = compact_text(url)
+    if "/sku/" in text:
+        text = text.split("/sku/", 1)[0]
+    return text.rstrip("/")
+
+
+def target_skus_from_env():
+    raw = os.getenv("BESTBUY_DETAIL_SKUS", "")
+    return [value.strip() for value in re.split(r"[\s,;]+", raw) if value.strip()]
+
+
+def detail_cost_summary():
+    if not DETAIL_MANIFEST_PATH.exists():
+        return {}
+    try:
+        manifest = json.loads(DETAIL_MANIFEST_PATH.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    keys = [
+        "retry_missing_similar",
+        "force_refresh",
+        "processed_count",
+        "similar_blank_output_rows",
+        "similar_retry_candidate_count",
+        "detail_cost_usd_this_run",
+        "review_cost_usd_this_run",
+        "total_cost_usd_this_run",
+        "total_cost_krw_1550_this_run",
+    ]
+    return {key: manifest.get(key) for key in keys if key in manifest}
+
+
+def target_lookup_rows():
+    lookup = {}
+    for row in read_csv(FINAL_TARGETS_CSV):
+        sku = compact_text(row.get("sku_id"))
+        keys = {
+            sku,
+            compact_text(row.get("bsin") or row.get("item")),
+            sku_from_url(row.get("product_url")),
+            sku_from_url(row.get("detail_url")),
+            canonical_url(row.get("product_url")),
+            canonical_url(row.get("detail_url")),
+        }
+        for key in keys:
+            if key:
+                lookup[key] = row
+    return lookup
+
+
+def row_lookup_keys(row):
+    return {
+        compact_text(row.get("sku_id")),
+        compact_text(row.get("item") or row.get("bsin")),
+        sku_from_url(row.get("product_url")),
+        canonical_url(row.get("product_url")),
+    }
+
+
+def targeted_output_rows(rows):
+    skus = target_skus_from_env()
+    if not skus:
+        return []
+    targets = target_lookup_rows()
+    results = []
+    for sku in skus[:10]:
+        target = targets.get(sku, {})
+        match_keys = {
+            sku,
+            compact_text(target.get("bsin") or target.get("item")),
+            sku_from_url(target.get("product_url")),
+            sku_from_url(target.get("detail_url")),
+            canonical_url(target.get("product_url")),
+            canonical_url(target.get("detail_url")),
+        }
+        match_keys = {key for key in match_keys if key}
+        matched = None
+        for row in rows:
+            if row_lookup_keys(row) & match_keys:
+                matched = row
+                break
+        results.append(
+            {
+                "sku_id": sku,
+                "item": compact_text((matched or {}).get("item") or target.get("bsin")),
+                "retailer_sku_name": compact_text(
+                    (matched or {}).get("retailer_sku_name") or target.get("product_name")
+                ),
+                "retailer_sku_name_similar": compact_text((matched or {}).get("retailer_sku_name_similar")),
+            }
+        )
+    return results
+
+
+def copy_paste_summary(final_result, final_rows):
+    csv_counts = final_result.get("csv_nonblank_counts", {})
+    db_counts = final_result.get("db_nonblank_counts", {})
+    return {
+        "copy_paste_summary": True,
+        "category": CATEGORY,
+        "table": final_result.get("table"),
+        "csv_rows": final_result.get("csv_rows"),
+        "db_rows": db_counts.get("rows"),
+        "csv_retailer_sku_name_similar": csv_counts.get("retailer_sku_name_similar"),
+        "db_retailer_sku_name_similar": db_counts.get("retailer_sku_name_similar"),
+        "detail_cost": detail_cost_summary(),
+        "targeted_rows": targeted_output_rows(final_rows),
+    }
 
 
 def table_columns(cur, table_name):
@@ -202,6 +326,7 @@ def main():
             final_result = load_one(cur, FINAL_OUTPUT_CSV, final_table)
             product_list_result = load_one(cur, PRODUCT_LIST_CSV, product_list_table)
     conn.close()
+    final_rows = read_csv(FINAL_OUTPUT_CSV)
 
     manifest = {
         "run_type": "step14_db_load",
@@ -214,6 +339,8 @@ def main():
     }
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(manifest, indent=2, ensure_ascii=False))
+    print("COPY_PASTE_SUMMARY")
+    print(json.dumps(copy_paste_summary(final_result, final_rows), indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

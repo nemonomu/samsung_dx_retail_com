@@ -63,6 +63,7 @@ This repository is used with an RDP runtime for BestBuy collection. Before chang
 - For HHP `retailer_sku_name_similar` backfills, do not refresh all detail rows. Use `BESTBUY_DETAIL_RETRY_MISSING_SIMILAR=1` so step08 selects only rows whose existing `detail_enriched_rows.csv`/`final_output.csv` has blank `retailer_sku_name_similar`. Combine it with `BESTBUY_DETAIL_FORCE_REFRESH=1` and `BESTBUY_SAVE_HTML_MODE=full` for the targeted detail rerun, then rebuild/load once. The code must fail before paid calls if similar retry accidentally selects every output target or if full HTML storage is not enabled; do not make the user manually monitor `processed_count`.
 - If a targeted retry run reports `processed_count=0` while the DB/output still has blanks, treat it as a selector bug, not success. Add manifest counters for blank output rows and retry candidates, and fail before paid calls when blank rows exist but no target matches.
 - Before running a broad paid retry for repeated same-type issues, run a maximum of 3 representative SKUs first: usually two affected rows and one known-good comparison row. Verify raw capture, parsed output, final CSV, and DB load behavior on that small set before scaling to all affected rows.
+- For RDP validation loops, print a final `COPY_PASTE_SUMMARY` in the log so the user can paste one block instead of uploading multiple files. Include paid-call cost, processed counts, DB/CSV nonblank counts, and targeted SKU field values.
 
 ## Change Workflow
 

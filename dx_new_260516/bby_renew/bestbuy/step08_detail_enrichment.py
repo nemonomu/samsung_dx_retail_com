@@ -1375,6 +1375,29 @@ def target_match_keys(target):
     }
 
 
+def similar_diagnostics(sku):
+    paths = detail_paths(sku)
+    meta = read_json(paths["meta"])
+    html_text = paths["html"].read_text(encoding="utf-8", errors="replace") if paths["html"].exists() else ""
+    _, variations = products_from_detail(sku)
+    parsed_html_names = similar_products_from_html(html_text)
+    return {
+        "detail_success": meta.get("success"),
+        "detail_status_code": meta.get("status_code"),
+        "detail_attempt": meta.get("attempt"),
+        "detail_html_mode": meta.get("html_mode"),
+        "detail_bytes": meta.get("bytes"),
+        "detail_stored_bytes": meta.get("stored_bytes"),
+        "detail_apollo_payload_count": meta.get("apollo_payload_count"),
+        "html_has_compare_marker": bool(re.search(r"Compare\s+similar\s+products", html_text or "", re.I)),
+        "html_product_title_count": len(re.findall(r"product-title", html_text or "", re.I)),
+        "html_parsed_similar_count": len(parsed_html_names),
+        "variation_similar_count": len(variations),
+        "html_parsed_similar_preview": parsed_html_names[:4],
+        "variation_similar_preview": variations[:4],
+    }
+
+
 def copy_paste_summary(manifest, final_rows, output_targets):
     target_by_key = {}
     for target in output_targets:
@@ -1393,6 +1416,7 @@ def copy_paste_summary(manifest, final_rows, output_targets):
                 "item": compact_text(matched.get("item") or target.get("bsin")),
                 "retailer_sku_name": compact_text(matched.get("retailer_sku_name") or target.get("product_name")),
                 "retailer_sku_name_similar": compact_text(matched.get("retailer_sku_name_similar")),
+                "similar_diagnostics": similar_diagnostics(sku),
             }
         )
 

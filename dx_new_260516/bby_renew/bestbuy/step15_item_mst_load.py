@@ -25,11 +25,15 @@ def quote_ident(value):
 
 def item_mst_table():
     category_key = CATEGORY.upper()
+    if category_key == "HHP":
+        return (
+            os.getenv(f"BESTBUY_ITEM_MST_TABLE_{category_key}")
+            or "hhp_item_mst"
+        )
     if category_key != "TV":
         return ""
     return (
         os.getenv(f"BESTBUY_ITEM_MST_TABLE_{category_key}")
-        or os.getenv("BESTBUY_ITEM_MST_TABLE")
         or "tv_item_mst"
     )
 
@@ -67,11 +71,11 @@ def source_rows():
 
 
 def record_score(record):
-    return sum(
-        1
-        for field in ("sku", "product_url", "screen_size", "estimated_annual_electricity_use")
-        if record.get(field)
-    )
+    if CATEGORY.upper() == "HHP":
+        fields = ("sku", "product_url", "hhp_carrier", "hhp_color", "hhp_storage")
+    else:
+        fields = ("sku", "product_url", "screen_size", "estimated_annual_electricity_use")
+    return sum(1 for field in fields if record.get(field))
 
 
 def item_records(rows):
@@ -87,6 +91,9 @@ def item_records(rows):
             "sku": clean(row.get("sku")),
             "screen_size": clean(row.get("screen_size")),
             "estimated_annual_electricity_use": clean(row.get("estimated_annual_electricity_use")),
+            "hhp_carrier": clean(row.get("hhp_carrier")),
+            "hhp_color": clean(row.get("hhp_color")),
+            "hhp_storage": clean(row.get("hhp_storage")),
             "is_product": True,
             "is_checked": True,
         }
@@ -104,6 +111,9 @@ def insert_record(cur, table_name, columns, record, timestamp):
         "sku": record["sku"],
         "screen_size": record["screen_size"],
         "estimated_annual_electricity_use": record["estimated_annual_electricity_use"],
+        "hhp_carrier": record["hhp_carrier"],
+        "hhp_color": record["hhp_color"],
+        "hhp_storage": record["hhp_storage"],
         "is_product": record["is_product"],
         "is_checked": record["is_checked"],
         "created_at": timestamp,
@@ -122,13 +132,32 @@ def existing_blank(value):
     return value is None or str(value).strip() == ""
 
 
+def key_where(columns):
+    if "account_name" in columns:
+        return f"{quote_ident('item')} = %s AND {quote_ident('account_name')} = %s", [
+            "item",
+            "account_name",
+        ]
+    return f"{quote_ident('item')} = %s", ["item"]
+
+
 def update_record(cur, table_name, columns, existing, record, timestamp):
     updates = []
     params = []
-    for field in ("account_name", "product_url", "sku", "screen_size", "estimated_annual_electricity_use"):
+    always_update = {"product_url"} if CATEGORY.upper() == "HHP" else set()
+    for field in (
+        "account_name",
+        "product_url",
+        "sku",
+        "screen_size",
+        "estimated_annual_electricity_use",
+        "hhp_carrier",
+        "hhp_color",
+        "hhp_storage",
+    ):
         if field not in columns:
             continue
-        if existing_blank(existing.get(field)) and record.get(field):
+        if record.get(field) and (field in always_update or existing_blank(existing.get(field))):
             updates.append(f"{quote_ident(field)} = %s")
             params.append(record[field])
     for field in ("is_product", "is_checked"):
@@ -142,10 +171,11 @@ def update_record(cur, table_name, columns, existing, record, timestamp):
     if "updated_at" in columns:
         updates.append(f"{quote_ident('updated_at')} = %s")
         params.append(timestamp)
-    params.append(record["item"])
+    where_sql, key_fields = key_where(columns)
+    params.extend(record[field] for field in key_fields)
     sql = (
         f"UPDATE {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} "
-        f"SET {', '.join(updates)} WHERE {quote_ident('item')} = %s"
+        f"SET {', '.join(updates)} WHERE {where_sql}"
     )
     cur.execute(sql, params)
     return cur.rowcount > 0
@@ -173,19 +203,23 @@ def upsert_records(cur, table_name, records):
             "sku",
             "screen_size",
             "estimated_annual_electricity_use",
+            "hhp_carrier",
+            "hhp_color",
+            "hhp_storage",
             "is_product",
             "is_checked",
         )
         if name in columns
     ]
+    where_sql, key_fields = key_where(columns)
     select_sql = (
         f"SELECT {', '.join(quote_ident(name) for name in select_columns)} "
         f"FROM {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} "
-        f"WHERE {quote_ident('item')} = %s"
+        f"WHERE {where_sql}"
     )
 
     for record in records:
-        cur.execute(select_sql, (record["item"],))
+        cur.execute(select_sql, [record[field] for field in key_fields])
         row = cur.fetchone()
         if row is None:
             insert_record(cur, table_name, columns, record, timestamp)
@@ -224,8 +258,8 @@ def main():
         "skipped": "",
     }
 
-    if CATEGORY.upper() != "TV":
-        manifest.update({"skipped": "item_mst_load is only configured for TV"})
+    if CATEGORY.upper() not in {"TV", "HHP"}:
+        manifest.update({"skipped": "item_mst_load is only configured for TV/HHP"})
         manifest["finished_at"] = now()
         MANIFEST_PATH.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
         print(json.dumps(manifest, indent=2, ensure_ascii=False))

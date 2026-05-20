@@ -38,6 +38,7 @@ LIMIT = int(os.getenv("BESTBUY_DETAIL_LIMIT", "0"))
 MAX_ATTEMPTS = int(os.getenv("BESTBUY_DETAIL_MAX_ATTEMPTS", "3"))
 RETRY_ONLY = os.getenv("BESTBUY_DETAIL_RETRY_ONLY", "0").lower() in {"1", "true", "yes", "y"}
 REBUILD_ONLY = os.getenv("BESTBUY_DETAIL_REBUILD_ONLY", "0").lower() in {"1", "true", "yes", "y"}
+FORCE_REFRESH = os.getenv("BESTBUY_DETAIL_FORCE_REFRESH", "0").lower() in {"1", "true", "yes", "y"}
 TARGET_SKUS = {
     value.strip().lower()
     for value in re.split(r"[\s,;]+", os.getenv("BESTBUY_DETAIL_SKUS", ""))
@@ -1107,11 +1108,11 @@ def fetch_detail(client, target):
     sku = str(target.get("sku_id") or "").strip()
     pdp_url = target_url(target, sku)
     current_paths = detail_paths(sku)
-    if detail_success(sku):
+    if not FORCE_REFRESH and detail_success(sku):
         return read_json(current_paths["meta"])
     attempt = next_attempt(current_paths["meta"], pdp_url)
     meta = {"sku_id": sku, "stage": "detail", "url": pdp_url, "attempt": attempt, "started_at": now()}
-    if attempt > MAX_ATTEMPTS:
+    if not FORCE_REFRESH and attempt > MAX_ATTEMPTS:
         paths = detail_paths_for_status(sku, target, False)
         meta.update({"success": False, "error": "max_attempts_exceeded"})
         paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -1160,11 +1161,11 @@ def fetch_review20(client, target):
     sku = str(target.get("sku_id") or "").strip()
     pdp_url = target_url(target, sku)
     current_paths = review_paths(sku)
-    if review_success(sku):
+    if not FORCE_REFRESH and review_success(sku):
         return read_json(current_paths["meta"])
     attempt = next_attempt(current_paths["meta"], pdp_url)
     meta = {"sku_id": sku, "stage": "review20", "url": pdp_url, "attempt": attempt, "started_at": now()}
-    if attempt > MAX_ATTEMPTS:
+    if not FORCE_REFRESH and attempt > MAX_ATTEMPTS:
         paths = review_paths_for_status(sku, target, False)
         meta.update({"success": False, "error": "max_attempts_exceeded"})
         paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -1721,13 +1722,13 @@ def main():
         fetched_detail = False
         fetched_review = False
         if STAGE in {"all", "detail"}:
-            should_fetch_detail = client and not detail_success(sku)
+            should_fetch_detail = client and (FORCE_REFRESH or not detail_success(sku))
             dmeta = fetch_detail(client, target) if should_fetch_detail else read_json(detail_paths(sku)["meta"])
             fetched_detail = bool(should_fetch_detail)
         else:
             dmeta = read_json(detail_paths(sku)["meta"])
         if STAGE in {"all", "review"}:
-            should_fetch_review = client and dmeta.get("success") and not review_success(sku)
+            should_fetch_review = client and dmeta.get("success") and (FORCE_REFRESH or not review_success(sku))
             rmeta = fetch_review20(client, target) if should_fetch_review else read_json(review_paths(sku)["meta"])
             fetched_review = bool(should_fetch_review)
         else:
@@ -1787,6 +1788,7 @@ def main():
         "limit": LIMIT,
         "retry_only": RETRY_ONLY,
         "rebuild_only": REBUILD_ONLY,
+        "force_refresh": FORCE_REFRESH,
         "stage": STAGE,
         "workers": WORKERS,
         "max_attempts": MAX_ATTEMPTS,

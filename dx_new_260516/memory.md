@@ -14,6 +14,11 @@ This repository is used with an RDP runtime for BestBuy collection. Before chang
 - `Unavailable` is not a useful `fastest_delivery` value; leave it blank.
 - Preserve customer-required DB schemas and field meanings. Do not assume DB table order, column names, or types are flexible without checking `step13`, `step14`, and the live table schema.
 - After code changes, run syntax checks and inspect output field distributions before declaring success.
+- A command that finishes is not proof that it did the intended work. For recrawl/refresh commands, verify the semantic success condition in the log before telling the user it worked.
+- For "refresh at execution time" requests, cached successful raw files must be bypassed explicitly. Check for early-return paths such as `detail_success()`, `review_success()`, existing raw folders, retry-only filters, and rebuild-only modes.
+- For any paid/network collection step, the log must prove whether a new call happened. Expected indicators include nonzero `detail_cost_usd_this_run`/`review_cost_usd_this_run`, fresh `started_at`/`finished_at`, and explicit `force_refresh` or equivalent flags. If cost is `0.0`, assume cache reuse until proven otherwise.
+- When creating a shortcut runner such as `tvsku`, test the runner's actual control flow against the target code, not just its command syntax. The runner must set all environment variables needed to satisfy the user's intent.
+- If a targeted refresh rewrites DB output, confirm both dimensions separately: which SKUs were freshly fetched, and whether the full batch was reloaded into DB.
 
 ## Change Workflow
 
@@ -22,5 +27,5 @@ This repository is used with an RDP runtime for BestBuy collection. Before chang
 3. Make the smallest complete change that covers all affected pipeline steps.
 4. Rebuild the correct downstream artifacts in one runner when possible.
 5. Validate counts and suspicious distributions: empty values, repeated constants, policy text, price equality, and DB inserted rows.
-6. Commit and push only the intended files. Ignore unrelated untracked RDP/raw/result files.
-
+6. For refresh/retry runners, verify that cache-bypass behavior is active when the user asked for current execution-time data.
+7. Commit and push only the intended files. Ignore unrelated untracked RDP/raw/result files.

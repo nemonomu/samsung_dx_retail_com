@@ -1890,6 +1890,24 @@ def similar_products_from_html(html_text):
                 and text not in names
             ):
                 names.append(text)
+        for card in section.find_all(attrs={"data-skuid": True}):
+            text = ""
+            heading_element = card.find(["h2", "h3", "h4"])
+            if heading_element:
+                text = compact_text(heading_element.get_text(" "))
+            if not text:
+                link_element = card.find("a", href=re.compile(r"/product/", re.I))
+                if link_element:
+                    text = compact_text(link_element.get("aria-label") or link_element.get_text(" ", strip=True))
+            if (
+                text
+                and product_name_re.search(text)
+                and not skip_re.search(text)
+                and text not in names
+            ):
+                names.append(text)
+            if len(names) >= 4:
+                break
     for element in section.find_all(["img", "a"]):
         if element.name == "img":
             text = compact_text(element.get("alt"))

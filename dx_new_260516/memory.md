@@ -69,6 +69,7 @@ This repository is used with an RDP runtime for BestBuy collection. Before chang
 - TV reference code collected `retailer_sku_name_similar` from rendered browser DOM via XPath after scrolling, while the current step08 pipeline reads ZenRows HTML/Apollo snapshots. Do not assume TV's high fill rate proves the same raw source is present in HHP ZenRows snapshots. If a refresh returns blank similar for a row that already had a nonblank similar value, preserve the existing nonblank value instead of overwriting it with blank.
 - Use `BESTBUY_DETAIL_JS_PROFILE=similar` only for small SKU tests when checking whether slower incremental scrolling/waiting can make BestBuy's Compare carousel appear in ZenRows detail HTML. Do not apply it to broad runs until a 1-SKU test proves `html_has_compare_marker=true` or `html_parsed_similar_count>0`.
 - All HHP similar-product retry/diagnostic/preservation behavior in shared steps must be category-guarded with `CATEGORY == "HHP"`. Do not let HHP-specific retry env vars or fallback preservation change TV/REF/LDY behavior.
+- HHP rendered/reference Compare HTML can use `data-skuid` product cards with `h3` titles instead of the older `product-title` class. The earlier parser missed these cards even when `Compare similar products` was present. HHP similar parsing must read `data-skuid` card headings or product-link `aria-label` before falling back to generic image/link text.
 
 ## Change Workflow
 

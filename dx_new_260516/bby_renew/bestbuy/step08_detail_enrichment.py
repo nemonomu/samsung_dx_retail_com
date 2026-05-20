@@ -38,6 +38,11 @@ LIMIT = int(os.getenv("BESTBUY_DETAIL_LIMIT", "0"))
 MAX_ATTEMPTS = int(os.getenv("BESTBUY_DETAIL_MAX_ATTEMPTS", "3"))
 RETRY_ONLY = os.getenv("BESTBUY_DETAIL_RETRY_ONLY", "0").lower() in {"1", "true", "yes", "y"}
 REBUILD_ONLY = os.getenv("BESTBUY_DETAIL_REBUILD_ONLY", "0").lower() in {"1", "true", "yes", "y"}
+TARGET_SKUS = {
+    value.strip().lower()
+    for value in re.split(r"[\s,;]+", os.getenv("BESTBUY_DETAIL_SKUS", ""))
+    if value.strip()
+}
 REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "240"))
 WORKERS = int(os.getenv("BESTBUY_DETAIL_WORKERS", "1"))
 STAGE = os.getenv("BESTBUY_DETAIL_STAGE", "detail").lower()
@@ -1008,6 +1013,14 @@ def target_rows(apply_filters=True):
             continue
         seen.add(sku)
         unique.append(row)
+    if apply_filters and TARGET_SKUS:
+        unique = [
+            row
+            for row in unique
+            if str(row.get("sku_id") or "").strip().lower() in TARGET_SKUS
+            or str(row.get("bsin") or "").strip().lower() in TARGET_SKUS
+            or str(row.get("item") or "").strip().lower() in TARGET_SKUS
+        ]
     if apply_filters and RETRY_ONLY:
         if STAGE == "detail":
             unique = [row for row in unique if not detail_success(row["sku_id"])]

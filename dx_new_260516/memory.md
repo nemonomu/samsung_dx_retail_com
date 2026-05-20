@@ -27,7 +27,7 @@ This repository is used with an RDP runtime for BestBuy collection. Before chang
 - For every rerun diagnosis, inspect the manifest/log values actually used at runtime, especially `target_size`, `batch_id`, `run_root`, `table`, `force_refresh`, `retry_only`, and row counts. Do not infer them from code alone.
 - BestBuy delivery and pickup fields are location sensitive. Current PDP raw samples show `destinationZipCode`/`postalCode` such as `55423`; do not claim ZIP `10010` collection unless the raw request/response proves that ZIP was actually applied.
 - Shipping fields must preserve page-visible payment text. If the page shows `Get it tomorrow • FREE` or `Delivery as soon as ... • FREE`, do not truncate it to only the date phrase.
-- External/syndicated reviews are not BestBuy-owned reviews. If `syndicatedReviewSummary` exists, or the page-visible text is like `(11 reviews from Samsung US)`, store `star_rating=Not yet reviewed`, `count_of_reviews=0`, `count_of_star_ratings=0`, and `recommendation_intent=none`.
+- External/syndicated-only reviews are not BestBuy-owned reviews. Store `star_rating=Not yet reviewed`, `count_of_reviews=0`, `count_of_star_ratings=0`, and `recommendation_intent=none` only when the page-visible text is like `(11 reviews from Samsung US)`, or when `syndicatedReviewSummary` exists and BestBuy's own `reviewCount` is 0. Do not wipe normal BestBuy ratings just because syndicated summaries also exist.
 
 ## Change Workflow
 

@@ -1514,16 +1514,30 @@ def _has_non_empty_syndicated_summary(value):
     return False
 
 
+def review_count_value(review_info):
+    if not isinstance(review_info, dict):
+        return None
+    value = review_info.get("reviewCount")
+    if value in (None, ""):
+        return None
+    try:
+        return int(float(str(value).replace(",", "").strip()))
+    except ValueError:
+        return None
+
+
 def has_syndicated_reviews(products, target):
     for product in products:
         review_info = product.get("reviewInfo") if isinstance(product, dict) else {}
         if isinstance(review_info, dict) and _has_non_empty_syndicated_summary(
             review_info.get("syndicatedReviewSummary")
-        ):
+        ) and review_count_value(review_info) == 0:
             return True
     for key in ("syndicated_review_summary_json", "syndicatedReviewSummary"):
         if _has_non_empty_syndicated_summary(target.get(key)):
-            return True
+            target_count = str(target.get("review_count") or "").replace(",", "").strip()
+            if target_count in {"", "0", "0.0"}:
+                return True
     return False
 
 

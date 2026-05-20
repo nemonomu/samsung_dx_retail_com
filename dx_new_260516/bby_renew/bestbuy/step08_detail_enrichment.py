@@ -1223,6 +1223,10 @@ def canonical_pdp_url(url):
     return text.rstrip("/")
 
 
+def retry_key(value):
+    return compact_text(value).lower()
+
+
 @lru_cache(maxsize=1)
 def review_counts_from_existing_outputs():
     counts = {}
@@ -1312,9 +1316,11 @@ def output_similar_blank_keys():
                 sku_from_product_url(row.get("product_url")),
                 canonical_pdp_url(row.get("product_url")),
                 str(row.get("item") or row.get("bsin") or "").strip(),
+                str(row.get("retailer_sku_name") or row.get("product_name") or "").strip(),
             ):
-                if key:
-                    keys.add(key)
+                norm_key = retry_key(key)
+                if norm_key:
+                    keys.add(norm_key)
     return keys
 
 
@@ -1322,11 +1328,27 @@ def output_similar_needs_retry(target):
     keys = [
         str(target.get("sku_id") or "").strip(),
         sku_from_product_url(target.get("product_url") or target_url(target, target.get("sku_id"))),
+        sku_from_product_url(target.get("detail_url")),
         canonical_pdp_url(target.get("product_url") or target.get("detail_url") or target_url(target, target.get("sku_id"))),
         str(target.get("item") or target.get("bsin") or "").strip(),
+        str(target.get("retailer_sku_name") or target.get("product_name") or "").strip(),
     ]
     blank_keys = output_similar_blank_keys()
-    return any(key in blank_keys for key in keys if key)
+    return any(retry_key(key) in blank_keys for key in keys if retry_key(key))
+
+
+@lru_cache(maxsize=1)
+def output_similar_blank_row_count():
+    count = 0
+    for path in (DETAIL_ROWS_CSV, FINAL_OUTPUT_CSV):
+        rows = load_csv(path)
+        if not rows:
+            continue
+        count = max(
+            count,
+            sum(1 for row in rows if not compact_text(row.get("retailer_sku_name_similar"))),
+        )
+    return count
 
 
 def review_needs_retry(target):
@@ -2420,6 +2442,11 @@ def main():
     if RETRY_MISSING_SIMILAR and STAGE in {"all", "detail"}:
         if SAVE_HTML_MODE != "full":
             raise RuntimeError("BESTBUY_DETAIL_RETRY_MISSING_SIMILAR=1 requires BESTBUY_SAVE_HTML_MODE=full")
+        if output_similar_blank_row_count() and not targets:
+            raise RuntimeError(
+                "Refusing similar backfill because blank similar rows exist but no retry targets matched; "
+                "check target/output key mapping before paid refresh"
+            )
         if targets and len(targets) >= len(output_targets):
             raise RuntimeError(
                 "Refusing similar backfill because every output target was selected; "
@@ -2523,6 +2550,8 @@ def main():
         "max_attempts": MAX_ATTEMPTS,
         "target_count": len(output_targets),
         "processed_count": len(targets),
+        "similar_blank_output_rows": output_similar_blank_row_count() if RETRY_MISSING_SIMILAR else 0,
+        "similar_retry_candidate_count": len(targets) if RETRY_MISSING_SIMILAR else 0,
         "success_count": len(enriched_rows),
         "failure_count": len(failures),
         "detail_cost_usd_this_run": detail_cost,

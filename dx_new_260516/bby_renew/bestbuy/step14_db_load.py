@@ -10,6 +10,7 @@ from .step00_config import (
     bestbuy_product_list_table,
     db_config,
     rel_path,
+    validate_bestbuy_batch_id,
 )
 
 
@@ -96,6 +97,13 @@ def csv_nonblank_counts(rows):
     return {column: nonblank_count(rows, column) for column in VERIFY_COLUMNS if column in fields}
 
 
+def validate_csv_batch_ids(rows):
+    batch_ids = sorted({str(row.get("batch_id") or "").strip() for row in rows if row.get("batch_id")})
+    for batch_id in batch_ids:
+        validate_bestbuy_batch_id(batch_id, CATEGORY)
+    return batch_ids
+
+
 def db_nonblank_counts(cur, table_name, columns, rows):
     column_names = {name for name, _ in columns}
     if "batch_id" not in column_names:
@@ -129,6 +137,7 @@ def db_nonblank_counts(cur, table_name, columns, rows):
 def insert_rows(cur, table_name, columns, rows):
     if not rows:
         return {"inserted": 0, "deleted_existing": 0, "columns": []}
+    csv_batch_ids = validate_csv_batch_ids(rows)
     insert_columns = [(name, data_type) for name, data_type in columns if name != "id"]
     csv_fields = set(rows[0].keys())
     insert_columns = [(name, data_type) for name, data_type in insert_columns if name in csv_fields]
@@ -148,6 +157,7 @@ def insert_rows(cur, table_name, columns, rows):
         "inserted": len(values),
         "deleted_existing": deleted,
         "columns": [name for name, _ in insert_columns],
+        "csv_batch_ids": csv_batch_ids,
         "csv_nonblank_counts": csv_nonblank_counts(rows),
         "db_nonblank_counts": db_nonblank_counts(cur, table_name, columns, rows),
     }

@@ -132,12 +132,34 @@ def eastern_now():
     return datetime.now(EASTERN_TZ).replace(tzinfo=None)
 
 
+def bestbuy_batch_prefix(category=None):
+    category_key = (category or bestbuy_category()).strip().upper()
+    return {"TV": "b", "HHP": "h", "REF": "r", "LDY": "l"}.get(
+        category_key,
+        category_key.lower()[:1] or "b",
+    )
+
+
+def validate_bestbuy_batch_id(batch_id, category=None):
+    value = str(batch_id or "").strip()
+    if not value:
+        return value
+    expected_prefix = bestbuy_batch_prefix(category)
+    if not value.startswith(f"{expected_prefix}_"):
+        category_key = (category or bestbuy_category()).strip().upper()
+        raise ValueError(
+            f"BESTBUY_BATCH_ID category mismatch: category={category_key} "
+            f"requires prefix '{expected_prefix}_', got '{value}'"
+        )
+    return value
+
+
 def bestbuy_batch_id(category=None):
     override = os.getenv("BESTBUY_BATCH_ID")
     if override:
-        return override.strip()
+        return validate_bestbuy_batch_id(override, category)
     category_key = (category or bestbuy_category()).strip().upper()
-    prefix = {"TV": "b"}.get(category_key, category_key.lower()[:1] or "b")
+    prefix = bestbuy_batch_prefix(category_key)
     batch_time = os.getenv("BESTBUY_BATCH_TIME") or eastern_now().strftime("%H%M%S")
     return f"{prefix}_{bestbuy_run_date()}_{batch_time}"
 

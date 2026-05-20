@@ -24,6 +24,6 @@ set BESTBUY_FINAL_MAIN_RUN_ID=
 set BESTBUY_FINAL_BSR_RUN_ID=
 set BESTBUY_BSR_RUN_ID=
 
-python -u -m bestbuy.bestbuy_orchestrator --category TV 01 02 03 04 05 06 07 08 09 10 13 14 2>&1 | powershell -NoProfile -Command "$input | Tee-Object -FilePath 'logs\bestbuy_full_collect_db.log'"
+python -u -m bestbuy.bestbuy_orchestrator --category TV 01 02 03 04 05 06 07 08 09 10 13 14 15 2>&1 | powershell -NoProfile -Command "$input | Tee-Object -FilePath 'logs\bestbuy_full_collect_db.log'"
 
 endlocal

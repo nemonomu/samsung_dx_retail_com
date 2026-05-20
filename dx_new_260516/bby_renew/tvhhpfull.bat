@@ -19,7 +19,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "  @('BESTBUY_RUN_ROOT','BESTBUY_PROMOTION_RUN_ROOT','BESTBUY_DETAIL_RUN_ROOT','BESTBUY_OUTPUT_ROOT','BESTBUY_SEARCH_SORT','BESTBUY_MAIN_PAGES','BESTBUY_MAIN_RUN_ID','BESTBUY_MAIN_ORGANIC_OFFSET','BESTBUY_FINAL_MAIN_RUN_ID','BESTBUY_FINAL_BSR_RUN_ID','BESTBUY_BSR_RUN_ID') | ForEach-Object { Remove-Item ('Env:' + $_) -ErrorAction SilentlyContinue };" ^
   "  $env:BESTBUY_URL_SOURCE='csv';" ^
   "  $env:BESTBUY_SEARCH_URL='';" ^
-  "  if ($cat -eq 'TV') { $env:BESTBUY_SEARCH_TERM='tv'; $steps=@('01','02','03','04','05','06','07','08','09','10','13','14') } else { $env:BESTBUY_SEARCH_TERM='cellphone'; $steps=@('01','02','03','04','06','07','08','09','10','13','14') }" ^
+  "  if ($cat -eq 'TV') { $env:BESTBUY_SEARCH_TERM='tv'; $steps=@('01','02','03','04','05','06','07','08','09','10','13','14','15') } else { $env:BESTBUY_SEARCH_TERM='cellphone'; $steps=@('01','02','03','04','06','07','08','09','10','13','14') }" ^
   "  $env:BESTBUY_MAIN_SOURCE_HTML='';" ^
   "  $env:BESTBUY_FORCE_REFRESH='1';" ^
   "  $env:BESTBUY_FORCE_STEP_ENV='1';" ^

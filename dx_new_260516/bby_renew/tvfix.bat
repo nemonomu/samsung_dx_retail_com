@@ -23,7 +23,7 @@ echo log=%LOG%
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Continue';" ^
-  "$cmd='python -u -m bestbuy.bestbuy_orchestrator --category TV 07 08 10 14';" ^
+  "$cmd='python -u -m bestbuy.bestbuy_orchestrator --category TV 07 08 10 14 15';" ^
   "Write-Output ('[cmd] ' + $cmd);" ^
   "cmd /c $cmd 2>&1 | Tee-Object -FilePath '%LOG%';" ^
   "exit $LASTEXITCODE"

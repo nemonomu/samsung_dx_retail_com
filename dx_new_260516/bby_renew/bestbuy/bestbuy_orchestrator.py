@@ -104,6 +104,7 @@ STEPS = [
     Step(12, "local_cleanup", "bestbuy.step12_local_cleanup"),
     Step(13, "db_prepare", "bestbuy.step13_db_prepare"),
     Step(14, "db_load", "bestbuy.step14_db_load"),
+    Step(15, "item_mst_load", "bestbuy.step15_item_mst_load"),
 ]
 
 
@@ -274,6 +275,8 @@ def step_complete(step):
         return False, "always ensure DB tables when selected"
     if step.name == "db_load":
         return False, "always load final outputs to DB when selected"
+    if step.name == "item_mst_load":
+        return False, "always upsert item master when selected"
     return False, "no completion rule"
 
 

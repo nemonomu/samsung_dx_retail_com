@@ -4,7 +4,7 @@ import re
 import sys
 from pathlib import Path
 
-from .step00_config import bestbuy_main_source_html
+from .step00_config import bestbuy_category, bestbuy_main_source_html
 from .step00_parse_pdp import (
     absolute_bestbuy_url,
     compact_json,
@@ -199,6 +199,40 @@ def visible_offer_count(value):
     return ""
 
 
+PROMOTION_LABELS = {
+    "best selling",
+    "bundle and save",
+    "overall pick",
+    "pre-owned",
+    "top rated",
+    "trade-in offer",
+    "trending deal",
+}
+
+
+def promotion_labels(product):
+    if bestbuy_category() != "HHP":
+        return ""
+    labels = []
+    for badge in product.get("badges") or []:
+        if not isinstance(badge, dict):
+            continue
+        label = str(badge.get("displayName") or "").strip()
+        if label and label.lower() in PROMOTION_LABELS and label not in labels:
+            labels.append(label)
+    for badge in product.get("badgesV2") or []:
+        if not isinstance(badge, dict):
+            continue
+        label = str(badge.get("label") or "").strip()
+        if label and label.lower() in PROMOTION_LABELS and label not in labels:
+            labels.append(label)
+    for option in product.get("buyingOptions") or []:
+        option_type = str((option or {}).get("type") or "").strip()
+        if option_type and option_type.lower() in PROMOTION_LABELS and option_type not in labels:
+            labels.append(option_type)
+    return " ||| ".join(labels)
+
+
 def parse_product(product, occurrence):
     price = product.get("price", {}) if isinstance(product.get("price"), dict) else {}
     review_info = product.get("reviewInfo", {}) if isinstance(product.get("reviewInfo"), dict) else {}
@@ -206,7 +240,7 @@ def parse_product(product, occurrence):
     shipping = nested_get(product, ["fulfillmentOptions", "shippingDetails", "shippingAvailability"], {})
     pickup = nested_get(product, ["fulfillmentOptions", "ispuDetails", "ispuAvailability"], {})
 
-    return {
+    row = {
         "page": occurrence.get("page", 1),
         "visual_rank": occurrence.get("visual_rank", ""),
         "organic_rank": occurrence.get("organic_rank", ""),
@@ -241,6 +275,9 @@ def parse_product(product, occurrence):
         "syndicated_review_summary_json": compact_json(review_info.get("syndicatedReviewSummary")),
         "raw_product_json": compact_json(product),
     }
+    if bestbuy_category() == "HHP":
+        row["promotion_type"] = promotion_labels(product)
+    return row
 
 
 def write_csv(path, rows):
@@ -267,6 +304,7 @@ def write_csv(path, rows):
         "shipping_eligible",
         "pickup_eligible",
         "offer_count",
+        "promotion_type",
     ]
     keys = set()
     for row in rows:

@@ -1688,6 +1688,40 @@ def offer_value(selector_values, products, html_text):
     return offer_count_from_products(products)
 
 
+HHP_PROMOTION_TYPES = {
+    "best selling",
+    "bundle and save",
+    "overall pick",
+    "pre-owned",
+    "top rated",
+    "trade-in offer",
+    "trending deal",
+}
+
+
+def hhp_promotion_type(products, html_text):
+    if CATEGORY != "HHP":
+        return ""
+    names = []
+    for product in products:
+        for badge in product.get("badges") or []:
+            if not isinstance(badge, dict):
+                continue
+            name = compact_text(badge.get("displayName"))
+            if name and name.lower() in HHP_PROMOTION_TYPES and name not in names:
+                names.append(name)
+    if not names and html_text:
+        for value in re.findall(
+            r'data-component-name="Badge"[^>]*>.*?data-testid="button-label"[^>]*>(.*?)</span>',
+            html_text,
+            re.I | re.S,
+        ):
+            name = compact_text(html.unescape(re.sub(r"<[^>]+>", " ", value)))
+            if name and name.lower() in HHP_PROMOTION_TYPES and name not in names:
+                names.append(name)
+    return " ||| ".join(names)
+
+
 def recommendation(products, target):
     target_reviews = review_count_value({"reviewCount": target.get("review_count")})
     target_rating = usable_rating(target.get("rating"))
@@ -2011,7 +2045,7 @@ def output_row(target):
         "trend_rank": target.get("trend_rank", ""),
         "retailer_sku_name_similar": " ||| ".join(similar_names[:4]),
         "estimated_annual_electricity_use": clean_energy(energy),
-        "promotion_type": target.get("promotion_type", ""),
+        "promotion_type": first_non_empty(hhp_promotion_type(products, html_text), target.get("promotion_type", "")),
         "calendar_week": f"w{crawl_dt.isocalendar().week}",
         "crawl_datetime": crawl_dt.strftime("%Y-%m-%d %H:%M:%S"),
         "crawl_strdatetime": crawl_dt.strftime("%Y-%m-%d %H:%M:%S"),

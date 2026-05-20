@@ -426,6 +426,7 @@ def write_csv(path, rows):
         "shipping_eligible",
         "pickup_eligible",
         "offer_count",
+        "promotion_type",
     ]
     fieldnames = [key for key in preferred if key in keys]
     fieldnames.extend(sorted(keys - set(fieldnames)))

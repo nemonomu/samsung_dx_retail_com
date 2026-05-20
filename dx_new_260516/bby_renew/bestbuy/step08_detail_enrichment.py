@@ -293,13 +293,15 @@ def clean_hhp_carrier(value):
         ("AT&T", ["at&t", "att"]),
         ("Verizon", ["verizon"]),
         ("T-Mobile", ["t-mobile", "tmobile"]),
+        ("Sprint", ["sprint"]),
         ("Boost Mobile", ["boost mobile"]),
         ("Cricket", ["cricket"]),
         ("Tracfone", ["tracfone"]),
         ("Google Fi", ["google fi"]),
-        ("Metro by T-Mobile", ["metro by t-mobile", "metro"]),
+        ("Metro by T-Mobile", ["metro by t-mobile", "metropcs", "metro pcs", "metro"]),
         ("Consumer Cellular", ["consumer cellular"]),
-        ("Mint Mobile", ["mint mobile"]),
+        ("Mint Mobile", ["mint mobile", "mint"]),
+        ("Ultra Mobile", ["ultra mobile"]),
         ("H2O Wireless", ["h2o wireless", "h2o"]),
         ("Ting Mobile", ["ting mobile", "ting"]),
         ("US Cellular", ["us cellular", "u.s. cellular"]),
@@ -364,7 +366,7 @@ def clean_hhp_storage(value):
     return f"{number} gigabytes"
 
 
-def hhp_attributes_from_name(name):
+def hhp_attributes_from_name(name, include_carrier=False):
     text = compact_text(name)
     attrs = {"hhp_storage": "", "hhp_color": "", "hhp_carrier": ""}
     if not text:
@@ -376,15 +378,13 @@ def hhp_attributes_from_name(name):
         unit = storage_match.group(2).upper()
         attrs["hhp_storage"] = clean_hhp_storage(f"{number}{unit}")
 
-    paren_values = re.findall(r"\(([^()]*)\)", text)
-    for value in reversed(paren_values):
-        carrier = clean_hhp_carrier(value)
-        if carrier:
-            attrs["hhp_carrier"] = carrier
-            break
-
-    if not attrs["hhp_carrier"]:
-        attrs["hhp_carrier"] = clean_hhp_carrier(text)
+    if include_carrier:
+        paren_values = re.findall(r"\(([^()]*)\)", text)
+        for value in reversed(paren_values):
+            carrier = clean_hhp_carrier(value)
+            if carrier:
+                attrs["hhp_carrier"] = carrier
+                break
 
     # Best Buy HHP titles usually end with "- Color" after carrier/storage.
     parts = [part.strip() for part in re.split(r"\s+-\s+", text) if part.strip()]
@@ -398,14 +398,14 @@ def hhp_attributes_from_name(name):
 
 
 def hhp_attributes_from_product(product, product_name):
-    attrs = hhp_attributes_from_name(product_name)
+    attrs = hhp_attributes_from_name(product_name, include_carrier=False)
     color = first_path([product], ["color", "displayName"])
     if color:
         attrs["hhp_color"] = clean_hhp_color(color)
     spec_candidates = {
         "hhp_storage": ["Internal Storage", "Storage Capacity", "Built-In Storage", "Total Storage Capacity"],
         "hhp_color": ["Color", "Color Category"],
-        "hhp_carrier": ["Carrier", "Wireless Carrier"],
+        "hhp_carrier": ["Carrier Compatibility", "Carrier", "Wireless Carrier"],
     }
     for field, names in spec_candidates.items():
         for name in names:

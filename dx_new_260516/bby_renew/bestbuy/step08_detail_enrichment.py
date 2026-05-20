@@ -287,9 +287,11 @@ def clean_hhp_carrier(value):
     if not text:
         return ""
     lowered = text.lower()
+    if lowered in {"unlocked", "fully unlocked", "carrier unlocked"}:
+        return ""
     carriers = [
         ("Total by Verizon", ["total by verizon"]),
-        ("Unlocked", ["unlocked", "fully unlocked"]),
+        ("Metro by T-Mobile", ["metro by t-mobile", "metropcs", "metro pcs", "metro"]),
         ("AT&T", ["at&t", "att"]),
         ("Verizon", ["verizon"]),
         ("T-Mobile", ["t-mobile", "tmobile"]),
@@ -298,7 +300,6 @@ def clean_hhp_carrier(value):
         ("Cricket", ["cricket"]),
         ("Tracfone", ["tracfone"]),
         ("Google Fi", ["google fi"]),
-        ("Metro by T-Mobile", ["metro by t-mobile", "metropcs", "metro pcs", "metro"]),
         ("Consumer Cellular", ["consumer cellular"]),
         ("Mint Mobile", ["mint mobile", "mint"]),
         ("Ultra Mobile", ["ultra mobile"]),
@@ -322,15 +323,13 @@ def clean_hhp_carrier(value):
             if positions:
                 matches.append((min(positions), canonical))
         for _, canonical in sorted(matches, key=lambda item: item[0]):
-            if canonical == "Unlocked" and len(scan_values) > 1:
-                continue
             if canonical == "Verizon" and "Total by Verizon" in found and "total by verizon" in scan_lowered:
+                continue
+            if canonical == "T-Mobile" and "Metro by T-Mobile" in found and "metro by t-mobile" in scan_lowered:
                 continue
             if canonical not in found:
                 found.append(canonical)
     if found:
-        if "Unlocked" in found and len(found) > 1:
-            found = [carrier for carrier in found if carrier != "Unlocked"]
         return ", ".join(found)
     return ""
 
@@ -342,7 +341,7 @@ def clean_hhp_carrier_compatibility(value):
     parts = [compact_text(part) for part in re.split(r"\s*,\s*|\s*\|\|\|\s*", text) if compact_text(part)]
     cleaned = []
     for part in parts:
-        carrier = clean_hhp_carrier(part) or part
+        carrier = clean_hhp_carrier(part)
         if carrier and carrier not in cleaned:
             cleaned.append(carrier)
     return ", ".join(cleaned)

@@ -23,7 +23,11 @@ This repository is used with an RDP runtime for BestBuy collection. Before chang
 - Treat `.env` as another persistent environment source. Clearing a cmd variable with `set NAME=` can allow `.env` defaults to be loaded again via `load_env()`. Use explicit override values such as `0` when a blank value has semantic meaning.
 - For batch files and one-line rerun commands, explicitly set or clear every environment variable that controls scope, target size, output table, batch id, run date, retry/rebuild/force behavior, and workers. Do not rely on a variable being unset.
 - When a code change changes the meaning of an env var, update the runners too. A correct Python default is not enough if `.bat` or the user's current cmd session still exports the old value.
+- When `BESTBUY_FORCE_STEP_ENV=1`, orchestrator step defaults override parent cmd and batch variables. Check `bestbuy_orchestrator.py` step env values before trusting a runner variable.
 - For every rerun diagnosis, inspect the manifest/log values actually used at runtime, especially `target_size`, `batch_id`, `run_root`, `table`, `force_refresh`, `retry_only`, and row counts. Do not infer them from code alone.
+- BestBuy delivery and pickup fields are location sensitive. Current PDP raw samples show `destinationZipCode`/`postalCode` such as `55423`; do not claim ZIP `10010` collection unless the raw request/response proves that ZIP was actually applied.
+- Shipping fields must preserve page-visible payment text. If the page shows `Get it tomorrow • FREE` or `Delivery as soon as ... • FREE`, do not truncate it to only the date phrase.
+- External/syndicated reviews are not BestBuy-owned reviews. If `syndicatedReviewSummary` exists, or the page-visible text is like `(11 reviews from Samsung US)`, store `star_rating=Not yet reviewed`, `count_of_reviews=0`, `count_of_star_ratings=0`, and `recommendation_intent=none`.
 
 ## Change Workflow
 

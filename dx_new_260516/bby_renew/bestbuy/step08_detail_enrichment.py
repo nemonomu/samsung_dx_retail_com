@@ -441,6 +441,7 @@ def fastest_delivery_from_html(html_text):
     for pattern in (
         r'aria-label="(Get it[^"]*)"',
         r'aria-label="(Shipping[^"]+)"',
+        r"(Get it[^<]{0,80}(?:FREE|Free|free))",
         r">(Get it[^<]*)<",
     ):
         value = html_match(pattern, html_text)
@@ -453,6 +454,7 @@ def normalize_fastest_delivery(value):
     text = compact_text(value)
     if not text:
         return ""
+    text = re.sub(r"\s*(?:&bull;|•)\s*", " • ", text)
     text = re.sub(r"^(Shipping|Delivery|Pickup)\s+", "", text, flags=re.I).strip()
     if re.match(r"(?i)^get it tomorrow\b", text):
         return re.sub(r"(?i)^get it tomorrow\b", "Get it tomorrow", text, count=1)
@@ -464,8 +466,33 @@ def normalize_fastest_delivery(value):
 
 
 def delivery_from_html(html_text):
-    value = html_match(r'aria-label="(Delivery\s+As soon as[^"]+)"', html_text)
-    return compact_text(value).replace("Delivery As soon as", "Delivery as soon as")
+    for pattern in (
+        r'aria-label="(Delivery\s+As soon as[^"]+)"',
+        r"(Delivery\s+as soon as[^<]{0,120}(?:FREE|Free|free))",
+        r"(Delivery\s+As soon as[^<]{0,120}(?:FREE|Free|free))",
+    ):
+        value = html_match(pattern, html_text)
+        if value:
+            return normalize_delivery_availability(value)
+    return ""
+
+
+def normalize_delivery_availability(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    text = re.sub(r"\s*(?:&bull;|•)\s*", " • ", text)
+    return re.sub(r"(?i)^Delivery\s+As soon as", "Delivery as soon as", text, count=1)
+
+
+def visible_shipping_value(selector_value, html_value, fallback_value="", normalize_func=compact_text):
+    selector_text = normalize_func(selector_value)
+    html_text = normalize_func(html_value)
+    fallback_text = normalize_func(fallback_value)
+    for value in (selector_text, html_text, fallback_text):
+        if re.search(r"(?i)(?:^|\s)(FREE|free)(?:\s|$)|•", value):
+            return value
+    return first_non_empty(selector_text, html_text, fallback_text)
 
 
 def price_policy_from_html(html_text):
@@ -1469,6 +1496,71 @@ def recommendation(products):
     return f"{value}% would recommend to a friend" if value not in ("", None) else ""
 
 
+def _has_non_empty_syndicated_summary(value):
+    if value in (None, "", [], {}):
+        return False
+    if isinstance(value, list):
+        return any(item not in (None, "", [], {}) for item in value)
+    if isinstance(value, dict):
+        return True
+    if isinstance(value, str):
+        text = value.strip()
+        if not text or text.lower() in {"null", "none", "[]", "{}"}:
+            return False
+        try:
+            return _has_non_empty_syndicated_summary(json.loads(text))
+        except ValueError:
+            return "reviews from " in text.lower()
+    return False
+
+
+def has_syndicated_reviews(products, target):
+    for product in products:
+        review_info = product.get("reviewInfo") if isinstance(product, dict) else {}
+        if isinstance(review_info, dict) and _has_non_empty_syndicated_summary(
+            review_info.get("syndicatedReviewSummary")
+        ):
+            return True
+    for key in ("syndicated_review_summary_json", "syndicatedReviewSummary"):
+        if _has_non_empty_syndicated_summary(target.get(key)):
+            return True
+    return False
+
+
+def has_external_review_text(html_text, selector_values):
+    values = list(selector_values.values())
+    if html_text:
+        values.append(html_text)
+    for value in values:
+        text = compact_text(value)
+        if re.search(r"\(?\s*[\d,]+\s+reviews?\s+from\s+[^)]{2,80}\)?", text, re.I):
+            return True
+    return False
+
+
+def has_external_reviews(products, target, html_text, selector_values):
+    return has_syndicated_reviews(products, target) or has_external_review_text(html_text, selector_values)
+
+
+def is_zero_review_value(value):
+    text = compact_text(value).replace(",", "")
+    if text == "":
+        return False
+    try:
+        return int(float(text)) == 0
+    except ValueError:
+        return False
+
+
+def should_mark_not_yet_reviewed(row, external_reviews):
+    rating = compact_text(row.get("star_rating")).lower()
+    if external_reviews:
+        return True
+    if rating == "not yet reviewed":
+        return True
+    return rating in {"0", "0.0"} and is_zero_review_value(row.get("count_of_reviews"))
+
+
 def review20_content(sku):
     path = review_paths(sku)["response_json"]
     if not path.exists():
@@ -1613,14 +1705,16 @@ def output_row(target):
             selector_values.get("pick_up_availability"),
             date_to_phrase("Pick up", pickup.get("maxDate") if isinstance(pickup, dict) else ""),
         ),
-        "fastest_delivery": first_non_empty(
-            normalize_fastest_delivery(selector_values.get("fastest_delivery")),
-            normalize_fastest_delivery(fastest_delivery_from_html(html_text)),
+        "fastest_delivery": visible_shipping_value(
+            selector_values.get("fastest_delivery"),
+            fastest_delivery_from_html(html_text),
+            normalize_func=normalize_fastest_delivery,
         ),
-        "delivery_availability": first_non_empty(
+        "delivery_availability": visible_shipping_value(
             "" if CATEGORY == "HHP" else selector_values.get("delivery_availability"),
             "" if CATEGORY == "HHP" else delivery_from_html(html_text),
             "" if CATEGORY == "HHP" else date_to_phrase("Delivery as soon as", delivery_slot),
+            normalize_func=normalize_delivery_availability,
         ),
         "shipping_info": "",
         "sku_status": "Sponsored" if target.get("is_sponsored") in {"1", "true", "True"} else "",
@@ -1657,6 +1751,12 @@ def output_row(target):
         "batch_id": BATCH_ID,
         "country": "SEA",
     }
+    external_reviews = has_external_reviews(products, target, html_text, selector_values)
+    if should_mark_not_yet_reviewed(row, external_reviews):
+        row["star_rating"] = "Not yet reviewed"
+        row["count_of_reviews"] = "0"
+        row["count_of_star_ratings"] = "0"
+        row["recommendation_intent"] = "none"
     for field, value in selector_values.items():
         row.setdefault(field, value)
     return row

@@ -82,7 +82,7 @@ STEPS = [
         {
             "BESTBUY_FINAL_MAIN_RUN_ID": "main",
             "BESTBUY_FINAL_BSR_RUN_ID": "bsr",
-            "BESTBUY_FINAL_TARGET_SIZE": "300",
+            "BESTBUY_FINAL_TARGET_SIZE": "0",
         },
     ),
     Step(

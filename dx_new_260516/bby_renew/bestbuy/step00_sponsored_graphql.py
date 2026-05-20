@@ -60,10 +60,16 @@ def build_sponsored_payload(skus):
         "skuId reviewInfo{averageRating isReviewable reviewCount "
         "syndicatedReviewSummary{clientDisplayName overallRating totalReviewCount}}"
         "url{relativePdp}}"
+        "fragment SponsoredPrice_Fragment on Product{"
+        "price{skuId customerPrice displayableCustomerPrice regularPrice displayableRegularPrice "
+        "totalSavings totalSavingsPercent restrictedPriceDisplayMessage "
+        "mobileContracts{isDefaultContract customerPrice currentPrice regularPrice totalSavingsPercent "
+        "instantSavings contractTotalSavings carrierCode matchesCurrentPrice}}"
+        "offers{offers{hotOffer offerId offerType complexMemberOffer}}}"
         "query AdTech_NinjaCarousel_SkuDataQuery{"
         f"batch0:productsBySkuIds(skuIds:[{quoted_skus}])"
         "{...on Product{skuId name{short}primaryImage{href piscesHref altText}"
-        "...ReviewStats_Fragment url{skuSpecificUrl relativePdp}}}}"
+        "...ReviewStats_Fragment ...SponsoredPrice_Fragment url{skuSpecificUrl relativePdp}}}}"
     )
     return {
         "operationName": "AdTech_NinjaCarousel_SkuDataQuery",

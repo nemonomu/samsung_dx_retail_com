@@ -469,6 +469,23 @@ def money_int(value):
         return str(value)
 
 
+def normalize_monthly_price(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    lowered = text.lower()
+    if "per month" not in lowered and "/mo" not in lowered and "/month" not in lowered:
+        return text
+    match = re.search(r"\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)", text)
+    if not match:
+        return text
+    return f"${match.group(1)}/mo."
+
+
+def normalize_price_output(value):
+    return normalize_monthly_price(value)
+
+
 def normalize_savings(value):
     text = compact_text(value)
     if not text:
@@ -2115,6 +2132,7 @@ def output_row(target):
             policy_price,
             selector_final_price,
         )
+    final_price = normalize_price_output(final_price)
     original_price = "" if is_policy_price(final_price) else first_non_empty(
         selector_values.get("original_sku_price"),
         money(first_non_empty(*original_price_candidates)),

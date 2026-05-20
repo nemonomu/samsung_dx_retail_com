@@ -1176,11 +1176,21 @@ def expected_review_count(target):
         return 0
 
 
+def expected_review_count_from_detail(sku):
+    counts = []
+    for product in products_from_detail(sku):
+        review_info = product.get("reviewInfo") if isinstance(product, dict) else {}
+        count = review_count_value(review_info)
+        if count is not None:
+            counts.append(count)
+    return max(counts) if counts else 0
+
+
 def review_needs_retry(target):
     sku = str(target.get("sku_id") or "").strip()
     if not review_success(sku):
         return True
-    if expected_review_count(target) <= 0:
+    if max(expected_review_count(target), expected_review_count_from_detail(sku)) <= 0:
         return False
     if not review_has_recommended_percent(sku):
         return True

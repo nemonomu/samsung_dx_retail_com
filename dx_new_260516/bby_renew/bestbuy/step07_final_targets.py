@@ -438,7 +438,7 @@ def product_list_rows(rows, bsr_pages):
             "account_name": "Bestbuy",
             "page_type": page_type(row),
             "retailer_sku_name": row.get("product_name", ""),
-            "offer": "",
+            "offer": row.get("offer_count", ""),
             "pick_up_availability": row.get("pick_up_availability", ""),
             "fastest_delivery": row.get("fastest_delivery", ""),
             "delivery_availability": row.get("delivery_availability", ""),

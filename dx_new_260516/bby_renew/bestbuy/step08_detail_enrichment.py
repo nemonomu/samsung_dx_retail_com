@@ -2069,7 +2069,10 @@ def output_row(target):
         "final_sku_price": final_price,
         "original_sku_price": original_price,
         "savings": savings,
-        "offer": offer_value(selector_values, products, html_text),
+        "offer": first_non_empty(
+            offer_value(selector_values, products, html_text),
+            target.get("offer_count"),
+        ),
         "pick_up_availability": first_non_empty(
             selector_values.get("pick_up_availability"),
             date_to_phrase("Pick up", pickup.get("maxDate") if isinstance(pickup, dict) else ""),

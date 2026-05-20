@@ -9,7 +9,7 @@ from requests import RequestException
 
 from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, rel_path
 from .step00_parse_pdp import absolute_bestbuy_url, nested_get
-from .step00_parse_search import merge_dict
+from .step00_parse_search import display_price_or_policy, offer_count, price_value, merge_dict
 from .step00_sponsored_graphql import build_sponsored_payload, post_graphql, sponsored_product_map
 
 RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
@@ -147,6 +147,12 @@ def enrich_sponsored_row(row, product):
     row["rating"] = row.get("rating") or review_info.get("averageRating", "")
     row["review_count"] = row.get("review_count") or review_info.get("reviewCount", "")
     row["is_reviewable"] = row.get("is_reviewable") or review_info.get("isReviewable", "")
+    price = product.get("price", {}) if isinstance(product.get("price"), dict) else {}
+    row["customer_price"] = row.get("customer_price") or display_price_or_policy(price)
+    row["regular_price"] = row.get("regular_price") or price_value(price, "displayableRegularPrice")
+    row["total_savings"] = row.get("total_savings") or price_value(price, "totalSavings")
+    row["total_savings_percent"] = row.get("total_savings_percent") or price_value(price, "totalSavingsPercent")
+    row["offer_count"] = row.get("offer_count") or offer_count(product)
 
     try:
         raw_product = json.loads(row.get("raw_product_json") or "{}")

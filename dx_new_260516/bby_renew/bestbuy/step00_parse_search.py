@@ -199,6 +199,22 @@ def visible_offer_count(value):
     return ""
 
 
+def validated_offer_count(product):
+    if not isinstance(product, dict):
+        return ""
+    offers = ((product.get("offers") or {}).get("offers") or []) if isinstance(product.get("offers"), dict) else []
+    hot_offer_count = sum(1 for offer in offers if isinstance(offer, dict) and offer.get("hotOffer"))
+    price = product.get("price") if isinstance(product.get("price"), dict) else {}
+    gift_skus = price.get("giftSkus") if isinstance(price, dict) else []
+    gift_count = len(gift_skus) if isinstance(gift_skus, list) else 0
+    total = hot_offer_count + gift_count
+    return str(total) if total > 0 else ""
+
+
+def offer_count(product):
+    return visible_offer_count(product) or validated_offer_count(product)
+
+
 PROMOTION_LABELS = {
     "best selling",
     "bundle and save",
@@ -270,7 +286,7 @@ def parse_product(product, occurrence):
         "shipping_eligible": shipping.get("shippingEligible", "") if isinstance(shipping, dict) else "",
         "pickup_eligible": pickup.get("pickupEligible", "") if isinstance(pickup, dict) else "",
         "pickup_quantity": pickup.get("quantity", "") if isinstance(pickup, dict) else "",
-        "offer_count": visible_offer_count(product),
+        "offer_count": offer_count(product),
         "buying_options_json": compact_json(product.get("buyingOptions")),
         "syndicated_review_summary_json": compact_json(review_info.get("syndicatedReviewSummary")),
         "raw_product_json": compact_json(product),

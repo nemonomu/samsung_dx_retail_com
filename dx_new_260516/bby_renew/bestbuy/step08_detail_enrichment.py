@@ -497,8 +497,8 @@ def visible_shipping_value(*values, normalize_func=compact_text):
 
 def normalize_fastest_delivery_output(value):
     text = normalize_fastest_delivery(value)
-    if re.fullmatch(r"(?i)get it tomorrow", text):
-        return "Get it tomorrow • FREE"
+    if re.match(r"(?i)^get\b", text) and not re.search(r"(?i)(?:^|\s)FREE(?:\s|$)|•", text):
+        return f"{text} • FREE"
     return text
 
 

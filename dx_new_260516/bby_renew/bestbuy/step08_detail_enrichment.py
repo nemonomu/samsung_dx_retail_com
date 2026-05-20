@@ -521,6 +521,23 @@ def delivery_from_html(html_text):
     return ""
 
 
+def shipping_date_from_products(products):
+    shipping = best_path(
+        products,
+        ["fulfillmentOptions", "shippingDetails", 0, "shippingAvailability", 0],
+        ("customerLOSGroup",),
+    )
+    group = shipping.get("customerLOSGroup") if isinstance(shipping, dict) else {}
+    if not isinstance(group, dict):
+        return ""
+    return (
+        group.get("maxLineItemMaxDate")
+        or group.get("minLineItemMaxDate")
+        or group.get("maxDate")
+        or group.get("minDate")
+    )
+
+
 def normalize_delivery_availability(value):
     text = compact_text(value)
     if not text:
@@ -1203,6 +1220,11 @@ def review20_payload(html_text):
     if not payload:
         return None
     payload["query"] = payload["query"].replace("reviews(filter:{pageSize:5})", "reviews(filter:{pageSize:20})")
+    if CATEGORY == "HHP":
+        payload["query"] = payload["query"].replace(
+            "reviewInfo{averageRating reviewCount}",
+            "reviewInfo{averageRating reviewCount recommendedPercent}",
+        )
     return payload
 
 
@@ -1225,6 +1247,11 @@ def review20_payload_for_sku(sku):
     if not payload:
         return None
     payload["query"] = payload["query"].replace("reviews(filter:{pageSize:5})", "reviews(filter:{pageSize:20})")
+    if CATEGORY == "HHP":
+        payload["query"] = payload["query"].replace(
+            "reviewInfo{averageRating reviewCount}",
+            "reviewInfo{averageRating reviewCount recommendedPercent}",
+        )
     return payload
 
 
@@ -1451,7 +1478,14 @@ def similar_products_from_html(html_text):
             section = heading.parent if heading else soup
 
     names = []
-    product_name_re = re.compile(r"\bclass\b|smart|tv|television|oled|qled|uhd|led|roku|fire tv", re.I)
+    if CATEGORY == "HHP":
+        product_name_re = re.compile(
+            r"iphone|galaxy|pixel|motorola|moto|razr|nokia|oneplus|phone|cell|"
+            r"unlocked|verizon|at&t|t-mobile|mint mobile|tracfone|cricket|boost",
+            re.I,
+        )
+    else:
+        product_name_re = re.compile(r"\bclass\b|smart|tv|television|oled|qled|uhd|led|roku|fire tv", re.I)
     skip_re = re.compile(
         r"compare similar products|shop now|learn more|add to cart|stars?|reviews?|"
         r"home delivery|mounting|installation|haul-away|recycling|soundbar|wall mount",
@@ -1684,6 +1718,22 @@ def recommendation(products, target):
     return f"{value}% would recommend to a friend"
 
 
+def review20_review_info(sku):
+    path = review_paths(sku)["response_json"]
+    if not path.exists():
+        return {}
+    data = read_json(path)
+    review_info = ((data.get("data") or {}).get("productBySkuId") or {}).get("reviewInfo") or {}
+    return review_info if isinstance(review_info, dict) else {}
+
+
+def recommendation_from_review20(sku):
+    value = review20_review_info(sku).get("recommendedPercent")
+    if value in (None, "", [], {}):
+        return ""
+    return f"{value}% would recommend to a friend"
+
+
 def _has_non_empty_syndicated_summary(value):
     if value in (None, "", [], {}):
         return False
@@ -1874,6 +1924,7 @@ def output_row(target):
         ("deliverySlots",),
     )
     delivery_slot = (delivery.get("deliverySlots") or [{}])[0].get("date") if isinstance(delivery, dict) else ""
+    shipping_date = shipping_date_from_products(products) if CATEGORY == "HHP" else ""
     screen = spec_value(products, "Screen Size Class") or spec_value(products, "Screen Size")
     energy = spec_value(products, "Estimated Annual Electricity Use")
     model_year = spec_value(products, "Model Year")
@@ -1923,6 +1974,7 @@ def output_row(target):
         "fastest_delivery": visible_shipping_value(
             selector_values.get("fastest_delivery"),
             fastest_delivery_from_html(html_text),
+            date_to_phrase("Get it by", shipping_date),
             normalize_func=normalize_fastest_delivery,
         ),
         "delivery_availability": visible_shipping_value(
@@ -1950,6 +2002,7 @@ def output_row(target):
             recommendation_phrase(selector_values.get("reviewpage_recommendation_intent_fallback3")),
             recommendation_phrase(selector_values.get("reviewpage_recommendation_intent_fallback4")),
             recommendation_from_html(html_text),
+            recommendation_from_review20(sku) if CATEGORY == "HHP" else "",
             recommendation(products, target),
         ),
         "main_rank": target.get("main_rank", ""),

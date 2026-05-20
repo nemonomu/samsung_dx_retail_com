@@ -1543,6 +1543,16 @@ def similar_products_from_html(html_text):
         r"home delivery|mounting|installation|haul-away|recycling|soundbar|wall mount",
         re.I,
     )
+    if CATEGORY == "HHP":
+        for element in section.find_all(class_=re.compile(r"\bproduct-title\b", re.I)):
+            text = compact_text(element.get_text(" "))
+            if (
+                text
+                and product_name_re.search(text)
+                and not skip_re.search(text)
+                and text not in names
+            ):
+                names.append(text)
     for element in section.find_all(["img", "a"]):
         if element.name == "img":
             text = compact_text(element.get("alt"))

@@ -546,6 +546,19 @@ def shipping_date_from_products(products):
         ("customerLOSGroup",),
     )
     group = shipping.get("customerLOSGroup") if isinstance(shipping, dict) else {}
+    if isinstance(group, list):
+        free_groups = [item for item in group if isinstance(item, dict) and item.get("price") in (0, 0.0, "0")]
+        dated_groups = free_groups or [item for item in group if isinstance(item, dict)]
+        if not dated_groups:
+            return ""
+        group = sorted(
+            dated_groups,
+            key=lambda item: item.get("maxLineItemMaxDate")
+            or item.get("minLineItemMaxDate")
+            or item.get("maxDate")
+            or item.get("minDate")
+            or "",
+        )[0]
     if not isinstance(group, dict):
         return ""
     return (
@@ -615,6 +628,25 @@ def price_policy_value(price, selector_values, target, html_text):
 def is_policy_price(value):
     lowered = compact_text(value).lower()
     return any(needle in lowered for needle in ("see price in cart", "no longer available", "sold out", "coming soon", "unavailable"))
+
+
+def trade_in_from_html(html_text):
+    if not html_text:
+        return ""
+    text = compact_text(BeautifulSoup(html_text, "html.parser").get_text(" "))
+    match = re.search(
+        r"(Check your trade-in value(?:\.\s*Save(?: up to)?[^.]{0,100}\.)?)",
+        text,
+        re.I,
+    )
+    return compact_text(match.group(1)) if match else ""
+
+
+def trade_in_from_products(products):
+    for product in reversed(products):
+        if isinstance(product, dict) and product.get("isPurchaseWithTradeInEligible") is True:
+            return "Check your trade-in value."
+    return ""
 
 
 def clean_energy(value):
@@ -1129,6 +1161,8 @@ def review_needs_retry(target):
         return True
     if expected_review_count(target) <= 0:
         return False
+    if CATEGORY == "HHP" and not hhp_review_has_recommended_percent(sku):
+        return True
     return not bool(review20_content(sku))
 
 
@@ -1786,6 +1820,13 @@ def recommendation_from_review20(sku):
     return f"{value}% would recommend to a friend"
 
 
+def hhp_review_has_recommended_percent(sku):
+    if CATEGORY != "HHP":
+        return True
+    value = review20_review_info(sku).get("recommendedPercent")
+    return value not in (None, "", [], {})
+
+
 def _has_non_empty_syndicated_summary(value):
     if value in (None, "", [], {}):
         return False
@@ -2037,6 +2078,11 @@ def output_row(target):
         ),
         "shipping_info": "",
         "sku_status": "Sponsored" if target.get("is_sponsored") in {"1", "true", "True"} else "",
+        "trade_in": first_non_empty(
+            selector_values.get("trade_in"),
+            trade_in_from_html(html_text),
+            trade_in_from_products(products),
+        ),
         "hhp_storage": hhp_attrs.get("hhp_storage", ""),
         "hhp_color": hhp_attrs.get("hhp_color", ""),
         "hhp_carrier": hhp_attrs.get("hhp_carrier", ""),

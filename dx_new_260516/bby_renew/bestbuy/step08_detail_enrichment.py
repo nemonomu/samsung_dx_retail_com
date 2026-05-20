@@ -410,7 +410,8 @@ def hhp_attributes_from_name(name, include_carrier=False):
     return attrs
 
 
-def hhp_attributes_from_product(product, product_name):
+def hhp_attributes_from_product(products, product_name):
+    product = products[-1] if products else {}
     attrs = hhp_attributes_from_name(product_name, include_carrier=False)
     color = first_path([product], ["color", "displayName"])
     if color:
@@ -421,7 +422,7 @@ def hhp_attributes_from_product(product, product_name):
     }
     for field, names in spec_candidates.items():
         for name in names:
-            value = spec_value([product], name)
+            value = spec_value(products, name)
             if value:
                 if field == "hhp_carrier":
                     attrs[field] = clean_hhp_carrier(value)
@@ -430,12 +431,12 @@ def hhp_attributes_from_product(product, product_name):
                 else:
                     attrs[field] = clean_hhp_color(value)
                 break
-    carrier_compatibility = spec_value([product], "Carrier Compatibility")
+    carrier_compatibility = spec_value(products, "Carrier Compatibility")
     if carrier_compatibility:
         attrs["hhp_carrier"] = clean_hhp_carrier_compatibility(carrier_compatibility)
     else:
         for name in ("Carrier", "Wireless Carrier"):
-            value = spec_value([product], name)
+            value = spec_value(products, name)
             if value:
                 attrs["hhp_carrier"] = clean_hhp_carrier(value)
                 break
@@ -2071,8 +2072,7 @@ def output_row(target):
     product_name = first_path(products, ["name", "short"]) or target.get("product_name", "")
     product_url = first_path(products, ["url", "pdp"]) or target.get("product_url", "")
     bsin = first_value(products, "bsin") or target.get("bsin") or old_pdp_bsin(product_url) or ""
-    primary_product = products[-1] if products else {}
-    hhp_attrs = hhp_attributes_from_product(primary_product, product_name) if CATEGORY == "HHP" else {}
+    hhp_attrs = hhp_attributes_from_product(products, product_name) if CATEGORY == "HHP" else {}
 
     crawl_dt = eastern_now()
     category_key = (target.get("category_key") or CATEGORY).upper()
@@ -2244,7 +2244,7 @@ def main():
         else:
             dmeta = read_json(detail_paths(sku)["meta"])
         if STAGE in {"all", "review"}:
-            should_fetch_review = client and dmeta.get("success") and (FORCE_REFRESH or not review_success(sku))
+            should_fetch_review = client and dmeta.get("success") and (FORCE_REFRESH or review_needs_retry(target))
             rmeta = fetch_review20(client, target) if should_fetch_review else read_json(review_paths(sku)["meta"])
             fetched_review = bool(should_fetch_review)
         else:

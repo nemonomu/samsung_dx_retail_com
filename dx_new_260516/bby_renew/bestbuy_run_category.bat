@@ -13,6 +13,7 @@ if not exist logs mkdir logs
 if not "%BESTBUY_SKIP_PULL%"=="1" git pull
 
 set BESTBUY_RUN_ROOT=
+set BESTBUY_RUN_DATE=
 set BESTBUY_PROMOTION_RUN_ROOT=
 set BESTBUY_DETAIL_RUN_ROOT=
 set BESTBUY_OUTPUT_ROOT=

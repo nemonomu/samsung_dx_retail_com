@@ -125,7 +125,7 @@ def bestbuy_product_list_table(category=None):
 
 
 def bestbuy_run_date():
-    return os.getenv("BESTBUY_RUN_DATE", eastern_now().strftime("%Y%m%d"))
+    return (os.getenv("BESTBUY_RUN_DATE") or eastern_now().strftime("%Y%m%d")).strip()
 
 
 def eastern_now():

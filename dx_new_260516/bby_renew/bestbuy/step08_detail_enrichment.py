@@ -288,6 +288,7 @@ def clean_hhp_carrier(value):
         return ""
     lowered = text.lower()
     carriers = [
+        ("Total by Verizon", ["total by verizon"]),
         ("Unlocked", ["unlocked", "fully unlocked"]),
         ("AT&T", ["at&t", "att"]),
         ("Verizon", ["verizon"]),
@@ -298,13 +299,51 @@ def clean_hhp_carrier(value):
         ("Google Fi", ["google fi"]),
         ("Metro by T-Mobile", ["metro by t-mobile", "metro"]),
         ("Consumer Cellular", ["consumer cellular"]),
+        ("Mint Mobile", ["mint mobile"]),
+        ("H2O Wireless", ["h2o wireless", "h2o"]),
+        ("Ting Mobile", ["ting mobile", "ting"]),
+        ("US Cellular", ["us cellular", "u.s. cellular"]),
+        ("Simple Mobile", ["simple mobile"]),
         ("Straight Talk", ["straight talk"]),
         ("Total Wireless", ["total wireless"]),
+        ("Visible", ["visible"]),
     ]
-    for canonical, needles in carriers:
-        if any(needle in lowered for needle in needles):
-            return canonical
+    found = []
+    parts = [part.strip() for part in re.split(r"[,;/|]+", text) if part.strip()]
+    scan_values = parts if len(parts) > 1 else [text]
+    for scan_value in scan_values:
+        scan_lowered = scan_value.lower()
+        matches = []
+        for canonical, needles in carriers:
+            positions = [scan_lowered.find(needle) for needle in needles if needle in scan_lowered]
+            if positions:
+                matches.append((min(positions), canonical))
+        for _, canonical in sorted(matches, key=lambda item: item[0]):
+            if canonical == "Unlocked" and len(scan_values) > 1:
+                continue
+            if canonical == "Verizon" and "Total by Verizon" in found and "total by verizon" in scan_lowered:
+                continue
+            if canonical not in found:
+                found.append(canonical)
+    if found:
+        if "Unlocked" in found and len(found) > 1:
+            found = [carrier for carrier in found if carrier != "Unlocked"]
+        return ", ".join(found)
     return text
+
+
+def clean_hhp_storage(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    match = re.search(r"(?i)\b(\d+(?:\.\d+)?)\s*(TB|GB|terabytes?|gigabytes?)\b", text)
+    if not match:
+        return text
+    number = match.group(1)
+    unit = match.group(2).lower()
+    if unit.startswith("tb") or unit.startswith("tera"):
+        return f"{number} terabytes"
+    return f"{number} gigabytes"
 
 
 def hhp_attributes_from_name(name):
@@ -317,7 +356,7 @@ def hhp_attributes_from_name(name):
     if storage_match:
         number = storage_match.group(1)
         unit = storage_match.group(2).upper()
-        attrs["hhp_storage"] = f"{number}{unit}"
+        attrs["hhp_storage"] = clean_hhp_storage(f"{number}{unit}")
 
     paren_values = re.findall(r"\(([^()]*)\)", text)
     for value in reversed(paren_values):
@@ -351,12 +390,15 @@ def hhp_attributes_from_product(product, product_name):
         "hhp_carrier": ["Carrier", "Wireless Carrier"],
     }
     for field, names in spec_candidates.items():
-        if attrs.get(field):
-            continue
         for name in names:
             value = spec_value([product], name)
             if value:
-                attrs[field] = clean_hhp_carrier(value) if field == "hhp_carrier" else compact_text(value)
+                if field == "hhp_carrier":
+                    attrs[field] = clean_hhp_carrier(value)
+                elif field == "hhp_storage":
+                    attrs[field] = clean_hhp_storage(value)
+                else:
+                    attrs[field] = compact_text(value)
                 break
     return attrs
 

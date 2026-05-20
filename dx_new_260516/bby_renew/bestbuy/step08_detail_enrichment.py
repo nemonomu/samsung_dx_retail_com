@@ -1358,28 +1358,47 @@ def similar_products_from_html(html_text):
         return []
 
     heading = heading_text.parent
-    section = heading
-    for _ in range(8):
-        if not section or not getattr(section, "parent", None):
-            break
-        section = section.parent
-        links = section.find_all("a", href=re.compile(r"/product/", re.I))
-        if len(links) >= 2:
-            break
-    else:
-        section = heading.parent if heading else soup
+    section = heading.find_parent(attrs={"data-component-name": re.compile(r"^Compare$", re.I)})
+    if section is None:
+        section = heading
+        for _ in range(8):
+            if not section or not getattr(section, "parent", None):
+                break
+            section = section.parent
+            links = section.find_all("a", href=re.compile(r"/product/", re.I))
+            images = section.find_all("img", alt=True)
+            if len(links) + len(images) >= 4:
+                break
+        else:
+            section = heading.parent if heading else soup
 
     names = []
-    for link in section.find_all("a", href=re.compile(r"/product/", re.I)):
-        text = compact_text(link.get_text(" ", strip=True))
+    product_name_re = re.compile(r"\bclass\b|smart|tv|television|oled|qled|uhd|led|roku|fire tv", re.I)
+    skip_re = re.compile(
+        r"compare similar products|shop now|learn more|add to cart|stars?|reviews?|"
+        r"home delivery|mounting|installation|haul-away|recycling|soundbar|wall mount",
+        re.I,
+    )
+    for element in section.find_all(["img", "a"]):
+        if element.name == "img":
+            text = compact_text(element.get("alt"))
+        else:
+            href = element.get("href") or ""
+            if not re.search(r"/product/", href, re.I):
+                continue
+            text = compact_text(element.get_text(" ", strip=True))
         if not text:
             continue
-        if len(text) < 20 or re.search(r"(?i)compare similar products|shop now|learn more|add to cart", text):
+        if len(text) < 20 or skip_re.search(text):
             continue
         if re.search(r"\$\d|^\d+(\.\d+)?$|stars?|reviews?", text, re.I):
             continue
+        if not product_name_re.search(text):
+            continue
         if text not in names:
             names.append(text)
+        if len(names) >= 4:
+            break
     return names
 
 
@@ -1698,7 +1717,7 @@ def output_row(target):
     html_text = detail_html_path.read_text(encoding="utf-8", errors="replace") if detail_html_path.exists() else ""
     selector_values = detail_selector_values(html_text)
     products, variations = products_from_detail(sku)
-    similar_names = variations or similar_products_from_html(html_text)
+    similar_names = similar_products_from_html(html_text) or variations
     price = best_price(products)
     policy_price = price_policy_value(price, selector_values, target, html_text)
     selector_final_price = selector_values.get("final_sku_price")

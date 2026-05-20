@@ -6,6 +6,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
 
 
 KRW_PER_USD = 1550
@@ -15,6 +16,7 @@ REPO_ROOT = PACKAGE_DIR.parent
 INITIAL_URLS_CSV = PACKAGE_DIR / "config" / "bestbuy_initial_urls.csv"
 DEFAULT_RETAILER = "Bestbuy"
 DEFAULT_CATEGORY = "TV"
+EASTERN_TZ = ZoneInfo("America/New_York")
 TARGET_URL_TABLE = os.getenv("BESTBUY_TARGET_URL_TABLE", "dx_target_page_url")
 OUTPUT_TABLE_REGISTRY = os.getenv("COMMON_OUTPUT_TABLE_REGISTRY", "public.common_setting_step02_output_table")
 
@@ -123,7 +125,11 @@ def bestbuy_product_list_table(category=None):
 
 
 def bestbuy_run_date():
-    return os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
+    return os.getenv("BESTBUY_RUN_DATE", eastern_now().strftime("%Y%m%d"))
+
+
+def eastern_now():
+    return datetime.now(EASTERN_TZ).replace(tzinfo=None)
 
 
 def bestbuy_batch_id(category=None):
@@ -132,7 +138,7 @@ def bestbuy_batch_id(category=None):
         return override.strip()
     category_key = (category or bestbuy_category()).strip().upper()
     prefix = {"TV": "b"}.get(category_key, category_key.lower()[:1] or "b")
-    batch_time = os.getenv("BESTBUY_BATCH_TIME") or datetime.now().strftime("%H%M%S")
+    batch_time = os.getenv("BESTBUY_BATCH_TIME") or eastern_now().strftime("%H%M%S")
     return f"{prefix}_{bestbuy_run_date()}_{batch_time}"
 
 

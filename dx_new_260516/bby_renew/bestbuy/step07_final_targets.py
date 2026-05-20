@@ -10,6 +10,7 @@ from .step00_config import (
     KRW_PER_USD,
     bestbuy_batch_id,
     bestbuy_category,
+    eastern_now,
     old_pdp_url,
     rel_path,
 )
@@ -344,7 +345,7 @@ def page_type(row):
 
 
 def product_list_rows(rows, bsr_pages):
-    crawl_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    crawl_dt = eastern_now().strftime("%Y-%m-%d %H:%M:%S")
     output = []
     for row in rows:
         sku = str(row.get("sku_id") or "").strip()

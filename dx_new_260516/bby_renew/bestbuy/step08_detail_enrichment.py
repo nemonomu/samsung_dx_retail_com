@@ -22,6 +22,7 @@ from .step00_config import (
     bestbuy_category,
     bestbuy_output_table,
     db_config,
+    eastern_now,
     old_pdp_url,
     rel_path,
 )
@@ -1583,7 +1584,7 @@ def output_row(target):
     primary_product = products[-1] if products else {}
     hhp_attrs = hhp_attributes_from_product(primary_product, product_name) if CATEGORY == "HHP" else {}
 
-    crawl_dt = datetime.now()
+    crawl_dt = eastern_now()
     category_key = (target.get("category_key") or CATEGORY).upper()
     row = {
         "id": "",

@@ -1892,7 +1892,17 @@ def has_external_review_text(html_text, selector_values):
 
 
 def has_external_reviews(products, target, html_text, selector_values):
-    return has_syndicated_reviews(products, target) or has_external_review_text(html_text, selector_values)
+    if has_syndicated_reviews(products, target):
+        return True
+    bestbuy_review_counts = []
+    for product in products:
+        review_info = product.get("reviewInfo") if isinstance(product, dict) else {}
+        count = review_count_value(review_info)
+        if count is not None:
+            bestbuy_review_counts.append(count)
+    if bestbuy_review_counts and max(bestbuy_review_counts) > 0:
+        return False
+    return has_external_review_text(html_text, selector_values)
 
 
 def is_zero_review_value(value):

@@ -1354,7 +1354,8 @@ def target_rows(apply_filters=True):
             unique = [
                 row
                 for row in unique
-                if detail_success(row["sku_id"]) and review_needs_retry(row)
+                if (detail_success(row["sku_id"]) or output_review_needs_retry(row))
+                and review_needs_retry(row)
             ]
         else:
             unique = [
@@ -2392,7 +2393,9 @@ def main():
         else:
             dmeta = read_json(detail_paths(sku)["meta"])
         if STAGE in {"all", "review"}:
-            should_fetch_review = client and dmeta.get("success") and (FORCE_REFRESH or review_needs_retry(target))
+            should_fetch_review = client and (
+                dmeta.get("success") or output_review_needs_retry(target)
+            ) and (FORCE_REFRESH or review_needs_retry(target))
             rmeta = fetch_review20(client, target) if should_fetch_review else read_json(review_paths(sku)["meta"])
             fetched_review = bool(should_fetch_review)
         else:

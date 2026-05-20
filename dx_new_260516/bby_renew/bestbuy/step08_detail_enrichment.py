@@ -1019,6 +1019,23 @@ def review_success(sku):
     return False
 
 
+def expected_review_count(target):
+    value = str(target.get("review_count") or "").replace(",", "").strip()
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def review_needs_retry(target):
+    sku = str(target.get("sku_id") or "").strip()
+    if not review_success(sku):
+        return True
+    if expected_review_count(target) <= 0:
+        return False
+    return not bool(review20_content(sku))
+
+
 def review_result_count(path):
     data = read_json(path)
     return review_result_count_from_json(data)
@@ -1075,13 +1092,13 @@ def target_rows(apply_filters=True):
             unique = [
                 row
                 for row in unique
-                if detail_success(row["sku_id"]) and not review_success(row["sku_id"])
+                if detail_success(row["sku_id"]) and review_needs_retry(row)
             ]
         else:
             unique = [
                 row
                 for row in unique
-                if not detail_success(row["sku_id"]) or not review_success(row["sku_id"])
+                if not detail_success(row["sku_id"]) or review_needs_retry(row)
             ]
     if apply_filters and LIMIT:
         unique = unique[:LIMIT]
@@ -1207,7 +1224,7 @@ def fetch_review20(client, target):
     sku = str(target.get("sku_id") or "").strip()
     pdp_url = target_url(target, sku)
     current_paths = review_paths(sku)
-    if not FORCE_REFRESH and review_success(sku):
+    if not FORCE_REFRESH and not review_needs_retry(target):
         return read_json(current_paths["meta"])
     attempt = next_attempt(current_paths["meta"], pdp_url)
     meta = {"sku_id": sku, "stage": "review20", "url": pdp_url, "attempt": attempt, "started_at": now()}

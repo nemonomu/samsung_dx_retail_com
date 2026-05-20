@@ -29,8 +29,9 @@ This repository is used with an RDP runtime for BestBuy collection. Before chang
 - BestBuy delivery and pickup fields are location sensitive. Current PDP raw samples show `destinationZipCode`/`postalCode` such as `55423`; do not claim ZIP `10010` collection unless the raw request/response proves that ZIP was actually applied.
 - Shipping fields must preserve page-visible payment text. If the page shows `Get it tomorrow • FREE` or `Delivery as soon as ... • FREE`, do not truncate it to only the date phrase.
 - Current production listing flow does not fetch rendered PLP HTML, so listing-only fulfillment text is unavailable during full runs. Use detail-derived fulfillment fallback; when `fastest_delivery` starts with `Get` and does not already contain `FREE`/`•`, append ` • FREE` per the user's BestBuy display rule.
-- External/syndicated-only reviews are not BestBuy-owned reviews. Store `star_rating=Not yet reviewed`, `count_of_reviews=0`, `count_of_star_ratings=0`, and `recommendation_intent=none` only when the page-visible text is like `(11 reviews from Samsung US)`, or when `syndicatedReviewSummary` exists and BestBuy's own `reviewCount` is 0. Do not wipe normal BestBuy ratings just because syndicated summaries also exist.
+- External/syndicated-only reviews are not BestBuy-owned reviews. Store `star_rating=Not yet reviewed`, `count_of_reviews=0`, `count_of_star_ratings=0`, and leave `recommendation_intent` blank/NULL only when the page-visible text is like `(11 reviews from Samsung US)`, or when `syndicatedReviewSummary` exists and BestBuy's own `reviewCount` is 0. Do not write literal `none` to DB for this field, and do not wipe normal BestBuy ratings just because syndicated summaries also exist.
 - Numeric zero is a real value, not blank. Do not normalize with `value or ""` in parsing helpers because it can hide `0` ratings/review counts and skip required review normalization.
+- `retailer_sku_name_similar` must come from page/raw sources such as PDP `Compare similar products` or validated variation payloads. Do not synthesize similar names from brand/series matching across collected rows.
 
 ## Change Workflow
 

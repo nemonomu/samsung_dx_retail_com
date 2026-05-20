@@ -1305,9 +1305,28 @@ def products_from_detail(sku):
         seen_products.add(marker)
         products.append(product)
 
+    def add_variations(value):
+        if not isinstance(value, dict):
+            return
+        variation_display = value.get("productVariationDetailDisplay") or {}
+        items = variation_display.get("productBsinVariations", []) or []
+        if not isinstance(items, list):
+            return
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            name = (
+                (((item.get("bsinProduct") or {}).get("featuredSKU") or {}).get("product") or {})
+                .get("name", {})
+                .get("short")
+            )
+            if name and name not in variations:
+                variations.append(name)
+
     def walk(value):
         if isinstance(value, dict):
             add_product(value)
+            add_variations(value)
             for child in value.values():
                 walk(child)
         elif isinstance(value, list):
@@ -1321,18 +1340,42 @@ def products_from_detail(sku):
             add_product(product)
             walk(data)
             bsin_product = data.get("bsinProduct") if isinstance(data, dict) else None
-            if isinstance(bsin_product, dict):
-                variation_display = bsin_product.get("productVariationDetailDisplay") or {}
-                items = variation_display.get("productBsinVariations", []) or []
-                for item in items:
-                    name = (
-                        (((item.get("bsinProduct") or {}).get("featuredSKU") or {}).get("product") or {})
-                        .get("name", {})
-                        .get("short")
-                    )
-                    if name and name not in variations:
-                        variations.append(name)
+            add_variations(bsin_product)
     return products, variations
+
+
+def similar_products_from_html(html_text):
+    if not html_text or "Compare similar products" not in html_text:
+        return []
+    soup = BeautifulSoup(html_text, "lxml")
+    heading_text = soup.find(string=re.compile(r"Compare\s+similar\s+products", re.I))
+    if not heading_text:
+        return []
+
+    heading = heading_text.parent
+    section = heading
+    for _ in range(8):
+        if not section or not getattr(section, "parent", None):
+            break
+        section = section.parent
+        links = section.find_all("a", href=re.compile(r"/product/", re.I))
+        if len(links) >= 2:
+            break
+    else:
+        section = heading.parent if heading else soup
+
+    names = []
+    for link in section.find_all("a", href=re.compile(r"/product/", re.I)):
+        text = compact_text(link.get_text(" ", strip=True))
+        if not text:
+            continue
+        if len(text) < 20 or re.search(r"(?i)compare similar products|shop now|learn more|add to cart", text):
+            continue
+        if re.search(r"\$\d|^\d+(\.\d+)?$|stars?|reviews?", text, re.I):
+            continue
+        if text not in names:
+            names.append(text)
+    return names
 
 
 def first_value(products, key):
@@ -1639,6 +1682,7 @@ def output_row(target):
     html_text = detail_html_path.read_text(encoding="utf-8", errors="replace") if detail_html_path.exists() else ""
     selector_values = detail_selector_values(html_text)
     products, variations = products_from_detail(sku)
+    similar_names = variations or similar_products_from_html(html_text)
     price = best_price(products)
     policy_price = price_policy_value(price, selector_values, target, html_text)
     selector_final_price = selector_values.get("final_sku_price")
@@ -1762,7 +1806,7 @@ def output_row(target):
         "bsr_rank": target.get("bsr_rank", ""),
         "promotion_position": target.get("promotion_position", ""),
         "trend_rank": target.get("trend_rank", ""),
-        "retailer_sku_name_similar": " ||| ".join(variations[:4]),
+        "retailer_sku_name_similar": " ||| ".join(similar_names[:4]),
         "estimated_annual_electricity_use": clean_energy(energy),
         "promotion_type": target.get("promotion_type", ""),
         "calendar_week": f"w{crawl_dt.isocalendar().week}",
@@ -1778,7 +1822,7 @@ def output_row(target):
         row["star_rating"] = "Not yet reviewed"
         row["count_of_reviews"] = "0"
         row["count_of_star_ratings"] = "0"
-        row["recommendation_intent"] = "none"
+        row["recommendation_intent"] = ""
     for field, value in selector_values.items():
         row.setdefault(field, value)
     return row

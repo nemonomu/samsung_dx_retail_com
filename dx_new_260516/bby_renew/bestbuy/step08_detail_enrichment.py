@@ -1593,9 +1593,34 @@ def offer_value(selector_values, products, html_text):
     return offer_count_from_products(products)
 
 
-def recommendation(products):
-    value = first_path(products, ["reviewInfo", "recommendedPercent"])
-    return f"{value}% would recommend to a friend" if value not in ("", None) else ""
+def recommendation(products, target):
+    target_reviews = review_count_value({"reviewCount": target.get("review_count")})
+    target_rating = usable_rating(target.get("rating"))
+    candidates = []
+    for index, product in enumerate(products):
+        review_info = product.get("reviewInfo") if isinstance(product, dict) else {}
+        if not isinstance(review_info, dict):
+            continue
+        value = review_info.get("recommendedPercent")
+        if value in (None, "", [], {}):
+            continue
+        score = index
+        product_reviews = review_count_value(review_info)
+        product_rating = usable_rating(review_info.get("averageRating"))
+        if target_reviews is not None and product_reviews == target_reviews:
+            score += 1000
+        if target_rating and product_rating == target_rating:
+            score += 500
+        try:
+            if float(str(value).strip()) > 0:
+                score += 100
+        except ValueError:
+            pass
+        candidates.append((score, value))
+    if not candidates:
+        return ""
+    value = sorted(candidates, key=lambda item: item[0], reverse=True)[0][1]
+    return f"{value}% would recommend to a friend"
 
 
 def _has_non_empty_syndicated_summary(value):
@@ -1864,7 +1889,7 @@ def output_row(target):
             recommendation_phrase(selector_values.get("reviewpage_recommendation_intent_fallback3")),
             recommendation_phrase(selector_values.get("reviewpage_recommendation_intent_fallback4")),
             recommendation_from_html(html_text),
-            recommendation(products),
+            recommendation(products, target),
         ),
         "main_rank": target.get("main_rank", ""),
         "bsr_rank": target.get("bsr_rank", ""),

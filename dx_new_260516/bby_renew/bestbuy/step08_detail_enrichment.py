@@ -815,7 +815,7 @@ def request_cost(headers):
 
 def detail_params():
     js_profile = os.getenv("BESTBUY_DETAIL_JS_PROFILE", "").strip().lower()
-    if js_profile == "similar":
+    if CATEGORY == "HHP" and js_profile == "similar":
         instructions = [
             {"wait": 3500},
             {"scroll_y": 800},
@@ -1340,6 +1340,8 @@ def output_similar_blank_keys():
 
 
 def output_similar_needs_retry(target):
+    if CATEGORY != "HHP":
+        return False
     keys = [
         str(target.get("sku_id") or "").strip(),
         sku_from_product_url(target.get("product_url") or target_url(target, target.get("sku_id"))),
@@ -1381,6 +1383,8 @@ def existing_similar_values():
 
 
 def existing_similar_value(target, row):
+    if CATEGORY != "HHP":
+        return ""
     for key in target_match_keys(target) | row_match_keys(row):
         if key and key in existing_similar_values():
             return existing_similar_values()[key]
@@ -1412,6 +1416,8 @@ def target_match_keys(target):
 
 
 def similar_diagnostics(sku):
+    if CATEGORY != "HHP":
+        return {}
     paths = detail_paths(sku)
     meta = read_json(paths["meta"])
     html_text = paths["html"].read_text(encoding="utf-8", errors="replace") if paths["html"].exists() else ""
@@ -2568,6 +2574,8 @@ def main():
         raise RuntimeError("BESTBUY_DETAIL_STAGE must be one of: all, detail, review")
 
     if RETRY_MISSING_SIMILAR and STAGE in {"all", "detail"}:
+        if CATEGORY != "HHP":
+            raise RuntimeError("BESTBUY_DETAIL_RETRY_MISSING_SIMILAR=1 is only supported for HHP")
         if SAVE_HTML_MODE != "full":
             raise RuntimeError("BESTBUY_DETAIL_RETRY_MISSING_SIMILAR=1 requires BESTBUY_SAVE_HTML_MODE=full")
         if output_similar_blank_row_count() and not targets:

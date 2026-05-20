@@ -32,6 +32,7 @@ This repository is used with an RDP runtime for BestBuy collection. Before chang
 - External/syndicated-only reviews are not BestBuy-owned reviews. Store `star_rating=Not yet reviewed`, `count_of_reviews=0`, `count_of_star_ratings=0`, and leave `recommendation_intent` blank/NULL only when the page-visible text is like `(11 reviews from Samsung US)`, or when `syndicatedReviewSummary` exists and BestBuy's own `reviewCount` is 0. Do not write literal `none` to DB for this field, and do not wipe normal BestBuy ratings just because syndicated summaries also exist.
 - Numeric zero is a real value, not blank. Do not normalize with `value or ""` in parsing helpers because it can hide `0` ratings/review counts and skip required review normalization.
 - `retailer_sku_name_similar` must come from page/raw sources such as PDP `Compare similar products` or validated variation payloads. Do not synthesize similar names from brand/series matching across collected rows.
+- For BestBuy TV, removing the final target size cap does not mean `main_rank` can exceed 300. Keep listing main ranks capped at 300, and include BSR/promotion/trending extras as backfill rows with blank `main_rank`.
 
 ## Change Workflow
 

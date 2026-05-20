@@ -48,6 +48,7 @@ PRODUCT_LIST_CSV = Path(
 )
 TARGET_SIZE_RAW = os.getenv("BESTBUY_FINAL_TARGET_SIZE", "").strip()
 TARGET_SIZE = int(TARGET_SIZE_RAW) if TARGET_SIZE_RAW else 0
+MAIN_RANK_LIMIT = int(os.getenv("BESTBUY_MAIN_RANK_LIMIT", "300") or "300")
 CATEGORY = bestbuy_category()
 BATCH_ID = bestbuy_batch_id(CATEGORY)
 EXCLUDED_PROMOTION_TYPES = {
@@ -215,14 +216,43 @@ def trending_map(rows):
     return result
 
 
-def choose_final_rows(main_rows, bsr_rows, target_size):
+def source_only_row(row, source):
+    sku = str(row.get("sku_id") or "").strip()
+    output = {
+        "sku_id": sku,
+        "bsin": row.get("bsin", ""),
+        "product_name": row.get("product_name") or row.get("retailer_sku_name", ""),
+        "product_url": row.get("product_url", ""),
+        "main_rank": "",
+        "target_source": source,
+    }
+    for key, value in row.items():
+        if key not in output:
+            output[key] = value
+    output["main_rank"] = ""
+    return output
+
+
+def append_missing_source_rows(final_rows, source_rows, source):
+    seen = {str(row.get("sku_id") or "").strip() for row in final_rows if row.get("sku_id")}
+    for row in source_rows:
+        sku = str(row.get("sku_id") or "").strip()
+        if not sku or sku in seen:
+            continue
+        final_rows.append(source_only_row(row, source))
+        seen.add(sku)
+
+
+def choose_final_rows(main_rows, bsr_rows, target_size, promotion_rows=None, trending_rows=None):
     bsr = build_bsr_map(bsr_rows)
     main_by_sku = {str(row.get("sku_id")): row for row in main_rows if row.get("sku_id")}
     bsr_only = [row for sku, row in bsr.items() if sku not in main_by_sku]
 
     if not target_size:
-        final_rows = list(main_rows)
+        final_rows = list(main_rows[:MAIN_RANK_LIMIT])
         final_rows.extend(row_from_bsr_only(row) for row in bsr_only)
+        append_missing_source_rows(final_rows, promotion_rows or [], "promotion_backfill")
+        append_missing_source_rows(final_rows, trending_rows or [], "trending_backfill")
         return final_rows, bsr
 
     if len(main_rows) >= target_size:
@@ -466,7 +496,13 @@ def main():
     trending_rows = load_rows(trending_input)
 
     main_rows = unique_main_rows(main_input_rows)
-    selected_rows, bsr = choose_final_rows(main_rows, bsr_rows, TARGET_SIZE)
+    selected_rows, bsr = choose_final_rows(
+        main_rows,
+        bsr_rows,
+        TARGET_SIZE,
+        included_promotion_rows,
+        trending_rows,
+    )
     final_rows = enrich_rows(
         selected_rows,
         bsr,
@@ -483,6 +519,7 @@ def main():
         "started_at": started_at,
         "finished_at": now(),
         "target_size": TARGET_SIZE,
+        "main_rank_limit": MAIN_RANK_LIMIT,
         "main_input": rel_path(MAIN_INPUT),
         "bsr_input": rel_path(BSR_INPUT),
         "promotion_input": rel_path(promotion_input),

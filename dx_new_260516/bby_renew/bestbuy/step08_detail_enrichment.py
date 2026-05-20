@@ -1208,6 +1208,15 @@ def sku_from_product_url(url):
     return match.group(1) if match else ""
 
 
+def canonical_pdp_url(url):
+    text = compact_text(url)
+    if not text:
+        return ""
+    if "/sku/" in text:
+        text = text.split("/sku/", 1)[0]
+    return text.rstrip("/")
+
+
 @lru_cache(maxsize=1)
 def review_counts_from_existing_outputs():
     counts = {}
@@ -1216,6 +1225,7 @@ def review_counts_from_existing_outputs():
             keys = [
                 str(row.get("sku_id") or "").strip(),
                 sku_from_product_url(row.get("product_url")),
+                canonical_pdp_url(row.get("product_url")),
                 str(row.get("item") or row.get("bsin") or "").strip(),
             ]
             count = review_count_value({"reviewCount": row.get("count_of_reviews")})
@@ -1234,6 +1244,7 @@ def expected_review_count_from_outputs(target):
     keys = [
         str(target.get("sku_id") or "").strip(),
         sku_from_product_url(target.get("product_url") or target_url(target, target.get("sku_id"))),
+        canonical_pdp_url(target.get("product_url") or target.get("detail_url") or target_url(target, target.get("sku_id"))),
         str(target.get("item") or target.get("bsin") or "").strip(),
     ]
     counts = review_counts_from_existing_outputs()
@@ -1262,6 +1273,7 @@ def output_review_blank_keys():
             for key in (
                 str(row.get("sku_id") or "").strip(),
                 sku_from_product_url(row.get("product_url")),
+                canonical_pdp_url(row.get("product_url")),
                 str(row.get("item") or row.get("bsin") or "").strip(),
             ):
                 if key:
@@ -1275,6 +1287,7 @@ def output_review_needs_retry(target):
     keys = [
         str(target.get("sku_id") or "").strip(),
         sku_from_product_url(target.get("product_url") or target_url(target, target.get("sku_id"))),
+        canonical_pdp_url(target.get("product_url") or target.get("detail_url") or target_url(target, target.get("sku_id"))),
         str(target.get("item") or target.get("bsin") or "").strip(),
     ]
     blank_keys = output_review_blank_keys()

@@ -20,6 +20,7 @@ This repository is used with an RDP runtime for BestBuy collection. Before chang
 - When creating a shortcut runner such as `tvsku`, test the runner's actual control flow against the target code, not just its command syntax. The runner must set all environment variables needed to satisfy the user's intent.
 - If a targeted refresh rewrites DB output, confirm both dimensions separately: which SKUs were freshly fetched, and whether the full batch was reloaded into DB.
 - Treat the RDP command shell environment as persistent and potentially dirty. Before explaining or changing behavior, check whether old `set` values can override code defaults.
+- Treat `.env` as another persistent environment source. Clearing a cmd variable with `set NAME=` can allow `.env` defaults to be loaded again via `load_env()`. Use explicit override values such as `0` when a blank value has semantic meaning.
 - For batch files and one-line rerun commands, explicitly set or clear every environment variable that controls scope, target size, output table, batch id, run date, retry/rebuild/force behavior, and workers. Do not rely on a variable being unset.
 - When a code change changes the meaning of an env var, update the runners too. A correct Python default is not enough if `.bat` or the user's current cmd session still exports the old value.
 - For every rerun diagnosis, inspect the manifest/log values actually used at runtime, especially `target_size`, `batch_id`, `run_root`, `table`, `force_refresh`, `retry_only`, and row counts. Do not infer them from code alone.

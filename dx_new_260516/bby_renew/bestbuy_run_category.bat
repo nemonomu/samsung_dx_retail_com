@@ -61,8 +61,8 @@ if /I "%CAT%"=="TV" (
   set LOG=logs\bestbuy_tv_collect_db.log
 ) else if /I "%CAT%"=="HHP" (
   set BESTBUY_SEARCH_TERM=cellphone
-  set BESTBUY_OUTPUT_TABLE_HHP=hhp_retail_com
-  set BESTBUY_PRODUCT_LIST_TABLE_HHP=bby_hhp_product_list
+  set BESTBUY_OUTPUT_TABLE_HHP=hhp_retail_com_bby_v2_test
+  set BESTBUY_PRODUCT_LIST_TABLE_HHP=bby_hhp_product_list_v2_test
   set STEPS=01 02 03 04 06 07 08 09 10 13 14 15
   set LOG=logs\bestbuy_hhp_collect_db.log
 ) else if /I "%CAT%"=="REF" (

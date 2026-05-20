@@ -307,6 +307,7 @@ def clean_hhp_carrier(value):
         ("Straight Talk", ["straight talk"]),
         ("Total Wireless", ["total wireless"]),
         ("Visible", ["visible"]),
+        ("Lively", ["lively sim", "lively mobile"]),
     ]
     found = []
     parts = [part.strip() for part in re.split(r"[,;/|]+", text) if part.strip()]
@@ -329,6 +330,23 @@ def clean_hhp_carrier(value):
         if "Unlocked" in found and len(found) > 1:
             found = [carrier for carrier in found if carrier != "Unlocked"]
         return ", ".join(found)
+    return ""
+
+
+def clean_hhp_color(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    text = re.sub(
+        r"(?i)\s*\((?:unlocked|verizon|at&t|att|t-mobile|tmobile|total wireless|tracfone|lively)\)\s*$",
+        "",
+        text,
+    ).strip(" ,-")
+    text = re.sub(
+        r"(?i)\b(?:carrier\s+)?(?:unlocked|verizon|at&t|att|t-mobile|tmobile)\b\s*$",
+        "",
+        text,
+    ).strip(" ,-")
     return text
 
 
@@ -371,7 +389,7 @@ def hhp_attributes_from_name(name):
     # Best Buy HHP titles usually end with "- Color" after carrier/storage.
     parts = [part.strip() for part in re.split(r"\s+-\s+", text) if part.strip()]
     if len(parts) >= 2:
-        color = parts[-1]
+        color = clean_hhp_color(parts[-1])
         if not re.search(r"(?i)\b(class|series|gb|tb|unlocked|verizon|at&t|t-mobile)\b", color):
             attrs["hhp_color"] = color
         elif color and len(color.split()) <= 4:
@@ -383,7 +401,7 @@ def hhp_attributes_from_product(product, product_name):
     attrs = hhp_attributes_from_name(product_name)
     color = first_path([product], ["color", "displayName"])
     if color:
-        attrs["hhp_color"] = color
+        attrs["hhp_color"] = clean_hhp_color(color)
     spec_candidates = {
         "hhp_storage": ["Internal Storage", "Storage Capacity", "Built-In Storage", "Total Storage Capacity"],
         "hhp_color": ["Color", "Color Category"],
@@ -398,7 +416,7 @@ def hhp_attributes_from_product(product, product_name):
                 elif field == "hhp_storage":
                     attrs[field] = clean_hhp_storage(value)
                 else:
-                    attrs[field] = compact_text(value)
+                    attrs[field] = clean_hhp_color(value)
                 break
     return attrs
 

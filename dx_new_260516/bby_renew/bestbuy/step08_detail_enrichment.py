@@ -270,7 +270,9 @@ def now():
 
 
 def compact_text(value):
-    return re.sub(r"\s+", " ", html.unescape(str(value or ""))).strip()
+    if value is None:
+        value = ""
+    return re.sub(r"\s+", " ", html.unescape(str(value))).strip()
 
 
 def first_non_empty(*values):

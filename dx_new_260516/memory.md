@@ -66,6 +66,7 @@ This repository is used with an RDP runtime for BestBuy collection. Before chang
 - For RDP validation loops, print a final `COPY_PASTE_SUMMARY` in the log so the user can paste one block instead of uploading multiple files. Include paid-call cost, processed counts, DB/CSV nonblank counts, and targeted SKU field values.
 - For small paid SKU tests, avoid step14 DB load until parsing is proven. Step08 must print enough `COPY_PASTE_SUMMARY` detail to validate targeted SKU values and paid-call cost without reloading the full batch into DB.
 - For `retailer_sku_name_similar` diagnosis, include raw diagnostics in `COPY_PASTE_SUMMARY`: detail html mode/bytes, Apollo payload count, whether the stored HTML contains `Compare similar products`, `product-title` count, HTML parser count, and variation fallback count. This prevents asking the user for raw folders just to distinguish source absence from parser failure.
+- TV reference code collected `retailer_sku_name_similar` from rendered browser DOM via XPath after scrolling, while the current step08 pipeline reads ZenRows HTML/Apollo snapshots. Do not assume TV's high fill rate proves the same raw source is present in HHP ZenRows snapshots. If a refresh returns blank similar for a row that already had a nonblank similar value, preserve the existing nonblank value instead of overwriting it with blank.
 
 ## Change Workflow
 

@@ -1351,6 +1351,27 @@ def output_similar_blank_row_count():
     return count
 
 
+@lru_cache(maxsize=1)
+def existing_similar_values():
+    values = {}
+    for path in (DETAIL_ROWS_CSV, FINAL_OUTPUT_CSV):
+        for row in load_csv(path):
+            similar = compact_text(row.get("retailer_sku_name_similar"))
+            if not similar:
+                continue
+            for key in row_match_keys(row):
+                if key:
+                    values.setdefault(key, similar)
+    return values
+
+
+def existing_similar_value(target, row):
+    for key in target_match_keys(target) | row_match_keys(row):
+        if key and key in existing_similar_values():
+            return existing_similar_values()[key]
+    return ""
+
+
 def target_sku_list():
     return [value.strip() for value in re.split(r"[\s,;]+", os.getenv("BESTBUY_DETAIL_SKUS", "")) if value.strip()]
 
@@ -2470,6 +2491,8 @@ def output_row(target):
         "batch_id": BATCH_ID,
         "country": "SEA",
     }
+    if not compact_text(row.get("retailer_sku_name_similar")):
+        row["retailer_sku_name_similar"] = existing_similar_value(target, row)
     row["fastest_delivery"] = normalize_fastest_delivery_output(row["fastest_delivery"])
     external_reviews = has_external_reviews(products, target, html_text, selector_values)
     if should_mark_not_yet_reviewed(row, external_reviews):

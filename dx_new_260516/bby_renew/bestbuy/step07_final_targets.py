@@ -269,11 +269,11 @@ def append_missing_source_rows(final_rows, source_rows, source):
 def choose_final_rows(main_rows, bsr_rows, target_size, promotion_rows=None, trending_rows=None, main_attrs=None):
     main_attrs = main_attrs or {}
     bsr = build_bsr_map(bsr_rows)
-    main_by_sku = {str(row.get("sku_id")): row for row in main_rows if row.get("sku_id")}
-    bsr_only = [row for sku, row in bsr.items() if sku not in main_by_sku]
 
     if not target_size:
         final_rows = list(main_rows[:MAIN_RANK_LIMIT])
+        final_main_skus = {str(row.get("sku_id") or "").strip() for row in final_rows if row.get("sku_id")}
+        bsr_only = [row for sku, row in bsr.items() if sku not in final_main_skus]
         final_rows.extend(row_from_bsr_only(row) for row in bsr_only)
         append_missing_source_rows(
             final_rows,
@@ -287,6 +287,8 @@ def choose_final_rows(main_rows, bsr_rows, target_size, promotion_rows=None, tre
         )
         return final_rows, bsr
 
+    main_by_sku = {str(row.get("sku_id")): row for row in main_rows if row.get("sku_id")}
+    bsr_only = [row for sku, row in bsr.items() if sku not in main_by_sku]
     if len(main_rows) >= target_size:
         keep_main_count = max(0, target_size - len(bsr_only))
         final_rows = main_rows[:keep_main_count]

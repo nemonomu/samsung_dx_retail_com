@@ -7,7 +7,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, bestbuy_dated_run_root, has_target_url
+from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, bestbuy_batch_id, bestbuy_dated_run_root, has_target_url
 
 
 PYTHON = sys.executable
@@ -417,6 +417,7 @@ def main():
     args = parse_args()
     os.environ["BESTBUY_CATEGORY"] = str(args.category).strip().upper()
     os.environ.setdefault("BESTBUY_RUN_ROOT", str(bestbuy_dated_run_root(category=os.environ["BESTBUY_CATEGORY"])))
+    os.environ.setdefault("BESTBUY_BATCH_ID", bestbuy_batch_id(os.environ["BESTBUY_CATEGORY"]))
     steps = selected_steps(args)
     if not steps:
         print_steps()

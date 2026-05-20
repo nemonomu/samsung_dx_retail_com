@@ -18,6 +18,7 @@ from zenrows import ZenRowsClient
 from .step00_config import (
     DEFAULT_BESTBUY_RUN_ROOT,
     KRW_PER_USD,
+    bestbuy_batch_id,
     bestbuy_category,
     bestbuy_output_table,
     db_config,
@@ -29,6 +30,7 @@ from .step00_parse_pdp import event_data, extract_apollo_payloads
 
 RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
 CATEGORY = bestbuy_category()
+BATCH_ID = bestbuy_batch_id(CATEGORY)
 DETAIL_ROOT = Path(os.getenv("BESTBUY_DETAIL_RUN_ROOT", DEFAULT_BESTBUY_RUN_ROOT / "detail"))
 OUTPUT_ROOT = Path(os.getenv("BESTBUY_OUTPUT_ROOT", DEFAULT_BESTBUY_RUN_ROOT / "output"))
 TARGET_CSV = Path(os.getenv("BESTBUY_DETAIL_TARGET_CSV", OUTPUT_ROOT / "bestbuy_final_targets.csv"))
@@ -698,6 +700,10 @@ def sync_product_list(final_rows):
         "main_rank",
         "bsr_rank",
         "promotion_position",
+        "calendar_week",
+        "crawl_datetime",
+        "crawl_strdatetime",
+        "batch_id",
     ]
     changed = 0
     for row in rows:
@@ -1644,10 +1650,10 @@ def output_row(target):
         "estimated_annual_electricity_use": clean_energy(energy),
         "promotion_type": target.get("promotion_type", ""),
         "calendar_week": f"w{crawl_dt.isocalendar().week}",
-        "crawl_datetime": crawl_dt.strftime("%Y-%m-%d %H:%M"),
-        "crawl_strdatetime": crawl_dt.strftime("%Y-%m-%d %H:%M"),
+        "crawl_datetime": crawl_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        "crawl_strdatetime": crawl_dt.strftime("%Y-%m-%d %H:%M:%S"),
         "model_year": model_year,
-        "batch_id": f"bestbuy_{RUN_DATE}",
+        "batch_id": BATCH_ID,
         "country": "SEA",
     }
     for field, value in selector_values.items():

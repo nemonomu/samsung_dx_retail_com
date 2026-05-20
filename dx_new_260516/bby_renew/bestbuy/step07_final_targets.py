@@ -5,7 +5,14 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, KRW_PER_USD, bestbuy_category, old_pdp_url, rel_path
+from .step00_config import (
+    DEFAULT_BESTBUY_RUN_ROOT,
+    KRW_PER_USD,
+    bestbuy_batch_id,
+    bestbuy_category,
+    old_pdp_url,
+    rel_path,
+)
 
 RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
 MAIN_RUN_ID = os.getenv("BESTBUY_FINAL_MAIN_RUN_ID", "main")
@@ -39,6 +46,7 @@ PRODUCT_LIST_CSV = Path(
 )
 TARGET_SIZE = int(os.getenv("BESTBUY_FINAL_TARGET_SIZE", "300"))
 CATEGORY = bestbuy_category()
+BATCH_ID = bestbuy_batch_id(CATEGORY)
 
 PROMOTION_FALLBACK_INPUT = (
     RUN_ROOT / "promotion" / "parsed" / "all_promotion_products.csv"
@@ -336,7 +344,7 @@ def page_type(row):
 
 
 def product_list_rows(rows, bsr_pages):
-    crawl_dt = datetime.now().strftime("%Y-%m-%d %H:%M")
+    crawl_dt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     output = []
     for row in rows:
         sku = str(row.get("sku_id") or "").strip()
@@ -355,7 +363,7 @@ def product_list_rows(rows, bsr_pages):
             "bsr_rank": row.get("bsr_rank", ""),
             "product_url": row.get("product_url", ""),
             "calendar_week": calendar_week(),
-            "batch_id": f"bestbuy_{RUN_DATE}",
+            "batch_id": BATCH_ID,
             "main_page_number": row.get("page", "") if row.get("main_rank") else "",
             "bsr_page_number": bsr_pages.get(sku, ""),
             "sku_id": sku,

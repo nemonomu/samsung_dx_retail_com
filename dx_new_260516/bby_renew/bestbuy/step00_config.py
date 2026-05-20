@@ -126,6 +126,16 @@ def bestbuy_run_date():
     return os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
 
 
+def bestbuy_batch_id(category=None):
+    override = os.getenv("BESTBUY_BATCH_ID")
+    if override:
+        return override.strip()
+    category_key = (category or bestbuy_category()).strip().upper()
+    prefix = {"TV": "b"}.get(category_key, category_key.lower()[:1] or "b")
+    batch_time = os.getenv("BESTBUY_BATCH_TIME") or datetime.now().strftime("%H%M%S")
+    return f"{prefix}_{bestbuy_run_date()}_{batch_time}"
+
+
 def bestbuy_dated_run_root(run_date=None, category=None):
     return DEFAULT_BESTBUY_RUNS_BASE / (category or bestbuy_category()).lower() / (run_date or bestbuy_run_date())
 

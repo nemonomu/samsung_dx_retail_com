@@ -42,6 +42,12 @@ MAX_ATTEMPTS = int(os.getenv("BESTBUY_DETAIL_MAX_ATTEMPTS", "3"))
 RETRY_ONLY = os.getenv("BESTBUY_DETAIL_RETRY_ONLY", "0").lower() in {"1", "true", "yes", "y"}
 REBUILD_ONLY = os.getenv("BESTBUY_DETAIL_REBUILD_ONLY", "0").lower() in {"1", "true", "yes", "y"}
 FORCE_REFRESH = os.getenv("BESTBUY_DETAIL_FORCE_REFRESH", "0").lower() in {"1", "true", "yes", "y"}
+RETRY_MISSING_SIMILAR = os.getenv("BESTBUY_DETAIL_RETRY_MISSING_SIMILAR", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
 TARGET_SKUS = {
     value.strip().lower()
     for value in re.split(r"[\s,;]+", os.getenv("BESTBUY_DETAIL_SKUS", ""))
@@ -1294,6 +1300,35 @@ def output_review_needs_retry(target):
     return any(key in blank_keys for key in keys if key)
 
 
+@lru_cache(maxsize=1)
+def output_similar_blank_keys():
+    keys = set()
+    for path in (DETAIL_ROWS_CSV, FINAL_OUTPUT_CSV):
+        for row in load_csv(path):
+            if compact_text(row.get("retailer_sku_name_similar")):
+                continue
+            for key in (
+                str(row.get("sku_id") or "").strip(),
+                sku_from_product_url(row.get("product_url")),
+                canonical_pdp_url(row.get("product_url")),
+                str(row.get("item") or row.get("bsin") or "").strip(),
+            ):
+                if key:
+                    keys.add(key)
+    return keys
+
+
+def output_similar_needs_retry(target):
+    keys = [
+        str(target.get("sku_id") or "").strip(),
+        sku_from_product_url(target.get("product_url") or target_url(target, target.get("sku_id"))),
+        canonical_pdp_url(target.get("product_url") or target.get("detail_url") or target_url(target, target.get("sku_id"))),
+        str(target.get("item") or target.get("bsin") or "").strip(),
+    ]
+    blank_keys = output_similar_blank_keys()
+    return any(key in blank_keys for key in keys if key)
+
+
 def review_needs_retry(target):
     sku = str(target.get("sku_id") or "").strip()
     if not review_success(sku):
@@ -1360,6 +1395,8 @@ def target_rows(apply_filters=True):
             or str(row.get("bsin") or "").strip().lower() in TARGET_SKUS
             or str(row.get("item") or "").strip().lower() in TARGET_SKUS
         ]
+    if apply_filters and RETRY_MISSING_SIMILAR:
+        unique = [row for row in unique if output_similar_needs_retry(row)]
     if apply_filters and RETRY_ONLY:
         if STAGE == "detail":
             unique = [row for row in unique if not detail_success(row["sku_id"])]
@@ -2400,7 +2437,9 @@ def main():
         fetched_detail = False
         fetched_review = False
         if STAGE in {"all", "detail"}:
-            should_fetch_detail = client and (FORCE_REFRESH or not detail_success(sku))
+            should_fetch_detail = client and (
+                FORCE_REFRESH or (RETRY_MISSING_SIMILAR and output_similar_needs_retry(target)) or not detail_success(sku)
+            )
             dmeta = fetch_detail(client, target) if should_fetch_detail else read_json(detail_paths(sku)["meta"])
             fetched_detail = bool(should_fetch_detail)
         else:
@@ -2467,6 +2506,7 @@ def main():
         "target_csv": rel_path(TARGET_CSV),
         "limit": LIMIT,
         "retry_only": RETRY_ONLY,
+        "retry_missing_similar": RETRY_MISSING_SIMILAR,
         "rebuild_only": REBUILD_ONLY,
         "force_refresh": FORCE_REFRESH,
         "stage": STAGE,

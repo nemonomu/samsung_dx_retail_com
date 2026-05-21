@@ -16,8 +16,7 @@ set "BESTBUY_BATCH_ID=b_%RUN_TS%"
 set "BESTBUY_FETCH_MODE=zenrows"
 set "BESTBUY_GRAPHQL_FETCH_MODE=zenrows"
 set "BESTBUY_DETAIL_FETCH_MODE=zenrows"
-set "BESTBUY_DETAIL_FETCH_COMPARE=1"
-if /I "%CATEGORY%"=="TV" set "BESTBUY_OUTPUT_TABLE_TV=tv_retail_com"
+set "BESTBUY_DETAIL_FETCH_COMPARE=0"
 set "PYTHONUNBUFFERED=1"
 
 set "LOG_DIR=%~dp0bestbuy\data\%CATEGORY%\%RUN_DATE%\logs"
@@ -27,12 +26,10 @@ set "LOG_FILE=%LOG_DIR%\fullrun_%RUN_TS%.log"
 echo ==================================================
 echo BestBuy %CATEGORY% full run started
 echo batch_id=%BESTBUY_BATCH_ID%
-echo output_table=%BESTBUY_OUTPUT_TABLE_TV%
 echo log=%LOG_FILE%
 echo ==================================================
 echo BestBuy %CATEGORY% full run started > "%LOG_FILE%"
 echo batch_id=%BESTBUY_BATCH_ID% >> "%LOG_FILE%"
-echo output_table=%BESTBUY_OUTPUT_TABLE_TV% >> "%LOG_FILE%"
 
 call :run_step 01 12 "main_list" 01
 if errorlevel 1 goto :fail
@@ -48,7 +45,7 @@ call :run_step 06 12 "trending_deals" 06
 if errorlevel 1 goto :fail
 call :run_step 07 12 "final_targets" 07
 if errorlevel 1 goto :fail
-call :run_step 08 12 "detail_graphql" 08
+call :run_step 08 12 "detail_html" 08
 if errorlevel 1 goto :fail
 call :run_step 09 12 "review20" 09
 if errorlevel 1 goto :fail

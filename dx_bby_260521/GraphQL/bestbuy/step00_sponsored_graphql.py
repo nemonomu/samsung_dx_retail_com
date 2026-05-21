@@ -20,13 +20,13 @@ def build_search_url(page=1):
 
 def zenrows_params():
     params = {"custom_headers": "true"}
-    if os.getenv("BESTBUY_GRAPHQL_PREMIUM_PROXY", "0").lower() in {"1", "true", "yes"}:
+    if os.getenv("BESTBUY_GRAPHQL_PREMIUM_PROXY", "1").lower() in {"1", "true", "yes"}:
         params["premium_proxy"] = "true"
         params["proxy_country"] = "us"
     if os.getenv("BESTBUY_GRAPHQL_MODE_AUTO", "0").lower() in {"1", "true", "yes"}:
         params["mode"] = "auto"
         params["proxy_country"] = "us"
-    if os.getenv("BESTBUY_GRAPHQL_JS_RENDER", "0").lower() in {"1", "true", "yes"}:
+    if os.getenv("BESTBUY_GRAPHQL_JS_RENDER", "1").lower() in {"1", "true", "yes"}:
         params["js_render"] = "true"
     return params
 

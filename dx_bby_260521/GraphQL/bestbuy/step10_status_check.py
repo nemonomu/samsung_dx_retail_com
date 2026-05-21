@@ -52,7 +52,7 @@ def csv_unique_count(path, key):
 
 def detail_meta_counts():
     raw_dir = DETAIL_ROOT / "raw"
-    detail_dir = raw_dir / "detail_graphql"
+    detail_dir = raw_dir / "detail_html"
     review_dir = raw_dir / "review20"
     detail_success = 0
     detail_failed = 0

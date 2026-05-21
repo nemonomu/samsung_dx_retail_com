@@ -22,11 +22,12 @@ DETAIL_BENCHMARK_FIELDS = [
     "detail_transport",
     "detail_bytes",
     "detail_stored_bytes",
-    "detail_source_mode",
+    "detail_html_mode",
     "detail_apollo_payload_count",
     "detail_started_at",
     "detail_finished_at",
     "detail_error",
+    "detail_html_path",
     "detail_apollo_path",
     "review_success",
     "review_status_code",
@@ -118,10 +119,11 @@ def find_review_file(review_dir, sku, suffix):
 
 def benchmark_row(target, detail_root):
     sku = str(target.get("sku_id") or "").strip()
-    detail_dir = Path(detail_root) / "raw" / "detail_graphql"
+    detail_dir = Path(detail_root) / "raw" / "detail_html"
     review_dir = Path(detail_root) / "raw" / "review20"
     detail_meta_path = find_detail_file(detail_dir, sku, "_meta.json")
     review_meta_path = find_review_file(review_dir, sku, "_meta.json")
+    detail_html_path = find_detail_file(detail_dir, sku, ".html")
     detail_apollo_path = find_detail_file(detail_dir, sku, "_apollo.json")
     review_response_path = find_review_file(review_dir, sku, "_response.json")
 
@@ -149,11 +151,12 @@ def benchmark_row(target, detail_root):
         "detail_transport": dmeta.get("transport", ""),
         "detail_bytes": dmeta.get("bytes", ""),
         "detail_stored_bytes": dmeta.get("stored_bytes", ""),
-        "detail_source_mode": dmeta.get("html_mode", ""),
+        "detail_html_mode": dmeta.get("html_mode", ""),
         "detail_apollo_payload_count": dmeta.get("apollo_payload_count", ""),
         "detail_started_at": dmeta.get("started_at", ""),
         "detail_finished_at": dmeta.get("finished_at", ""),
         "detail_error": dmeta.get("error", ""),
+        "detail_html_path": rel_path(detail_html_path) if detail_html_path.exists() else "",
         "detail_apollo_path": rel_path(detail_apollo_path) if detail_apollo_path.exists() else "",
         "review_success": rmeta.get("success", ""),
         "review_status_code": rmeta.get("status_code", ""),

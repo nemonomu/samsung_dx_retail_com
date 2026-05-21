@@ -44,9 +44,11 @@ REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "240"))
 FETCH_MODE = os.getenv("BESTBUY_FETCH_MODE", os.getenv("BESTBUY_DETAIL_FETCH_MODE", "zenrows")).strip().lower()
 WORKERS = int(os.getenv("BESTBUY_DETAIL_WORKERS", "1"))
 STAGE = os.getenv("BESTBUY_DETAIL_STAGE", "detail").lower()
-SAVE_HTML_MODE = os.getenv("BESTBUY_SAVE_HTML_MODE", "slim").lower()
+# Production detail fetch is GraphQL-only. Keep the old HTML artifact switch disabled
+# unless an explicit local investigation sets BESTBUY_SAVE_HTML_MODE.
+SAVE_HTML_MODE = os.getenv("BESTBUY_SAVE_HTML_MODE", "none").lower()
 
-RAW_DETAIL_DIR = DETAIL_ROOT / "raw" / "detail_html"
+RAW_DETAIL_DIR = DETAIL_ROOT / "raw" / "detail_graphql"
 RAW_REVIEW_DIR = DETAIL_ROOT / "raw" / "review20"
 RAW_COMPARE_DIR = DETAIL_ROOT / "raw" / "compare"
 PARSED_DIR = DETAIL_ROOT / "parsed"
@@ -60,53 +62,37 @@ FETCH_COMPARE = os.getenv("BESTBUY_DETAIL_FETCH_COMPARE", "0").lower() in {"1", 
 RUN_BATCH_ID = os.getenv("BESTBUY_BATCH_ID") or f"b_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
 HHP_FINAL_FIELDS = [
-    "id",
-    "country",
-    "product",
     "item",
     "account_name",
     "page_type",
+    "product",
     "count_of_reviews",
     "retailer_sku_name",
     "product_url",
     "star_rating",
     "count_of_star_ratings",
-    "sku_popularity",
     "final_sku_price",
     "original_sku_price",
     "savings",
-    "discount_type",
     "offer",
-    "bundle",
     "pick_up_availability",
     "fastest_delivery",
-    "delivery_availability",
-    "shipping_info",
-    "available_quantity_for_purchase",
-    "inventory_status",
     "sku_status",
-    "retailer_membership_discounts",
     "trade_in",
     "hhp_storage",
     "hhp_color",
     "hhp_carrier",
-    "detailed_review_content",
-    "summarized_review_content",
-    "top_mentions",
     "recommendation_intent",
     "main_rank",
     "bsr_rank",
-    "rank_1",
-    "rank_2",
     "trend_rank",
-    "number_of_ppl_purchased_yesterday",
-    "number_of_ppl_added_to_carts",
-    "number_of_units_purchased_past_month",
     "retailer_sku_name_similar",
     "promotion_type",
     "calendar_week",
     "crawl_strdatetime",
     "batch_id",
+    "country",
+    "detailed_review_content",
 ]
 
 FALLBACK_FINAL_FIELDS = {
@@ -209,7 +195,27 @@ def hhp_attributes_from_product(product, product_name):
             if value:
                 attrs[field] = clean_hhp_carrier(value) if field == "hhp_carrier" else compact_text(value)
                 break
+    storage = (
+        spec_value([product], "Internal Storage")
+        or spec_value([product], "Storage Capacity")
+        or spec_value([product], "Built-In Storage")
+        or spec_value([product], "Total Storage Capacity")
+    )
+    if storage:
+        attrs["hhp_storage"] = compact_text(storage)
     return attrs
+
+
+def output_product_value(target):
+    category = (target.get("category_key") or CATEGORY).strip().upper()
+    return "HHP" if category == "HHP" else category.lower()
+
+
+def output_page_type(target):
+    value = str(target.get("page_type") or "").strip().lower()
+    if value in {"main", "bsr", "promotion", "trend"}:
+        return value
+    return "bsr" if target.get("target_source") == "bsr_only_backfill" else "main"
 
 
 def money(value):
@@ -801,7 +807,7 @@ def write_detail_artifacts(paths, html_text, headers):
 def detail_success(sku):
     paths = detail_paths(sku)
     meta = read_json(paths["meta"])
-    if meta.get("success") is True and paths["html"].exists():
+    if meta.get("success") is True and (paths["apollo"].exists() or paths["html"].exists()):
         return True
     return False
 
@@ -934,6 +940,127 @@ def review20_payload(html_text):
     return payload
 
 
+DETAIL_PRODUCT_QUERY = """
+query BestBuyDetailGraphqlOnly($skuId: String!) {
+  productBySkuId(skuId: $skuId) {
+    skuId
+    bsin
+    brand
+    name { short }
+    url { pdp relativePdp skuSpecificUrl }
+    color { displayName }
+    reviewInfo {
+      averageRating
+      reviewCount
+      recommendedPercent
+      reviewSummary
+      conFeatures { name }
+      proFeatures { name }
+      syndicatedReviewSummary { clientDisplayName overallRating totalReviewCount }
+    }
+    price(input: {salesChannel: "www", usePriceWithCart: true}) {
+      displayableCustomerPrice
+      displayableRegularPrice
+      customerPrice
+      currentPrice
+      regularPrice
+      totalSavings
+      totalSavingsPercent
+      preferredBadging
+      puckDisplayMessage
+    }
+    specificationGroups { name specifications { definition displayName value } }
+    productVariationDetailDisplay {
+      productVariations {
+        shortName
+        color
+        colorCategory
+        sku
+        variations { rawName value }
+      }
+    }
+    fulfillmentOptions {
+      ispuDetails {
+        ispuAvailability {
+          pickupEligible
+          maxDate
+          fulfillDate
+          promiseByStreetDate
+        }
+      }
+      deliveryDetails {
+        deliveryAvailability {
+          deliveryEligible
+          deliverySlots { date }
+        }
+      }
+      shippingDetails {
+        shippingAvailability {
+          shippingEligible
+          promiseByStreetDate
+          defaultCustomerLosGroupId
+          customerLOSGroup {
+            customerLosGroupId
+            minLineItemMaxDate
+            maxLineItemMaxDate
+            price
+          }
+        }
+      }
+    }
+    operationalAttributes { values }
+    badgesV2 { badgeId label type }
+    badges { displayName typeCode }
+    offers { offers { offerId offerType hotOffer complexMemberOffer } }
+    openBoxCondition
+  }
+}
+""".strip()
+
+
+def detail_product_payload(sku):
+    return {
+        "operationName": "BestBuyDetailGraphqlOnly",
+        "variables": {"skuId": str(sku)},
+        "extensions": {"clientLibrary": {"name": "@apollo/client", "version": "4.1.6"}},
+        "query": DETAIL_PRODUCT_QUERY,
+    }
+
+
+def apollo_events_from_graphql_response(response_json):
+    return [
+        {
+            "events": [
+                {
+                    "type": "next",
+                    "value": {"data": response_json.get("data", {}) if isinstance(response_json, dict) else {}},
+                }
+            ]
+        }
+    ]
+
+
+REVIEW20_QUERY = """
+query BestBuyReview20GraphqlOnly($skuId: String!) {
+  productBySkuId(skuId: $skuId) {
+    skuId
+    reviews(filter: {page: 1, pageSize: 20, sortBy: BEST_MATCH}) {
+      results { rating title text userNickname submissionTime }
+    }
+  }
+}
+""".strip()
+
+
+def review20_direct_payload(sku):
+    return {
+        "operationName": "BestBuyReview20GraphqlOnly",
+        "variables": {"skuId": str(sku)},
+        "extensions": {"clientLibrary": {"name": "@apollo/client", "version": "4.1.6"}},
+        "query": REVIEW20_QUERY,
+    }
+
+
 COMPARE_PRODUCT_QUERY = """
 query GetCompareProduct($placement: String!, $site: String!, $limit: Int!, $skuId: String!) {
   productBySkuId(skuId: $skuId) {
@@ -1002,6 +1129,8 @@ def detail_payloads(sku):
 
 
 def review20_payload_for_sku(sku):
+    if os.getenv("BESTBUY_GRAPHQL_ONLY", "1").lower() in {"1", "true", "yes", "y"}:
+        return review20_direct_payload(sku)
     payload = find_started_operation_from_payloads(detail_payloads(sku), "ProductSchema_init")
     if not payload:
         return None
@@ -1030,12 +1159,38 @@ def fetch_detail(client, target):
             continue
         start = time.perf_counter()
         try:
-            response = client.get(pdp_url, params=detail_params(), timeout=REQUEST_TIMEOUT)
-            html_text = response.text
+            payload = detail_product_payload(sku)
+            response = client.post(
+                "https://www.bestbuy.com/gateway/graphql",
+                params=graphql_params(),
+                headers={
+                    "accept": "application/json, text/plain, */*",
+                    "content-type": "application/json",
+                    "origin": "https://www.bestbuy.com",
+                    "referer": pdp_url,
+                },
+                data=json.dumps(payload),
+                timeout=REQUEST_TIMEOUT,
+            )
             status = response.status_code
-            success = status == 200 and has_product_schema(html_text)
+            response_json = {}
+            error = ""
+            try:
+                response_json = response.json()
+                if response_json.get("errors"):
+                    error = json.dumps(response_json.get("errors"), ensure_ascii=False, separators=(",", ":"))
+            except ValueError as exc:
+                error = str(exc)
+            product = ((response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(response_json, dict) else {}
+            success = status == 200 and isinstance(product, dict) and str(product.get("skuId") or "") == str(sku)
             paths = detail_paths_for_status(sku, target, success)
-            artifact_meta = write_detail_artifacts(paths, html_text, dict(response.headers))
+            paths["apollo"].write_text(
+                json.dumps(apollo_events_from_graphql_response(response_json), ensure_ascii=False, separators=(",", ":")),
+                encoding="utf-8",
+            )
+            paths["headers"].write_text(json.dumps(dict(response.headers), indent=2, ensure_ascii=False), encoding="utf-8")
+            if paths["html"].exists():
+                paths["html"].unlink()
             meta.update(
                 {
                     "success": success,
@@ -1044,12 +1199,12 @@ def fetch_detail(client, target):
                     "fetch_mode": FETCH_MODE,
                     "elapsed_seconds": round(time.perf_counter() - start, 3),
                     "x_request_cost": request_cost(response.headers),
-                    "bytes": artifact_meta["full_bytes"],
-                    "stored_bytes": artifact_meta["stored_bytes"],
-                    "html_mode": artifact_meta["html_mode"],
-                    "apollo_payload_count": artifact_meta["apollo_payload_count"],
+                    "bytes": len(response.text or ""),
+                    "stored_bytes": 0,
+                    "html_mode": "graphql_only",
+                    "apollo_payload_count": 1 if response_json else 0,
                     "finished_at": now(),
-                    "error": "" if success else "detail_html_missing_product_schema",
+                    "error": "" if success else (error or "detail_graphql_missing_product"),
                 }
             )
         except RequestException as exc:
@@ -1610,9 +1765,8 @@ def sample_fields():
 
 def output_row(target):
     sku = str(target.get("sku_id") or "").strip()
-    detail_html_path = detail_paths(sku)["html"]
-    html_text = detail_html_path.read_text(encoding="utf-8", errors="replace") if detail_html_path.exists() else ""
-    selector_values = detail_selector_values(html_text)
+    html_text = ""
+    selector_values = {}
     products = products_from_detail(sku)
     compare_similar_names = compare_similar_names_from_detail(sku)
     price = best_price(products)
@@ -1638,10 +1792,10 @@ def output_row(target):
     crawl_dt = datetime.now()
     row = {
         "id": "",
-        "product": (target.get("category_key") or CATEGORY).lower(),
+        "product": output_product_value(target),
         "item": bsin,
         "account_name": "Bestbuy",
-        "page_type": "bsr" if target.get("target_source") == "bsr_only_backfill" else "main",
+        "page_type": output_page_type(target),
         "count_of_reviews": "0" if external_reviews else int_commas(review_info.get("reviewCount") or target.get("review_count")),
         "retailer_sku_name": first_non_empty(product_name, selector_values.get("retailer_sku_name")),
         "product_url": product_url,
@@ -1675,20 +1829,15 @@ def output_row(target):
         "offer": first_non_empty(target.get("offer"), target.get("offer_count")),
         "pick_up_availability": first_non_empty(
             target.get("pick_up_availability"),
-            selector_values.get("pick_up_availability"),
             pickup_text(pickup),
         ),
         "fastest_delivery": first_non_empty(
             target.get("fastest_delivery"),
-            selector_values.get("fastest_delivery"),
             fastest_delivery_text(best_shipping_availability(products)),
-            fastest_delivery_from_html(html_text),
         ),
         "delivery_availability": first_non_empty(
             target.get("delivery_availability"),
-            selector_values.get("delivery_availability"),
             delivery_text(delivery),
-            delivery_from_html(html_text),
             date_to_relative_or_phrase("Delivery as soon as", delivery_slot),
         ),
         "shipping_info": "",
@@ -1703,12 +1852,6 @@ def output_row(target):
         if external_reviews
         else recommendation_intent_value(
             review_count,
-            selector_values.get("recommendation_intent"),
-            selector_values.get("reviewpage_recommendation_intent_fallback"),
-            selector_values.get("reviewpage_recommendation_intent_fallback2"),
-            selector_values.get("reviewpage_recommendation_intent_fallback3"),
-            selector_values.get("reviewpage_recommendation_intent_fallback4"),
-            recommendation_from_html(html_text),
             recommended_percent_from_detail(sku),
             recommendation(products),
         ),
@@ -1726,8 +1869,6 @@ def output_row(target):
         "batch_id": RUN_BATCH_ID,
         "country": "SEA",
     }
-    for field, value in selector_values.items():
-        row.setdefault(field, value)
     return row
 
 

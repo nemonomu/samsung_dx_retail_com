@@ -10,7 +10,7 @@ from pathlib import Path
 
 from zenrows import ZenRowsClient
 
-from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, has_target_url, load_initial_urls, rel_path
+from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, bestbuy_category, has_target_url, load_initial_urls, rel_path
 
 
 RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
@@ -116,7 +116,62 @@ def extract_structured_product_metadata(text):
     return metadata
 
 
+def clean_graphql_value(value):
+    return clean_text(
+        html.unescape(str(value or "").replace("\\u0026", "&").replace("\\/", "/"))
+    )
+
+
+def extract_spotlight_product_rows(text, limit=10):
+    decoded = decode_capture_text(text)
+    connection_pos = decoded.find('"__typename":"SpotlightProductConnection"')
+    if connection_pos < 0:
+        return []
+
+    block = decoded[connection_pos : connection_pos + 250000]
+    header_match = re.search(r'"storyHeader":"(?P<header>(?:\\.|[^"])*)"', block)
+    trend_section = clean_graphql_value(header_match.group("header")) if header_match else TREND_SECTION
+    pattern = re.compile(
+        r'"__typename":"SpotlightProduct","sku":"(?P<sku>\d{7})"'
+        r'(?P<body>.*?)'
+        r'"bsin":"(?P<bsin>[A-Z0-9]+)","originalSkuId":"(?P<original_sku>\d{7})"',
+        re.DOTALL,
+    )
+    rows = []
+    seen = set()
+    for match in pattern.finditer(block):
+        sku = match.group("sku")
+        if sku in seen:
+            continue
+        seen.add(sku)
+        body = match.group("body")
+        name_match = re.search(r'"short":"(?P<name>(?:\\.|[^"])*)"', body)
+        url_match = re.search(r'"pdp":"(?P<url>(?:\\.|[^"])*)"', body)
+        if not url_match:
+            url_match = re.search(r'"relativePdp":"(?P<url>(?:\\.|[^"])*)"', body)
+        rows.append(
+            {
+                "trend_section": trend_section,
+                "trend_rank": len(rows) + 1,
+                "sku_id": sku,
+                "bsin": match.group("bsin"),
+                "retailer_sku_name": clean_graphql_value(name_match.group("name")) if name_match else "",
+                "product_url": absolute_url(clean_graphql_value(url_match.group("url"))) if url_match else "",
+                "source_card_id": "",
+                "source": "spotlight_product_connection",
+            }
+        )
+        if limit and len(rows) >= limit:
+            break
+    return rows
+
+
 def parse_trending_products(html_text, limit=10):
+    if bestbuy_category() == "HHP":
+        spotlight_rows = extract_spotlight_product_rows(html_text, limit=limit)
+        if spotlight_rows:
+            return spotlight_rows
+
     trend_skus = choose_trending_skus(html_text, limit=limit)
     metadata = extract_structured_product_metadata(html_text)
     rows = []
@@ -145,6 +200,7 @@ def write_rows(path, rows):
                 "trend_section",
                 "trend_rank",
                 "sku_id",
+                "bsin",
                 "retailer_sku_name",
                 "product_url",
                 "source_card_id",
@@ -172,6 +228,7 @@ def live_html():
             "js_render": "true",
             "premium_proxy": "true",
             "proxy_country": "us",
+            **({"wait": os.getenv("ZENROWS_WAIT_MS")} if os.getenv("ZENROWS_WAIT_MS") else {}),
         },
         timeout=REQUEST_TIMEOUT,
     )

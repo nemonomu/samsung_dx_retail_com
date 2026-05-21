@@ -87,12 +87,12 @@ STEPS = [
     ),
     Step(
         8,
-        "detail_html",
+        "detail_graphql",
         "bestbuy.step08_detail_enrichment",
-        {"BESTBUY_DETAIL_STAGE": "detail", "BESTBUY_DETAIL_FETCH_COMPARE": "0", "ZENROWS_TIMEOUT": "240"},
+        {"BESTBUY_DETAIL_STAGE": "detail", "BESTBUY_DETAIL_FETCH_COMPARE": "1", "ZENROWS_TIMEOUT": "240"},
         {
             "BESTBUY_DETAIL_STAGE": "detail",
-            "BESTBUY_DETAIL_FETCH_COMPARE": "0",
+            "BESTBUY_DETAIL_FETCH_COMPARE": "1",
             "BESTBUY_DETAIL_RETRY_ONLY": "1",
             "ZENROWS_TIMEOUT": "240",
         },
@@ -237,11 +237,11 @@ def final_targets_complete():
     return True, f"target unique {count}"
 
 
-def detail_html_complete():
+def detail_graphql_complete():
     root = run_root()
     target_csv = root / "output" / "bestbuy_final_targets.csv"
     target_count = csv_unique_count(target_csv, "sku_id")
-    detail_meta = list((root / "detail" / "raw" / "detail_html").rglob("*_meta.json"))
+    detail_meta = list((root / "detail" / "raw" / "detail_graphql").rglob("*_meta.json"))
     detail_success = sum(1 for path in detail_meta if read_json(path).get("success") is True)
     if target_count <= 0:
         return False, "missing final targets"
@@ -276,8 +276,8 @@ def step_complete(step):
         return trending_complete()
     if step.name == "final_targets":
         return final_targets_complete()
-    if step.name == "detail_html":
-        return detail_html_complete()
+    if step.name == "detail_graphql":
+        return detail_graphql_complete()
     if step.name == "review20":
         return review20_complete()
     if step.name == "status_check":
@@ -303,6 +303,9 @@ def step_by_key(value):
 def run_step(step, dry_run=False, resume=False):
     if not step.implemented:
         print(f"[skip] step {step.key} {step.name}: not implemented yet")
+        return
+    if os.environ.get("BESTBUY_CATEGORY", "").strip().upper() == "HHP" and step.name == "promotion_deals":
+        print(f"[skip] step {step.key} {step.name}: HHP does not use promotion page")
         return
     if step.name == "promotion_deals" and not has_target_url("promotion"):
         print(f"[skip] step {step.key} {step.name}: no promotion URL for category")
@@ -389,10 +392,10 @@ def resume_steps():
         elif step.name == "final_targets" and (dirty_main or dirty_bsr or dirty_join_sources):
             force = True
             reason = "upstream source changed"
-        elif step.name == "detail_html" and any(item.name == "final_targets" for item in selected):
+        elif step.name == "detail_graphql" and any(item.name == "final_targets" for item in selected):
             force = True
             reason = "final targets refreshed"
-        elif step.name == "review20" and any(item.name in {"final_targets", "detail_html"} for item in selected):
+        elif step.name == "review20" and any(item.name in {"final_targets", "detail_graphql"} for item in selected):
             force = True
             reason = "detail source refreshed"
 

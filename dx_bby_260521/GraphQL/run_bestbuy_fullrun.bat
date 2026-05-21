@@ -16,7 +16,7 @@ set "BESTBUY_BATCH_ID=b_%RUN_TS%"
 set "BESTBUY_FETCH_MODE=zenrows"
 set "BESTBUY_GRAPHQL_FETCH_MODE=zenrows"
 set "BESTBUY_DETAIL_FETCH_MODE=zenrows"
-set "BESTBUY_DETAIL_FETCH_COMPARE=0"
+set "BESTBUY_DETAIL_FETCH_COMPARE=1"
 if /I "%CATEGORY%"=="TV" set "BESTBUY_OUTPUT_TABLE_TV=tv_retail_com"
 set "PYTHONUNBUFFERED=1"
 
@@ -48,7 +48,7 @@ call :run_step 06 12 "trending_deals" 06
 if errorlevel 1 goto :fail
 call :run_step 07 12 "final_targets" 07
 if errorlevel 1 goto :fail
-call :run_step 08 12 "detail_html" 08
+call :run_step 08 12 "detail_graphql" 08
 if errorlevel 1 goto :fail
 call :run_step 09 12 "review20" 09
 if errorlevel 1 goto :fail

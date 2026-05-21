@@ -11,6 +11,7 @@ from zenrows import ZenRowsClient
 
 from .step00_config import (
     DEFAULT_BESTBUY_RUN_ROOT,
+    apply_bestbuy_postal_code,
     bestbuy_category,
     bestbuy_main_source_html,
     load_initial_urls,
@@ -104,7 +105,7 @@ def prepare_product_list_payload(operation, page):
 
     return {
         "operationName": operation["operationName"],
-        "variables": variables,
+        "variables": apply_bestbuy_postal_code(variables),
         "query": query,
     }
 

@@ -18,6 +18,7 @@ from zenrows import ZenRowsClient
 from .step00_config import (
     DEFAULT_BESTBUY_RUN_ROOT,
     KRW_PER_USD,
+    apply_bestbuy_postal_code,
     bestbuy_batch_id,
     bestbuy_category,
     bestbuy_output_table,
@@ -1641,7 +1642,7 @@ def review20_payload_for_sku(sku):
             "reviewInfo{averageRating reviewCount}",
             "reviewInfo{averageRating reviewCount recommendedPercent}",
         )
-    return payload
+    return apply_bestbuy_postal_code(payload)
 
 
 def fetch_detail(client, target):

@@ -5,6 +5,8 @@ from urllib.parse import urlencode
 
 from zenrows import ZenRowsClient
 
+from .step00_config import apply_bestbuy_postal_code
+
 BESTBUY_BASE_URL = "https://www.bestbuy.com"
 GRAPHQL_ENDPOINT = os.getenv("BESTBUY_GRAPHQL_ENDPOINT", "https://www.bestbuy.com/gateway/graphql")
 SEARCH_TERM = os.getenv("BESTBUY_SEARCH_TERM", "tv")
@@ -73,11 +75,11 @@ def build_sponsored_payload(skus):
         "{...on Product{skuId name{short}primaryImage{href piscesHref altText}"
         "...ReviewStats_Fragment ...SponsoredPrice_Fragment url{skuSpecificUrl relativePdp}}}}"
     )
-    return {
+    return apply_bestbuy_postal_code({
         "operationName": "AdTech_NinjaCarousel_SkuDataQuery",
         "variables": {},
         "query": query,
-    }
+    })
 
 
 def sponsored_product_map(response_json):

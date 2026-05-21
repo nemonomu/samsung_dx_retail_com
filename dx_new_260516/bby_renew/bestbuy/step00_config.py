@@ -128,6 +128,35 @@ def bestbuy_run_date():
     return (os.getenv("BESTBUY_RUN_DATE") or eastern_now().strftime("%Y%m%d")).strip()
 
 
+BESTBUY_POSTAL_KEYS = {
+    "postalCode",
+    "destinationZipCode",
+    "zipCode",
+    "zipcode",
+    "zip",
+}
+
+
+def bestbuy_postal_code():
+    return (os.getenv("BESTBUY_POSTAL_CODE") or os.getenv("BESTBUY_ZIP_CODE") or "").strip()
+
+
+def apply_bestbuy_postal_code(value, postal_code=None):
+    code = str(postal_code if postal_code is not None else bestbuy_postal_code()).strip()
+    if not code:
+        return value
+    if isinstance(value, dict):
+        for key, item in list(value.items()):
+            if key in BESTBUY_POSTAL_KEYS:
+                value[key] = code
+            else:
+                apply_bestbuy_postal_code(item, code)
+    elif isinstance(value, list):
+        for item in value:
+            apply_bestbuy_postal_code(item, code)
+    return value
+
+
 def eastern_now():
     return datetime.now(EASTERN_TZ).replace(tzinfo=None)
 

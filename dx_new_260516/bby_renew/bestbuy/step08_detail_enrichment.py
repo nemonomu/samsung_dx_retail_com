@@ -276,6 +276,17 @@ def now():
     return datetime.now().isoformat(timespec="seconds")
 
 
+def crawl_datetime_value():
+    override = os.getenv("BESTBUY_CRAWL_DATETIME", "").strip()
+    if override:
+        text = override.replace("T", " ")
+        try:
+            return datetime.fromisoformat(text)
+        except ValueError:
+            pass
+    return eastern_now()
+
+
 def compact_text(value):
     if value is None:
         value = ""
@@ -2470,7 +2481,7 @@ def output_row(target):
     bsin = first_value(products, "bsin") or target.get("bsin") or old_pdp_bsin(product_url) or ""
     hhp_attrs = hhp_attributes_from_product(products, product_name) if CATEGORY == "HHP" else {}
 
-    crawl_dt = eastern_now()
+    crawl_dt = crawl_datetime_value()
     category_key = (target.get("category_key") or CATEGORY).upper()
     row = {
         "id": "",

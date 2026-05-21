@@ -418,6 +418,13 @@ def calendar_week():
     return f"w{datetime.now().isocalendar().week}"
 
 
+def crawl_datetime_value():
+    override = os.getenv("BESTBUY_CRAWL_DATETIME", "").strip()
+    if override:
+        return override
+    return eastern_now().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def page_type(row):
     source = row.get("target_source")
     if source == "bsr_only_backfill":
@@ -430,7 +437,7 @@ def page_type(row):
 
 
 def product_list_rows(rows, bsr_pages):
-    crawl_dt = eastern_now().strftime("%Y-%m-%d %H:%M:%S")
+    crawl_dt = crawl_datetime_value()
     output = []
     for row in rows:
         sku = str(row.get("sku_id") or "").strip()

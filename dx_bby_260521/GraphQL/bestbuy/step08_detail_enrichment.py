@@ -678,7 +678,11 @@ def detail_params():
             [
                 {"wait": 2000},
                 {"scroll_y": 1800},
-                {"wait": 800},
+                {"wait": 1500},
+                {"scroll_y": -500},
+                {"wait": 1000},
+                {"scroll_y": 500},
+                {"wait": 2500},
                 {"scroll_y": 1800},
                 {"wait": 800},
                 {"scroll_y": 1800},

@@ -85,11 +85,9 @@ HHP_FINAL_FIELDS = [
     "savings",
     "discount_type",
     "offer",
-    "bundle",
     "pick_up_availability",
     "fastest_delivery",
     "delivery_availability",
-    "shipping_info",
     "available_quantity_for_purchase",
     "inventory_status",
     "sku_status",
@@ -1191,7 +1189,58 @@ def event_variables(event):
 
 
 def product_short_name(product):
-    return ((product or {}).get("name") or {}).get("short") or ""
+    if not isinstance(product, dict):
+        return ""
+    name = product.get("name")
+    if isinstance(name, dict):
+        return first_non_empty(
+            name.get("short"),
+            name.get("title"),
+            name.get("displayName"),
+            name.get("name"),
+        )
+    return first_non_empty(
+        name,
+        product.get("shortName"),
+        product.get("displayName"),
+        product.get("title"),
+        product.get("productName"),
+        product.get("retailer_sku_name"),
+    )
+
+
+def product_names_from_value(value):
+    names = []
+
+    def add(name):
+        name = compact_text(name)
+        if name and name not in names:
+            names.append(name)
+
+    def visit(item):
+        if isinstance(item, dict):
+            add(product_short_name(item))
+            for key in (
+                "item",
+                "product",
+                "recommendedProduct",
+                "catalogProduct",
+                "sku",
+                "node",
+            ):
+                child = item.get(key)
+                if isinstance(child, (dict, list)):
+                    visit(child)
+            for key in ("items", "products", "nodes", "results"):
+                child = item.get(key)
+                if isinstance(child, list):
+                    visit(child)
+        elif isinstance(item, list):
+            for child in item:
+                visit(child)
+
+    visit(value)
+    return names
 
 
 def event_data(event):
@@ -1667,10 +1716,9 @@ def recommendation_names_from_data(data):
                     for recommendation in subplacement.get("recommendations") or []:
                         if not isinstance(recommendation, dict):
                             continue
-                        item = recommendation.get("item") or {}
-                        name = product_short_name(item)
-                        if name and name not in names:
-                            names.append(name)
+                        for name in product_names_from_value(recommendation):
+                            if name and name not in names:
+                                names.append(name)
             for child in value.values():
                 visit(child)
         elif isinstance(value, list):
@@ -2229,7 +2277,6 @@ def output_row(target):
             delivery_from_html(html_text),
             date_to_relative_or_phrase("Delivery as soon as", delivery_slot),
         ),
-        "shipping_info": "",
         "sku_status": "Sponsored" if truthy(target.get("is_sponsored")) or target.get("sku_status") == "Sponsored" else "",
         "trade_in": first_non_empty(
             selector_values.get("trade_in"),
@@ -2269,6 +2316,8 @@ def output_row(target):
         "batch_id": RUN_BATCH_ID,
         "country": "SEA",
     }
+    if CATEGORY != "HHP":
+        row["shipping_info"] = ""
     for field, value in selector_values.items():
         row.setdefault(field, value)
     return row

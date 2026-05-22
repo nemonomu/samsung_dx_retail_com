@@ -1194,6 +1194,12 @@ def product_short_name(product):
     return ((product or {}).get("name") or {}).get("short") or ""
 
 
+def event_data(event):
+    value = event.get("value") if isinstance(event, dict) else {}
+    data = value.get("data") if isinstance(value, dict) else {}
+    return data if isinstance(data, dict) else {}
+
+
 def review20_payload(html_text):
     payload = find_started_operation(html_text, "ProductSchema_init")
     if not payload:
@@ -1636,13 +1642,32 @@ def compare_similar_names_from_detail(sku):
     if current_name:
         names.append(current_name)
 
-    subplacements = first_path([data], ["recommendations", "subPlacements"]) or []
-    for subplacement in subplacements:
-        for recommendation in subplacement.get("recommendations") or []:
-            item = recommendation.get("item") or {}
-            name = product_short_name(item)
-            if name and name not in names:
-                names.append(name)
+    for name in recommendation_names_from_data(data):
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def recommendation_names_from_data(data):
+    names = []
+    if not isinstance(data, dict):
+        return names
+    for value in data.values():
+        if not isinstance(value, dict):
+            continue
+        subplacements = value.get("subPlacements")
+        if not isinstance(subplacements, list):
+            continue
+        for subplacement in subplacements:
+            if not isinstance(subplacement, dict):
+                continue
+            for recommendation in subplacement.get("recommendations") or []:
+                if not isinstance(recommendation, dict):
+                    continue
+                item = recommendation.get("item") or {}
+                name = product_short_name(item)
+                if name and name not in names:
+                    names.append(name)
     return names
 
 
@@ -1653,13 +1678,11 @@ def compare_data_from_detail_payloads(sku):
             if not isinstance(data, dict):
                 continue
             current = data.get("productBySkuId")
-            recommendations = data.get("recommendations")
-            if not isinstance(current, dict) or not isinstance(recommendations, dict):
+            if not isinstance(current, dict):
                 continue
             if str(current.get("skuId") or "") != str(sku):
                 continue
-            subplacements = recommendations.get("subPlacements")
-            if isinstance(subplacements, list):
+            if recommendation_names_from_data(data):
                 return data
     return {}
 

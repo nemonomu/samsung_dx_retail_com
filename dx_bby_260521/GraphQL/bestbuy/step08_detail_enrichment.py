@@ -1681,7 +1681,10 @@ def compare_similar_names_from_detail(sku):
     response_json = read_json(paths["response_json"])
     data = response_json.get("data") if isinstance(response_json, dict) else {}
 
-    source_names = recommendation_names_from_data(data) if isinstance(data, dict) else []
+    if not isinstance(data, dict) or not data:
+        data = compare_data_from_detail_payloads(sku)
+
+    source_names = compare_recommendation_names(data) if isinstance(data, dict) else []
     if not source_names:
         source_names = recommendation_names_from_detail_payloads(sku)
     if not source_names:
@@ -1698,6 +1701,22 @@ def compare_similar_names_from_detail(sku):
     for name in source_names:
         if name and name not in names:
             names.append(name)
+    return names
+
+
+def compare_recommendation_names(data):
+    names = []
+    subplacements = (((data.get("recommendations") or {}).get("subPlacements")) or [])
+    for subplacement in subplacements:
+        if not isinstance(subplacement, dict):
+            continue
+        for recommendation in subplacement.get("recommendations") or []:
+            if not isinstance(recommendation, dict):
+                continue
+            item = recommendation.get("item") or {}
+            name = product_short_name(item)
+            if name and name not in names:
+                names.append(name)
     return names
 
 
@@ -1741,16 +1760,25 @@ def recommendation_names_from_detail_payloads(sku):
 
 def compare_data_from_detail_payloads(sku):
     for payload in detail_payloads(sku):
+        compare_event_ids = set()
         for event in payload.get("events", []):
+            if event.get("type") != "started":
+                continue
+            if operation_name(event) != "GetCompareProduct":
+                continue
+            variables = event_variables(event)
+            if str(variables.get("skuId") or "") == str(sku):
+                compare_event_ids.add(str(event.get("id") or ""))
+        if not compare_event_ids:
+            continue
+        for event in payload.get("events", []):
+            if event.get("type") != "next" or str(event.get("id") or "") not in compare_event_ids:
+                continue
             data = event_data(event)
-            if not isinstance(data, dict):
+            current = data.get("productBySkuId") if isinstance(data, dict) else {}
+            if isinstance(current, dict) and str(current.get("skuId") or "") != str(sku):
                 continue
-            current = data.get("productBySkuId")
-            if not isinstance(current, dict):
-                continue
-            if str(current.get("skuId") or "") != str(sku):
-                continue
-            if recommendation_names_from_data(data):
+            if compare_recommendation_names(data):
                 return data
     return {}
 

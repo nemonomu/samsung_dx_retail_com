@@ -1632,6 +1632,12 @@ def compare_similar_names_from_detail(sku):
     response_json = read_json(paths["response_json"])
     data = response_json.get("data") if isinstance(response_json, dict) else {}
 
+    source_names = recommendation_names_from_data(data) if isinstance(data, dict) else []
+    if not source_names:
+        source_names = recommendation_names_from_detail_payloads(sku)
+    if not source_names:
+        return []
+
     names = []
     current = data.get("productBySkuId") if isinstance(data, dict) else {}
     current_name = product_short_name(current) if isinstance(current, dict) else ""
@@ -1640,9 +1646,6 @@ def compare_similar_names_from_detail(sku):
     if current_name:
         names.append(current_name)
 
-    source_names = recommendation_names_from_data(data) if isinstance(data, dict) else []
-    if not source_names:
-        source_names = recommendation_names_from_detail_payloads(sku)
     for name in source_names:
         if name and name not in names:
             names.append(name)
@@ -1653,22 +1656,28 @@ def recommendation_names_from_data(data):
     names = []
     if not isinstance(data, dict):
         return names
-    for value in data.values():
-        if not isinstance(value, dict):
-            continue
-        subplacements = value.get("subPlacements")
-        if not isinstance(subplacements, list):
-            continue
-        for subplacement in subplacements:
-            if not isinstance(subplacement, dict):
-                continue
-            for recommendation in subplacement.get("recommendations") or []:
-                if not isinstance(recommendation, dict):
-                    continue
-                item = recommendation.get("item") or {}
-                name = product_short_name(item)
-                if name and name not in names:
-                    names.append(name)
+
+    def visit(value):
+        if isinstance(value, dict):
+            subplacements = value.get("subPlacements")
+            if isinstance(subplacements, list):
+                for subplacement in subplacements:
+                    if not isinstance(subplacement, dict):
+                        continue
+                    for recommendation in subplacement.get("recommendations") or []:
+                        if not isinstance(recommendation, dict):
+                            continue
+                        item = recommendation.get("item") or {}
+                        name = product_short_name(item)
+                        if name and name not in names:
+                            names.append(name)
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(data)
     return names
 
 

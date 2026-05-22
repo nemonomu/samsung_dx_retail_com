@@ -1631,18 +1631,19 @@ def compare_similar_names_from_detail(sku):
     paths = compare_paths(sku)
     response_json = read_json(paths["response_json"])
     data = response_json.get("data") if isinstance(response_json, dict) else {}
-    if not isinstance(data, dict) or not data:
-        data = compare_data_from_detail_payloads(sku)
-    if not isinstance(data, dict):
-        return []
 
     names = []
-    current = data.get("productBySkuId")
+    current = data.get("productBySkuId") if isinstance(data, dict) else {}
     current_name = product_short_name(current) if isinstance(current, dict) else ""
+    if not current_name:
+        current_name = product_short_name((products_from_detail(sku) or [{}])[-1])
     if current_name:
         names.append(current_name)
 
-    for name in recommendation_names_from_data(data):
+    source_names = recommendation_names_from_data(data) if isinstance(data, dict) else []
+    if not source_names:
+        source_names = recommendation_names_from_detail_payloads(sku)
+    for name in source_names:
         if name and name not in names:
             names.append(name)
     return names
@@ -1666,6 +1667,16 @@ def recommendation_names_from_data(data):
                     continue
                 item = recommendation.get("item") or {}
                 name = product_short_name(item)
+                if name and name not in names:
+                    names.append(name)
+    return names
+
+
+def recommendation_names_from_detail_payloads(sku):
+    names = []
+    for payload in detail_payloads(sku):
+        for event in payload.get("events", []):
+            for name in recommendation_names_from_data(event_data(event)):
                 if name and name not in names:
                     names.append(name)
     return names

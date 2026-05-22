@@ -26,7 +26,20 @@ LIVE_FETCH = os.getenv("BESTBUY_TRENDING_LIVE", "1").lower() in {"1", "true", "y
 REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "180"))
 TRENDING_URL = os.getenv("BESTBUY_TRENDING_URL", load_initial_urls().get("trending_tvs_projectors", ""))
 LIMIT = int(os.getenv("BESTBUY_TRENDING_LIMIT", "10"))
-TREND_SECTION = os.getenv("BESTBUY_TRENDING_SECTION", "Trending Deals in TVs & Projectors")
+REQUIRE_ROWS = os.getenv(
+    "BESTBUY_TRENDING_REQUIRE_ROWS",
+    "1",
+).lower() in {"1", "true", "yes", "y"}
+ALLOW_NETWORK_SKU_FALLBACK = os.getenv(
+    "BESTBUY_TRENDING_ALLOW_NETWORK_SKUS",
+    "0",
+).lower() in {"1", "true", "yes", "y"}
+DEFAULT_TREND_SECTION = (
+    "Trending Deals in Cell Phones & Accessories"
+    if bestbuy_category() == "HHP"
+    else "Trending Deals in TVs & Projectors"
+)
+TREND_SECTION = os.getenv("BESTBUY_TRENDING_SECTION", DEFAULT_TREND_SECTION)
 SKU_WINDOW = os.getenv("BESTBUY_TRENDING_SKU_WINDOW", "tail").strip().lower()
 BESTBUY_BASE_URL = "https://www.bestbuy.com"
 
@@ -117,13 +130,16 @@ def extract_structured_product_metadata(text):
 
 
 def clean_graphql_value(value):
-    return clean_text(
-        html.unescape(str(value or "").replace("\\u0026", "&").replace("\\/", "/"))
-    )
+    raw = str(value or "").replace('\\\\"', '\\"')
+    try:
+        decoded = json.loads(f'"{raw}"')
+    except ValueError:
+        decoded = raw
+    return clean_text(html.unescape(str(decoded).replace("\\u0026", "&").replace("\\/", "/").replace('\\"', '"')))
 
 
 def extract_spotlight_product_rows(text, limit=10):
-    decoded = decode_capture_text(text)
+    decoded = decode_capture_text(text).replace('\\\\"', '\\"')
     connection_pos = decoded.find('"__typename":"SpotlightProductConnection"')
     if connection_pos < 0:
         return []
@@ -167,10 +183,11 @@ def extract_spotlight_product_rows(text, limit=10):
 
 
 def parse_trending_products(html_text, limit=10):
-    if bestbuy_category() == "HHP":
-        spotlight_rows = extract_spotlight_product_rows(html_text, limit=limit)
-        if spotlight_rows:
-            return spotlight_rows
+    spotlight_rows = extract_spotlight_product_rows(html_text, limit=limit)
+    if spotlight_rows:
+        return spotlight_rows
+    if not ALLOW_NETWORK_SKU_FALLBACK:
+        return []
 
     trend_skus = choose_trending_skus(html_text, limit=limit)
     metadata = extract_structured_product_metadata(html_text)
@@ -185,7 +202,7 @@ def parse_trending_products(html_text, limit=10):
                 "retailer_sku_name": product.get("retailer_sku_name", ""),
                 "product_url": product.get("product_url", ""),
                 "source_card_id": "",
-                "source": "analytics_skus_with_structured_product_metadata" if product else "analytics_skus",
+                "source": "network_skus_with_structured_product_metadata" if product else "network_skus",
             }
         )
     return rows
@@ -221,6 +238,11 @@ def live_html():
     raw_dir = RUN_ROOT / "raw" / "live_page"
     raw_dir.mkdir(parents=True, exist_ok=True)
     client = ZenRowsClient(api_key)
+    wait_ms = (
+        os.getenv("ZENROWS_WAIT_MS")
+        or os.getenv("BESTBUY_TRENDING_WAIT_MS")
+        or "8000"
+    )
     start = time.perf_counter()
     response = client.get(
         TRENDING_URL,
@@ -228,7 +250,7 @@ def live_html():
             "js_render": "true",
             "premium_proxy": "true",
             "proxy_country": "us",
-            **({"wait": os.getenv("ZENROWS_WAIT_MS")} if os.getenv("ZENROWS_WAIT_MS") else {}),
+            **({"wait": wait_ms} if wait_ms else {}),
         },
         timeout=REQUEST_TIMEOUT,
     )
@@ -245,6 +267,7 @@ def live_html():
         "status_code": response.status_code,
         "elapsed_seconds": elapsed,
         "x_request_cost": response.headers.get("x-request-cost", ""),
+        "wait_ms": wait_ms,
         "bytes": len(text or ""),
         "html": rel_path(html_path),
         "headers": rel_path(headers_path),
@@ -265,6 +288,8 @@ def main():
         return
     html_text = live_html() if LIVE_FETCH else INPUT_HTML.read_text(encoding="utf-8", errors="ignore")
     rows = parse_trending_products(html_text, LIMIT)
+    if LIVE_FETCH and REQUIRE_ROWS and not rows:
+        raise RuntimeError("Trending live fetch returned 0 GraphQL SpotlightProduct rows; retry with a larger BESTBUY_TRENDING_WAIT_MS")
     write_rows(OUTPUT_CSV, rows)
     print(f"wrote {len(rows)} rows -> {OUTPUT_CSV}")
     for row in rows:

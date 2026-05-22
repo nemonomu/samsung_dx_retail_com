@@ -39,6 +39,7 @@ PRODUCT_LIST_CSV = Path(
 )
 TARGET_SIZE = int(os.getenv("BESTBUY_FINAL_TARGET_SIZE", "300"))
 CATEGORY = bestbuy_category()
+MAIN_RANK_LIMIT = int(os.getenv("BESTBUY_MAIN_RANK_LIMIT", "300") or "300")
 
 PROMOTION_FALLBACK_INPUT = (
     RUN_ROOT / "promotion" / "parsed" / "all_promotion_products.csv"
@@ -75,6 +76,10 @@ def first_non_empty(*values):
         if value not in ("", None):
             return value
     return ""
+
+
+def truthy(value):
+    return value is True or str(value or "").strip().lower() in {"1", "true", "yes", "y", "sponsored"}
 
 
 def unique_main_rows(rows):
@@ -132,6 +137,9 @@ def main_attribute_map(rows):
         if not sku:
             continue
         target = attrs.setdefault(sku, {})
+        if truthy(row.get("is_sponsored")) or str(row.get("sku_status") or "").strip().lower() == "sponsored":
+            target["is_sponsored"] = "True"
+            target["sku_status"] = "Sponsored"
         for key in fill_keys:
             if not target.get(key) and row.get(key):
                 target[key] = row.get(key)
@@ -196,22 +204,77 @@ def trending_map(rows):
     return result
 
 
-def choose_final_rows(main_rows, bsr_rows, target_size):
-    bsr = build_bsr_map(bsr_rows)
-    main_by_sku = {str(row.get("sku_id")): row for row in main_rows if row.get("sku_id")}
-    bsr_only = [row for sku, row in bsr.items() if sku not in main_by_sku]
+def merge_missing_attrs(row, attrs):
+    for key in (
+        "bsin",
+        "brand",
+        "product_name",
+        "product_url",
+        "image_url",
+        "rating",
+        "review_count",
+        "customer_price",
+        "regular_price",
+        "total_savings",
+        "total_savings_percent",
+        "buying_options_json",
+        "is_reviewable",
+        "syndicated_review_summary_json",
+    ):
+        if not row.get(key) and attrs.get(key):
+            row[key] = attrs.get(key)
+    return row
 
-    if len(main_rows) >= target_size:
-        keep_main_count = max(0, target_size - len(bsr_only))
-        final_rows = main_rows[:keep_main_count]
-        for bsr_row in bsr_only[: target_size - len(final_rows)]:
-            final_rows.append(row_from_bsr_only(bsr_row))
-    else:
-        final_rows = list(main_rows)
-        for bsr_row in bsr_only:
-            if len(final_rows) >= target_size:
-                break
-            final_rows.append(row_from_bsr_only(bsr_row))
+
+def source_only_row(row, source):
+    sku = str(row.get("sku_id") or "").strip()
+    output = {
+        "sku_id": sku,
+        "bsin": row.get("bsin", ""),
+        "product_name": row.get("product_name") or row.get("retailer_sku_name", ""),
+        "product_url": row.get("product_url", ""),
+        "main_rank": "",
+        "target_source": source,
+    }
+    for key, value in row.items():
+        if key not in output:
+            output[key] = value
+    output["main_rank"] = ""
+    return output
+
+
+def source_backfill_rows(main_rows, bsr_map, promotion_rows=None, trending_rows=None, main_attrs=None):
+    main_skus = {str(row.get("sku_id") or "").strip() for row in main_rows if row.get("sku_id")}
+    rows = []
+    seen = set(main_skus)
+
+    for sku, row in sorted(bsr_map.items(), key=lambda item: int_value(item[1].get("bsr_rank"))):
+        if not sku or sku in seen:
+            continue
+        rows.append(row_from_bsr_only(row))
+        seen.add(sku)
+
+    for source_rows, source in (
+        (promotion_rows or [], "promotion_backfill"),
+        (trending_rows or [], "trending_backfill"),
+    ):
+        for row in source_rows:
+            sku = str(row.get("sku_id") or "").strip()
+            if not sku or sku in seen:
+                continue
+            attrs = (main_attrs or {}).get(sku) or {}
+            rows.append(source_only_row(merge_missing_attrs(dict(row), attrs), source))
+            seen.add(sku)
+    return rows
+
+
+def choose_final_rows(main_rows, bsr_rows, target_size, promotion_rows=None, trending_rows=None, main_attrs=None):
+    main_attrs = main_attrs or {}
+    bsr = build_bsr_map(bsr_rows)
+    main_limit = MAIN_RANK_LIMIT if target_size <= 0 else min(target_size, MAIN_RANK_LIMIT)
+    final_rows = list(main_rows[:main_limit])
+    backfill_rows = source_backfill_rows(final_rows, bsr, promotion_rows, trending_rows, main_attrs)
+    final_rows.extend(backfill_rows)
 
     return final_rows, bsr
 
@@ -248,6 +311,9 @@ def enrich_rows(rows, bsr, promotions, trends, main_attrs):
         attrs = main_attrs.get(sku) or {}
         for key, value in attrs.items():
             out[key] = first_non_empty(out.get(key), value)
+        if truthy(attrs.get("is_sponsored")) or truthy(out.get("is_sponsored")):
+            out["is_sponsored"] = "True"
+            out["sku_status"] = "Sponsored"
         bsr_attrs = bsr.get(sku) or {}
         for key, value in bsr_attrs.items():
             out[key] = first_non_empty(out.get(key), value)
@@ -334,14 +400,25 @@ def batch_id_from_datetime(value):
     return f"b_{value.strftime('%Y%m%d_%H%M%S')}"
 
 
+def run_batch_id(value=None):
+    return os.getenv("BESTBUY_BATCH_ID") or batch_id_from_datetime(value or datetime.now())
+
+
 def page_type(row):
-    return "bsr" if row.get("target_source") == "bsr_only_backfill" else "main"
+    source = row.get("target_source")
+    if source == "bsr_only_backfill":
+        return "bsr"
+    if source == "promotion_backfill":
+        return "promotion"
+    if source == "trending_backfill":
+        return "trend"
+    return "main"
 
 
 def product_list_rows(rows, bsr_pages):
     crawl_dt_obj = datetime.now()
-    crawl_dt = crawl_dt_obj.strftime("%Y-%m-%d %H:%M")
-    batch_id = batch_id_from_datetime(crawl_dt_obj)
+    crawl_dt = crawl_dt_obj.strftime("%Y-%m-%d %H:%M:%S")
+    batch_id = run_batch_id(crawl_dt_obj)
     output = []
     for row in rows:
         sku = str(row.get("sku_id") or "").strip()
@@ -353,7 +430,7 @@ def product_list_rows(rows, bsr_pages):
             "pick_up_availability": row.get("pick_up_availability", ""),
             "fastest_delivery": row.get("fastest_delivery", ""),
             "delivery_availability": row.get("delivery_availability", ""),
-            "sku_status": "Sponsored" if row.get("is_sponsored") in {"1", "true", "True"} else "",
+            "sku_status": "Sponsored" if truthy(row.get("is_sponsored")) else "",
             "promotion_type": row.get("promotion_type", ""),
             "trend_rank": row.get("trend_rank", ""),
             "main_rank": row.get("main_rank", ""),
@@ -401,9 +478,6 @@ def product_list_fields():
             "main_page_number",
             "bsr_page_number",
             "promotion_position",
-            "sku_id",
-            "category_key",
-            "final_target_rank",
         ]
     return [
         "account_name",
@@ -427,9 +501,6 @@ def product_list_fields():
         "batch_id",
         "main_page_number",
         "bsr_page_number",
-        "sku_id",
-        "category_key",
-        "final_target_rank",
     ]
 
 
@@ -443,13 +514,22 @@ def main():
     trending_rows = load_rows(trending_input)
 
     main_rows = unique_main_rows(main_input_rows)
-    selected_rows, bsr = choose_final_rows(main_rows, bsr_rows, TARGET_SIZE)
+    main_attrs = main_attribute_map(main_input_rows)
+    main_selection_limit = MAIN_RANK_LIMIT if TARGET_SIZE <= 0 else min(TARGET_SIZE, MAIN_RANK_LIMIT)
+    selected_rows, bsr = choose_final_rows(
+        main_rows,
+        bsr_rows,
+        TARGET_SIZE,
+        promotion_rows,
+        trending_rows,
+        main_attrs,
+    )
     final_rows = enrich_rows(
         selected_rows,
         bsr,
         promotion_map(promotion_rows),
         trending_map(trending_rows),
-        main_attribute_map(main_input_rows),
+        main_attrs,
     )
     write_csv(OUTPUT_CSV, final_rows)
     listing_rows = product_list_rows(final_rows, bsr_page_map(bsr_rows))
@@ -460,6 +540,7 @@ def main():
         "started_at": started_at,
         "finished_at": now(),
         "target_size": TARGET_SIZE,
+        "main_rank_limit": MAIN_RANK_LIMIT,
         "main_input": rel_path(MAIN_INPUT),
         "bsr_input": rel_path(BSR_INPUT),
         "promotion_input": rel_path(promotion_input),
@@ -467,13 +548,14 @@ def main():
         "output_csv": rel_path(OUTPUT_CSV),
         "product_list_csv": rel_path(PRODUCT_LIST_CSV),
         "main_unique_count": len(main_rows),
+        "main_selected_count": min(len(main_rows), main_selection_limit),
         "bsr_count": len(bsr),
         "promotion_unique_count": len({row.get("sku_id") for row in promotion_rows if row.get("sku_id")}),
         "trending_unique_count": len({row.get("sku_id") for row in trending_rows if row.get("sku_id")}),
         "final_row_count": len(final_rows),
         "final_unique_sku_count": len({row.get("sku_id") for row in final_rows if row.get("sku_id")}),
         "product_list_row_count": len(listing_rows),
-        "needs_more_main_candidates": len(final_rows) < TARGET_SIZE,
+        "needs_more_main_candidates": len(main_rows) < main_selection_limit,
         "krw_per_usd": KRW_PER_USD,
     }
     manifest_path = OUTPUT_CSV.with_suffix(".manifest.json")

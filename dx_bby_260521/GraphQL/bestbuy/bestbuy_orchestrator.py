@@ -89,10 +89,16 @@ STEPS = [
         8,
         "detail_html",
         "bestbuy.step08_detail_enrichment",
-        {"BESTBUY_DETAIL_STAGE": "detail", "BESTBUY_DETAIL_FETCH_COMPARE": "0", "ZENROWS_TIMEOUT": "240"},
         {
             "BESTBUY_DETAIL_STAGE": "detail",
             "BESTBUY_DETAIL_FETCH_COMPARE": "0",
+            "BESTBUY_DETAIL_WORKERS": "3",
+            "ZENROWS_TIMEOUT": "240",
+        },
+        {
+            "BESTBUY_DETAIL_STAGE": "detail",
+            "BESTBUY_DETAIL_FETCH_COMPARE": "0",
+            "BESTBUY_DETAIL_WORKERS": "3",
             "BESTBUY_DETAIL_RETRY_ONLY": "1",
             "ZENROWS_TIMEOUT": "240",
         },
@@ -101,8 +107,8 @@ STEPS = [
         9,
         "review20",
         "bestbuy.step09_review20",
-        {"ZENROWS_TIMEOUT": "240"},
-        {"BESTBUY_DETAIL_RETRY_ONLY": "1", "ZENROWS_TIMEOUT": "240"},
+        {"BESTBUY_DETAIL_WORKERS": "3", "ZENROWS_TIMEOUT": "240"},
+        {"BESTBUY_DETAIL_RETRY_ONLY": "1", "BESTBUY_DETAIL_WORKERS": "3", "ZENROWS_TIMEOUT": "240"},
     ),
     Step(10, "status_check", "bestbuy.step10_status_check"),
     Step(11, "s3_sync", "bestbuy.step11_s3_sync"),
@@ -312,11 +318,18 @@ def run_step(step, dry_run=False, resume=False):
         return
 
     env = os.environ.copy()
-    for key, value in step.env.items():
-        env.setdefault(key, value)
-    if resume:
-        for key, value in step.resume_env.items():
+    force_step_env = os.getenv("BESTBUY_FORCE_STEP_ENV", "1").lower() in {"1", "true", "yes", "y"}
+    if force_step_env:
+        env.update(step.env)
+    else:
+        for key, value in step.env.items():
             env.setdefault(key, value)
+    if resume:
+        if force_step_env:
+            env.update(step.resume_env)
+        else:
+            for key, value in step.resume_env.items():
+                env.setdefault(key, value)
     command = [PYTHON, "-m", step.module]
     print(f"[run] step {step.key} {step.name}: {' '.join(command)}")
     effective_env = {key: env.get(key, value) for key, value in step.env.items()}

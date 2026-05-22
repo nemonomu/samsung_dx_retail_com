@@ -1,5 +1,6 @@
 import csv
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -20,6 +21,7 @@ OUTPUT_ROOT = RUN_ROOT / "output"
 FINAL_OUTPUT_CSV = OUTPUT_ROOT / "final_output.csv"
 PRODUCT_LIST_CSV = OUTPUT_ROOT / "bestbuy_product_list.csv"
 MANIFEST_PATH = OUTPUT_ROOT / "db_load_manifest.json"
+DRY_RUN = os.getenv("BESTBUY_DB_LOAD_DRY_RUN", "0").lower() in {"1", "true", "yes", "y"}
 
 
 def now():
@@ -102,51 +104,78 @@ def insert_rows(cur, table_name, columns, rows):
     }
 
 
-def load_one(cur, csv_path, table_name):
+def plan_rows(columns, rows):
+    if not rows:
+        return {"inserted": 0, "deleted_existing": 0, "columns": []}
+    insert_columns = [(name, data_type) for name, data_type in columns if name != "id"]
+    csv_fields = set(rows[0].keys())
+    insert_columns = [(name, data_type) for name, data_type in insert_columns if name in csv_fields]
+    return {
+        "inserted": len(rows) if insert_columns else 0,
+        "deleted_existing": 0,
+        "columns": [name for name, _ in insert_columns],
+    }
+
+
+def fallback_csv_columns(rows):
+    if not rows:
+        return []
+    return [(name, "text") for name in rows[0].keys()]
+
+
+def load_one(cur, csv_path, table_name, dry_run=False):
     rows = read_csv(csv_path)
-    columns = table_columns(cur, table_name)
+    columns = table_columns(cur, table_name) if cur else fallback_csv_columns(rows)
     if not columns:
         raise RuntimeError(f"DB table not found or has no columns: {TARGET_SCHEMA}.{table_name}")
-    result = insert_rows(cur, table_name, columns, rows)
+    result = plan_rows(columns, rows) if dry_run else insert_rows(cur, table_name, columns, rows)
     result.update(
         {
             "csv": rel_path(csv_path),
             "table": f"{TARGET_SCHEMA}.{table_name}",
             "csv_rows": len(rows),
+            "dry_run": dry_run,
         }
     )
     return result
 
 
 def main():
-    import psycopg2
-
     started_at = now()
     config = db_config()
-    if not config:
+    if not config and not DRY_RUN:
         raise RuntimeError("DB_CONFIG is missing")
 
     final_table = bestbuy_output_table(CATEGORY)
     product_list_table = bestbuy_product_list_table(CATEGORY)
-    conn = psycopg2.connect(
-        host=config.get("host"),
-        port=int(config.get("port") or 5432),
-        user=config.get("user"),
-        password=config.get("password"),
-        dbname=config.get("database"),
-        connect_timeout=10,
-    )
-    with conn:
-        with conn.cursor() as cur:
-            final_result = load_one(cur, FINAL_OUTPUT_CSV, final_table)
-            product_list_result = load_one(cur, PRODUCT_LIST_CSV, product_list_table)
-    conn.close()
+    conn = None
+    if config:
+        import psycopg2
+
+        conn = psycopg2.connect(
+            host=config.get("host"),
+            port=int(config.get("port") or 5432),
+            user=config.get("user"),
+            password=config.get("password"),
+            dbname=config.get("database"),
+            connect_timeout=10,
+        )
+    if conn:
+        with conn:
+            with conn.cursor() as cur:
+                final_result = load_one(cur, FINAL_OUTPUT_CSV, final_table, DRY_RUN)
+                product_list_result = load_one(cur, PRODUCT_LIST_CSV, product_list_table, DRY_RUN)
+        conn.close()
+    else:
+        final_result = load_one(None, FINAL_OUTPUT_CSV, final_table, DRY_RUN)
+        product_list_result = load_one(None, PRODUCT_LIST_CSV, product_list_table, DRY_RUN)
 
     manifest = {
         "run_type": "step14_db_load",
         "started_at": started_at,
         "finished_at": now(),
         "category": CATEGORY,
+        "dry_run": DRY_RUN,
         "run_root": rel_path(RUN_ROOT),
         "final_output": final_result,
         "product_list": product_list_result,

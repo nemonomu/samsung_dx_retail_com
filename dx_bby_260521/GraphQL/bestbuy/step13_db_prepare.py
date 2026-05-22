@@ -47,6 +47,57 @@ COMMON_COLUMNS = [
 ]
 
 
+HHP_COLUMNS = [
+    ("id", "serial PRIMARY KEY"),
+    ("country", "varchar"),
+    ("product", "varchar"),
+    ("item", "varchar"),
+    ("account_name", "varchar"),
+    ("page_type", "varchar"),
+    ("count_of_reviews", "text"),
+    ("retailer_sku_name", "text"),
+    ("product_url", "text"),
+    ("star_rating", "varchar"),
+    ("count_of_star_ratings", "text"),
+    ("sku_popularity", "varchar"),
+    ("final_sku_price", "varchar"),
+    ("original_sku_price", "varchar"),
+    ("savings", "varchar"),
+    ("discount_type", "varchar"),
+    ("offer", "text"),
+    ("bundle", "varchar"),
+    ("pick_up_availability", "text"),
+    ("fastest_delivery", "text"),
+    ("delivery_availability", "text"),
+    ("shipping_info", "text"),
+    ("available_quantity_for_purchase", "varchar"),
+    ("inventory_status", "varchar"),
+    ("sku_status", "varchar"),
+    ("retailer_membership_discounts", "varchar"),
+    ("trade_in", "text"),
+    ("hhp_storage", "varchar"),
+    ("hhp_color", "varchar"),
+    ("hhp_carrier", "varchar"),
+    ("detailed_review_content", "text"),
+    ("summarized_review_content", "text"),
+    ("top_mentions", "text"),
+    ("recommendation_intent", "varchar"),
+    ("main_rank", "integer"),
+    ("bsr_rank", "integer"),
+    ("rank_1", "varchar"),
+    ("rank_2", "varchar"),
+    ("trend_rank", "integer"),
+    ("number_of_ppl_purchased_yesterday", "integer"),
+    ("number_of_ppl_added_to_carts", "integer"),
+    ("number_of_units_purchased_past_month", "integer"),
+    ("retailer_sku_name_similar", "text"),
+    ("promotion_type", "varchar"),
+    ("calendar_week", "varchar"),
+    ("crawl_strdatetime", "varchar"),
+    ("batch_id", "varchar"),
+]
+
+
 REF_COLUMNS = COMMON_COLUMNS + [
     ("capacity", "varchar"),
     ("refrigerator_type", "varchar"),
@@ -77,6 +128,7 @@ LDY_COLUMNS = COMMON_COLUMNS + [
 
 
 SCHEMAS = {
+    "HHP": HHP_COLUMNS,
     "REF": REF_COLUMNS,
     "LDY": LDY_COLUMNS,
 }

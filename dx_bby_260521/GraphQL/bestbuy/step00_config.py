@@ -33,6 +33,12 @@ BESTBUY_PRODUCT_LIST_TABLES = {
 }
 
 
+PROTECTED_PROD_OUTPUT_TABLES = {
+    "TV": {"tv_retail_com", "public.tv_retail_com"},
+    "HHP": {"hhp_retail_com", "public.hhp_retail_com"},
+}
+
+
 def load_env(path=None):
     env_path = Path(path or (REPO_ROOT / ".env"))
     if not env_path.exists():
@@ -93,6 +99,13 @@ def bestbuy_category():
 def bestbuy_output_table(category=None):
     category_key = (category or bestbuy_category()).strip().upper()
     override = os.getenv(f"BESTBUY_OUTPUT_TABLE_{category_key}") or os.getenv("BESTBUY_OUTPUT_TABLE")
+    if (
+        override
+        and category_key in PROTECTED_PROD_OUTPUT_TABLES
+        and override.strip().lower() in PROTECTED_PROD_OUTPUT_TABLES[category_key]
+        and os.getenv("BESTBUY_ALLOW_PROD_OUTPUT_TABLE", "0").lower() not in {"1", "true", "yes", "y"}
+    ):
+        return BESTBUY_OUTPUT_TABLES[category_key]
     return override or BESTBUY_OUTPUT_TABLES.get(category_key, f"{category_key.lower()}_retail_com_bby")
 
 

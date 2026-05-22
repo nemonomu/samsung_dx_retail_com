@@ -8,7 +8,14 @@ from pathlib import Path
 from zenrows import ZenRowsClient
 
 from .step00_apollo import iter_apollo_push_payloads
-from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, PROMOTION_LABELS, has_target_url, load_initial_urls, rel_path
+from .step00_config import (
+    DEFAULT_BESTBUY_RUN_ROOT,
+    PROMOTION_LABELS,
+    bestbuy_category,
+    has_target_url,
+    load_initial_urls,
+    rel_path,
+)
 
 RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
 RUN_ROOT = Path(os.getenv("BESTBUY_PROMOTION_RUN_ROOT", DEFAULT_BESTBUY_RUN_ROOT / "promotion"))
@@ -243,11 +250,12 @@ def write_rows(path, rows):
 
 
 def main():
-    if not has_target_url("promotion"):
+    category = bestbuy_category()
+    if category == "HHP" or not has_target_url("promotion"):
         summary = {
             "started_at": now(),
             "skipped": True,
-            "reason": "no promotion URL for category",
+            "reason": "HHP promotion page is not collected" if category == "HHP" else "no promotion URL for category",
             "placements": [],
             "call_count": 0,
             "row_count": 0,

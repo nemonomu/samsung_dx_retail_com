@@ -3,6 +3,7 @@ import html
 import json
 import os
 import re
+import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -38,11 +39,13 @@ SAMPLE_SCHEMA_CSV = Path(os.getenv("BESTBUY_OUTPUT_SCHEMA_CSV", "references/tv_r
 SELECTOR_TABLE = os.getenv("BESTBUY_SELECTOR_TABLE", "dx_xpath_selectors")
 LIMIT = int(os.getenv("BESTBUY_DETAIL_LIMIT", "0"))
 MAX_ATTEMPTS = int(os.getenv("BESTBUY_DETAIL_MAX_ATTEMPTS", "3"))
+AUTO_RETRY = os.getenv("BESTBUY_DETAIL_AUTO_RETRY", "1").lower() in {"1", "true", "yes", "y"}
 RETRY_ONLY = os.getenv("BESTBUY_DETAIL_RETRY_ONLY", "0").lower() in {"1", "true", "yes", "y"}
 REBUILD_ONLY = os.getenv("BESTBUY_DETAIL_REBUILD_ONLY", "0").lower() in {"1", "true", "yes", "y"}
+FORCE_REFRESH = os.getenv("BESTBUY_DETAIL_FORCE_REFRESH", "0").lower() in {"1", "true", "yes", "y"}
 REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "240"))
 FETCH_MODE = os.getenv("BESTBUY_FETCH_MODE", os.getenv("BESTBUY_DETAIL_FETCH_MODE", "zenrows")).strip().lower()
-WORKERS = int(os.getenv("BESTBUY_DETAIL_WORKERS", "1"))
+WORKERS = int(os.getenv("BESTBUY_DETAIL_WORKERS", "3"))
 STAGE = os.getenv("BESTBUY_DETAIL_STAGE", "detail").lower()
 SAVE_HTML_MODE = os.getenv("BESTBUY_SAVE_HTML_MODE", "slim").lower()
 
@@ -58,6 +61,11 @@ FINAL_OUTPUT_CSV = Path(os.getenv("BESTBUY_FINAL_OUTPUT_CSV", OUTPUT_ROOT / "fin
 MANIFEST_PATH = DETAIL_ROOT / "manifest_detail_enrichment.json"
 FETCH_COMPARE = os.getenv("BESTBUY_DETAIL_FETCH_COMPARE", "0").lower() in {"1", "true", "yes", "y"}
 RUN_BATCH_ID = os.getenv("BESTBUY_BATCH_ID") or f"b_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+TARGET_SKUS = {
+    value.strip().lower()
+    for value in re.split(r"[\s,;]+", os.getenv("BESTBUY_DETAIL_SKUS", ""))
+    if value.strip()
+}
 
 HHP_FINAL_FIELDS = [
     "id",
@@ -122,6 +130,17 @@ def batch_id_from_datetime(value):
     return f"b_{value.strftime('%Y%m%d_%H%M%S')}"
 
 
+def page_type_from_target(target):
+    source = target.get("target_source")
+    if source == "bsr_only_backfill":
+        return "bsr"
+    if source == "promotion_backfill":
+        return "promotion"
+    if source == "trending_backfill":
+        return "trend"
+    return "main"
+
+
 def compact_text(value):
     return re.sub(r"\s+", " ", html.unescape(str(value or ""))).strip()
 
@@ -133,29 +152,115 @@ def first_non_empty(*values):
     return ""
 
 
+def sku_from_product_url(url):
+    match = re.search(r"/sku/(\d+)", str(url or ""))
+    return match.group(1) if match else ""
+
+
+def canonical_pdp_url(url):
+    text = compact_text(url)
+    if not text:
+        return ""
+    if "/sku/" in text:
+        text = text.split("/sku/", 1)[0]
+    return text.rstrip("/").lower()
+
+
+def truthy(value):
+    return value is True or str(value or "").strip().lower() in {"1", "true", "yes", "y", "sponsored"}
+
+
 def clean_hhp_carrier(value):
     text = compact_text(value)
     if not text:
         return ""
     lowered = text.lower()
     carriers = [
+        ("Total by Verizon", ["total by verizon"]),
+        ("Metro by T-Mobile", ["metro by t-mobile", "metropcs", "metro pcs", "metro"]),
         ("Unlocked", ["unlocked", "fully unlocked"]),
         ("AT&T", ["at&t", "att"]),
         ("Verizon", ["verizon"]),
         ("T-Mobile", ["t-mobile", "tmobile"]),
+        ("Sprint", ["sprint"]),
         ("Boost Mobile", ["boost mobile"]),
         ("Cricket", ["cricket"]),
         ("Tracfone", ["tracfone"]),
         ("Google Fi", ["google fi"]),
-        ("Metro by T-Mobile", ["metro by t-mobile", "metro"]),
         ("Consumer Cellular", ["consumer cellular"]),
+        ("Mint Mobile", ["mint mobile", "mint"]),
+        ("Ultra Mobile", ["ultra mobile"]),
+        ("H2O Wireless", ["h2o wireless", "h2o"]),
+        ("Ting Mobile", ["ting mobile", "ting"]),
+        ("US Cellular", ["us cellular", "u.s. cellular"]),
+        ("Simple Mobile", ["simple mobile"]),
         ("Straight Talk", ["straight talk"]),
         ("Total Wireless", ["total wireless"]),
+        ("Visible", ["visible"]),
+        ("Lively", ["lively sim", "lively mobile"]),
     ]
-    for canonical, needles in carriers:
-        if any(needle in lowered for needle in needles):
-            return canonical
+    found = []
+    parts = [part.strip() for part in re.split(r"[,;/|]+", text) if part.strip()]
+    scan_values = parts if len(parts) > 1 else [text]
+    for scan_value in scan_values:
+        scan_lowered = scan_value.lower()
+        matches = []
+        for canonical, needles in carriers:
+            positions = [scan_lowered.find(needle) for needle in needles if needle in scan_lowered]
+            if positions:
+                matches.append((min(positions), canonical))
+        for _, canonical in sorted(matches, key=lambda item: item[0]):
+            if canonical == "Verizon" and "Total by Verizon" in found and "total by verizon" in scan_lowered:
+                continue
+            if canonical == "T-Mobile" and "Metro by T-Mobile" in found and "metro by t-mobile" in scan_lowered:
+                continue
+            if canonical not in found:
+                found.append(canonical)
+    return ", ".join(found) if found else text
+
+
+def clean_hhp_carrier_compatibility(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    parts = [compact_text(part) for part in re.split(r"\s*,\s*|\s*\|\|\|\s*", text) if compact_text(part)]
+    cleaned = []
+    for part in parts:
+        carrier = clean_hhp_carrier(part)
+        if carrier and carrier not in cleaned:
+            cleaned.append(carrier)
+    return ", ".join(cleaned)
+
+
+def clean_hhp_color(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    text = re.sub(
+        r"(?i)\s*\((?:unlocked|verizon|at&t|att|t-mobile|tmobile|total wireless|tracfone|lively)\)\s*$",
+        "",
+        text,
+    ).strip(" ,-")
+    text = re.sub(
+        r"(?i)\b(?:carrier\s+)?(?:unlocked|verizon|at&t|att|t-mobile|tmobile)\b\s*$",
+        "",
+        text,
+    ).strip(" ,-")
     return text
+
+
+def clean_hhp_storage(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    match = re.search(r"(?i)\b(\d+(?:\.\d+)?)\s*(TB|GB|terabytes?|gigabytes?)\b", text)
+    if not match:
+        return text
+    number = match.group(1)
+    unit = match.group(2).lower()
+    if unit.startswith("tb") or unit.startswith("tera"):
+        return f"{number} terabytes"
+    return f"{number} gigabytes"
 
 
 def hhp_attributes_from_name(name):
@@ -168,7 +273,7 @@ def hhp_attributes_from_name(name):
     if storage_match:
         number = storage_match.group(1)
         unit = storage_match.group(2).upper()
-        attrs["hhp_storage"] = f"{number}{unit}"
+        attrs["hhp_storage"] = clean_hhp_storage(f"{number}{unit}")
 
     paren_values = re.findall(r"\(([^()]*)\)", text)
     for value in reversed(paren_values):
@@ -183,7 +288,7 @@ def hhp_attributes_from_name(name):
     # Best Buy HHP titles usually end with "- Color" after carrier/storage.
     parts = [part.strip() for part in re.split(r"\s+-\s+", text) if part.strip()]
     if len(parts) >= 2:
-        color = parts[-1]
+        color = clean_hhp_color(parts[-1])
         if not re.search(r"(?i)\b(class|series|gb|tb|unlocked|verizon|at&t|t-mobile)\b", color):
             attrs["hhp_color"] = color
         elif color and len(color.split()) <= 4:
@@ -192,22 +297,33 @@ def hhp_attributes_from_name(name):
 
 
 def hhp_attributes_from_product(product, product_name):
+    products = product if isinstance(product, list) else [product]
+    product = products[-1] if products else {}
     attrs = hhp_attributes_from_name(product_name)
     color = first_path([product], ["color", "displayName"])
     if color:
-        attrs["hhp_color"] = color
+        attrs["hhp_color"] = clean_hhp_color(color)
     spec_candidates = {
         "hhp_storage": ["Internal Storage", "Storage Capacity", "Built-In Storage", "Total Storage Capacity"],
         "hhp_color": ["Color", "Color Category"],
-        "hhp_carrier": ["Carrier", "Wireless Carrier"],
     }
     for field, names in spec_candidates.items():
-        if attrs.get(field):
-            continue
         for name in names:
-            value = spec_value([product], name)
+            value = spec_value(products, name)
             if value:
-                attrs[field] = clean_hhp_carrier(value) if field == "hhp_carrier" else compact_text(value)
+                if field == "hhp_storage":
+                    attrs[field] = clean_hhp_storage(value)
+                else:
+                    attrs[field] = clean_hhp_color(value)
+                break
+    carrier_compatibility = spec_value(products, "Carrier Compatibility")
+    if carrier_compatibility:
+        attrs["hhp_carrier"] = clean_hhp_carrier_compatibility(carrier_compatibility)
+    else:
+        for name in ("Carrier", "Wireless Carrier"):
+            value = spec_value(products, name)
+            if value:
+                attrs["hhp_carrier"] = clean_hhp_carrier(value)
                 break
     return attrs
 
@@ -228,6 +344,73 @@ def money_int(value):
         return f"${int(round(float(value))):,}"
     except (TypeError, ValueError):
         return str(value)
+
+
+def numeric_money(value):
+    if value in ("", None):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value)
+    match = re.search(r"-?\d[\d,]*(?:\.\d+)?", text)
+    if not match:
+        return None
+    try:
+        return float(match.group(0).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def price_output_fields(price, target, selector_values):
+    final_price = first_non_empty(
+        money(price.get("displayableCustomerPrice") or price.get("customerPrice") or target.get("customer_price")),
+        selector_values.get("final_sku_price"),
+        selector_values.get("final_sku_price_see_price_in_cart"),
+        selector_values.get("final_sku_price_no_longer_available"),
+    )
+    original_price = first_non_empty(
+        money(price.get("displayableRegularPrice") or price.get("regularPrice") or target.get("regular_price")),
+        selector_values.get("original_sku_price"),
+    )
+    savings = first_non_empty(
+        money_int(price.get("totalSavings") or target.get("total_savings")),
+        selector_values.get("savings"),
+    )
+
+    final_value = numeric_money(final_price)
+    original_value = numeric_money(original_price)
+    savings_value = numeric_money(savings)
+    if final_value is None:
+        return final_price, "", ""
+    if original_value is None or original_value <= final_value:
+        return final_price, "", ""
+    if savings_value is None or savings_value <= 0:
+        savings = ""
+    return final_price, original_price, savings
+
+
+def numeric_rating(value):
+    if value in ("", None):
+        return None
+    try:
+        return float(str(value).strip())
+    except ValueError:
+        return None
+
+
+def has_not_yet_reviewed_text(*values):
+    return any("not yet reviewed" in str(value or "").lower() for value in values)
+
+
+def screen_size_from_name(name):
+    text = compact_text(name)
+    match = re.search(r'(?i)\b(\d{2,3}(?:\.\d+)?)\s*(?:"|”|″|inch(?:es)?|in\.|[^\w\s])?\s+class\b', text)
+    if not match:
+        return ""
+    number = match.group(1)
+    if "." in number:
+        number = number.rstrip("0").rstrip(".")
+    return f"{number} inches"
 
 
 def int_commas(value):
@@ -295,6 +478,54 @@ def delivery_from_html(html_text):
         html_text,
     )
     return compact_text(value).replace("Delivery As soon as", "Delivery as soon as")
+
+
+def trade_in_from_html(html_text):
+    if not html_text:
+        return ""
+    soup = BeautifulSoup(html_text, "html.parser")
+    title_node = soup.find(attrs={"data-testid": "trade-in-check-your-value"})
+    body_node = soup.find(attrs={"data-testid": "trade-in-save-when-you-trade"})
+    title = compact_text(title_node.get_text(" ", strip=True) if title_node else "")
+    body = compact_text(body_node.get_text(" ", strip=True) if body_node else "")
+    if title and body:
+        return f"{title}{body}"
+    if title:
+        return title
+    text = compact_text(soup.get_text(" "))
+    match = trade_in_text_match(text)
+    return compact_text(match.group(1)) if match else ""
+
+
+def trade_in_text_match(value):
+    return re.search(
+        r"(Check your trade-in value(?:\.\s*Save(?: up to)?(?:\s+\$[\d,]+(?:\.\d{2})?)?"
+        r"(?:\s+when you trade in a similar device)?\.)?)",
+        str(value or ""),
+        re.I,
+    )
+
+
+def nested_strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for child in value.values():
+            yield from nested_strings(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from nested_strings(child)
+
+
+def trade_in_from_products(products):
+    for product in reversed(products):
+        if not isinstance(product, dict):
+            continue
+        for value in nested_strings(product.get("operationalAttributes") or {}):
+            match = trade_in_text_match(value)
+            if match:
+                return compact_text(match.group(1))
+    return ""
 
 
 def clean_energy(value):
@@ -419,6 +650,25 @@ def request_cost(headers):
         return float(raw)
     except (TypeError, ValueError):
         return 0.0
+
+
+def response_error(status, text, fallback):
+    if status != 200:
+        try:
+            problem = json.loads(text or "{}")
+        except ValueError:
+            problem = {}
+        if isinstance(problem, dict):
+            code = problem.get("code")
+            title = problem.get("title")
+            if code or title:
+                return "http_{}_{}{}".format(
+                    status,
+                    code or "error",
+                    f": {title}" if title else "",
+                )
+        return f"http_{status}"
+    return fallback
 
 
 def detail_params():
@@ -546,6 +796,10 @@ def detail_folder(sku, target=None, status=None):
                         if not new_file.exists():
                             old_file.rename(new_file)
         desired.mkdir(parents=True, exist_ok=True)
+        if status == "success":
+            for old_dir in existing_detail_dirs(sku):
+                if old_dir != desired and old_dir.name.endswith("_fail"):
+                    shutil.rmtree(old_dir, ignore_errors=True)
         return desired
     if existing:
         return existing[0]
@@ -587,6 +841,10 @@ def review_folder(sku, target=None, status=None):
                         if not new_file.exists():
                             old_file.rename(new_file)
         desired.mkdir(parents=True, exist_ok=True)
+        if status == "success":
+            for old_dir in existing_review_dirs(sku):
+                if old_dir != desired and old_dir.name.endswith("_fail"):
+                    shutil.rmtree(old_dir, ignore_errors=True)
         return desired
     if existing:
         return existing[0]
@@ -628,6 +886,10 @@ def compare_folder(sku, target=None, status=None):
                         if not new_file.exists():
                             old_file.rename(new_file)
         desired.mkdir(parents=True, exist_ok=True)
+        if status == "success":
+            for old_dir in existing_compare_dirs(sku):
+                if old_dir != desired and old_dir.name.endswith("_fail"):
+                    shutil.rmtree(old_dir, ignore_errors=True)
         return desired
     if existing:
         return existing[0]
@@ -801,7 +1063,7 @@ def write_detail_artifacts(paths, html_text, headers):
 def detail_success(sku):
     paths = detail_paths(sku)
     meta = read_json(paths["meta"])
-    if meta.get("success") is True and paths["html"].exists():
+    if meta.get("success") is True and (paths["html"].exists() or paths["apollo"].exists()):
         return True
     return False
 
@@ -851,6 +1113,15 @@ def target_rows(apply_filters=True):
             continue
         seen.add(sku)
         unique.append(row)
+    if apply_filters and TARGET_SKUS:
+        unique = [
+            row
+            for row in unique
+            if str(row.get("sku_id") or "").strip().lower() in TARGET_SKUS
+            or str(row.get("bsin") or "").strip().lower() in TARGET_SKUS
+            or str(row.get("item") or "").strip().lower() in TARGET_SKUS
+            or sku_from_product_url(row.get("product_url")).lower() in TARGET_SKUS
+        ]
     if apply_filters and RETRY_ONLY:
         if STAGE == "detail":
             unique = [row for row in unique if not detail_success(row["sku_id"])]
@@ -858,16 +1129,14 @@ def target_rows(apply_filters=True):
             unique = [
                 row
                 for row in unique
-                if detail_success(row["sku_id"])
-                and review20_required_for_target(row, row["sku_id"])
-                and not review_success(row["sku_id"])
+                if review_needs_retry(row)
             ]
         else:
             unique = [
                 row
                 for row in unique
                 if not detail_success(row["sku_id"])
-                or (review20_required_for_target(row, row["sku_id"]) and not review_success(row["sku_id"]))
+                or review_needs_retry(row)
             ]
     if apply_filters and LIMIT:
         unique = unique[:LIMIT]
@@ -931,7 +1200,56 @@ def review20_payload(html_text):
         return None
     apply_bestbuy_location(payload.get("variables", {}))
     payload["query"] = payload["query"].replace("reviews(filter:{pageSize:5})", "reviews(filter:{pageSize:20})")
+    payload["query"] = ensure_recommended_percent_query(payload.get("query") or "")
     return payload
+
+
+def ensure_recommended_percent_query(query):
+    if not query or "recommendedPercent" in query:
+        return query
+    return re.sub(
+        r"(reviewInfo\s*\{\s*averageRating\s+reviewCount)(?!\s+recommendedPercent)",
+        r"\1 recommendedPercent",
+        query,
+    )
+
+
+PRODUCT_SCHEMA_REVIEW20_QUERY = (
+    "query ProductSchema_init($skuId:String!$salesChannel:String!$fulfillmentInput:ProductFulfillmentInput!)"
+    "{...ProductSchema_Fragment}"
+    "fragment ProductSchema_Fragment on Query{productBySkuId(skuId:$skuId){bsin name{short}images{piscesHref}"
+    "url{pdp}description{short}skuId manufacturer{modelNumber}color{displayName}brand "
+    "reviewInfo{averageRating reviewCount recommendedPercent}"
+    "specificationGroups{specifications{displayName value}}"
+    "buyingOptions{description pdpUrl skuId type product{price(input:{salesChannel:$salesChannel}){customerPrice}}}"
+    "fulfillmentOptions(input:$fulfillmentInput){shippingDetails{shippingAvailability{shippingEligible "
+    "customerLOSGroup{customerLosGroupId maxLineItemMaxDate name displayDateType price minLineItemMaxDate}}}"
+    "ispuDetails{ispuAvailability{pickupEligible instoreInventoryAvailable quantity minPickupInHours maxDate}}}"
+    "reviews(filter:{pageSize:20}){results{rating title text userNickname}}}}"
+)
+
+
+def fallback_review20_payload(sku):
+    variables = {
+        "skuId": str(sku),
+        "salesChannel": "LargeView",
+        "fulfillmentInput": {
+            "shipping": {"destinationZipCode": "10010"},
+            "inStorePickup": {"storeId": "482"},
+            "buttonState": {
+                "fulfillmentOption": "PICKUP",
+                "context": "PDP",
+                "destinationZipCode": "10010",
+                "storeId": "482",
+            },
+        },
+    }
+    apply_bestbuy_location(variables)
+    return {
+        "operationName": "ProductSchema_init",
+        "variables": variables,
+        "query": PRODUCT_SCHEMA_REVIEW20_QUERY,
+    }
 
 
 COMPARE_PRODUCT_QUERY = """
@@ -1004,9 +1322,10 @@ def detail_payloads(sku):
 def review20_payload_for_sku(sku):
     payload = find_started_operation_from_payloads(detail_payloads(sku), "ProductSchema_init")
     if not payload:
-        return None
+        return fallback_review20_payload(sku)
     apply_bestbuy_location(payload.get("variables", {}))
     payload["query"] = payload["query"].replace("reviews(filter:{pageSize:5})", "reviews(filter:{pageSize:20})")
+    payload["query"] = ensure_recommended_percent_query(payload.get("query") or "")
     return payload
 
 
@@ -1014,11 +1333,11 @@ def fetch_detail(client, target):
     sku = str(target.get("sku_id") or "").strip()
     pdp_url = target_url(target, sku)
     current_paths = detail_paths(sku)
-    if detail_success(sku):
+    if not FORCE_REFRESH and detail_success(sku):
         return read_json(current_paths["meta"])
     attempt = next_attempt(current_paths["meta"], pdp_url)
     meta = {"sku_id": sku, "stage": "detail", "url": pdp_url, "attempt": attempt, "started_at": now()}
-    if attempt > MAX_ATTEMPTS:
+    if not FORCE_REFRESH and attempt > MAX_ATTEMPTS:
         paths = detail_paths_for_status(sku, target, False)
         meta.update({"success": False, "error": "max_attempts_exceeded"})
         paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -1036,6 +1355,7 @@ def fetch_detail(client, target):
             success = status == 200 and has_product_schema(html_text)
             paths = detail_paths_for_status(sku, target, success)
             artifact_meta = write_detail_artifacts(paths, html_text, dict(response.headers))
+            error = response_error(status, html_text, "detail_html_missing_product_schema")
             meta.update(
                 {
                     "success": success,
@@ -1049,7 +1369,7 @@ def fetch_detail(client, target):
                     "html_mode": artifact_meta["html_mode"],
                     "apollo_payload_count": artifact_meta["apollo_payload_count"],
                     "finished_at": now(),
-                    "error": "" if success else "detail_html_missing_product_schema",
+                    "error": "" if success else error,
                 }
             )
         except RequestException as exc:
@@ -1076,11 +1396,11 @@ def fetch_review20(client, target):
     sku = str(target.get("sku_id") or "").strip()
     pdp_url = target_url(target, sku)
     current_paths = review_paths(sku)
-    if review_success(sku):
+    if not FORCE_REFRESH and not review_needs_retry(target):
         return read_json(current_paths["meta"])
     attempt = next_attempt(current_paths["meta"], pdp_url)
     meta = {"sku_id": sku, "stage": "review20", "url": pdp_url, "attempt": attempt, "started_at": now()}
-    if attempt > MAX_ATTEMPTS:
+    if not FORCE_REFRESH and attempt > MAX_ATTEMPTS:
         paths = review_paths_for_status(sku, target, False)
         meta.update({"success": False, "error": "max_attempts_exceeded"})
         paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -1261,6 +1581,31 @@ def fetch_compare(client, target):
     return meta
 
 
+def fetch_with_retries(fetcher, success_key, client, target):
+    total_cost = 0.0
+    meta = {}
+    while True:
+        meta = fetcher(client, target)
+        total_cost += float(meta.get("x_request_cost") or 0)
+        attempt = int(meta.get("attempt") or 0)
+        if meta.get(success_key) or not AUTO_RETRY or attempt >= MAX_ATTEMPTS:
+            break
+    meta["x_request_cost_total"] = total_cost
+    return meta
+
+
+def fetch_detail_with_retries(client, target):
+    return fetch_with_retries(fetch_detail, "success", client, target)
+
+
+def fetch_review20_with_retries(client, target):
+    return fetch_with_retries(fetch_review20, "success", client, target)
+
+
+def fetch_compare_with_retries(client, target):
+    return fetch_with_retries(fetch_compare, "success", client, target)
+
+
 def products_from_detail(sku):
     products = []
     for payload in detail_payloads(sku):
@@ -1269,6 +1614,10 @@ def products_from_detail(sku):
             product = data.get("productBySkuId") if isinstance(data, dict) else None
             if isinstance(product, dict) and str(product.get("skuId")) == str(sku):
                 products.append(product)
+    review_data = read_json(review_paths(sku)["response_json"])
+    review_product = ((review_data.get("data") or {}).get("productBySkuId") or {}) if isinstance(review_data, dict) else {}
+    if isinstance(review_product, dict) and str(review_product.get("skuId") or "") == str(sku):
+        products.append(review_product)
     return products
 
 
@@ -1423,6 +1772,40 @@ def offer_count(products):
     return str(len(buying)) if buying else ""
 
 
+HHP_PROMOTION_TYPES = {
+    "best selling",
+    "bundle and save",
+    "overall pick",
+    "pre-owned",
+    "top rated",
+    "trade-in offer",
+    "trending deal",
+}
+
+
+def hhp_promotion_type(products, html_text):
+    if CATEGORY != "HHP":
+        return ""
+    names = []
+    for product in products:
+        for badge in (product.get("badges") or []) + (product.get("badgesV2") or []):
+            if not isinstance(badge, dict):
+                continue
+            name = compact_text(badge.get("displayName") or badge.get("label"))
+            if name and name.lower() in HHP_PROMOTION_TYPES and name not in names:
+                names.append(name)
+    if not names and html_text:
+        for value in re.findall(
+            r'data-component-name="Badge"[^>]*>.*?data-testid="button-label"[^>]*>(.*?)</span>',
+            html_text,
+            re.I | re.S,
+        ):
+            name = compact_text(html.unescape(re.sub(r"<[^>]+>", " ", value)))
+            if name and name.lower() in HHP_PROMOTION_TYPES and name not in names:
+                names.append(name)
+    return " ||| ".join(names)
+
+
 def recommendation(products):
     value = first_path(products, ["reviewInfo", "recommendedPercent"])
     return f"{value}% would recommend to a friend" if value not in ("", None) else ""
@@ -1436,6 +1819,112 @@ def review_count_number(*values):
         if text:
             return int(text)
     return None
+
+
+def target_identity_keys(target):
+    keys = [
+        str(target.get("sku_id") or "").strip(),
+        sku_from_product_url(target.get("product_url")),
+        canonical_pdp_url(target.get("product_url") or target.get("detail_url")),
+        str(target.get("item") or target.get("bsin") or "").strip(),
+    ]
+    return [key.lower() for key in keys if key]
+
+
+@lru_cache(maxsize=1)
+def output_review_counts():
+    counts = {}
+    for path in (DETAIL_ROWS_CSV, FINAL_OUTPUT_CSV):
+        for row in load_csv(path):
+            count = review_count_number(row.get("count_of_reviews"), row.get("count_of_star_ratings"))
+            if count is None:
+                continue
+            for key in target_identity_keys(row):
+                counts[key] = max(counts.get(key, 0), count)
+    return counts
+
+
+def expected_review_count_from_outputs(target):
+    counts = output_review_counts()
+    values = [counts.get(key) for key in target_identity_keys(target) if key in counts]
+    return max(values) if values else None
+
+
+def expected_review_count(target, sku=None):
+    counts = []
+    target_count = review_count_number(
+        target.get("count_of_reviews"),
+        target.get("review_count"),
+        target.get("count_of_star_ratings"),
+    )
+    if target_count is not None:
+        counts.append(target_count)
+    if sku:
+        for product in products_from_detail(sku):
+            review_info = product.get("reviewInfo") if isinstance(product, dict) else {}
+            count = review_count_number(review_info.get("reviewCount")) if isinstance(review_info, dict) else None
+            if count is not None:
+                counts.append(count)
+    output_count = expected_review_count_from_outputs(target)
+    if output_count is not None:
+        counts.append(output_count)
+    return max(counts) if counts else None
+
+
+@lru_cache(maxsize=1)
+def output_review_blank_keys():
+    keys = set()
+    for path in (DETAIL_ROWS_CSV, FINAL_OUTPUT_CSV):
+        for row in load_csv(path):
+            review_count = review_count_number(row.get("count_of_reviews"), row.get("count_of_star_ratings"))
+            star_rating = compact_text(row.get("star_rating"))
+            if not star_rating or star_rating.lower() == "not yet reviewed" or review_count in (None, 0):
+                continue
+            if compact_text(row.get("detailed_review_content")) and compact_text(row.get("recommendation_intent")):
+                continue
+            keys.update(target_identity_keys(row))
+    return keys
+
+
+def output_review_needs_retry(target):
+    blank_keys = output_review_blank_keys()
+    return any(key in blank_keys for key in target_identity_keys(target))
+
+
+def review_info_from_review_response(sku):
+    data = read_json(review_paths(sku)["response_json"])
+    product = ((data.get("data") or {}).get("productBySkuId") or {}) if isinstance(data, dict) else {}
+    review_info = product.get("reviewInfo") if isinstance(product, dict) else {}
+    return review_info if isinstance(review_info, dict) else {}
+
+
+def review_has_recommended_percent(sku):
+    if review_info_from_review_response(sku).get("recommendedPercent") not in ("", None):
+        return True
+    for product in products_from_detail(sku):
+        review_info = product.get("reviewInfo") if isinstance(product, dict) else {}
+        if isinstance(review_info, dict) and review_info.get("recommendedPercent") not in ("", None):
+            return True
+    return False
+
+
+def review_needs_retry(target):
+    sku = str(target.get("sku_id") or "").strip()
+    if not sku:
+        return False
+    review_info = (first_value(products_from_detail(sku), "reviewInfo") or {})
+    if is_external_review_source(target, review_info):
+        return False
+    if output_review_needs_retry(target):
+        return True
+    expected_count = expected_review_count(target, sku)
+    if not review_success(sku):
+        return expected_count is None or expected_count > 0
+    if expected_count in (None, 0):
+        return False
+    if not review20_content(sku):
+        return True
+    return not review_has_recommended_percent(sku)
 
 
 def has_external_review_text(*values):
@@ -1555,6 +2044,9 @@ def review20_content(sku):
 
 
 def recommended_percent_from_detail(sku):
+    review_value = review_info_from_review_response(sku).get("recommendedPercent")
+    if review_value not in ("", None):
+        return review_value
     for payload in detail_payloads(sku):
         stack = [payload]
         while stack:
@@ -1619,6 +2111,22 @@ def output_row(target):
     review_info = first_value(products, "reviewInfo") or {}
     review_count = review_count_number(review_info.get("reviewCount"), target.get("review_count"))
     external_reviews = is_external_review_source(target, review_info)
+    not_yet_reviewed = external_reviews or has_not_yet_reviewed_text(
+        selector_values.get("top_star_rating"),
+        selector_values.get("star_rating"),
+        target.get("rating"),
+    )
+    rating_value = first_non_empty(
+        review_info.get("averageRating"),
+        target.get("rating"),
+        selector_values.get("top_star_rating"),
+        selector_values.get("star_rating"),
+    )
+    rating_number = numeric_rating(rating_value)
+    if review_count == 0 or (rating_number == 0 and review_count in (None, 0)):
+        not_yet_reviewed = True
+        review_count = 0
+    final_price, original_price, savings = price_output_fields(price, target, selector_values)
     pickup = best_path(products, ["fulfillmentOptions", "ispuDetails", 0, "ispuAvailability", 0], ("maxDate",))
     delivery = best_path(
         products,
@@ -1632,46 +2140,33 @@ def output_row(target):
     product_name = first_path(products, ["name", "short"]) or target.get("product_name", "")
     product_url = first_path(products, ["url", "pdp"]) or target.get("product_url", "")
     bsin = first_value(products, "bsin") or target.get("bsin", "")
-    primary_product = products[-1] if products else {}
-    hhp_attrs = hhp_attributes_from_product(primary_product, product_name) if CATEGORY == "HHP" else {}
+    hhp_attrs = hhp_attributes_from_product(products, product_name) if CATEGORY == "HHP" else {}
 
     crawl_dt = datetime.now()
     row = {
         "id": "",
-        "product": (target.get("category_key") or CATEGORY).lower(),
+        "product": (target.get("category_key") or CATEGORY).upper(),
         "item": bsin,
         "account_name": "Bestbuy",
-        "page_type": "bsr" if target.get("target_source") == "bsr_only_backfill" else "main",
-        "count_of_reviews": "0" if external_reviews else int_commas(review_info.get("reviewCount") or target.get("review_count")),
+        "page_type": page_type_from_target(target),
+        "count_of_reviews": "0"
+        if not_yet_reviewed
+        else int_commas(review_info.get("reviewCount") or target.get("review_count")),
         "retailer_sku_name": first_non_empty(product_name, selector_values.get("retailer_sku_name")),
         "product_url": product_url,
         "star_rating": "Not yet reviewed"
-        if external_reviews
+        if not_yet_reviewed
         else first_non_empty(
-            review_info.get("averageRating"),
-            target.get("rating"),
-            selector_values.get("top_star_rating"),
-            selector_values.get("star_rating"),
+            rating_value,
             "Not yet reviewed",
         ),
         "count_of_star_ratings": "0"
-        if external_reviews
+        if not_yet_reviewed
         else int_commas(review_info.get("reviewCount") or target.get("review_count")),
-        "screen_size": first_non_empty(screen, selector_values.get("screen_size")),
-        "final_sku_price": first_non_empty(
-            money(price.get("displayableCustomerPrice") or price.get("customerPrice") or target.get("customer_price")),
-            selector_values.get("final_sku_price"),
-            selector_values.get("final_sku_price_see_price_in_cart"),
-            selector_values.get("final_sku_price_no_longer_available"),
-        ),
-        "original_sku_price": first_non_empty(
-            money(price.get("displayableRegularPrice") or price.get("regularPrice") or target.get("regular_price")),
-            selector_values.get("original_sku_price"),
-        ),
-        "savings": first_non_empty(
-            money_int(price.get("totalSavings") or target.get("total_savings")),
-            selector_values.get("savings"),
-        ),
+        "screen_size": first_non_empty(screen, selector_values.get("screen_size"), screen_size_from_name(product_name)),
+        "final_sku_price": final_price,
+        "original_sku_price": original_price,
+        "savings": savings,
         "offer": first_non_empty(target.get("offer"), target.get("offer_count")),
         "pick_up_availability": first_non_empty(
             target.get("pick_up_availability"),
@@ -1692,15 +2187,20 @@ def output_row(target):
             date_to_relative_or_phrase("Delivery as soon as", delivery_slot),
         ),
         "shipping_info": "",
-        "sku_status": "Sponsored" if target.get("is_sponsored") in {"1", "true", "True"} else "",
+        "sku_status": "Sponsored" if truthy(target.get("is_sponsored")) or target.get("sku_status") == "Sponsored" else "",
+        "trade_in": first_non_empty(
+            selector_values.get("trade_in"),
+            trade_in_from_html(html_text),
+            trade_in_from_products(products),
+        ),
         "hhp_storage": hhp_attrs.get("hhp_storage", ""),
         "hhp_color": hhp_attrs.get("hhp_color", ""),
         "hhp_carrier": hhp_attrs.get("hhp_carrier", ""),
-        "detailed_review_content": "" if external_reviews else review20_content(sku),
+        "detailed_review_content": "" if not_yet_reviewed else review20_content(sku),
         "summarized_review_content": "",
         "top_mentions": "",
         "recommendation_intent": ""
-        if external_reviews
+        if not_yet_reviewed
         else recommendation_intent_value(
             review_count,
             selector_values.get("recommendation_intent"),
@@ -1718,10 +2218,10 @@ def output_row(target):
         "trend_rank": target.get("trend_rank", ""),
         "retailer_sku_name_similar": " ||| ".join(compare_similar_names[:4]),
         "estimated_annual_electricity_use": clean_energy(energy),
-        "promotion_type": target.get("promotion_type", ""),
+        "promotion_type": first_non_empty(hhp_promotion_type(products, html_text), target.get("promotion_type", "")),
         "calendar_week": f"w{crawl_dt.isocalendar().week}",
-        "crawl_datetime": crawl_dt.strftime("%Y-%m-%d %H:%M"),
-        "crawl_strdatetime": crawl_dt.strftime("%Y-%m-%d %H:%M"),
+        "crawl_datetime": crawl_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        "crawl_strdatetime": crawl_dt.strftime("%Y-%m-%d %H:%M:%S"),
         "model_year": model_year,
         "batch_id": RUN_BATCH_ID,
         "country": "SEA",
@@ -1751,8 +2251,7 @@ def build_outputs(targets):
                     "retryable": str(int(int(dmeta.get("attempt", 0) or 0) < MAX_ATTEMPTS)),
                 }
             )
-        review_required = review20_required_for_target(target, sku)
-        if review_required and not rmeta.get("success"):
+        if review_needs_retry(target):
             failures.append(
                 {
                     "sku_id": sku,
@@ -1821,25 +2320,20 @@ def main():
         fetched_review = False
         fetched_compare = False
         if STAGE in {"all", "detail"}:
-            should_fetch_detail = can_fetch_network and not detail_success(sku)
-            dmeta = fetch_detail(client, target) if should_fetch_detail else read_json(detail_paths(sku)["meta"])
+            should_fetch_detail = can_fetch_network and (FORCE_REFRESH or not detail_success(sku))
+            dmeta = fetch_detail_with_retries(client, target) if should_fetch_detail else read_json(detail_paths(sku)["meta"])
             fetched_detail = bool(should_fetch_detail)
         else:
             dmeta = read_json(detail_paths(sku)["meta"])
         if STAGE in {"all", "review"}:
-            should_fetch_review = (
-                can_fetch_network
-                and dmeta.get("success")
-                and review20_required_for_target(target, sku)
-                and not review_success(sku)
-            )
-            rmeta = fetch_review20(client, target) if should_fetch_review else read_json(review_paths(sku)["meta"])
+            should_fetch_review = can_fetch_network and (FORCE_REFRESH or review_needs_retry(target))
+            rmeta = fetch_review20_with_retries(client, target) if should_fetch_review else read_json(review_paths(sku)["meta"])
             fetched_review = bool(should_fetch_review)
         else:
             rmeta = read_json(review_paths(sku)["meta"])
         if FETCH_COMPARE and STAGE in {"all", "detail"}:
             should_fetch_compare = can_fetch_network and dmeta.get("success") and not compare_success(sku)
-            cmeta = fetch_compare(client, target) if should_fetch_compare else read_json(compare_paths(sku)["meta"])
+            cmeta = fetch_compare_with_retries(client, target) if should_fetch_compare else read_json(compare_paths(sku)["meta"])
             fetched_compare = bool(should_fetch_compare)
         else:
             cmeta = read_json(compare_paths(sku)["meta"])
@@ -1858,11 +2352,11 @@ def main():
             for future in as_completed(futures):
                 index, sku, dmeta, rmeta, cmeta, fetched_detail, fetched_review, fetched_compare = future.result()
                 if fetched_detail:
-                    detail_cost += float(dmeta.get("x_request_cost") or 0)
+                    detail_cost += float(dmeta.get("x_request_cost_total", dmeta.get("x_request_cost") or 0) or 0)
                 if fetched_review:
-                    review_cost += float(rmeta.get("x_request_cost") or 0)
+                    review_cost += float(rmeta.get("x_request_cost_total", rmeta.get("x_request_cost") or 0) or 0)
                 if fetched_compare:
-                    compare_cost += float(cmeta.get("x_request_cost") or 0)
+                    compare_cost += float(cmeta.get("x_request_cost_total", cmeta.get("x_request_cost") or 0) or 0)
                 print(
                     f"[{index}/{len(targets)}] sku={sku} "
                     f"detail={dmeta.get('success')} attempt={dmeta.get('attempt')} "
@@ -1874,11 +2368,11 @@ def main():
         for index, target in enumerate(targets, 1):
             index, sku, dmeta, rmeta, cmeta, fetched_detail, fetched_review, fetched_compare = process_target(index, target)
             if fetched_detail:
-                detail_cost += float(dmeta.get("x_request_cost") or 0)
+                detail_cost += float(dmeta.get("x_request_cost_total", dmeta.get("x_request_cost") or 0) or 0)
             if fetched_review:
-                review_cost += float(rmeta.get("x_request_cost") or 0)
+                review_cost += float(rmeta.get("x_request_cost_total", rmeta.get("x_request_cost") or 0) or 0)
             if fetched_compare:
-                compare_cost += float(cmeta.get("x_request_cost") or 0)
+                compare_cost += float(cmeta.get("x_request_cost_total", cmeta.get("x_request_cost") or 0) or 0)
             print(
                 f"[{index}/{len(targets)}] sku={sku} "
                 f"detail={dmeta.get('success')} attempt={dmeta.get('attempt')} "
@@ -1906,9 +2400,12 @@ def main():
         "limit": LIMIT,
         "retry_only": RETRY_ONLY,
         "rebuild_only": REBUILD_ONLY,
+        "force_refresh": FORCE_REFRESH,
         "stage": STAGE,
         "workers": WORKERS,
         "max_attempts": MAX_ATTEMPTS,
+        "auto_retry": AUTO_RETRY,
+        "target_skus": sorted(TARGET_SKUS),
         "fetch_mode": FETCH_MODE,
         "fetch_transports": fetch_transports(),
         "target_count": len(output_targets),

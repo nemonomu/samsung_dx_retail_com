@@ -32,7 +32,7 @@ REQUIRE_ROWS = os.getenv(
 ).lower() in {"1", "true", "yes", "y"}
 ALLOW_NETWORK_SKU_FALLBACK = os.getenv(
     "BESTBUY_TRENDING_ALLOW_NETWORK_SKUS",
-    "0",
+    "1",
 ).lower() in {"1", "true", "yes", "y"}
 DEFAULT_TREND_SECTION = (
     "Trending Deals in Cell Phones & Accessories"

@@ -1245,7 +1245,11 @@ def product_names_from_value(value):
 
 def event_data(event):
     value = event.get("value") if isinstance(event, dict) else {}
-    data = value.get("data") if isinstance(value, dict) else {}
+    data = value.get("data") if isinstance(value, dict) and "data" in value else None
+    if isinstance(data, dict):
+        return data
+    result = event.get("result") if isinstance(event, dict) else {}
+    data = result.get("data") if isinstance(result, dict) and "data" in result else None
     return data if isinstance(data, dict) else {}
 
 
@@ -1772,7 +1776,7 @@ def compare_data_from_detail_payloads(sku):
         if not compare_event_ids:
             continue
         for event in payload.get("events", []):
-            if event.get("type") != "next" or str(event.get("id") or "") not in compare_event_ids:
+            if event.get("type") not in {"next", "data"} or str(event.get("id") or "") not in compare_event_ids:
                 continue
             data = event_data(event)
             current = data.get("productBySkuId") if isinstance(data, dict) else {}

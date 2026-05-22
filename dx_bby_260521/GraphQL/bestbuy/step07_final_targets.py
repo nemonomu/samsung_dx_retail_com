@@ -40,6 +40,7 @@ PRODUCT_LIST_CSV = Path(
 TARGET_SIZE = int(os.getenv("BESTBUY_FINAL_TARGET_SIZE", "300"))
 CATEGORY = bestbuy_category()
 MAIN_RANK_LIMIT = int(os.getenv("BESTBUY_MAIN_RANK_LIMIT", "300") or "300")
+BSR_RANK_LIMIT = int(os.getenv("BESTBUY_BSR_RANK_LIMIT", "100") or "100")
 
 PROMOTION_FALLBACK_INPUT = (
     RUN_ROOT / "promotion" / "parsed" / "all_promotion_products.csv"
@@ -151,6 +152,8 @@ def build_bsr_map(rows):
     sorted_rows = sorted(rows, key=lambda row: int_value(row.get("bsr_rank")))
     for row in sorted_rows:
         sku = str(row.get("sku_id") or "").strip()
+        if BSR_RANK_LIMIT > 0 and int_value(row.get("bsr_rank")) > BSR_RANK_LIMIT:
+            continue
         if sku and sku not in result:
             result[sku] = dict(row)
     return result
@@ -541,6 +544,7 @@ def main():
         "finished_at": now(),
         "target_size": TARGET_SIZE,
         "main_rank_limit": MAIN_RANK_LIMIT,
+        "bsr_rank_limit": BSR_RANK_LIMIT,
         "main_input": rel_path(MAIN_INPUT),
         "bsr_input": rel_path(BSR_INPUT),
         "promotion_input": rel_path(promotion_input),
@@ -550,6 +554,15 @@ def main():
         "main_unique_count": len(main_rows),
         "main_selected_count": min(len(main_rows), main_selection_limit),
         "bsr_count": len(bsr),
+        "bsr_only_backfill_count": len(
+            [row for row in final_rows if row.get("target_source") == "bsr_only_backfill"]
+        ),
+        "promotion_backfill_count": len(
+            [row for row in final_rows if row.get("target_source") == "promotion_backfill"]
+        ),
+        "trending_backfill_count": len(
+            [row for row in final_rows if row.get("target_source") == "trending_backfill"]
+        ),
         "promotion_unique_count": len({row.get("sku_id") for row in promotion_rows if row.get("sku_id")}),
         "trending_unique_count": len({row.get("sku_id") for row in trending_rows if row.get("sku_id")}),
         "final_row_count": len(final_rows),

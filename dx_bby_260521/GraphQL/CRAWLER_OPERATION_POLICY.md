@@ -911,6 +911,40 @@ detail: Apollo first, selector fallback
 review20: GraphQL from PDP Apollo query
 ```
 
+Best Buy final target composition:
+
+```text
+main listing:
+  collect enough pages to produce up to 300 unique main SKUs
+  assign main_rank after SKU dedupe
+
+bsr listing:
+  collect enough pages to cover the bsr top 100 rank range
+  exclude SKUs already present in main
+  add only the non-overlap SKUs from that top 100 range
+  bsr-only rows have bsr_rank but no main_rank
+
+promotion:
+  collect all promotion products
+  enrich existing main/bsr rows when the SKU already exists
+  add promotion_backfill rows only for non-overlap SKUs
+
+trending:
+  collect all trending products
+  enrich existing main/bsr/promotion rows when the SKU already exists
+  add trending_backfill rows only for non-overlap SKUs
+```
+
+Therefore `bestbuy_final_targets.csv` is not capped at 300 rows. The 300 limit applies only to
+main-ranked SKUs. The final target set is:
+
+```text
+main unique up to 300
++ non-overlap SKUs from bsr top 100
++ promotion-only unique
++ trending-only unique
+```
+
 Latest limited test status:
 
 ```text

@@ -711,21 +711,6 @@ def detail_js_instructions(attempt=1):
         {"wait": 2000},
     ]
 
-    compare_retry_rounds = max(0, min(int(attempt or 1) - 1, 3))
-    for _ in range(compare_retry_rounds):
-        instructions.extend(
-            [
-                {"evaluate": lower_eighth_scroll},
-                {"wait": 2200},
-                {"evaluate": quarter_scroll},
-                {"wait": 1400},
-                {"evaluate": upper_eighth_scroll},
-                {"wait": 2200},
-                {"evaluate": quarter_scroll},
-                {"wait": 2200},
-            ]
-        )
-
     instructions.extend(
         [
             {"scroll_y": 1800},
@@ -1902,16 +1887,18 @@ def fetch_detail_with_retries(client, target):
     sku = str(target.get("sku_id") or "").strip()
     total_cost = 0.0
     meta = {}
+    run_attempts = 0
     while True:
         meta = fetch_detail(client, target)
+        run_attempts += 1
         total_cost += float(meta.get("x_request_cost") or 0)
-        attempt = int(meta.get("attempt") or 0)
         missing_similar = detail_needs_similar_retry(meta)
         if missing_similar:
             meta["similar_retry_reason"] = f"json_response_compare_name_count<{DETAIL_SIMILAR_MIN_NAMES}"
-        if (meta.get("success") and not missing_similar) or not AUTO_RETRY or attempt >= MAX_ATTEMPTS:
+        if (meta.get("success") and not missing_similar) or not AUTO_RETRY or run_attempts >= MAX_ATTEMPTS:
             break
     meta["x_request_cost_total"] = total_cost
+    meta["run_attempts"] = run_attempts
     if meta:
         try:
             detail_paths(sku)["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -2782,6 +2769,7 @@ def main():
                 print(
                     f"[{index}/{len(targets)}] sku={sku} "
                     f"detail={dmeta.get('success')} attempt={dmeta.get('attempt')} "
+                    f"run_attempts={dmeta.get('run_attempts', '')} "
                     f"similar={dmeta.get('json_response_compare_name_count', '')} "
                     f"similar_ok={dmeta.get('json_response_compare_ok', '')} "
                     f"compare={cmeta.get('success')} attempt={cmeta.get('attempt')} "
@@ -2800,6 +2788,7 @@ def main():
             print(
                 f"[{index}/{len(targets)}] sku={sku} "
                 f"detail={dmeta.get('success')} attempt={dmeta.get('attempt')} "
+                f"run_attempts={dmeta.get('run_attempts', '')} "
                 f"similar={dmeta.get('json_response_compare_name_count', '')} "
                 f"similar_ok={dmeta.get('json_response_compare_ok', '')} "
                 f"compare={cmeta.get('success')} attempt={cmeta.get('attempt')} "

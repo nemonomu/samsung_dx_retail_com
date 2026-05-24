@@ -41,6 +41,7 @@ LIMIT = int(os.getenv("BESTBUY_DETAIL_LIMIT", "0"))
 MAX_ATTEMPTS = int(os.getenv("BESTBUY_DETAIL_MAX_ATTEMPTS", "3"))
 AUTO_RETRY = os.getenv("BESTBUY_DETAIL_AUTO_RETRY", "1").lower() in {"1", "true", "yes", "y"}
 RETRY_ONLY = os.getenv("BESTBUY_DETAIL_RETRY_ONLY", "0").lower() in {"1", "true", "yes", "y"}
+RETRY_MISSING_SIMILAR = os.getenv("BESTBUY_DETAIL_RETRY_MISSING_SIMILAR", "0").lower() in {"1", "true", "yes", "y"}
 REBUILD_ONLY = os.getenv("BESTBUY_DETAIL_REBUILD_ONLY", "0").lower() in {"1", "true", "yes", "y"}
 FORCE_REFRESH = os.getenv("BESTBUY_DETAIL_FORCE_REFRESH", "0").lower() in {"1", "true", "yes", "y"}
 REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "240"))
@@ -61,6 +62,7 @@ DETAIL_ROWS_CSV = PARSED_DIR / "detail_enriched_rows.csv"
 FAILURES_CSV = PARSED_DIR / "detail_failures.csv"
 DETAIL_BENCHMARKS_CSV = BENCHMARKS_DIR / "detail_benchmarks.csv"
 FINAL_OUTPUT_CSV = Path(os.getenv("BESTBUY_FINAL_OUTPUT_CSV", OUTPUT_ROOT / "final_output.csv"))
+RETRY_MISSING_SIMILAR_SOURCE_CSV = os.getenv("BESTBUY_DETAIL_RETRY_MISSING_SIMILAR_SOURCE_CSV", "").strip()
 MANIFEST_PATH = DETAIL_ROOT / "manifest_detail_enrichment.json"
 FETCH_COMPARE = os.getenv("BESTBUY_DETAIL_FETCH_COMPARE", "0").lower() in {"1", "true", "yes", "y"}
 RUN_BATCH_ID = os.getenv("BESTBUY_BATCH_ID") or f"b_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -1230,6 +1232,57 @@ def next_attempt(meta_path, url):
     return int(meta.get("attempt", 0) or 0) + 1
 
 
+def target_match_keys(row):
+    keys = set()
+    for field in ("sku_id", "bsin", "item"):
+        value = str(row.get(field) or "").strip().lower()
+        if value:
+            keys.add(value)
+    sku = sku_from_product_url(row.get("product_url")).lower()
+    if sku:
+        keys.add(sku)
+    url = canonical_pdp_url(row.get("product_url"))
+    if url:
+        keys.add(url)
+    return keys
+
+
+def missing_similar_match_keys():
+    rows = []
+    source_path = None
+    candidate_paths = []
+    if RETRY_MISSING_SIMILAR_SOURCE_CSV:
+        candidate_paths.append(Path(RETRY_MISSING_SIMILAR_SOURCE_CSV))
+    candidate_paths.extend([FINAL_OUTPUT_CSV, DETAIL_ROWS_CSV])
+    for path in candidate_paths:
+        if path.exists():
+            rows = load_csv(path)
+            source_path = path
+            if rows:
+                break
+    if not rows:
+        raise RuntimeError(
+            "BESTBUY_DETAIL_RETRY_MISSING_SIMILAR=1 requires existing final_output.csv or detail_enriched_rows.csv"
+        )
+
+    missing_rows = [row for row in rows if not str(row.get("retailer_sku_name_similar") or "").strip()]
+    if missing_rows and len(missing_rows) == len(rows) and not truthy(
+        os.getenv("BESTBUY_DETAIL_RETRY_MISSING_SIMILAR_ALLOW_ALL")
+    ):
+        raise RuntimeError(
+            "All existing rows are missing retailer_sku_name_similar; refusing broad retry. "
+            "Set BESTBUY_DETAIL_RETRY_MISSING_SIMILAR_ALLOW_ALL=1 to override."
+        )
+    keys = set()
+    for row in missing_rows:
+        keys.update(target_match_keys(row))
+    print(
+        f"retry_missing_similar=1 source={rel_path(source_path)} "
+        f"missing_rows={len(missing_rows)} match_keys={len(keys)}"
+    )
+    return keys
+
+
 def target_rows(apply_filters=True):
     rows = load_csv(TARGET_CSV)
     unique = []
@@ -1249,6 +1302,9 @@ def target_rows(apply_filters=True):
             or str(row.get("item") or "").strip().lower() in TARGET_SKUS
             or sku_from_product_url(row.get("product_url")).lower() in TARGET_SKUS
         ]
+    if apply_filters and RETRY_MISSING_SIMILAR:
+        missing_keys = missing_similar_match_keys()
+        unique = [row for row in unique if target_match_keys(row) & missing_keys]
     if apply_filters and RETRY_ONLY:
         if STAGE == "detail":
             unique = [row for row in unique if not detail_success(row["sku_id"])]
@@ -2691,6 +2747,7 @@ def main():
         "target_csv": rel_path(TARGET_CSV),
         "limit": LIMIT,
         "retry_only": RETRY_ONLY,
+        "retry_missing_similar": RETRY_MISSING_SIMILAR,
         "rebuild_only": REBUILD_ONLY,
         "force_refresh": FORCE_REFRESH,
         "stage": STAGE,

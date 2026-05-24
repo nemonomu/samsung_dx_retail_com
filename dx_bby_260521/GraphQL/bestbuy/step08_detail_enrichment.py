@@ -57,6 +57,12 @@ DETAIL_SCROLL_NETWORK_IDLE = os.getenv("BESTBUY_DETAIL_SCROLL_NETWORK_IDLE", "1"
     "yes",
     "y",
 }
+DETAIL_COMPARE_CAPTURE_HOOK = os.getenv("BESTBUY_DETAIL_COMPARE_CAPTURE_HOOK", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
 DETAIL_JSON_RESPONSE = os.getenv("BESTBUY_DETAIL_JSON_RESPONSE", "0").lower() in {"1", "true", "yes", "y"}
 DETAIL_JSON_WAIT = os.getenv("BESTBUY_DETAIL_JSON_WAIT", "10000")
 DETAIL_REQUIRE_SIMILAR = (
@@ -695,6 +701,134 @@ def response_error(status, text, fallback):
     return fallback
 
 
+def detail_compare_capture_hook_script():
+    return r"""
+(() => {
+  if (window.__bbyCompareCaptureInstalled) return;
+  window.__bbyCompareCaptureInstalled = true;
+  const captureId = "bby-compare-capture";
+  const captures = [];
+  const maxCaptures = 12;
+  const maxBodyChars = 800000;
+
+  function asText(value) {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    try { return JSON.stringify(value); } catch (e) { return String(value); }
+  }
+
+  function isCandidate(url, requestBody, responseBody) {
+    const urlText = asText(url);
+    const blob = asText(requestBody) + "\n" + asText(responseBody);
+    return urlText.indexOf("/gateway/graphql") !== -1 && (
+      blob.indexOf("GetCompareProduct") !== -1 ||
+      blob.indexOf("single-compare") !== -1 ||
+      (
+        blob.indexOf("\"productBySkuId\"") !== -1 &&
+        blob.indexOf("\"recommendations\"") !== -1 &&
+        blob.indexOf("\"subPlacements\"") !== -1
+      )
+    );
+  }
+
+  function publish() {
+    try {
+      let el = document.getElementById(captureId);
+      if (!el) {
+        el = document.createElement("textarea");
+        el.id = captureId;
+        el.hidden = true;
+        el.style.display = "none";
+        (document.body || document.documentElement).appendChild(el);
+      }
+      el.textContent = JSON.stringify(captures.slice(-maxCaptures));
+    } catch (e) {}
+  }
+
+  function pushCapture(source, url, method, requestBody, responseBody) {
+    try {
+      if (!isCandidate(url, requestBody, responseBody)) return;
+      captures.push({
+        source,
+        url: asText(url),
+        method: asText(method),
+        requestBody: asText(requestBody).slice(0, 4000),
+        body: asText(responseBody).slice(0, maxBodyChars)
+      });
+      publish();
+    } catch (e) {}
+  }
+
+  const NativeResponse = window.Response;
+  if (NativeResponse && NativeResponse.prototype) {
+    const originalJson = NativeResponse.prototype.json;
+    if (typeof originalJson === "function") {
+      NativeResponse.prototype.json = function() {
+        const response = this;
+        return originalJson.apply(this, arguments).then((data) => {
+          pushCapture("response.json", response.url || "", "", "", data);
+          return data;
+        });
+      };
+    }
+    const originalText = NativeResponse.prototype.text;
+    if (typeof originalText === "function") {
+      NativeResponse.prototype.text = function() {
+        const response = this;
+        return originalText.apply(this, arguments).then((text) => {
+          pushCapture("response.text", response.url || "", "", "", text);
+          return text;
+        });
+      };
+    }
+  }
+
+  const originalFetch = window.fetch;
+  if (typeof originalFetch === "function") {
+    window.fetch = function(input, init) {
+      const url = typeof input === "string" ? input : (input && input.url) || "";
+      const method = (init && init.method) || (input && input.method) || "GET";
+      const requestBody = (init && init.body) || "";
+      return originalFetch.apply(this, arguments).then((response) => {
+        try {
+          response.clone().text().then((text) => {
+            pushCapture("fetch.clone", url, method, requestBody, text);
+          }).catch(() => {});
+        } catch (e) {}
+        return response;
+      });
+    };
+  }
+
+  const NativeXhr = window.XMLHttpRequest;
+  if (NativeXhr && NativeXhr.prototype) {
+    const originalOpen = NativeXhr.prototype.open;
+    const originalSend = NativeXhr.prototype.send;
+    if (typeof originalOpen === "function" && typeof originalSend === "function") {
+      NativeXhr.prototype.open = function(method, url) {
+        this.__bbyCompareMethod = method;
+        this.__bbyCompareUrl = url;
+        return originalOpen.apply(this, arguments);
+      };
+      NativeXhr.prototype.send = function(body) {
+        const xhr = this;
+        const requestBody = body;
+        try {
+          xhr.addEventListener("loadend", () => {
+            let responseBody = "";
+            try { responseBody = xhr.responseText || ""; } catch (e) {}
+            pushCapture("xhr", xhr.__bbyCompareUrl || "", xhr.__bbyCompareMethod || "", requestBody, responseBody);
+          });
+        } catch (e) {}
+        return originalSend.apply(this, arguments);
+      };
+    }
+  }
+  publish();
+})();
+"""
+
+
 def detail_js_instructions(attempt=1):
     quarter_scroll = (
         "window.scrollTo(0, Math.floor((document.documentElement.scrollHeight || document.body.scrollHeight) * 0.25));"
@@ -707,6 +841,7 @@ def detail_js_instructions(attempt=1):
     )
     settle = [{"wait_event": "networkalmostidle"}] if DETAIL_SCROLL_NETWORK_IDLE else []
     instructions = [
+        *([{"evaluate": detail_compare_capture_hook_script()}] if DETAIL_COMPARE_CAPTURE_HOOK else []),
         {"wait": 2000},
         {"scroll_y": 1800},
         {"wait": 1200},
@@ -1176,6 +1311,28 @@ def strict_compare_response_names(body_data, sku=""):
     return compare_recommendation_names(data)
 
 
+def compare_capture_entries_from_html(html_text):
+    if not isinstance(html_text, str) or "bby-compare-capture" not in html_text:
+        return []
+    entries = []
+    pattern = re.compile(
+        r"<textarea\b(?=[^>]*\bid=[\"']bby-compare-capture[\"'])[^>]*>(.*?)</textarea>",
+        re.IGNORECASE | re.DOTALL,
+    )
+    for match in pattern.finditer(html_text):
+        raw = html.unescape(match.group(1) or "").strip()
+        data = parse_json_value(raw)
+        if isinstance(data, list):
+            entries.extend(item for item in data if isinstance(item, dict))
+        elif isinstance(data, dict):
+            captures = data.get("captures")
+            if isinstance(captures, list):
+                entries.extend(item for item in captures if isinstance(item, dict))
+            else:
+                entries.append(data)
+    return entries
+
+
 def json_response_compare_summary(json_data, sku=""):
     xhr = (json_data.get("xhr") or []) if isinstance(json_data, dict) else []
     if not isinstance(xhr, list):
@@ -1211,9 +1368,39 @@ def json_response_compare_summary(json_data, sku=""):
                 "body_preview": body_preview(body),
             }
         )
+    html_text = ""
+    if isinstance(json_data, dict):
+        html_text = json_data.get("html") or json_data.get("content") or ""
+    capture_entries = compare_capture_entries_from_html(html_text)
+    for entry in capture_entries:
+        body = entry.get("body")
+        body_data = parse_json_value(body)
+        entry_blob = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+        has_get_compare = "GetCompareProduct" in entry_blob or "single-compare" in entry_blob
+        entry_names = strict_compare_response_names(body_data, sku)
+        is_compare_response = bool(entry_names)
+        if not has_get_compare and not is_compare_response:
+            continue
+        for name in entry_names:
+            if name and name not in names:
+                names.append(name)
+        hits.append(
+            {
+                "source": entry.get("source", "html_capture"),
+                "method": entry.get("method", ""),
+                "status_code": "html_capture",
+                "url": entry.get("url", ""),
+                "has_get_compare": has_get_compare,
+                "is_compare_response": is_compare_response,
+                "name_count": len(entry_names),
+                "names": entry_names[:5],
+                "body_preview": body_preview(body),
+            }
+        )
     return {
         "strict_compare_parser": True,
         "xhr_count": len(xhr),
+        "html_compare_capture_count": len(capture_entries),
         "graphql_or_compare_hit_count": len(hits),
         "compare_name_count": len(names),
         "compare_names": names[:20],
@@ -1628,7 +1815,7 @@ def fetch_detail(client, target):
             print(
                 f"[detail:start] sku={sku} attempt={attempt} transport={transport} "
                 f"json_response={DETAIL_JSON_RESPONSE} scroll={DETAIL_SCROLL} "
-                f"network_idle={DETAIL_SCROLL_NETWORK_IDLE}",
+                f"network_idle={DETAIL_SCROLL_NETWORK_IDLE} capture_hook={DETAIL_COMPARE_CAPTURE_HOOK}",
                 flush=True,
             )
             response = client.get(pdp_url, params=detail_params(attempt), timeout=REQUEST_TIMEOUT)
@@ -1666,6 +1853,7 @@ def fetch_detail(client, target):
                     "apollo_payload_count": artifact_meta["apollo_payload_count"],
                     "json_response": DETAIL_JSON_RESPONSE,
                     "json_response_xhr_count": json_response_summary.get("xhr_count", 0),
+                    "json_response_html_capture_count": json_response_summary.get("html_compare_capture_count", 0),
                     "json_response_graphql_hit_count": json_response_summary.get("graphql_or_compare_hit_count", 0),
                     "json_response_compare_name_count": compare_name_count,
                     "json_response_compare_required": DETAIL_REQUIRE_SIMILAR,
@@ -2851,6 +3039,7 @@ def main():
         "target_skus": sorted(TARGET_SKUS),
         "detail_scroll": DETAIL_SCROLL,
         "detail_scroll_network_idle": DETAIL_SCROLL_NETWORK_IDLE,
+        "detail_compare_capture_hook": DETAIL_COMPARE_CAPTURE_HOOK,
         "detail_json_response": DETAIL_JSON_RESPONSE,
         "detail_json_wait": DETAIL_JSON_WAIT,
         "detail_require_similar": DETAIL_REQUIRE_SIMILAR,

@@ -53,6 +53,11 @@ SAVE_HTML_MODE = os.getenv("BESTBUY_SAVE_HTML_MODE", "slim").lower()
 DETAIL_SCROLL = os.getenv("BESTBUY_DETAIL_SCROLL", "1").lower() in {"1", "true", "yes", "y"}
 DETAIL_JSON_RESPONSE = os.getenv("BESTBUY_DETAIL_JSON_RESPONSE", "0").lower() in {"1", "true", "yes", "y"}
 DETAIL_JSON_WAIT = os.getenv("BESTBUY_DETAIL_JSON_WAIT", "10000")
+DETAIL_REQUIRE_SIMILAR = (
+    os.getenv("BESTBUY_DETAIL_REQUIRE_SIMILAR", "1" if DETAIL_JSON_RESPONSE else "0").lower()
+    in {"1", "true", "yes", "y"}
+)
+DETAIL_SIMILAR_MIN_NAMES = int(os.getenv("BESTBUY_DETAIL_SIMILAR_MIN_NAMES", "1"))
 
 RAW_DETAIL_DIR = DETAIL_ROOT / "raw" / "detail_html"
 RAW_REVIEW_DIR = DETAIL_ROOT / "raw" / "review20"
@@ -678,7 +683,7 @@ def response_error(status, text, fallback):
     return fallback
 
 
-def detail_js_instructions():
+def detail_js_instructions(attempt=1):
     quarter_scroll = (
         "window.scrollTo(0, Math.floor((document.documentElement.scrollHeight || document.body.scrollHeight) * 0.25));"
     )
@@ -688,7 +693,7 @@ def detail_js_instructions():
     lower_eighth_scroll = (
         "window.scrollTo(0, Math.floor((document.documentElement.scrollHeight || document.body.scrollHeight) * 0.375));"
     )
-    return [
+    instructions = [
         {"wait": 2000},
         {"scroll_y": 1800},
         {"wait": 1500},
@@ -704,28 +709,49 @@ def detail_js_instructions():
         {"wait": 2000},
         {"evaluate": quarter_scroll},
         {"wait": 2000},
-        {"scroll_y": 1800},
-        {"wait": 800},
-        {"scroll_y": 1800},
-        {"wait": 800},
-        {"scroll_y": 2200},
-        {"wait": 900},
-        {"scroll_y": 2200},
-        {"wait": 900},
-        {"scroll_y": 2200},
-        {"wait": 900},
-        {"wait": 1500},
     ]
 
+    compare_retry_rounds = max(0, min(int(attempt or 1) - 1, 3))
+    for _ in range(compare_retry_rounds):
+        instructions.extend(
+            [
+                {"evaluate": lower_eighth_scroll},
+                {"wait": 2200},
+                {"evaluate": quarter_scroll},
+                {"wait": 1400},
+                {"evaluate": upper_eighth_scroll},
+                {"wait": 2200},
+                {"evaluate": quarter_scroll},
+                {"wait": 2200},
+            ]
+        )
 
-def detail_params():
+    instructions.extend(
+        [
+            {"scroll_y": 1800},
+            {"wait": 800},
+            {"scroll_y": 1800},
+            {"wait": 800},
+            {"scroll_y": 2200},
+            {"wait": 900},
+            {"scroll_y": 2200},
+            {"wait": 900},
+            {"scroll_y": 2200},
+            {"wait": 900},
+            {"wait": 1500},
+        ]
+    )
+    return instructions
+
+
+def detail_params(attempt=1):
     params = {
         "js_render": "true",
         "premium_proxy": "true",
         "proxy_country": "us",
     }
     if DETAIL_SCROLL:
-        params["js_instructions"] = json.dumps(detail_js_instructions())
+        params["js_instructions"] = json.dumps(detail_js_instructions(attempt))
     elif DETAIL_JSON_RESPONSE:
         params["wait"] = DETAIL_JSON_WAIT
     if DETAIL_JSON_RESPONSE:
@@ -1597,7 +1623,7 @@ def fetch_detail(client, target):
             continue
         start = time.perf_counter()
         try:
-            response = client.get(pdp_url, params=detail_params(), timeout=REQUEST_TIMEOUT)
+            response = client.get(pdp_url, params=detail_params(attempt), timeout=REQUEST_TIMEOUT)
             response_text = response.text
             html_text = response_text
             json_response_data = {}
@@ -1606,6 +1632,8 @@ def fetch_detail(client, target):
                 json_response_data = parse_json_value(response_text)
                 html_text = json_response_data.get("html") or json_response_data.get("content") or ""
                 json_response_summary = json_response_compare_summary(json_response_data, sku)
+            compare_name_count = int(json_response_summary.get("compare_name_count", 0) or 0)
+            compare_ok = (not DETAIL_REQUIRE_SIMILAR) or compare_name_count >= DETAIL_SIMILAR_MIN_NAMES
             status = response.status_code
             success = status == 200 and has_product_schema(html_text)
             paths = detail_paths_for_status(sku, target, success)
@@ -1631,7 +1659,10 @@ def fetch_detail(client, target):
                     "json_response": DETAIL_JSON_RESPONSE,
                     "json_response_xhr_count": json_response_summary.get("xhr_count", 0),
                     "json_response_graphql_hit_count": json_response_summary.get("graphql_or_compare_hit_count", 0),
-                    "json_response_compare_name_count": json_response_summary.get("compare_name_count", 0),
+                    "json_response_compare_name_count": compare_name_count,
+                    "json_response_compare_required": DETAIL_REQUIRE_SIMILAR,
+                    "json_response_compare_min_names": DETAIL_SIMILAR_MIN_NAMES,
+                    "json_response_compare_ok": compare_ok,
                     "finished_at": now(),
                     "error": "" if success else error,
                 }
@@ -1858,8 +1889,35 @@ def fetch_with_retries(fetcher, success_key, client, target):
     return meta
 
 
+def detail_needs_similar_retry(meta):
+    if not DETAIL_JSON_RESPONSE or not DETAIL_REQUIRE_SIMILAR:
+        return False
+    if meta.get("success") is not True:
+        return False
+    count = int(meta.get("json_response_compare_name_count") or 0)
+    return count < DETAIL_SIMILAR_MIN_NAMES
+
+
 def fetch_detail_with_retries(client, target):
-    return fetch_with_retries(fetch_detail, "success", client, target)
+    sku = str(target.get("sku_id") or "").strip()
+    total_cost = 0.0
+    meta = {}
+    while True:
+        meta = fetch_detail(client, target)
+        total_cost += float(meta.get("x_request_cost") or 0)
+        attempt = int(meta.get("attempt") or 0)
+        missing_similar = detail_needs_similar_retry(meta)
+        if missing_similar:
+            meta["similar_retry_reason"] = f"json_response_compare_name_count<{DETAIL_SIMILAR_MIN_NAMES}"
+        if (meta.get("success") and not missing_similar) or not AUTO_RETRY or attempt >= MAX_ATTEMPTS:
+            break
+    meta["x_request_cost_total"] = total_cost
+    if meta:
+        try:
+            detail_paths(sku)["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
+    return meta
 
 
 def fetch_review20_with_retries(client, target):
@@ -2591,7 +2649,8 @@ def build_outputs(targets):
         dmeta = read_json(detail_paths(sku)["meta"])
         rmeta = read_json(review_paths(sku)["meta"])
         cmeta = read_json(compare_paths(sku)["meta"])
-        rows.append(output_row(target))
+        row = output_row(target)
+        rows.append(row)
         if not dmeta.get("success"):
             failures.append(
                 {
@@ -2600,6 +2659,17 @@ def build_outputs(targets):
                     "attempt": dmeta.get("attempt", 0),
                     "status_code": dmeta.get("status_code", ""),
                     "error": dmeta.get("error", "missing_detail"),
+                    "retryable": str(int(int(dmeta.get("attempt", 0) or 0) < MAX_ATTEMPTS)),
+                }
+            )
+        if DETAIL_REQUIRE_SIMILAR and dmeta.get("success") and not compact_text(row.get("retailer_sku_name_similar")):
+            failures.append(
+                {
+                    "sku_id": sku,
+                    "stage": "detail_similar",
+                    "attempt": dmeta.get("attempt", 0),
+                    "status_code": dmeta.get("status_code", ""),
+                    "error": dmeta.get("similar_retry_reason", "missing_lazy_compare_response"),
                     "retryable": str(int(int(dmeta.get("attempt", 0) or 0) < MAX_ATTEMPTS)),
                 }
             )
@@ -2712,6 +2782,8 @@ def main():
                 print(
                     f"[{index}/{len(targets)}] sku={sku} "
                     f"detail={dmeta.get('success')} attempt={dmeta.get('attempt')} "
+                    f"similar={dmeta.get('json_response_compare_name_count', '')} "
+                    f"similar_ok={dmeta.get('json_response_compare_ok', '')} "
                     f"compare={cmeta.get('success')} attempt={cmeta.get('attempt')} "
                     f"review={rmeta.get('success')} attempt={rmeta.get('attempt')} "
                     f"reviews={rmeta.get('review_count_returned', '')}"
@@ -2728,6 +2800,8 @@ def main():
             print(
                 f"[{index}/{len(targets)}] sku={sku} "
                 f"detail={dmeta.get('success')} attempt={dmeta.get('attempt')} "
+                f"similar={dmeta.get('json_response_compare_name_count', '')} "
+                f"similar_ok={dmeta.get('json_response_compare_ok', '')} "
                 f"compare={cmeta.get('success')} attempt={cmeta.get('attempt')} "
                 f"review={rmeta.get('success')} attempt={rmeta.get('attempt')} "
                 f"reviews={rmeta.get('review_count_returned', '')}"
@@ -2762,6 +2836,8 @@ def main():
         "detail_scroll": DETAIL_SCROLL,
         "detail_json_response": DETAIL_JSON_RESPONSE,
         "detail_json_wait": DETAIL_JSON_WAIT,
+        "detail_require_similar": DETAIL_REQUIRE_SIMILAR,
+        "detail_similar_min_names": DETAIL_SIMILAR_MIN_NAMES,
         "use_db_selectors": USE_DB_SELECTORS,
         "fetch_mode": FETCH_MODE,
         "fetch_transports": fetch_transports(),

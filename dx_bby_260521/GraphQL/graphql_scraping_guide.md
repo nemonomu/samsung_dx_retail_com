@@ -3618,6 +3618,67 @@ EC2 IAM Role에 S3 권한 부여하면 키 없이도 동작.
 |---|---|
 | `RecommendationsAdDisplay_` ⭐ | **Compare 추천 + Complementary 추천** (핵심!) |
 
+### 8.1.1 BestBuy TV `retailer_sku_name_similar` 운영 기준
+
+2026-05-24 TV 검증 기준으로, `retailer_sku_name_similar`는 PDP 렌더 중 lazy-load되는 Compare 영역의 GraphQL 응답에서 가져온다.
+
+운영 기본 원칙:
+
+- 정상 운영에서는 `BESTBUY_DETAIL_FETCH_COMPARE=0`을 유지한다.
+- 즉, 별도 `GetCompareProduct` POST를 직접 추가 호출하지 않는다.
+- 대신 ZenRows detail 렌더 1회 안에서 BestBuy 페이지가 자체 호출하는 XHR/Fetch 응답을 `json_response=true`로 캡처한다.
+- Compare 영역은 스크롤 전에는 호출되지 않을 수 있으므로, detail `js_instructions`는 기존 스크롤을 유지하면서 1/4 지점 근처에서 위/아래로 작은 추가 이동과 2초 대기를 수행한다.
+- 검증 성공 기준은 `*_json_response_summary.json`에서 `has_get_compare: true` 또는 `is_compare_response: true`, 그리고 `compare_name_count > 0`이 확인되는 것이다.
+
+성공한 TV 검증 흐름:
+
+```text
+detail render 1회
++ json_response=true
++ BESTBUY_DETAIL_FETCH_COMPARE=0
++ PDP 1/4 지점 부근 scroll/wait
+=> BestBuy 페이지가 GetCompareProduct lazy-load
+=> json_response XHR에서 compare response 캡처
+=> retailer_sku_name_similar 저장
+```
+
+검증 예시:
+
+```text
+detail_cost_usd_this_run = 0.006999
+compare_cost_usd_this_run = 0.0
+retailer_sku_name_similar = 현재 상품명 ||| 유사 TV 1 ||| 유사 TV 2 ||| 유사 TV 3
+```
+
+주의:
+
+- `data.productBySkuId.skuId`가 현재 SKU와 같고, `data.recommendations.subPlacements[].recommendations[].item.name.short`가 있는 응답만 similar로 인정한다.
+- 벽걸이, 사운드바, 케이블 같은 일반 추천/액세서리 추천은 similar가 아니다.
+- summary artifact에는 `strict_compare_parser: true`가 있어야 최신 parser로 재계산된 파일이다.
+
+직접 호출 fallback 또는 응답 구조 검증용 operation:
+
+```json
+{
+  "operationName": "GetCompareProduct",
+  "variables": {
+    "placement": "single-compare",
+    "site": "dotcom-l",
+    "limit": 3,
+    "skuId": "6668565"
+  },
+  "extensions": {
+    "clientLibrary": {
+      "name": "@apollo/client",
+      "version": "4.1.6"
+    }
+  },
+  "query": "query GetCompareProduct($placement: String!, $site: String!, $limit: Int!, $skuId: String!) { productBySkuId(skuId: $skuId) { description { long } name { short } primaryImage { piscesHref } reviewInfo { averageRating reviewCount conFeatures { name } proFeatures { name } } specificationGroups { name specifications { definition displayName value } } url { relativePdp } skuId openBoxCondition } recommendations(filter: { placement: $placement, site: $site, limit: $limit, skus: [$skuId] }) { subPlacements { recommendations { ep id item { ... on Product { description { long } name { short } primaryImage { piscesHref } reviewInfo { averageRating reviewCount conFeatures { name } proFeatures { name } } specificationGroups { name specifications { definition displayName value } } url { relativePdp } skuId openBoxCondition } } } ep id name } } }"
+}
+```
+
+운영 parser는 위 operation을 직접 호출하지 않더라도, `json_response`에 캡처된 응답이 동일한 top-level 구조(`data.productBySkuId` + `data.recommendations`)를 만족하면 `retailer_sku_name_similar`로 사용할 수 있다.
+
 #### 부가 기능
 
 | 쿼리명 | 역할 |

@@ -48,6 +48,9 @@ FETCH_MODE = os.getenv("BESTBUY_FETCH_MODE", os.getenv("BESTBUY_DETAIL_FETCH_MOD
 WORKERS = int(os.getenv("BESTBUY_DETAIL_WORKERS", "3"))
 STAGE = os.getenv("BESTBUY_DETAIL_STAGE", "detail").lower()
 SAVE_HTML_MODE = os.getenv("BESTBUY_SAVE_HTML_MODE", "slim").lower()
+DETAIL_SCROLL = os.getenv("BESTBUY_DETAIL_SCROLL", "1").lower() in {"1", "true", "yes", "y"}
+DETAIL_JSON_RESPONSE = os.getenv("BESTBUY_DETAIL_JSON_RESPONSE", "0").lower() in {"1", "true", "yes", "y"}
+DETAIL_JSON_WAIT = os.getenv("BESTBUY_DETAIL_JSON_WAIT", "10000")
 
 RAW_DETAIL_DIR = DETAIL_ROOT / "raw" / "detail_html"
 RAW_REVIEW_DIR = DETAIL_ROOT / "raw" / "review20"
@@ -669,32 +672,40 @@ def response_error(status, text, fallback):
     return fallback
 
 
+def detail_js_instructions():
+    return [
+        {"wait": 2000},
+        {"scroll_y": 1800},
+        {"wait": 1500},
+        {"scroll_y": 500},
+        {"wait": 2500},
+        {"scroll_y": 1800},
+        {"wait": 800},
+        {"scroll_y": 1800},
+        {"wait": 800},
+        {"scroll_y": 2200},
+        {"wait": 900},
+        {"scroll_y": 2200},
+        {"wait": 900},
+        {"scroll_y": 2200},
+        {"wait": 900},
+        {"wait": 1500},
+    ]
+
+
 def detail_params():
-    return {
+    params = {
         "js_render": "true",
         "premium_proxy": "true",
         "proxy_country": "us",
-        "js_instructions": json.dumps(
-            [
-                {"wait": 2000},
-                {"scroll_y": 1800},
-                {"wait": 1500},
-                {"scroll_y": 500},
-                {"wait": 2500},
-                {"scroll_y": 1800},
-                {"wait": 800},
-                {"scroll_y": 1800},
-                {"wait": 800},
-                {"scroll_y": 2200},
-                {"wait": 900},
-                {"scroll_y": 2200},
-                {"wait": 900},
-                {"scroll_y": 2200},
-                {"wait": 900},
-                {"wait": 1500},
-            ]
-        ),
     }
+    if DETAIL_SCROLL:
+        params["js_instructions"] = json.dumps(detail_js_instructions())
+    elif DETAIL_JSON_RESPONSE:
+        params["wait"] = DETAIL_JSON_WAIT
+    if DETAIL_JSON_RESPONSE:
+        params["json_response"] = "true"
+    return params
 
 
 def graphql_params():
@@ -772,6 +783,8 @@ def legacy_detail_paths(sku):
         "html": RAW_DETAIL_DIR / f"{sku}.html",
         "headers": RAW_DETAIL_DIR / f"{sku}_headers.json",
         "apollo": RAW_DETAIL_DIR / f"{sku}_apollo.json",
+        "json_response": RAW_DETAIL_DIR / f"{sku}_json_response.json",
+        "json_response_summary": RAW_DETAIL_DIR / f"{sku}_json_response_summary.json",
         "meta": RAW_DETAIL_DIR / f"{sku}_meta.json",
     }
 
@@ -903,6 +916,8 @@ def detail_paths(sku):
             "html": folder / f"{sku}.html",
             "headers": folder / f"{sku}_headers.json",
             "apollo": folder / f"{sku}_apollo.json",
+            "json_response": folder / f"{sku}_json_response.json",
+            "json_response_summary": folder / f"{sku}_json_response_summary.json",
             "meta": folder / f"{sku}_meta.json",
         }
     legacy = legacy_detail_paths(sku)
@@ -913,6 +928,8 @@ def detail_paths(sku):
         "html": folder / f"{sku}.html",
         "headers": folder / f"{sku}_headers.json",
         "apollo": folder / f"{sku}_apollo.json",
+        "json_response": folder / f"{sku}_json_response.json",
+        "json_response_summary": folder / f"{sku}_json_response_summary.json",
         "meta": folder / f"{sku}_meta.json",
     }
 
@@ -923,6 +940,8 @@ def detail_paths_for_status(sku, target, success):
         "html": folder / f"{sku}.html",
         "headers": folder / f"{sku}_headers.json",
         "apollo": folder / f"{sku}_apollo.json",
+        "json_response": folder / f"{sku}_json_response.json",
+        "json_response_summary": folder / f"{sku}_json_response_summary.json",
         "meta": folder / f"{sku}_meta.json",
     }
 
@@ -1057,6 +1076,67 @@ def write_detail_artifacts(paths, html_text, headers):
         "full_bytes": len(html_text or ""),
         "stored_bytes": len(stored or ""),
         "apollo_payload_count": len(payloads),
+    }
+
+
+def parse_json_value(value):
+    if isinstance(value, (dict, list)):
+        return value
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        return json.loads(value)
+    except ValueError:
+        return {}
+
+
+def body_preview(value, limit=500):
+    if isinstance(value, str):
+        text = value
+    else:
+        text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    return compact_text(text)[:limit]
+
+
+def json_response_compare_summary(json_data):
+    xhr = (json_data.get("xhr") or []) if isinstance(json_data, dict) else []
+    if not isinstance(xhr, list):
+        xhr = []
+    hits = []
+    names = []
+    for request in xhr:
+        if not isinstance(request, dict):
+            continue
+        request_blob = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
+        url = str(request.get("url") or "")
+        if "GetCompareProduct" not in request_blob and "/gateway/graphql" not in url:
+            continue
+        body = request.get("body")
+        body_data = parse_json_value(body)
+        data = body_data.get("data") if isinstance(body_data, dict) else {}
+        request_names = compare_recommendation_names(data) if isinstance(data, dict) else []
+        if not request_names and isinstance(body_data, (dict, list)):
+            request_names = recommendation_names_from_data(body_data)
+        for name in request_names:
+            if name and name not in names:
+                names.append(name)
+        hits.append(
+            {
+                "method": request.get("method", ""),
+                "status_code": request.get("status_code", ""),
+                "url": url,
+                "has_get_compare": "GetCompareProduct" in request_blob,
+                "name_count": len(request_names),
+                "names": request_names[:5],
+                "body_preview": body_preview(body),
+            }
+        )
+    return {
+        "xhr_count": len(xhr),
+        "graphql_or_compare_hit_count": len(hits),
+        "compare_name_count": len(names),
+        "compare_names": names[:20],
+        "hits": hits[:20],
     }
 
 
@@ -1411,11 +1491,23 @@ def fetch_detail(client, target):
         start = time.perf_counter()
         try:
             response = client.get(pdp_url, params=detail_params(), timeout=REQUEST_TIMEOUT)
-            html_text = response.text
+            response_text = response.text
+            html_text = response_text
+            json_response_data = {}
+            json_response_summary = {}
+            if DETAIL_JSON_RESPONSE:
+                json_response_data = parse_json_value(response_text)
+                html_text = json_response_data.get("html") or json_response_data.get("content") or ""
+                json_response_summary = json_response_compare_summary(json_response_data)
             status = response.status_code
             success = status == 200 and has_product_schema(html_text)
             paths = detail_paths_for_status(sku, target, success)
             artifact_meta = write_detail_artifacts(paths, html_text, dict(response.headers))
+            if DETAIL_JSON_RESPONSE:
+                paths["json_response"].write_text(response_text, encoding="utf-8", errors="replace")
+                paths["json_response_summary"].write_text(
+                    json.dumps(json_response_summary, indent=2, ensure_ascii=False), encoding="utf-8"
+                )
             error = response_error(status, html_text, "detail_html_missing_product_schema")
             meta.update(
                 {
@@ -1429,6 +1521,10 @@ def fetch_detail(client, target):
                     "stored_bytes": artifact_meta["stored_bytes"],
                     "html_mode": artifact_meta["html_mode"],
                     "apollo_payload_count": artifact_meta["apollo_payload_count"],
+                    "json_response": DETAIL_JSON_RESPONSE,
+                    "json_response_xhr_count": json_response_summary.get("xhr_count", 0),
+                    "json_response_graphql_hit_count": json_response_summary.get("graphql_or_compare_hit_count", 0),
+                    "json_response_compare_name_count": json_response_summary.get("compare_name_count", 0),
                     "finished_at": now(),
                     "error": "" if success else error,
                 }
@@ -1694,6 +1790,8 @@ def compare_similar_names_from_detail(sku):
     if not source_names:
         source_names = recommendation_names_from_detail_payloads(sku)
     if not source_names:
+        source_names = compare_names_from_json_response(sku)
+    if not source_names:
         return []
 
     names = []
@@ -1708,6 +1806,18 @@ def compare_similar_names_from_detail(sku):
         if name and name not in names:
             names.append(name)
     return names
+
+
+def compare_names_from_json_response(sku):
+    paths = detail_paths(sku)
+    summary = read_json(paths.get("json_response_summary"))
+    names = summary.get("compare_names") if isinstance(summary, dict) else []
+    if isinstance(names, list) and names:
+        return [name for name in names if name]
+    json_data = read_json(paths.get("json_response"))
+    summary = json_response_compare_summary(json_data)
+    names = summary.get("compare_names") if isinstance(summary, dict) else []
+    return [name for name in names if name] if isinstance(names, list) else []
 
 
 def compare_recommendation_names(data):
@@ -2532,6 +2642,9 @@ def main():
         "max_attempts": MAX_ATTEMPTS,
         "auto_retry": AUTO_RETRY,
         "target_skus": sorted(TARGET_SKUS),
+        "detail_scroll": DETAIL_SCROLL,
+        "detail_json_response": DETAIL_JSON_RESPONSE,
+        "detail_json_wait": DETAIL_JSON_WAIT,
         "fetch_mode": FETCH_MODE,
         "fetch_transports": fetch_transports(),
         "target_count": len(output_targets),

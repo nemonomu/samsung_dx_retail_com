@@ -63,6 +63,12 @@ DETAIL_COMPARE_CAPTURE_HOOK = os.getenv("BESTBUY_DETAIL_COMPARE_CAPTURE_HOOK", "
     "yes",
     "y",
 }
+DETAIL_COMPARE_SCROLL_SCAN = os.getenv("BESTBUY_DETAIL_COMPARE_SCROLL_SCAN", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
 DETAIL_JSON_RESPONSE = os.getenv("BESTBUY_DETAIL_JSON_RESPONSE", "0").lower() in {"1", "true", "yes", "y"}
 DETAIL_JSON_WAIT = os.getenv("BESTBUY_DETAIL_JSON_WAIT", "10000")
 DETAIL_REQUIRE_SIMILAR = (
@@ -829,38 +835,96 @@ def detail_compare_capture_hook_script():
 """
 
 
+def detail_compare_scroll_scan_script():
+    return r"""
+(() => {
+  const points = [0.18, 0.24, 0.30, 0.36, 0.43, 0.53, 0.45, 0.37, 0.30, 0.24];
+  const delay = 650;
+  if (Array.isArray(window.__bbyCompareScanTimers)) {
+    window.__bbyCompareScanTimers.forEach((timer) => clearTimeout(timer));
+  }
+  window.__bbyCompareScanTimers = [];
+  const height = () => Math.max(
+    document.documentElement.scrollHeight || 0,
+    document.body ? document.body.scrollHeight || 0 : 0,
+    window.innerHeight || 0
+  );
+  points.forEach((point, index) => {
+    const timer = setTimeout(() => {
+      const y = Math.max(0, Math.floor(height() * point));
+      window.scrollTo(0, y);
+      try { window.dispatchEvent(new Event("scroll")); } catch (e) {}
+    }, index * delay);
+    window.__bbyCompareScanTimers.push(timer);
+  });
+})();
+"""
+
+
+def detail_scroll_to_text_script(keywords, fallback_fraction):
+    return f"""
+(() => {{
+  const keywords = {json.dumps([keyword.lower() for keyword in keywords])};
+  const fallbackFraction = {float(fallback_fraction)};
+  const maxTextLength = 1800;
+  const selectors = "h1,h2,h3,h4,section,[data-testid],div";
+  function norm(value) {{
+    return String(value || "").replace(/\\s+/g, " ").trim().toLowerCase();
+  }}
+  function height() {{
+    return Math.max(
+      document.documentElement.scrollHeight || 0,
+      document.body ? document.body.scrollHeight || 0 : 0,
+      window.innerHeight || 0
+    );
+  }}
+  let best = null;
+  let bestScore = -1;
+  for (const el of Array.from(document.querySelectorAll(selectors))) {{
+    const text = norm(el.innerText || el.textContent || "");
+    if (!text || text.length > maxTextLength) continue;
+    let score = 0;
+    for (const keyword of keywords) {{
+      if (text.indexOf(keyword) !== -1) score += 1000 - Math.min(text.length, 900);
+    }}
+    if (!score) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) continue;
+    if (/^H[1-4]$/.test(el.tagName)) score += 200;
+    if (score > bestScore) {{
+      bestScore = score;
+      best = el;
+    }}
+  }}
+  if (best) {{
+    const top = best.getBoundingClientRect().top + window.scrollY - Math.floor((window.innerHeight || 800) * 0.22);
+    window.scrollTo(0, Math.max(0, Math.floor(top)));
+    try {{ best.setAttribute("data-bby-compare-scroll-hit", keywords.join("|")); }} catch (e) {{}}
+  }} else {{
+    window.scrollTo(0, Math.max(0, Math.floor(height() * fallbackFraction)));
+  }}
+  try {{ window.dispatchEvent(new Event("scroll")); }} catch (e) {{}}
+}})();
+"""
+
+
 def detail_js_instructions(attempt=1):
-    quarter_scroll = (
-        "window.scrollTo(0, Math.floor((document.documentElement.scrollHeight || document.body.scrollHeight) * 0.25));"
-    )
-    upper_eighth_scroll = (
-        "window.scrollTo(0, Math.floor((document.documentElement.scrollHeight || document.body.scrollHeight) * 0.125));"
-    )
-    lower_eighth_scroll = (
-        "window.scrollTo(0, Math.floor((document.documentElement.scrollHeight || document.body.scrollHeight) * 0.375));"
-    )
+    compare_keywords = ["Compare similar products", "Compare similar", "Similar products"]
     settle = [{"wait_event": "networkalmostidle"}] if DETAIL_SCROLL_NETWORK_IDLE else []
     instructions = [
         *([{"evaluate": detail_compare_capture_hook_script()}] if DETAIL_COMPARE_CAPTURE_HOOK else []),
-        {"wait": 2000},
-        {"scroll_y": 1800},
-        {"wait": 1200},
-        {"scroll_y": 500},
-        {"wait": 1500},
-        {"evaluate": quarter_scroll},
-        *settle,
-        {"wait": 2200},
-        {"evaluate": lower_eighth_scroll},
-        *settle,
-        {"wait": 1500},
-        {"evaluate": quarter_scroll},
-        *settle,
-        {"wait": 1500},
-        {"evaluate": upper_eighth_scroll},
-        {"wait": 1500},
-        {"evaluate": quarter_scroll},
-        *settle,
         {"wait": 1800},
+        *([{"evaluate": detail_compare_scroll_scan_script()}, {"wait": 7000}] if DETAIL_COMPARE_SCROLL_SCAN else []),
+        *settle,
+        {"evaluate": detail_scroll_to_text_script(compare_keywords, 0.32)},
+        {"wait": 2200},
+        *settle,
+        {"evaluate": detail_scroll_to_text_script(compare_keywords, 0.43)},
+        {"wait": 1800},
+        *settle,
+        {"evaluate": detail_scroll_to_text_script(compare_keywords, 0.25)},
+        {"wait": 1500},
+        *settle,
     ]
 
     instructions.extend(
@@ -1815,7 +1879,8 @@ def fetch_detail(client, target):
             print(
                 f"[detail:start] sku={sku} attempt={attempt} transport={transport} "
                 f"json_response={DETAIL_JSON_RESPONSE} scroll={DETAIL_SCROLL} "
-                f"network_idle={DETAIL_SCROLL_NETWORK_IDLE} capture_hook={DETAIL_COMPARE_CAPTURE_HOOK}",
+                f"network_idle={DETAIL_SCROLL_NETWORK_IDLE} capture_hook={DETAIL_COMPARE_CAPTURE_HOOK} "
+                f"scroll_scan={DETAIL_COMPARE_SCROLL_SCAN}",
                 flush=True,
             )
             response = client.get(pdp_url, params=detail_params(attempt), timeout=REQUEST_TIMEOUT)
@@ -3040,6 +3105,7 @@ def main():
         "detail_scroll": DETAIL_SCROLL,
         "detail_scroll_network_idle": DETAIL_SCROLL_NETWORK_IDLE,
         "detail_compare_capture_hook": DETAIL_COMPARE_CAPTURE_HOOK,
+        "detail_compare_scroll_scan": DETAIL_COMPARE_SCROLL_SCAN,
         "detail_json_response": DETAIL_JSON_RESPONSE,
         "detail_json_wait": DETAIL_JSON_WAIT,
         "detail_require_similar": DETAIL_REQUIRE_SIMILAR,

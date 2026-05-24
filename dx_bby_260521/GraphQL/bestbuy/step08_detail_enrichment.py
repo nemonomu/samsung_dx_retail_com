@@ -57,6 +57,12 @@ DETAIL_REQUIRE_SIMILAR = (
     os.getenv("BESTBUY_DETAIL_REQUIRE_SIMILAR", "1" if DETAIL_JSON_RESPONSE else "0").lower()
     in {"1", "true", "yes", "y"}
 )
+DETAIL_RETRY_ON_MISSING_SIMILAR = os.getenv("BESTBUY_DETAIL_RETRY_ON_MISSING_SIMILAR", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
 DETAIL_SIMILAR_MIN_NAMES = int(os.getenv("BESTBUY_DETAIL_SIMILAR_MIN_NAMES", "1"))
 
 RAW_DETAIL_DIR = DETAIL_ROOT / "raw" / "detail_html"
@@ -700,15 +706,15 @@ def detail_js_instructions(attempt=1):
         {"scroll_y": 500},
         {"wait": 2500},
         {"evaluate": quarter_scroll},
-        {"wait": 2000},
+        {"wait": 3000},
         {"evaluate": lower_eighth_scroll},
-        {"wait": 2000},
+        {"wait": 2500},
         {"evaluate": quarter_scroll},
         {"wait": 2000},
         {"evaluate": upper_eighth_scroll},
         {"wait": 2000},
         {"evaluate": quarter_scroll},
-        {"wait": 2000},
+        {"wait": 2500},
     ]
 
     instructions.extend(
@@ -1882,7 +1888,7 @@ def fetch_with_retries(fetcher, success_key, client, target):
 
 
 def detail_needs_similar_retry(meta):
-    if not DETAIL_JSON_RESPONSE or not DETAIL_REQUIRE_SIMILAR:
+    if not DETAIL_JSON_RESPONSE or not DETAIL_REQUIRE_SIMILAR or not DETAIL_RETRY_ON_MISSING_SIMILAR:
         return False
     if meta.get("success") is not True:
         return False
@@ -2663,7 +2669,7 @@ def build_outputs(targets):
                     "stage": "detail_similar",
                     "attempt": dmeta.get("attempt", 0),
                     "status_code": dmeta.get("status_code", ""),
-                    "error": dmeta.get("similar_retry_reason", "missing_lazy_compare_response"),
+                    "error": dmeta.get("similar_retry_reason", "compare_response_not_captured_in_render_window"),
                     "retryable": str(int(int(dmeta.get("attempt", 0) or 0) < MAX_ATTEMPTS)),
                 }
             )
@@ -2835,6 +2841,7 @@ def main():
         "detail_json_response": DETAIL_JSON_RESPONSE,
         "detail_json_wait": DETAIL_JSON_WAIT,
         "detail_require_similar": DETAIL_REQUIRE_SIMILAR,
+        "detail_retry_on_missing_similar": DETAIL_RETRY_ON_MISSING_SIMILAR,
         "detail_similar_min_names": DETAIL_SIMILAR_MIN_NAMES,
         "use_db_selectors": USE_DB_SELECTORS,
         "fetch_mode": FETCH_MODE,

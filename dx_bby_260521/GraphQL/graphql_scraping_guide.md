@@ -3627,7 +3627,9 @@ EC2 IAM Role에 S3 권한 부여하면 키 없이도 동작.
 - 정상 운영에서는 `BESTBUY_DETAIL_FETCH_COMPARE=0`을 유지한다.
 - 즉, 별도 `GetCompareProduct` POST를 직접 추가 호출하지 않는다.
 - 대신 ZenRows detail 렌더 1회 안에서 BestBuy 페이지가 자체 호출하는 XHR/Fetch 응답을 `json_response=true`로 캡처한다.
-- Compare 영역은 스크롤 전에는 호출되지 않을 수 있으므로, detail `js_instructions`는 기존 스크롤을 유지하면서 1/4 지점 근처에서 위/아래로 작은 추가 이동과 2초 대기를 수행한다.
+- Compare 영역은 review 섹션 로딩 이후 lazy-load되므로, detail `js_instructions`는 기존 스크롤을 유지하면서 1/4 지점 근처에서 위/아래로 작은 추가 이동과 짧은 대기를 수행한다.
+- 정상 운영은 SKU당 detail render 1회를 원칙으로 한다. `retailer_sku_name_similar`가 비었다는 이유만으로 같은 SKU를 자동 재호출하지 않는다.
+- `BESTBUY_DETAIL_RETRY_ON_MISSING_SIMILAR=0`을 기본값으로 유지한다. 재호출 보강은 운영자가 비용을 명시적으로 감수할 때만 별도 실행한다.
 - 검증 성공 기준은 `*_json_response_summary.json`에서 `has_get_compare: true` 또는 `is_compare_response: true`, 그리고 `compare_name_count > 0`이 확인되는 것이다.
 
 성공한 TV 검증 흐름:
@@ -3636,6 +3638,7 @@ EC2 IAM Role에 S3 권한 부여하면 키 없이도 동작.
 detail render 1회
 + json_response=true
 + BESTBUY_DETAIL_FETCH_COMPARE=0
++ BESTBUY_DETAIL_RETRY_ON_MISSING_SIMILAR=0
 + PDP 1/4 지점 부근 scroll/wait
 => BestBuy 페이지가 GetCompareProduct lazy-load
 => json_response XHR에서 compare response 캡처

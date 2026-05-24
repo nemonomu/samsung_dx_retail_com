@@ -1157,6 +1157,7 @@ def json_response_compare_summary(json_data, sku=""):
             }
         )
     return {
+        "strict_compare_parser": True,
         "xhr_count": len(xhr),
         "graphql_or_compare_hit_count": len(hits),
         "compare_name_count": len(names),
@@ -1833,14 +1834,19 @@ def compare_similar_names_from_detail(sku):
 
 def compare_names_from_json_response(sku):
     paths = detail_paths(sku)
+    json_data = read_json(paths.get("json_response"))
+    if json_data:
+        summary = json_response_compare_summary(json_data, sku)
+        names = summary.get("compare_names") if isinstance(summary, dict) else []
+        return [name for name in names if name] if isinstance(names, list) else []
+
     summary = read_json(paths.get("json_response_summary"))
+    if not isinstance(summary, dict) or summary.get("strict_compare_parser") is not True:
+        return []
     names = summary.get("compare_names") if isinstance(summary, dict) else []
     if isinstance(names, list) and names:
         return [name for name in names if name]
-    json_data = read_json(paths.get("json_response"))
-    summary = json_response_compare_summary(json_data, sku)
-    names = summary.get("compare_names") if isinstance(summary, dict) else []
-    return [name for name in names if name] if isinstance(names, list) else []
+    return []
 
 
 def compare_recommendation_names(data):

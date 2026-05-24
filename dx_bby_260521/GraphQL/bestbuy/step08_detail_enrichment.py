@@ -673,12 +673,31 @@ def response_error(status, text, fallback):
 
 
 def detail_js_instructions():
+    quarter_scroll = (
+        "window.scrollTo(0, Math.floor((document.documentElement.scrollHeight || document.body.scrollHeight) * 0.25));"
+    )
+    upper_eighth_scroll = (
+        "window.scrollTo(0, Math.floor((document.documentElement.scrollHeight || document.body.scrollHeight) * 0.125));"
+    )
+    lower_eighth_scroll = (
+        "window.scrollTo(0, Math.floor((document.documentElement.scrollHeight || document.body.scrollHeight) * 0.375));"
+    )
     return [
         {"wait": 2000},
         {"scroll_y": 1800},
         {"wait": 1500},
         {"scroll_y": 500},
         {"wait": 2500},
+        {"evaluate": quarter_scroll},
+        {"wait": 2000},
+        {"evaluate": lower_eighth_scroll},
+        {"wait": 2000},
+        {"evaluate": quarter_scroll},
+        {"wait": 2000},
+        {"evaluate": upper_eighth_scroll},
+        {"wait": 2000},
+        {"evaluate": quarter_scroll},
+        {"wait": 2000},
         {"scroll_y": 1800},
         {"wait": 800},
         {"scroll_y": 1800},

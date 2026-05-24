@@ -51,6 +51,12 @@ WORKERS = int(os.getenv("BESTBUY_DETAIL_WORKERS", "3"))
 STAGE = os.getenv("BESTBUY_DETAIL_STAGE", "detail").lower()
 SAVE_HTML_MODE = os.getenv("BESTBUY_SAVE_HTML_MODE", "slim").lower()
 DETAIL_SCROLL = os.getenv("BESTBUY_DETAIL_SCROLL", "1").lower() in {"1", "true", "yes", "y"}
+DETAIL_SCROLL_NETWORK_IDLE = os.getenv("BESTBUY_DETAIL_SCROLL_NETWORK_IDLE", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
 DETAIL_JSON_RESPONSE = os.getenv("BESTBUY_DETAIL_JSON_RESPONSE", "0").lower() in {"1", "true", "yes", "y"}
 DETAIL_JSON_WAIT = os.getenv("BESTBUY_DETAIL_JSON_WAIT", "10000")
 DETAIL_REQUIRE_SIMILAR = (
@@ -699,22 +705,27 @@ def detail_js_instructions(attempt=1):
     lower_eighth_scroll = (
         "window.scrollTo(0, Math.floor((document.documentElement.scrollHeight || document.body.scrollHeight) * 0.375));"
     )
+    settle = [{"wait_event": "networkalmostidle"}] if DETAIL_SCROLL_NETWORK_IDLE else []
     instructions = [
         {"wait": 2000},
         {"scroll_y": 1800},
-        {"wait": 1500},
+        {"wait": 1200},
         {"scroll_y": 500},
-        {"wait": 2500},
+        {"wait": 1500},
         {"evaluate": quarter_scroll},
-        {"wait": 3000},
+        *settle,
+        {"wait": 2200},
         {"evaluate": lower_eighth_scroll},
-        {"wait": 2500},
+        *settle,
+        {"wait": 1500},
         {"evaluate": quarter_scroll},
-        {"wait": 2000},
+        *settle,
+        {"wait": 1500},
         {"evaluate": upper_eighth_scroll},
-        {"wait": 2000},
+        {"wait": 1500},
         {"evaluate": quarter_scroll},
-        {"wait": 2500},
+        *settle,
+        {"wait": 1800},
     ]
 
     instructions.extend(
@@ -1616,7 +1627,8 @@ def fetch_detail(client, target):
         try:
             print(
                 f"[detail:start] sku={sku} attempt={attempt} transport={transport} "
-                f"json_response={DETAIL_JSON_RESPONSE} scroll={DETAIL_SCROLL}",
+                f"json_response={DETAIL_JSON_RESPONSE} scroll={DETAIL_SCROLL} "
+                f"network_idle={DETAIL_SCROLL_NETWORK_IDLE}",
                 flush=True,
             )
             response = client.get(pdp_url, params=detail_params(attempt), timeout=REQUEST_TIMEOUT)
@@ -2838,6 +2850,7 @@ def main():
         "auto_retry": AUTO_RETRY,
         "target_skus": sorted(TARGET_SKUS),
         "detail_scroll": DETAIL_SCROLL,
+        "detail_scroll_network_idle": DETAIL_SCROLL_NETWORK_IDLE,
         "detail_json_response": DETAIL_JSON_RESPONSE,
         "detail_json_wait": DETAIL_JSON_WAIT,
         "detail_require_similar": DETAIL_REQUIRE_SIMILAR,

@@ -745,6 +745,7 @@ def detail_compare_capture_hook_script():
 
   function publish() {
     try {
+      window.__bbyCompareCaptureCount = captures.length;
       let el = document.getElementById(captureId);
       if (!el) {
         el = document.createElement("textarea");
@@ -873,9 +874,23 @@ def detail_compare_dom_observer_script():
   if (window.__bbyCompareDomObserverInstalled) return;
   window.__bbyCompareDomObserverInstalled = true;
   window.__bbyCompareDomObserverHits = 0;
+  window.__bbyCompareJiggleCount = 0;
   const keywords = ["compare similar products", "compare similar", "similar products"];
   const selectors = "h1,h2,h3,h4,section,[data-testid],div";
   const maxTextLength = 1800;
+  const debugId = "bby-compare-debug";
+  const debug = window.__bbyCompareDebug || {
+    events: [],
+    compareTextFound: false,
+    observerHits: 0,
+    jiggleCount: 0,
+    fallbackScrolls: 0,
+    captureCount: 0,
+    lastScrollY: 0,
+    lastScrollPercent: 0,
+    pageHeight: 0
+  };
+  window.__bbyCompareDebug = debug;
 
   function norm(value) {
     return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -887,6 +902,56 @@ def detail_compare_dom_observer_script():
       document.body ? document.body.scrollHeight || 0 : 0,
       window.innerHeight || 0
     );
+  }
+
+  function publishDebug() {
+    try {
+      const height = pageHeight();
+      debug.captureCount = Number(window.__bbyCompareCaptureCount || 0);
+      debug.observerHits = Number(window.__bbyCompareDomObserverHits || 0);
+      debug.jiggleCount = Number(window.__bbyCompareJiggleCount || 0);
+      debug.lastScrollY = Math.max(0, Math.floor(window.scrollY || 0));
+      debug.pageHeight = height;
+      debug.lastScrollPercent = height ? Number((debug.lastScrollY / height).toFixed(4)) : 0;
+      let el = document.getElementById(debugId);
+      if (!el) {
+        el = document.createElement("textarea");
+        el.id = debugId;
+        el.hidden = true;
+        el.style.display = "none";
+        (document.body || document.documentElement).appendChild(el);
+      }
+      el.textContent = JSON.stringify(debug);
+    } catch (e) {}
+  }
+
+  function record(eventName, extra) {
+    try {
+      debug.events.push(Object.assign({ event: eventName, ts: Date.now() }, extra || {}));
+      if (debug.events.length > 40) debug.events = debug.events.slice(-40);
+      publishDebug();
+    } catch (e) {}
+  }
+
+  function dispatchLazyEvents() {
+    try { window.dispatchEvent(new Event("scroll")); } catch (e) {}
+    try { window.dispatchEvent(new Event("resize")); } catch (e) {}
+  }
+
+  let lastJiggleAt = 0;
+  function jiggleAround(baseY, reason) {
+    const now = Date.now();
+    if (now - lastJiggleAt < 1000) return;
+    lastJiggleAt = now;
+    const offsets = [0, 36, -32, 58, -18, 0];
+    offsets.forEach((offset, index) => {
+      setTimeout(() => {
+        window.scrollTo(0, Math.max(0, Math.floor(baseY + offset)));
+        window.__bbyCompareJiggleCount += 1;
+        dispatchLazyEvents();
+        record("jiggle", { offset, reason });
+      }, 220 + index * 260);
+    });
   }
 
   function findCompareNode() {
@@ -914,10 +979,18 @@ def detail_compare_dom_observer_script():
   function scrollToNode(el) {
     if (!el) return false;
     const top = el.getBoundingClientRect().top + window.scrollY - Math.floor((window.innerHeight || 800) * 0.22);
-    window.scrollTo(0, Math.max(0, Math.floor(top)));
-    try { window.dispatchEvent(new Event("scroll")); } catch (e) {}
+    const baseY = Math.max(0, Math.floor(top));
+    window.scrollTo(0, baseY);
+    dispatchLazyEvents();
     try { el.setAttribute("data-bby-compare-observer-hit", String(Date.now())); } catch (e) {}
     window.__bbyCompareDomObserverHits += 1;
+    debug.compareTextFound = true;
+    record("compare_text_found", {
+      tag: el.tagName || "",
+      text: norm(el.innerText || el.textContent || "").slice(0, 160),
+      y: baseY
+    });
+    jiggleAround(baseY, "compare_text_found");
     return true;
   }
 
@@ -925,7 +998,9 @@ def detail_compare_dom_observer_script():
     const node = findCompareNode();
     if (scrollToNode(node)) return true;
     window.scrollTo(0, Math.max(0, Math.floor(pageHeight() * Number(fallbackFraction || 0.32))));
-    try { window.dispatchEvent(new Event("scroll")); } catch (e) {}
+    debug.fallbackScrolls += 1;
+    dispatchLazyEvents();
+    record("fallback_scroll", { fraction: Number(fallbackFraction || 0.32) });
     return false;
   };
 
@@ -956,7 +1031,8 @@ def detail_compare_dom_observer_script():
     observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
     window.__bbyCompareDomObserver = observer;
   } catch (e) {}
-  [600, 1600, 3200, 5600, 8600, 12500, 16500].forEach((ms) => setTimeout(pulse, ms));
+  [600, 1600, 3200, 5600, 8600, 12500, 16500, 20500].forEach((ms) => setTimeout(pulse, ms));
+  publishDebug();
 })();
 """
 
@@ -1025,13 +1101,13 @@ def detail_js_instructions(attempt=1):
         ),
         *settle,
         {"evaluate": "window.__bbyCompareScrollToText ? window.__bbyCompareScrollToText(0.32) : null;"},
-        {"wait": 2200},
+        {"wait": 3600},
         *settle,
         {"evaluate": "window.__bbyCompareScrollToText ? window.__bbyCompareScrollToText(0.43) : null;"},
-        {"wait": 1800},
+        {"wait": 2600},
         *settle,
         {"evaluate": "window.__bbyCompareScrollToText ? window.__bbyCompareScrollToText(0.25) : null;"},
-        {"wait": 1500},
+        {"wait": 2000},
         *settle,
     ]
 
@@ -1505,6 +1581,21 @@ def compare_capture_entries_from_html(html_text):
     return entries
 
 
+def compare_debug_from_html(html_text):
+    if not isinstance(html_text, str) or "bby-compare-debug" not in html_text:
+        return {}
+    pattern = re.compile(
+        r"<textarea\b(?=[^>]*\bid=[\"']bby-compare-debug[\"'])[^>]*>(.*?)</textarea>",
+        re.IGNORECASE | re.DOTALL,
+    )
+    matches = list(pattern.finditer(html_text))
+    if not matches:
+        return {}
+    raw = html.unescape(matches[-1].group(1) or "").strip()
+    data = parse_json_value(raw)
+    return data if isinstance(data, dict) else {}
+
+
 def json_response_compare_summary(json_data, sku=""):
     xhr = (json_data.get("xhr") or []) if isinstance(json_data, dict) else []
     if not isinstance(xhr, list):
@@ -1544,6 +1635,7 @@ def json_response_compare_summary(json_data, sku=""):
     if isinstance(json_data, dict):
         html_text = json_data.get("html") or json_data.get("content") or ""
     capture_entries = compare_capture_entries_from_html(html_text)
+    compare_debug = compare_debug_from_html(html_text)
     for entry in capture_entries:
         body = entry.get("body")
         body_data = parse_json_value(body)
@@ -1573,6 +1665,7 @@ def json_response_compare_summary(json_data, sku=""):
         "strict_compare_parser": True,
         "xhr_count": len(xhr),
         "html_compare_capture_count": len(capture_entries),
+        "html_compare_debug": compare_debug,
         "graphql_or_compare_hit_count": len(hits),
         "compare_name_count": len(names),
         "compare_names": names[:20],
@@ -2001,6 +2094,7 @@ def fetch_detail(client, target):
                 html_text = json_response_data.get("html") or json_response_data.get("content") or ""
                 json_response_summary = json_response_compare_summary(json_response_data, sku)
             compare_name_count = int(json_response_summary.get("compare_name_count", 0) or 0)
+            compare_debug = json_response_summary.get("html_compare_debug") or {}
             compare_ok = (not DETAIL_REQUIRE_SIMILAR) or compare_name_count >= DETAIL_SIMILAR_MIN_NAMES
             status = response.status_code
             success = status == 200 and has_product_schema(html_text)
@@ -2027,6 +2121,20 @@ def fetch_detail(client, target):
                     "json_response": DETAIL_JSON_RESPONSE,
                     "json_response_xhr_count": json_response_summary.get("xhr_count", 0),
                     "json_response_html_capture_count": json_response_summary.get("html_compare_capture_count", 0),
+                    "json_response_compare_debug_compare_text_found": bool(
+                        compare_debug.get("compareTextFound")
+                    )
+                    if isinstance(compare_debug, dict)
+                    else False,
+                    "json_response_compare_debug_observer_hits": compare_debug.get("observerHits", 0)
+                    if isinstance(compare_debug, dict)
+                    else 0,
+                    "json_response_compare_debug_jiggle_count": compare_debug.get("jiggleCount", 0)
+                    if isinstance(compare_debug, dict)
+                    else 0,
+                    "json_response_compare_debug_last_scroll_percent": compare_debug.get("lastScrollPercent", 0)
+                    if isinstance(compare_debug, dict)
+                    else 0,
                     "json_response_graphql_hit_count": json_response_summary.get("graphql_or_compare_hit_count", 0),
                     "json_response_compare_name_count": compare_name_count,
                     "json_response_compare_required": DETAIL_REQUIRE_SIMILAR,
@@ -2882,6 +2990,31 @@ def sample_fields():
         return next(csv.reader(f))
 
 
+NO_LONGER_AVAILABLE_PHRASES = (
+    "no longer available",
+    "this item is no longer available",
+    "item is no longer available",
+    "product is no longer available",
+)
+
+
+def detail_no_longer_available(sku):
+    paths = detail_paths(sku)
+    html_path = paths.get("html")
+    html_text = html_path.read_text(encoding="utf-8", errors="replace") if html_path and html_path.exists() else ""
+    text_parts = [html_text]
+    try:
+        text_parts.append(BeautifulSoup(html_text or "", "html.parser").get_text(" "))
+    except Exception:
+        pass
+    try:
+        text_parts.append(json.dumps(products_from_detail(sku), ensure_ascii=False))
+    except Exception:
+        pass
+    haystack = compact_text(" ".join(text_parts)).lower()
+    return any(phrase in haystack for phrase in NO_LONGER_AVAILABLE_PHRASES)
+
+
 def output_row(target):
     sku = str(target.get("sku_id") or "").strip()
     detail_html_path = detail_paths(sku)["html"]
@@ -3035,7 +3168,12 @@ def build_outputs(targets):
                     "retryable": str(int(int(dmeta.get("attempt", 0) or 0) < MAX_ATTEMPTS)),
                 }
             )
-        if DETAIL_REQUIRE_SIMILAR and dmeta.get("success") and not compact_text(row.get("retailer_sku_name_similar")):
+        if (
+            DETAIL_REQUIRE_SIMILAR
+            and dmeta.get("success")
+            and not compact_text(row.get("retailer_sku_name_similar"))
+            and not detail_no_longer_available(sku)
+        ):
             failures.append(
                 {
                     "sku_id": sku,

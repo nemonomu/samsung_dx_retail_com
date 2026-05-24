@@ -1839,6 +1839,12 @@ def compare_names_from_json_response(sku):
     json_data = read_json(paths.get("json_response"))
     if json_data:
         summary = json_response_compare_summary(json_data, sku)
+        try:
+            paths["json_response_summary"].write_text(
+                json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+        except OSError:
+            pass
         names = summary.get("compare_names") if isinstance(summary, dict) else []
         return [name for name in names if name] if isinstance(names, list) else []
 

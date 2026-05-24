@@ -1116,7 +1116,9 @@ def strict_compare_response_names(body_data, sku=""):
         return []
 
     product = data.get("productBySkuId")
-    if sku and isinstance(product, dict) and str(product.get("skuId") or "") != str(sku):
+    if not isinstance(product, dict):
+        return []
+    if sku and str(product.get("skuId") or "") != str(sku):
         return []
     return compare_recommendation_names(data)
 

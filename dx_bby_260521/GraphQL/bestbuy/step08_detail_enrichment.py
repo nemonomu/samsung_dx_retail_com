@@ -1608,6 +1608,11 @@ def fetch_detail(client, target):
             continue
         start = time.perf_counter()
         try:
+            print(
+                f"[detail:start] sku={sku} attempt={attempt} transport={transport} "
+                f"json_response={DETAIL_JSON_RESPONSE} scroll={DETAIL_SCROLL}",
+                flush=True,
+            )
             response = client.get(pdp_url, params=detail_params(attempt), timeout=REQUEST_TIMEOUT)
             response_text = response.text
             html_text = response_text

@@ -1864,13 +1864,15 @@ def fetch_compare(client, target):
 def fetch_with_retries(fetcher, success_key, client, target):
     total_cost = 0.0
     meta = {}
+    run_attempts = 0
     while True:
         meta = fetcher(client, target)
+        run_attempts += 1
         total_cost += float(meta.get("x_request_cost") or 0)
-        attempt = int(meta.get("attempt") or 0)
-        if meta.get(success_key) or not AUTO_RETRY or attempt >= MAX_ATTEMPTS:
+        if meta.get(success_key) or not AUTO_RETRY or run_attempts >= MAX_ATTEMPTS:
             break
     meta["x_request_cost_total"] = total_cost
+    meta["run_attempts"] = run_attempts
     return meta
 
 
@@ -2774,6 +2776,7 @@ def main():
                     f"similar_ok={dmeta.get('json_response_compare_ok', '')} "
                     f"compare={cmeta.get('success')} attempt={cmeta.get('attempt')} "
                     f"review={rmeta.get('success')} attempt={rmeta.get('attempt')} "
+                    f"review_run_attempts={rmeta.get('run_attempts', '')} "
                     f"reviews={rmeta.get('review_count_returned', '')}"
                 )
     else:
@@ -2793,6 +2796,7 @@ def main():
                 f"similar_ok={dmeta.get('json_response_compare_ok', '')} "
                 f"compare={cmeta.get('success')} attempt={cmeta.get('attempt')} "
                 f"review={rmeta.get('success')} attempt={rmeta.get('attempt')} "
+                f"review_run_attempts={rmeta.get('run_attempts', '')} "
                 f"reviews={rmeta.get('review_count_returned', '')}"
             )
 

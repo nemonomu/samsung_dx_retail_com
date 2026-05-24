@@ -375,6 +375,10 @@ Meaning:
 - `bestbuy_final_targets.csv`: target rows for detail enrichment.
 - `bestbuy_product_list.csv`: listing-level DB output, detail excluded.
 - `final_output.csv`: final integrated result with detail and review enrichment.
+- Best Buy detail fetches should use the canonical PDP URL. If a target URL
+  includes `/sku/{sku_id}`, strip that suffix before rendering because some
+  SKU-suffixed PDP URLs can resolve to an unavailable page while the canonical
+  product URL still exposes the detail and compare sections.
 
 ## DB Policy
 

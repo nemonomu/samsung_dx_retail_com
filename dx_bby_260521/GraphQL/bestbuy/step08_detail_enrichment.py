@@ -205,6 +205,15 @@ def canonical_pdp_url(url):
     return text.rstrip("/").lower()
 
 
+def fetchable_pdp_url(url):
+    text = compact_text(url)
+    if not text:
+        return ""
+    if "/sku/" in text:
+        text = text.split("/sku/", 1)[0]
+    return text.rstrip("/")
+
+
 def truthy(value):
     return value is True or str(value or "").strip().lower() in {"1", "true", "yes", "y", "sponsored"}
 
@@ -1454,7 +1463,7 @@ def compare_paths_for_status(sku, target, success):
 
 
 def target_url(target, sku):
-    url = str(target.get("product_url") or "").strip()
+    url = fetchable_pdp_url(target.get("product_url"))
     # PDP URL fallback is intentionally disabled for sponsored enrichment.
     # Sponsored rows should be resolved first via productsBySkuIds in step02.
     # Keep this only as a last-resort detail/review fallback for explicit PDP runs.

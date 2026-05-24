@@ -69,6 +69,12 @@ DETAIL_COMPARE_SCROLL_SCAN = os.getenv("BESTBUY_DETAIL_COMPARE_SCROLL_SCAN", "1"
     "yes",
     "y",
 }
+DETAIL_COMPARE_DOM_OBSERVER = os.getenv("BESTBUY_DETAIL_COMPARE_DOM_OBSERVER", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
 DETAIL_JSON_RESPONSE = os.getenv("BESTBUY_DETAIL_JSON_RESPONSE", "0").lower() in {"1", "true", "yes", "y"}
 DETAIL_JSON_WAIT = os.getenv("BESTBUY_DETAIL_JSON_WAIT", "10000")
 DETAIL_REQUIRE_SIMILAR = (
@@ -861,6 +867,100 @@ def detail_compare_scroll_scan_script():
 """
 
 
+def detail_compare_dom_observer_script():
+    return r"""
+(() => {
+  if (window.__bbyCompareDomObserverInstalled) return;
+  window.__bbyCompareDomObserverInstalled = true;
+  window.__bbyCompareDomObserverHits = 0;
+  const keywords = ["compare similar products", "compare similar", "similar products"];
+  const selectors = "h1,h2,h3,h4,section,[data-testid],div";
+  const maxTextLength = 1800;
+
+  function norm(value) {
+    return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+  }
+
+  function pageHeight() {
+    return Math.max(
+      document.documentElement.scrollHeight || 0,
+      document.body ? document.body.scrollHeight || 0 : 0,
+      window.innerHeight || 0
+    );
+  }
+
+  function findCompareNode() {
+    let best = null;
+    let bestScore = -1;
+    for (const el of Array.from(document.querySelectorAll(selectors))) {
+      const text = norm(el.innerText || el.textContent || "");
+      if (!text || text.length > maxTextLength) continue;
+      let score = 0;
+      for (const keyword of keywords) {
+        if (text.indexOf(keyword) !== -1) score += 1000 - Math.min(text.length, 900);
+      }
+      if (!score) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      if (/^H[1-4]$/.test(el.tagName)) score += 200;
+      if (score > bestScore) {
+        bestScore = score;
+        best = el;
+      }
+    }
+    return best;
+  }
+
+  function scrollToNode(el) {
+    if (!el) return false;
+    const top = el.getBoundingClientRect().top + window.scrollY - Math.floor((window.innerHeight || 800) * 0.22);
+    window.scrollTo(0, Math.max(0, Math.floor(top)));
+    try { window.dispatchEvent(new Event("scroll")); } catch (e) {}
+    try { el.setAttribute("data-bby-compare-observer-hit", String(Date.now())); } catch (e) {}
+    window.__bbyCompareDomObserverHits += 1;
+    return true;
+  }
+
+  window.__bbyCompareScrollToText = function(fallbackFraction) {
+    const node = findCompareNode();
+    if (scrollToNode(node)) return true;
+    window.scrollTo(0, Math.max(0, Math.floor(pageHeight() * Number(fallbackFraction || 0.32))));
+    try { window.dispatchEvent(new Event("scroll")); } catch (e) {}
+    return false;
+  };
+
+  window.__bbyCompareStartScan = function(points, delay) {
+    const scanPoints = Array.isArray(points) && points.length ? points : [0.18,0.24,0.30,0.36,0.43,0.53,0.62,0.72,0.58,0.44,0.32,0.24];
+    const scanDelay = Number(delay || 650);
+    if (Array.isArray(window.__bbyCompareScanTimers)) {
+      window.__bbyCompareScanTimers.forEach((timer) => clearTimeout(timer));
+    }
+    window.__bbyCompareScanTimers = [];
+    scanPoints.forEach((point, index) => {
+      const timer = setTimeout(() => {
+        if (window.__bbyCompareScrollToText(point)) return;
+        window.scrollTo(0, Math.max(0, Math.floor(pageHeight() * point)));
+        try { window.dispatchEvent(new Event("scroll")); } catch (e) {}
+      }, index * scanDelay);
+      window.__bbyCompareScanTimers.push(timer);
+    });
+  };
+
+  let debounce = null;
+  const pulse = () => window.__bbyCompareScrollToText(0.32);
+  try {
+    const observer = new MutationObserver(() => {
+      clearTimeout(debounce);
+      debounce = setTimeout(pulse, 160);
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+    window.__bbyCompareDomObserver = observer;
+  } catch (e) {}
+  [600, 1600, 3200, 5600, 8600, 12500, 16500].forEach((ms) => setTimeout(pulse, ms));
+})();
+"""
+
+
 def detail_scroll_to_text_script(keywords, fallback_fraction):
     return f"""
 (() => {{
@@ -913,16 +1013,24 @@ def detail_js_instructions(attempt=1):
     settle = [{"wait_event": "networkalmostidle"}] if DETAIL_SCROLL_NETWORK_IDLE else []
     instructions = [
         *([{"evaluate": detail_compare_capture_hook_script()}] if DETAIL_COMPARE_CAPTURE_HOOK else []),
+        *([{"evaluate": detail_compare_dom_observer_script()}] if DETAIL_COMPARE_DOM_OBSERVER else []),
         {"wait": 1800},
-        *([{"evaluate": detail_compare_scroll_scan_script()}, {"wait": 7000}] if DETAIL_COMPARE_SCROLL_SCAN else []),
+        *(
+            [
+                {"evaluate": "window.__bbyCompareStartScan && window.__bbyCompareStartScan([0.18,0.24,0.30,0.36,0.43,0.53,0.62,0.72,0.58,0.44,0.32,0.24],650);"},
+                {"wait": 8500},
+            ]
+            if DETAIL_COMPARE_SCROLL_SCAN
+            else []
+        ),
         *settle,
-        {"evaluate": detail_scroll_to_text_script(compare_keywords, 0.32)},
+        {"evaluate": "window.__bbyCompareScrollToText ? window.__bbyCompareScrollToText(0.32) : null;"},
         {"wait": 2200},
         *settle,
-        {"evaluate": detail_scroll_to_text_script(compare_keywords, 0.43)},
+        {"evaluate": "window.__bbyCompareScrollToText ? window.__bbyCompareScrollToText(0.43) : null;"},
         {"wait": 1800},
         *settle,
-        {"evaluate": detail_scroll_to_text_script(compare_keywords, 0.25)},
+        {"evaluate": "window.__bbyCompareScrollToText ? window.__bbyCompareScrollToText(0.25) : null;"},
         {"wait": 1500},
         *settle,
     ]
@@ -1880,7 +1988,7 @@ def fetch_detail(client, target):
                 f"[detail:start] sku={sku} attempt={attempt} transport={transport} "
                 f"json_response={DETAIL_JSON_RESPONSE} scroll={DETAIL_SCROLL} "
                 f"network_idle={DETAIL_SCROLL_NETWORK_IDLE} capture_hook={DETAIL_COMPARE_CAPTURE_HOOK} "
-                f"scroll_scan={DETAIL_COMPARE_SCROLL_SCAN}",
+                f"scroll_scan={DETAIL_COMPARE_SCROLL_SCAN} dom_observer={DETAIL_COMPARE_DOM_OBSERVER}",
                 flush=True,
             )
             response = client.get(pdp_url, params=detail_params(attempt), timeout=REQUEST_TIMEOUT)
@@ -3106,6 +3214,7 @@ def main():
         "detail_scroll_network_idle": DETAIL_SCROLL_NETWORK_IDLE,
         "detail_compare_capture_hook": DETAIL_COMPARE_CAPTURE_HOOK,
         "detail_compare_scroll_scan": DETAIL_COMPARE_SCROLL_SCAN,
+        "detail_compare_dom_observer": DETAIL_COMPARE_DOM_OBSERVER,
         "detail_json_response": DETAIL_JSON_RESPONSE,
         "detail_json_wait": DETAIL_JSON_WAIT,
         "detail_require_similar": DETAIL_REQUIRE_SIMILAR,

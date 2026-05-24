@@ -3631,6 +3631,7 @@ EC2 IAM Role에 S3 권한 부여하면 키 없이도 동작.
 - ZenRows 공식 `js_instructions`의 `wait_event: networkalmostidle`을 1/4 지점 부근 스크롤 뒤에 사용한다. 이는 고정 대기만 늘리는 방식보다, 같은 detail render 안에서 lazy XHR이 끝나는 시점에 맞추기 위한 운영 기본값이다. 끌 때는 `BESTBUY_DETAIL_SCROLL_NETWORK_IDLE=0`을 사용한다.
 - `BESTBUY_DETAIL_COMPARE_CAPTURE_HOOK=1`을 기본값으로 둔다. 첫 scroll 전에 페이지의 `fetch`, `Response`, `XMLHttpRequest`를 보존형으로 감싸고, Compare 후보 GraphQL 응답을 숨김 DOM에도 남긴다. 기존 detail 응답은 그대로 반환하므로 detail field 파싱에는 영향을 주지 않고, ZenRows `xhr` 배열에서 누락된 Compare 응답을 HTML fallback으로 다시 읽기 위한 장치다.
 - `BESTBUY_DETAIL_COMPARE_SCROLL_SCAN=1`을 기본값으로 둔다. 고정 1/4 위치만 기다리지 않고 PDP 높이의 약 18%~53% 구간을 짧게 훑은 뒤, `Compare similar products` 텍스트 후보가 있으면 해당 DOM으로 직접 이동한다. 목적은 review 이후 lazy-load되는 Compare 섹션의 viewport trigger를 같은 detail render 안에서 더 확실히 밟는 것이다.
+- `BESTBUY_DETAIL_COMPARE_DOM_OBSERVER=1`을 기본값으로 둔다. Compare heading/placeholder가 늦게 DOM에 삽입되는 케이스를 잡기 위해 `MutationObserver`로 텍스트 후보를 감시하고, 발견 즉시 해당 위치로 이동한다.
 - 정상 운영은 SKU당 detail render 1회를 원칙으로 한다. `retailer_sku_name_similar`가 비었다는 이유만으로 같은 SKU를 자동 재호출하지 않는다.
 - `BESTBUY_DETAIL_RETRY_ON_MISSING_SIMILAR=0`을 기본값으로 유지한다. 재호출 보강은 운영자가 비용을 명시적으로 감수할 때만 별도 실행한다.
 - 검증 성공 기준은 `*_json_response_summary.json`에서 `has_get_compare: true` 또는 `is_compare_response: true`, 그리고 `compare_name_count > 0`이 확인되는 것이다.
@@ -3645,6 +3646,7 @@ detail render 1회
 + PDP 1/4 지점 부근 scroll/wait + networkalmostidle
 + BESTBUY_DETAIL_COMPARE_CAPTURE_HOOK=1
 + BESTBUY_DETAIL_COMPARE_SCROLL_SCAN=1
++ BESTBUY_DETAIL_COMPARE_DOM_OBSERVER=1
 => BestBuy 페이지가 GetCompareProduct lazy-load
 => json_response XHR 또는 HTML fallback에서 compare response 캡처
 => retailer_sku_name_similar 저장

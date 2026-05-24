@@ -26,6 +26,11 @@ REFERER = os.getenv("BESTBUY_PROMOTION_REFERER", load_initial_urls().get("promot
 QUERY_TEMPLATE_HTML = Path(
     os.getenv("BESTBUY_PROMOTION_QUERY_TEMPLATE_HTML", "references/bestbuy_promotion_page_sample.html")
 )
+EXCLUDED_PROMOTION_TYPES = {
+    value.strip().lower()
+    for value in os.getenv("BESTBUY_PROMOTION_EXCLUDE_TYPES", "Featured deals").split("|")
+    if value.strip()
+}
 
 
 def now():
@@ -50,8 +55,18 @@ def find_started_operation_for_placement(html_text, placement):
     raise RuntimeError(f"Could not find operation for placement={placement}")
 
 
+def promotion_type_for_placement(placement):
+    return PROMOTION_LABELS.get(placement, placement)
+
+
+def promotion_placement_excluded(placement):
+    return promotion_type_for_placement(placement).strip().lower() in EXCLUDED_PROMOTION_TYPES
+
+
 def extract_rows_from_response(response_json, placement):
-    promotion_type = PROMOTION_LABELS.get(placement, placement)
+    if promotion_placement_excluded(placement):
+        return []
+    promotion_type = promotion_type_for_placement(placement)
     rows = []
     deals = (((response_json.get("data") or {}).get("customer") or {}).get("deals") or {})
     for position, item in enumerate(deals.get("items") or [], 1):
@@ -151,7 +166,7 @@ def run_one(client, html_text, placement):
         "summary": {
             "started_at": now(),
             "placement": placement,
-            "promotion_type": PROMOTION_LABELS.get(placement, placement),
+            "promotion_type": promotion_type_for_placement(placement),
             "status_code": response.status_code,
             "elapsed_seconds": elapsed,
             "x_request_cost": response.headers.get("x-request-cost", ""),
@@ -215,7 +230,7 @@ def run_batch(client, html_text, placements):
             {
                 "started_at": now(),
                 "placement": placement,
-                "promotion_type": PROMOTION_LABELS.get(placement, placement),
+                "promotion_type": promotion_type_for_placement(placement),
                 "status_code": response.status_code,
                 "elapsed_seconds": elapsed,
                 "x_request_cost": response.headers.get("x-request-cost", ""),
@@ -266,12 +281,32 @@ def main():
         (RUN_ROOT / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
         print(json.dumps(summary, indent=2, ensure_ascii=False))
         return
+    requested_placements = list(PROMOTION_LABELS) if PLACEMENT.lower() == "all" else [PLACEMENT]
+    excluded_placements = [placement for placement in requested_placements if promotion_placement_excluded(placement)]
+    excluded_set = set(excluded_placements)
+    placements = [placement for placement in requested_placements if placement not in excluded_set]
+    if not placements:
+        summary = {
+            "started_at": now(),
+            "placements": [],
+            "excluded_placements": excluded_placements,
+            "call_count": 0,
+            "row_count": 0,
+            "total_x_request_cost": 0,
+            "summaries": [],
+            "csv": rel_path(RUN_ROOT / "parsed" / "all_promotion_products.csv"),
+        }
+        RUN_ROOT.mkdir(parents=True, exist_ok=True)
+        write_rows(RUN_ROOT / "parsed" / "all_promotion_products.csv", [])
+        (RUN_ROOT / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(json.dumps(summary, indent=2, ensure_ascii=False))
+        return
+
     api_key = os.getenv("ZENROWS_API_KEY")
     if not api_key:
         raise RuntimeError("Set ZENROWS_API_KEY in .env")
     html_text = QUERY_TEMPLATE_HTML.read_text(encoding="utf-8", errors="ignore")
     client = ZenRowsClient(api_key)
-    placements = list(PROMOTION_LABELS) if PLACEMENT.lower() == "all" else [PLACEMENT]
 
     if PLACEMENT.lower() == "all":
         result = run_batch(client, html_text, placements)
@@ -290,6 +325,7 @@ def main():
     summary = {
         "started_at": now(),
         "placements": placements,
+        "excluded_placements": excluded_placements,
         "call_count": call_count,
         "row_count": len(all_rows),
         "total_x_request_cost": (

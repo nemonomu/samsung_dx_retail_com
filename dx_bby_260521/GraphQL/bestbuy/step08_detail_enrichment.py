@@ -1921,6 +1921,21 @@ def product_names_from_value(value):
     return names
 
 
+def detail_resolved_sku_ids(sku):
+    sku_ids = {str(sku)}
+    for payload in detail_payloads(sku):
+        for event in payload.get("events", []):
+            variables = event_variables(event)
+            variable_sku = variables.get("skuId")
+            if variable_sku not in (None, ""):
+                sku_ids.add(str(variable_sku))
+            data = event_data(event)
+            product = data.get("productBySkuId") if isinstance(data, dict) else None
+            if isinstance(product, dict) and product.get("skuId") not in (None, ""):
+                sku_ids.add(str(product.get("skuId")))
+    return sku_ids
+
+
 def event_data(event):
     value = event.get("value") if isinstance(event, dict) else {}
     data = value.get("data") if isinstance(value, dict) and "data" in value else None
@@ -2420,15 +2435,16 @@ def fetch_compare_with_retries(client, target):
 
 def products_from_detail(sku):
     products = []
+    allowed_sku_ids = detail_resolved_sku_ids(sku)
     for payload in detail_payloads(sku):
         for event in payload.get("events", []):
             data = event_data(event)
             product = data.get("productBySkuId") if isinstance(data, dict) else None
-            if isinstance(product, dict) and str(product.get("skuId")) == str(sku):
+            if isinstance(product, dict) and str(product.get("skuId")) in allowed_sku_ids:
                 products.append(product)
     review_data = read_json(review_paths(sku)["response_json"])
     review_product = ((review_data.get("data") or {}).get("productBySkuId") or {}) if isinstance(review_data, dict) else {}
-    if isinstance(review_product, dict) and str(review_product.get("skuId") or "") == str(sku):
+    if isinstance(review_product, dict) and str(review_product.get("skuId") or "") in allowed_sku_ids:
         products.append(review_product)
     return products
 
@@ -2444,6 +2460,8 @@ def compare_similar_names_from_detail(sku):
     source_names = compare_recommendation_names(data) if isinstance(data, dict) else []
     if not source_names:
         source_names = compare_names_from_json_response(sku)
+    if not source_names:
+        source_names = compare_names_from_detail_html(sku)
     if not source_names:
         return []
 
@@ -2538,7 +2556,32 @@ def recommendation_names_from_detail_payloads(sku):
     return names
 
 
+def compare_names_from_detail_html(sku):
+    paths = detail_paths(sku)
+    html_path = paths.get("html")
+    if not html_path or not html_path.exists():
+        return []
+    html_text = html_path.read_text(encoding="utf-8", errors="replace")
+    if not html_text or "GPC-sku-card" not in html_text:
+        return []
+
+    soup = BeautifulSoup(html_text, "html.parser")
+    names = []
+    for card in soup.find_all(attrs={"data-testid": "GPC-sku-card"}):
+        name_node = card.find("h3")
+        if not name_node:
+            name_link = card.find("a", attrs={"aria-label": True})
+            name = name_link.get("aria-label") if name_link else ""
+        else:
+            name = name_node.get_text(" ", strip=True)
+        name = compact_text(name)
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
 def compare_data_from_detail_payloads(sku):
+    allowed_sku_ids = detail_resolved_sku_ids(sku)
     for payload in detail_payloads(sku):
         compare_event_ids = set()
         for event in payload.get("events", []):
@@ -2547,7 +2590,7 @@ def compare_data_from_detail_payloads(sku):
             if operation_name(event) != "GetCompareProduct":
                 continue
             variables = event_variables(event)
-            if str(variables.get("skuId") or "") == str(sku):
+            if str(variables.get("skuId") or "") in allowed_sku_ids:
                 compare_event_ids.add(str(event.get("id") or ""))
         if not compare_event_ids:
             continue
@@ -2556,7 +2599,7 @@ def compare_data_from_detail_payloads(sku):
                 continue
             data = event_data(event)
             current = data.get("productBySkuId") if isinstance(data, dict) else {}
-            if isinstance(current, dict) and str(current.get("skuId") or "") != str(sku):
+            if isinstance(current, dict) and str(current.get("skuId") or "") not in allowed_sku_ids:
                 continue
             if compare_recommendation_names(data):
                 return data

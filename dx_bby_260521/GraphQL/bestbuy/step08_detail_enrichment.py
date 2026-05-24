@@ -37,6 +37,7 @@ OUTPUT_ROOT = Path(os.getenv("BESTBUY_OUTPUT_ROOT", DEFAULT_BESTBUY_RUN_ROOT / "
 TARGET_CSV = Path(os.getenv("BESTBUY_DETAIL_TARGET_CSV", OUTPUT_ROOT / "bestbuy_final_targets.csv"))
 SAMPLE_SCHEMA_CSV = Path(os.getenv("BESTBUY_OUTPUT_SCHEMA_CSV", "references/tv_retail_com_202605170513.csv"))
 SELECTOR_TABLE = os.getenv("BESTBUY_SELECTOR_TABLE", "dx_xpath_selectors")
+USE_DB_SELECTORS = os.getenv("BESTBUY_DETAIL_USE_DB_SELECTORS", "1").lower() in {"1", "true", "yes", "y"}
 LIMIT = int(os.getenv("BESTBUY_DETAIL_LIMIT", "0"))
 MAX_ATTEMPTS = int(os.getenv("BESTBUY_DETAIL_MAX_ATTEMPTS", "3"))
 AUTO_RETRY = os.getenv("BESTBUY_DETAIL_AUTO_RETRY", "1").lower() in {"1", "true", "yes", "y"}
@@ -542,6 +543,8 @@ def quote_ident(value):
 
 @lru_cache(maxsize=32)
 def detail_selectors(category):
+    if not USE_DB_SELECTORS:
+        return {}
     config = db_config()
     if not config:
         return {}
@@ -555,6 +558,7 @@ def detail_selectors(category):
             password=config.get("password"),
             dbname=config.get("database"),
             connect_timeout=10,
+            options="-c statement_timeout=5000",
         )
         with conn:
             with conn.cursor() as cur:
@@ -2758,6 +2762,7 @@ def main():
         "detail_scroll": DETAIL_SCROLL,
         "detail_json_response": DETAIL_JSON_RESPONSE,
         "detail_json_wait": DETAIL_JSON_WAIT,
+        "use_db_selectors": USE_DB_SELECTORS,
         "fetch_mode": FETCH_MODE,
         "fetch_transports": fetch_transports(),
         "target_count": len(output_targets),

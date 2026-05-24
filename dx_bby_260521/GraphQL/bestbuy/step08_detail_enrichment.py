@@ -1098,7 +1098,30 @@ def body_preview(value, limit=500):
     return compact_text(text)[:limit]
 
 
-def json_response_compare_summary(json_data):
+def strict_compare_response_names(body_data, sku=""):
+    if isinstance(body_data, list):
+        names = []
+        for item in body_data:
+            for name in strict_compare_response_names(item, sku):
+                if name and name not in names:
+                    names.append(name)
+        return names
+    if not isinstance(body_data, dict):
+        return []
+
+    data = body_data.get("data")
+    if not isinstance(data, dict):
+        return []
+    if not isinstance(data.get("recommendations"), dict):
+        return []
+
+    product = data.get("productBySkuId")
+    if sku and isinstance(product, dict) and str(product.get("skuId") or "") != str(sku):
+        return []
+    return compare_recommendation_names(data)
+
+
+def json_response_compare_summary(json_data, sku=""):
     xhr = (json_data.get("xhr") or []) if isinstance(json_data, dict) else []
     if not isinstance(xhr, list):
         xhr = []
@@ -1113,10 +1136,11 @@ def json_response_compare_summary(json_data):
             continue
         body = request.get("body")
         body_data = parse_json_value(body)
-        data = body_data.get("data") if isinstance(body_data, dict) else {}
-        request_names = compare_recommendation_names(data) if isinstance(data, dict) else []
-        if not request_names and isinstance(body_data, (dict, list)):
-            request_names = recommendation_names_from_data(body_data)
+        has_get_compare = "GetCompareProduct" in request_blob or "single-compare" in request_blob
+        request_names = strict_compare_response_names(body_data, sku)
+        is_compare_response = bool(request_names)
+        if not has_get_compare and not is_compare_response:
+            request_names = []
         for name in request_names:
             if name and name not in names:
                 names.append(name)
@@ -1125,7 +1149,8 @@ def json_response_compare_summary(json_data):
                 "method": request.get("method", ""),
                 "status_code": request.get("status_code", ""),
                 "url": url,
-                "has_get_compare": "GetCompareProduct" in request_blob,
+                "has_get_compare": has_get_compare,
+                "is_compare_response": is_compare_response,
                 "name_count": len(request_names),
                 "names": request_names[:5],
                 "body_preview": body_preview(body),
@@ -1498,7 +1523,7 @@ def fetch_detail(client, target):
             if DETAIL_JSON_RESPONSE:
                 json_response_data = parse_json_value(response_text)
                 html_text = json_response_data.get("html") or json_response_data.get("content") or ""
-                json_response_summary = json_response_compare_summary(json_response_data)
+                json_response_summary = json_response_compare_summary(json_response_data, sku)
             status = response.status_code
             success = status == 200 and has_product_schema(html_text)
             paths = detail_paths_for_status(sku, target, success)
@@ -1788,8 +1813,6 @@ def compare_similar_names_from_detail(sku):
 
     source_names = compare_recommendation_names(data) if isinstance(data, dict) else []
     if not source_names:
-        source_names = recommendation_names_from_detail_payloads(sku)
-    if not source_names:
         source_names = compare_names_from_json_response(sku)
     if not source_names:
         return []
@@ -1815,7 +1838,7 @@ def compare_names_from_json_response(sku):
     if isinstance(names, list) and names:
         return [name for name in names if name]
     json_data = read_json(paths.get("json_response"))
-    summary = json_response_compare_summary(json_data)
+    summary = json_response_compare_summary(json_data, sku)
     names = summary.get("compare_names") if isinstance(summary, dict) else []
     return [name for name in names if name] if isinstance(names, list) else []
 

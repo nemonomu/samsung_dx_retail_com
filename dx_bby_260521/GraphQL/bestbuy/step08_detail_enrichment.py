@@ -1100,8 +1100,9 @@ def detail_scroll_to_text_script(keywords, fallback_fraction):
 """
 
 
-def detail_compare_force_fetch_script():
+def detail_compare_force_fetch_script(fallback_sku=""):
     payload_json = json.dumps(compare_product_payload("__BBY_SKU__"), ensure_ascii=False, separators=(",", ":"))
+    fallback_sku_json = json.dumps(str(fallback_sku or ""), ensure_ascii=False)
     return f"""
 (() => {{
   if (window.__bbyCompareForceFetchStarted) return;
@@ -1110,6 +1111,7 @@ def detail_compare_force_fetch_script():
   const captureId = "bby-compare-capture";
   const debugId = "bby-compare-force-fetch-debug";
   const payloadTemplate = {payload_json};
+  const fallbackSku = {fallback_sku_json};
 
   function readJson(text, fallback) {{
     try {{ return JSON.parse(text); }} catch (e) {{ return fallback; }}
@@ -1184,6 +1186,16 @@ def detail_compare_force_fetch_script():
       const match = String(location.href).match(/\\/sku\\/([0-9]{{4,}})/i);
       if (match) return match[1];
     }} catch (e) {{}}
+    try {{
+      const scripts = Array.from(document.scripts || []);
+      for (const script of scripts) {{
+        const text = script && script.textContent || "";
+        if (!text || text.indexOf("skuId") === -1) continue;
+        const match = text.match(/["']skuId["']\\s*:\\s*["']?([0-9]{{4,}})["']?/i);
+        if (match) return match[1];
+      }}
+    }} catch (e) {{}}
+    if (fallbackSku && /^[0-9]{{4,}}$/.test(String(fallbackSku))) return String(fallbackSku);
     return "";
   }}
 
@@ -1232,7 +1244,7 @@ def detail_compare_force_fetch_script():
 """
 
 
-def detail_js_instructions(attempt=1):
+def detail_js_instructions(attempt=1, sku=""):
     compare_keywords = ["Compare similar products", "Compare similar", "Similar products"]
     settle = [{"wait_event": "networkalmostidle"}] if DETAIL_SCROLL_NETWORK_IDLE else []
     instructions = [
@@ -1262,7 +1274,7 @@ def detail_js_instructions(attempt=1):
     if DETAIL_COMPARE_FORCE_FETCH:
         instructions.extend(
             [
-                {"evaluate": detail_compare_force_fetch_script()},
+                {"evaluate": detail_compare_force_fetch_script(sku)},
                 {"wait": DETAIL_COMPARE_FORCE_FETCH_WAIT},
             ]
         )
@@ -1285,14 +1297,14 @@ def detail_js_instructions(attempt=1):
     return instructions
 
 
-def detail_params(attempt=1):
+def detail_params(attempt=1, sku=""):
     params = {
         "js_render": "true",
         "premium_proxy": "true",
         "proxy_country": "us",
     }
     if DETAIL_SCROLL:
-        params["js_instructions"] = json.dumps(detail_js_instructions(attempt))
+        params["js_instructions"] = json.dumps(detail_js_instructions(attempt, sku))
     elif DETAIL_JSON_RESPONSE:
         params["wait"] = DETAIL_JSON_WAIT
     if DETAIL_JSON_RESPONSE:
@@ -2300,7 +2312,7 @@ def fetch_detail(client, target):
                 f"scroll_scan={DETAIL_COMPARE_SCROLL_SCAN} dom_observer={DETAIL_COMPARE_DOM_OBSERVER}",
                 flush=True,
             )
-            response = client.get(pdp_url, params=detail_params(attempt), timeout=REQUEST_TIMEOUT)
+            response = client.get(pdp_url, params=detail_params(attempt, sku), timeout=REQUEST_TIMEOUT)
             response_text = response.text
             html_text = response_text
             json_response_data = {}

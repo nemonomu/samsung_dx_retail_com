@@ -3633,6 +3633,7 @@ EC2 IAM Role에 S3 권한 부여하면 키 없이도 동작.
 - `BESTBUY_DETAIL_COMPARE_SCROLL_SCAN=1`을 기본값으로 둔다. 고정 1/4 위치만 기다리지 않고 PDP 높이의 약 18%~53% 구간을 짧게 훑은 뒤, `Compare similar products` 텍스트 후보가 있으면 해당 DOM으로 직접 이동한다. 목적은 review 이후 lazy-load되는 Compare 섹션의 viewport trigger를 같은 detail render 안에서 더 확실히 밟는 것이다.
 - `BESTBUY_DETAIL_COMPARE_DOM_OBSERVER=1`을 기본값으로 둔다. Compare heading/placeholder가 늦게 DOM에 삽입되는 케이스를 잡기 위해 `MutationObserver`로 텍스트 후보를 감시하고, 발견 즉시 해당 위치로 이동한다.
 - Compare 텍스트 후보를 찾으면 같은 위치 주변에서 작은 scroll jiggle과 `scroll`/`resize` 이벤트를 반복하고, `bby-compare-debug` hidden marker에 text 발견 여부, observer hit, jiggle count, 마지막 scroll percent를 남긴다.
+- `BESTBUY_DETAIL_COMPARE_FORCE_FETCH=1`은 같은 ZenRows detail render 안에서만 동작한다. 페이지의 analytics/meta/data/script에서 SKU를 찾고, 실패 시 Python target SKU를 fallback으로 사용해 `GetCompareProduct`를 브라우저 내부에서 실행한 뒤 hidden capture에 남긴다. 이는 ZenRows detail 요청을 새로 만들지 않는다.
 - PDP가 `no longer available` 상태이면 Compare 섹션이 없는 정상 케이스로 보고 `detail_similar` failure에서 제외한다.
 - 정상 운영은 SKU당 detail render 1회를 원칙으로 한다. `retailer_sku_name_similar`가 비었다는 이유만으로 같은 SKU를 자동 재호출하지 않는다.
 - `BESTBUY_DETAIL_RETRY_ON_MISSING_SIMILAR=0`을 기본값으로 유지한다. 재호출 보강은 운영자가 비용을 명시적으로 감수할 때만 별도 실행한다.

@@ -49,15 +49,16 @@ def read_csv(path):
 
 def csv_fields(path, rows):
     path = Path(path)
+    header = []
     if path.exists():
         with path.open("r", encoding="utf-8-sig", newline="") as f:
             reader = csv.reader(f)
             try:
-                return next(reader)
+                header = next(reader)
             except StopIteration:
                 pass
-    keys = []
-    seen = set()
+    keys = list(header)
+    seen = set(header)
     for row in rows:
         for key in row:
             if key not in seen:
@@ -79,6 +80,22 @@ def canonical_url(value):
     if "/sku/" in text:
         text = text.split("/sku/", 1)[0]
     return text.rstrip("/").lower()
+
+
+def item_from_product_url(value):
+    text = compact_text(value)
+    if not text or "/sku/" not in text:
+        return ""
+    before_sku = text.split("/sku/", 1)[0].rstrip("/")
+    item = before_sku.rsplit("/", 1)[-1].strip()
+    return item if item and item.lower() not in {"product", "site"} else ""
+
+
+def ensure_item_from_url(row):
+    if not compact_text(row.get("item")):
+        item = item_from_product_url(row.get("product_url"))
+        if item:
+            row["item"] = item
 
 
 def all_availability_blank(row):
@@ -106,6 +123,7 @@ def build_sku_lookup(targets):
         add_lookup(lookup, target.get("sku"), sku)
         add_lookup(lookup, target.get("item"), sku)
         add_lookup(lookup, target.get("bsin"), sku)
+        add_lookup(lookup, item_from_product_url(target.get("product_url")), sku)
         add_lookup(lookup, target.get("product_url"), sku)
         add_lookup(lookup, canonical_url(target.get("product_url")), sku)
     return lookup
@@ -117,6 +135,7 @@ def sku_for_row(row, lookup):
         row.get("sku"),
         row.get("item"),
         row.get("bsin"),
+        item_from_product_url(row.get("product_url")),
         row.get("product_url"),
         canonical_url(row.get("product_url")),
     ):
@@ -284,6 +303,10 @@ def main():
         raise RuntimeError(f"final_output.csv not found or empty: {FINAL_OUTPUT_CSV}")
     if not targets:
         raise RuntimeError(f"target CSV not found or empty: {TARGET_CSV}")
+    for row in final_rows:
+        ensure_item_from_url(row)
+    for row in detail_rows:
+        ensure_item_from_url(row)
 
     lookup = build_sku_lookup(targets)
     batch_indexes = [index for index, row in enumerate(final_rows) if compact_text(row.get("batch_id")) == BACKFILL_BATCH_ID]

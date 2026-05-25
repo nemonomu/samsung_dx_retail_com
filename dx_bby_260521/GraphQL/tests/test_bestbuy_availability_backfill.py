@@ -12,6 +12,7 @@ from bestbuy.step08_availability_backfill import (  # noqa: E402
     apply_values,
     backfill_candidate,
     build_sku_lookup,
+    item_from_product_url,
     sku_for_row,
 )
 
@@ -45,6 +46,12 @@ class AvailabilityBackfillTests(unittest.TestCase):
 
         self.assertEqual(sku_for_row({"item": "J2FPJK9P43"}, lookup), "6623791")
         self.assertEqual(sku_for_row({"sku_id": "6623791"}, lookup), "6623791")
+
+    def test_item_can_be_derived_from_bestbuy_product_url(self):
+        self.assertEqual(
+            item_from_product_url("https://www.bestbuy.com/product/name/J3ZYG2V5VV/sku/6639210"),
+            "J3ZYG2V5VV",
+        )
 
     def test_parse_batch_fulfillment_response_groups_values_by_sku(self):
         response = {

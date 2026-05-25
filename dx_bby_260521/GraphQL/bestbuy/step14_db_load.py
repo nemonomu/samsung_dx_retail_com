@@ -1,6 +1,7 @@
 import csv
 import json
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -46,6 +47,23 @@ def read_csv(path):
         return []
     with path.open("r", encoding="utf-8-sig", newline="") as f:
         return list(csv.DictReader(f))
+
+
+def compact_text(value):
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def item_from_product_url(value):
+    text = compact_text(value)
+    if not text or "/sku/" not in text:
+        return ""
+    before_sku = text.split("/sku/", 1)[0].rstrip("/")
+    item = before_sku.rsplit("/", 1)[-1].strip()
+    return item if item and item.lower() not in {"product", "site"} else ""
+
+
+def row_item(row):
+    return compact_text(row.get("item") or item_from_product_url(row.get("product_url")))
 
 
 def table_columns(cur, table_name):
@@ -205,13 +223,17 @@ def update_similar_only(cur, csv_path, table_name, dry_run=False):
 
 
 def availability_update_candidates(rows, batch_id=""):
-    return [
-        row
-        for row in rows
-        if str(row.get("batch_id") or "").strip()
-        and str(row.get("item") or "").strip()
-        and (not batch_id or str(row.get("batch_id") or "").strip() == batch_id)
-    ]
+    candidates = []
+    for row in rows:
+        item = row_item(row)
+        if not str(row.get("batch_id") or "").strip() or not item:
+            continue
+        if batch_id and str(row.get("batch_id") or "").strip() != batch_id:
+            continue
+        normalized = dict(row)
+        normalized["item"] = item
+        candidates.append(normalized)
+    return candidates
 
 
 def update_availability_only(cur, csv_path, table_name, dry_run=False, batch_id=UPDATE_BATCH_ID):

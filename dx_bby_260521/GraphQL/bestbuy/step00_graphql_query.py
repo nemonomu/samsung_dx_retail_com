@@ -1,7 +1,8 @@
 import re
 
 
-GRAPHQL_FIELD_ERROR_FIELDS = {"arModels", "fulfillmentOptions"}
+GRAPHQL_FIELD_ERROR_FIELDS = {"arModels"}
+GRAPHQL_FULFILLMENT_FIELD_ERROR_FIELDS = {"fulfillmentOptions"}
 GRAPHQL_UNUSED_AFTER_FIELD_STRIP = {
     "ButtonStatesFragment",
     "DeliveryDetailsFragment",
@@ -100,7 +101,10 @@ def _remove_fragment_definitions(query, fragment_names):
     return query
 
 
-def sanitize_product_list_query(query):
-    query = _remove_field_selections(query, GRAPHQL_FIELD_ERROR_FIELDS)
+def sanitize_product_list_query(query, strip_fulfillment=False):
+    field_names = set(GRAPHQL_FIELD_ERROR_FIELDS)
+    if strip_fulfillment:
+        field_names.update(GRAPHQL_FULFILLMENT_FIELD_ERROR_FIELDS)
+    query = _remove_field_selections(query, field_names)
     query = _remove_fragment_definitions(query, GRAPHQL_UNUSED_AFTER_FIELD_STRIP)
     return query

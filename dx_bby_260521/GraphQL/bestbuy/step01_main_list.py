@@ -109,7 +109,11 @@ def prepare_product_list_payload(operation, page):
 
     query = operation["query"]
     if os.getenv("BESTBUY_SANITIZE_PRODUCT_LIST_QUERY", "0").lower() in {"1", "true", "yes"}:
-        query = sanitize_product_list_query(query)
+        query = sanitize_product_list_query(
+            query,
+            strip_fulfillment=os.getenv("BESTBUY_STRIP_PRODUCT_LIST_FULFILLMENT", "0").lower()
+            in {"1", "true", "yes"},
+        )
 
     return {
         "operationName": operation["operationName"],
@@ -255,6 +259,9 @@ def save_page_artifacts(page, payload, response, started_at, finished_at, elapse
         "response_path": rel_path(response_path),
         "response_json_path": rel_path(json_path) if response_json else "",
         "headers_path": rel_path(headers_path),
+        "sanitize_product_list_query": os.getenv("BESTBUY_SANITIZE_PRODUCT_LIST_QUERY", "0"),
+        "strip_product_list_fulfillment": os.getenv("BESTBUY_STRIP_PRODUCT_LIST_FULFILLMENT", "0"),
+        "query_has_fulfillment_options": "fulfillmentOptions" in (payload.get("query") or ""),
     }
     meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
     return response_json, meta

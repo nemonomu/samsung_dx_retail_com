@@ -26,6 +26,11 @@ from .step08_detail_enrichment import (
 REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "240"))
 PROBE_ROOT = Path(os.getenv("BESTBUY_AVAILABILITY_PROBE_ROOT", DEFAULT_BESTBUY_RUN_ROOT / "availability_probe"))
 PROBE_MODE = os.getenv("BESTBUY_AVAILABILITY_PROBE_MODE", "reference").strip().lower()
+PROBE_MINIMAL = os.getenv("BESTBUY_AVAILABILITY_PROBE_MINIMAL", "0").lower() in {"1", "true", "yes", "y"}
+PROBE_VARIANT = os.getenv(
+    "BESTBUY_AVAILABILITY_PROBE_VARIANT",
+    "detail_with_fulfillment" if PROBE_MINIMAL else "full",
+).strip().lower()
 PROBE_SKUS = [
     value.strip()
     for value in re.split(r"[\s,;]+", os.getenv("BESTBUY_AVAILABILITY_PROBE_SKUS", os.getenv("BESTBUY_DETAIL_SKUS", "6623791")))
@@ -41,6 +46,20 @@ PRODUCT_SCHEMA_WITH_FULFILLMENT_QUERY = (
     "shippingDetails{shippingAvailability{shippingEligible defaultCustomerLosGroupId promiseByStreetDate "
     "customerLOSGroup{customerLosGroupId minLineItemMaxDate maxLineItemMaxDate name displayDateType price}}}"
     "deliveryDetails{deliveryAvailability{deliveryEligible deliverable deliverySlots{date}}}"
+    "ispuDetails{ispuAvailability{pickupEligible instoreInventoryAvailable quantity minPickupInHours maxDate fulfillDate promiseByStreetDate}}}}}"
+)
+
+DETAIL_WITH_FULFILLMENT_QUERY = (
+    "query ProductSchema_init($skuId:String!$salesChannel:String!$fulfillmentInput:ProductFulfillmentInput!)"
+    "{productBySkuId(skuId:$skuId){bsin name{short}images{piscesHref}url{pdp}description{short}"
+    "skuId manufacturer{modelNumber}color{displayName}brand reviewInfo{averageRating reviewCount recommendedPercent}"
+    "specificationGroups{specifications{displayName value}}"
+    "buyingOptions{description pdpUrl skuId type product{price(input:{salesChannel:$salesChannel}){customerPrice}}}"
+    "reviews(filter:{pageSize:20}){results{rating title text userNickname}}"
+    "fulfillmentOptions(input:$fulfillmentInput){buttonStates{buttonState displayText secondaryDisplayText}"
+    "shippingDetails{shippingAvailability{shippingEligible defaultCustomerLosGroupId promiseByStreetDate "
+    "customerLOSGroup{customerLosGroupId minLineItemMaxDate maxLineItemMaxDate name displayDateType price}}}"
+    "deliveryDetails{deliveryAvailability{deliveryEligible deliverable deliverySlots{date} installationSlots{date}}}"
     "ispuDetails{ispuAvailability{pickupEligible instoreInventoryAvailable quantity minPickupInHours maxDate fulfillDate promiseByStreetDate}}}}}"
 )
 
@@ -291,6 +310,20 @@ def product_schema_fulfillment_payload(sku):
     }
 
 
+def detail_with_fulfillment_payload(sku):
+    variables = {
+        "skuId": str(sku),
+        "salesChannel": "LargeView",
+        "fulfillmentInput": fulfillment_input("PICKUP"),
+    }
+    apply_bestbuy_location(variables)
+    return {
+        "operationName": "ProductSchema_init",
+        "variables": variables,
+        "query": DETAIL_WITH_FULFILLMENT_QUERY,
+    }
+
+
 def fulfillment_dynamic_payload(sku, option_marker=None):
     return {
         "operationName": "FulfillmentOptionHook_FulfillmentDynamicQuery",
@@ -358,22 +391,37 @@ def error_summary(item):
 
 def probe_sku(client, sku):
     pdp_url = f"https://www.bestbuy.com/site/-/{sku}.p?skuId={sku}&intl=nosplash"
-    request_payload = [
-        fallback_review20_payload(sku),
-        product_schema_fulfillment_payload(sku),
-        fulfillment_dynamic_payload(sku, None),
-        fulfillment_dynamic_payload(sku, "PICKUP"),
-        fulfillment_dynamic_payload(sku, "SHIPPING"),
-        fulfillment_dynamic_payload(sku, "DELIVERY"),
-    ]
-    labels = [
-        "detail_control",
-        "product_schema_fulfillment",
-        "fulfillment_dynamic_default",
-        "fulfillment_dynamic_pickup",
-        "fulfillment_dynamic_shipping",
-        "fulfillment_dynamic_delivery",
-    ]
+    if PROBE_VARIANT == "control":
+        request_payload = [fallback_review20_payload(sku)]
+        labels = ["detail_control"]
+    elif PROBE_VARIANT in {"detail_with_fulfillment", "minimal"}:
+        request_payload = [detail_with_fulfillment_payload(sku)]
+        labels = ["detail_with_fulfillment"]
+    elif PROBE_VARIANT == "product_schema_fulfillment":
+        request_payload = [product_schema_fulfillment_payload(sku)]
+        labels = ["product_schema_fulfillment"]
+    elif PROBE_VARIANT == "full":
+        request_payload = [
+            fallback_review20_payload(sku),
+            product_schema_fulfillment_payload(sku),
+            fulfillment_dynamic_payload(sku, None),
+            fulfillment_dynamic_payload(sku, "PICKUP"),
+            fulfillment_dynamic_payload(sku, "SHIPPING"),
+            fulfillment_dynamic_payload(sku, "DELIVERY"),
+        ]
+        labels = [
+            "detail_control",
+            "product_schema_fulfillment",
+            "fulfillment_dynamic_default",
+            "fulfillment_dynamic_pickup",
+            "fulfillment_dynamic_shipping",
+            "fulfillment_dynamic_delivery",
+        ]
+    else:
+        raise RuntimeError(
+            "BESTBUY_AVAILABILITY_PROBE_VARIANT must be control, detail_with_fulfillment, "
+            "product_schema_fulfillment, or full"
+        )
     started_at = now()
     start = time.perf_counter()
     response = client.post(
@@ -425,6 +473,7 @@ def probe_sku(client, sku):
                 "sku_id": str(sku),
                 "url": pdp_url,
                 "endpoint": "https://www.bestbuy.com/gateway/graphql",
+                "variant": PROBE_VARIANT,
                 "http_call_count": 1,
                 "status_code": response.status_code,
                 "elapsed_seconds": elapsed,
@@ -459,7 +508,11 @@ def main():
         except RequestException as exc:
             print(f"[availability_probe:error] sku={sku} error={exc}", flush=True)
             continue
-        print(f"[availability_probe:call] sku={sku} endpoint=gateway_graphql http_calls=1 status={status_code}", flush=True)
+        print(
+            f"[availability_probe:call] sku={sku} endpoint=gateway_graphql "
+            f"variant={PROBE_VARIANT} http_calls=1 status={status_code}",
+            flush=True,
+        )
         for row in rows:
             values = row["values"]
             errors = row["errors"]

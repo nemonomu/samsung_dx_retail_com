@@ -6,7 +6,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bestbuy.step00_availability_graphql_probe import analyze_curl_reference_text  # noqa: E402
+from bestbuy.step00_availability_graphql_probe import (  # noqa: E402
+    analyze_curl_reference_text,
+    detail_with_fulfillment_payload,
+)
 
 
 class AvailabilityProbeReferenceTests(unittest.TestCase):
@@ -41,6 +44,16 @@ curl ^"https://www.bestbuy.com/gateway/graphql^" ^
 
         self.assertEqual(summary["graphql_post_count"], 1)
         self.assertEqual(len(summary["graphql_posts_with_availability_fields"]), 1)
+
+    def test_detail_with_fulfillment_payload_is_single_operation(self):
+        payload = detail_with_fulfillment_payload("6623791")
+
+        self.assertEqual(payload["operationName"], "ProductSchema_init")
+        self.assertEqual(payload["variables"]["skuId"], "6623791")
+        self.assertIn("fulfillmentInput", payload["variables"])
+        self.assertIn("ProductFulfillmentInput", payload["query"])
+        self.assertIn("fulfillmentOptions(input:$fulfillmentInput)", payload["query"])
+        self.assertNotIsInstance(payload, list)
 
 
 if __name__ == "__main__":

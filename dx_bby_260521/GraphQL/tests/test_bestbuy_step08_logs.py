@@ -70,6 +70,55 @@ class Step08LogTests(unittest.TestCase):
         self.assertNotIn("ProductFulfillmentInput", payload["query"])
         self.assertNotIn("fulfillmentOptions", payload["query"])
 
+    def test_get_it_fast_payload_is_same_batch_operation(self):
+        payload = step08.get_it_fast_payload("6623791")
+
+        self.assertEqual(payload["operationName"], "ProductSchemaGetItFastProbe")
+        self.assertEqual(payload["variables"]["skuId"], "6623791")
+        self.assertIn("fulfillmentGetItFastOptions", payload["query"])
+        self.assertNotIn("ProductFulfillmentInput", payload["query"])
+        self.assertNotIn("fulfillmentOptions(input:$fulfillmentInput)", payload["query"])
+        self.assertNotIsInstance(payload, list)
+
+    def test_get_it_fast_values_fill_pickup_and_fastest_only(self):
+        item = {
+            "data": {
+                "fulfillmentGetItFastOptions": {
+                    "shippingCutOffDetails": {"getItBy": "tomorrow", "getItByDate": "2026-05-27"},
+                    "storeCutOffDetails": [{"getItBy": "today", "getItByDate": "2026-05-25"}],
+                }
+            }
+        }
+
+        values = step08.get_it_fast_availability_values(item)
+
+        self.assertEqual(values["pick_up_availability"], "Pick up today")
+        self.assertEqual(values["fastest_delivery"], "Get it tomorrow")
+        self.assertEqual(values["delivery_availability"], "")
+
+    def test_detail_batch_request_entries_maps_multiple_skus(self):
+        old_fetch_compare = step08.FETCH_COMPARE
+        old_fetch_get_it_fast = step08.FETCH_GET_IT_FAST
+        step08.FETCH_COMPARE = True
+        step08.FETCH_GET_IT_FAST = True
+        try:
+            payloads, entries = step08.detail_batch_request_entries(
+                [
+                    {"sku_id": "6639210", "product_url": "https://www.bestbuy.com/site/-/6639210.p?skuId=6639210"},
+                    {"sku_id": "6670264", "product_url": "https://www.bestbuy.com/site/-/6670264.p?skuId=6670264"},
+                ]
+            )
+        finally:
+            step08.FETCH_COMPARE = old_fetch_compare
+            step08.FETCH_GET_IT_FAST = old_fetch_get_it_fast
+
+        self.assertEqual(len(entries), 2)
+        self.assertEqual(len(payloads), 8)
+        self.assertEqual(entries[0]["indices"], {"detail": 0, "review": 1, "compare": 2, "get_it_fast": 3})
+        self.assertEqual(entries[1]["indices"], {"detail": 4, "review": 5, "compare": 6, "get_it_fast": 7})
+        self.assertEqual(payloads[0]["variables"]["skuId"], "6639210")
+        self.assertEqual(payloads[4]["variables"]["skuId"], "6670264")
+
 
 if __name__ == "__main__":
     unittest.main()

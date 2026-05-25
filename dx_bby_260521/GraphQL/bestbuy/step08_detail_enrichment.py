@@ -22,6 +22,8 @@ from .step00_config import (
     apply_bestbuy_location,
     bestbuy_category,
     bestbuy_output_table,
+    bestbuy_store_id,
+    bestbuy_zip_code,
     db_config,
     old_pdp_url,
     rel_path,
@@ -103,6 +105,7 @@ DETAIL_PRINT_MANIFEST_JSON = os.getenv("BESTBUY_DETAIL_PRINT_MANIFEST_JSON", "0"
     "y",
 }
 DETAIL_LOG_FAILURE_LIMIT = int(os.getenv("BESTBUY_DETAIL_LOG_FAILURE_LIMIT", "3"))
+DETAIL_SKU_BATCH_SIZE = max(1, int(os.getenv("BESTBUY_DETAIL_SKU_BATCH_SIZE", "1")))
 
 RAW_DETAIL_DIR = DETAIL_ROOT / "raw" / "detail_html"
 RAW_REVIEW_DIR = DETAIL_ROOT / "raw" / "review20"
@@ -116,6 +119,12 @@ FINAL_OUTPUT_CSV = Path(os.getenv("BESTBUY_FINAL_OUTPUT_CSV", OUTPUT_ROOT / "fin
 RETRY_MISSING_SIMILAR_SOURCE_CSV = os.getenv("BESTBUY_DETAIL_RETRY_MISSING_SIMILAR_SOURCE_CSV", "").strip()
 MANIFEST_PATH = DETAIL_ROOT / "manifest_detail_enrichment.json"
 FETCH_COMPARE = os.getenv("BESTBUY_DETAIL_FETCH_COMPARE", "0").lower() in {"1", "true", "yes", "y"}
+FETCH_GET_IT_FAST = os.getenv("BESTBUY_DETAIL_FETCH_GET_IT_FAST", "1" if CATEGORY == "TV" else "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
 RUN_BATCH_ID = os.getenv("BESTBUY_BATCH_ID") or f"b_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 TARGET_SKUS = {
     value.strip().lower()
@@ -517,6 +526,34 @@ def date_to_relative_or_phrase(prefix, date_value):
     if (target - today).days == 1:
         return f"{prefix} tomorrow"
     return f"{prefix} {dt.strftime('%a, %b')} {dt.day}"
+
+
+def date_to_phrase_from_get_it_fast(prefix, value):
+    if not isinstance(value, dict):
+        return ""
+    get_it_by = str(value.get("getItBy") or "").strip().lower()
+    if get_it_by == "today":
+        return f"{prefix} today"
+    if get_it_by == "tomorrow":
+        return f"{prefix} tomorrow"
+    return date_to_relative_or_phrase(prefix, value.get("getItByDate"))
+
+
+def get_it_fast_availability_values(item):
+    data = item.get("data") if isinstance(item, dict) else {}
+    connection = data.get("fulfillmentGetItFastOptions") if isinstance(data, dict) else {}
+    if not isinstance(connection, dict):
+        connection = {}
+    shipping = connection.get("shippingCutOffDetails")
+    if not isinstance(shipping, dict):
+        shipping = {}
+    stores = as_list(connection.get("storeCutOffDetails"))
+    store = stores[0] if stores and isinstance(stores[0], dict) else {}
+    return {
+        "pick_up_availability": date_to_phrase_from_get_it_fast("Pick up", store),
+        "fastest_delivery": date_to_phrase_from_get_it_fast("Get it", shipping),
+        "delivery_availability": "",
+    }
 
 
 def html_match(pattern, html_text, flags=re.I | re.S):
@@ -2307,6 +2344,15 @@ PRODUCT_SCHEMA_REVIEW20_QUERY = (
 )
 
 
+PRODUCT_SCHEMA_GET_IT_FAST_QUERY = (
+    "query ProductSchemaGetItFastProbe($skuId:String!$destinationZipCode:String$locationId:String)"
+    "{productBySkuId(skuId:$skuId){skuId bsin name{short}url{pdp}}"
+    "fulfillmentGetItFastOptions(input:{destinationZipCode:$destinationZipCode locationId:$locationId})"
+    "{shippingCutOffDetails{getItBy getItByDate destinationZipCode}"
+    "storeCutOffDetails{getItBy getItByDate minPickupHours locationId}}}"
+)
+
+
 def fallback_review20_payload(sku):
     variables = {
         "skuId": str(sku),
@@ -2317,6 +2363,20 @@ def fallback_review20_payload(sku):
         "operationName": "ProductSchema_init",
         "variables": variables,
         "query": PRODUCT_SCHEMA_REVIEW20_QUERY,
+    }
+
+
+def get_it_fast_payload(sku):
+    variables = {
+        "skuId": str(sku),
+        "destinationZipCode": bestbuy_zip_code(),
+        "locationId": bestbuy_store_id(),
+    }
+    apply_bestbuy_location(variables)
+    return {
+        "operationName": "ProductSchemaGetItFastProbe",
+        "variables": variables,
+        "query": PRODUCT_SCHEMA_GET_IT_FAST_QUERY,
     }
 
 
@@ -2373,6 +2433,46 @@ def compare_product_payload(sku):
     }
 
 
+def detail_batch_payloads_for_sku(sku):
+    payloads = []
+    indices = {}
+    detail_payload = fallback_review20_payload(sku)
+    review_payload = fallback_review20_payload(sku)
+    indices["detail"] = len(payloads)
+    payloads.append(detail_payload)
+    indices["review"] = len(payloads)
+    payloads.append(review_payload)
+    if FETCH_COMPARE:
+        indices["compare"] = len(payloads)
+        payloads.append(compare_product_payload(sku))
+    if FETCH_GET_IT_FAST:
+        indices["get_it_fast"] = len(payloads)
+        payloads.append(get_it_fast_payload(sku))
+    return payloads, indices
+
+
+def detail_batch_request_entries(targets):
+    request_payload = []
+    entries = []
+    for target in targets:
+        sku = str(target.get("sku_id") or "").strip()
+        if not sku:
+            continue
+        payloads, relative_indices = detail_batch_payloads_for_sku(sku)
+        base_index = len(request_payload)
+        request_payload.extend(payloads)
+        entries.append(
+            {
+                "target": target,
+                "sku": sku,
+                "pdp_url": target_url(target, sku),
+                "payloads": payloads,
+                "indices": {stage: base_index + index for stage, index in relative_indices.items()},
+            }
+        )
+    return request_payload, entries
+
+
 def detail_payloads(sku):
     paths = detail_paths(sku)
     if paths.get("apollo") and paths["apollo"].exists():
@@ -2414,9 +2514,14 @@ def fetch_detail(client, target):
     detail_payload = fallback_review20_payload(sku)
     review_payload = fallback_review20_payload(sku)
     compare_payload = compare_product_payload(sku) if FETCH_COMPARE else None
+    get_it_fast_batch_payload = get_it_fast_payload(sku) if FETCH_GET_IT_FAST else None
     request_payload = [detail_payload, review_payload]
     if compare_payload:
         request_payload.append(compare_payload)
+    get_it_fast_index = None
+    if get_it_fast_batch_payload:
+        get_it_fast_index = len(request_payload)
+        request_payload.append(get_it_fast_batch_payload)
     operation_names = [payload.get("operationName", "") for payload in request_payload]
     compare_index = 2 if compare_payload else None
     paths = detail_paths_for_status(sku, target, False)
@@ -2429,6 +2534,7 @@ def fetch_detail(client, target):
             compare_debug = {}
             compare_name_count = 0
             compare_ok = True
+            get_it_fast_values = {}
             if DETAIL_DIRECT_GRAPHQL:
                 response = client.post(
                     "https://www.bestbuy.com/gateway/graphql",
@@ -2451,6 +2557,10 @@ def fetch_detail(client, target):
                 detail_response_json = graphql_batch_response_item(response_json, 0)
                 review_response_json = graphql_batch_response_item(response_json, 1)
                 compare_response_json = graphql_batch_response_item(response_json, compare_index) if compare_index is not None else {}
+                get_it_fast_response_json = (
+                    graphql_batch_response_item(response_json, get_it_fast_index) if get_it_fast_index is not None else {}
+                )
+                get_it_fast_values = get_it_fast_availability_values(get_it_fast_response_json)
                 product = ((response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(response_json, dict) else {}
                 if not product:
                     product = ((detail_response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(detail_response_json, dict) else {}
@@ -2460,7 +2570,10 @@ def fetch_detail(client, target):
                     "status_code": response.status_code,
                     "operation_names": operation_names,
                     "batch_count": len(response_json) if isinstance(response_json, list) else (1 if isinstance(response_json, dict) else 0),
-                    "fulfillment_in_batch": False,
+                    "fulfillment_in_batch": bool(get_it_fast_batch_payload),
+                    "product_fulfillment_options_in_batch": False,
+                    "get_it_fast_in_batch": bool(get_it_fast_batch_payload),
+                    "get_it_fast_value_count": sum(1 for value in get_it_fast_values.values() if value),
                     "errors": [
                         item.get("errors")
                         for item in (response_json if isinstance(response_json, list) else [response_json])
@@ -2638,7 +2751,11 @@ def fetch_detail(client, target):
                     "json_response_compare_min_names": DETAIL_SIMILAR_MIN_NAMES,
                     "json_response_compare_ok": compare_ok,
                     "fulfillment_endpoint_enabled": False,
-                    "fulfillment_direct_batch_enabled": False,
+                    "fulfillment_direct_batch_enabled": bool(get_it_fast_batch_payload),
+                    "fulfillment_get_it_fast_batch_enabled": bool(get_it_fast_batch_payload),
+                    "fulfillment_get_it_fast_value_count": sum(1 for value in get_it_fast_values.values() if value)
+                    if DETAIL_DIRECT_GRAPHQL
+                    else 0,
                     "fulfillment_extra_network_calls": 0,
                     "fulfillment_endpoint_variant_count": 0,
                     "fulfillment_endpoint_success_count": 0,
@@ -2666,6 +2783,263 @@ def fetch_detail(client, target):
             break
     paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
     return meta
+
+
+def fetch_detail_sku_batch(client, targets):
+    if not targets:
+        return {}
+    prepared_targets = []
+    metas = {}
+    for target in targets:
+        sku = str(target.get("sku_id") or "").strip()
+        if not sku:
+            continue
+        pdp_url = target_url(target, sku)
+        current_paths = detail_paths(sku)
+        if not FORCE_REFRESH and detail_success(sku):
+            meta = read_json(current_paths["meta"])
+            annotate_detail_final_compare(meta, sku)
+            metas[sku] = meta
+            continue
+        attempt = next_attempt(current_paths["meta"], pdp_url)
+        meta = {"sku_id": sku, "stage": "detail", "url": pdp_url, "attempt": attempt, "started_at": now()}
+        if not FORCE_REFRESH and attempt > MAX_ATTEMPTS:
+            paths = detail_paths_for_status(sku, target, False)
+            meta.update({"success": False, "error": "max_attempts_exceeded", "finished_at": now()})
+            paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+            metas[sku] = meta
+            continue
+        prepared_targets.append(target)
+        metas[sku] = meta
+
+    request_payload, entries = detail_batch_request_entries(prepared_targets)
+    if not entries:
+        return metas
+    for transport in fetch_transports():
+        if transport == "zenrows" and not client:
+            continue
+        start = time.perf_counter()
+        response = None
+        response_json = {}
+        text = ""
+        headers = {}
+        error = ""
+        try:
+            response = client.post(
+                "https://www.bestbuy.com/gateway/graphql",
+                params=graphql_params(),
+                headers={
+                    "accept": "application/json, text/plain, */*",
+                    "content-type": "application/json",
+                    "origin": "https://www.bestbuy.com",
+                    "referer": entries[0]["pdp_url"],
+                },
+                data=json.dumps(request_payload),
+                timeout=REQUEST_TIMEOUT,
+            )
+            text = response.text
+            headers = dict(response.headers)
+            try:
+                response_json = response.json()
+            except ValueError:
+                response_json = {}
+        except RequestException as exc:
+            error = str(exc)
+
+        elapsed = round(time.perf_counter() - start, 3)
+        batch_cost = request_cost(response.headers) if response is not None else 0
+        split_cost = batch_cost / len(entries) if entries else 0
+        status_code = response.status_code if response is not None else "ERR"
+        response_count = len(response_json) if isinstance(response_json, list) else (1 if isinstance(response_json, dict) else 0)
+        for batch_index, entry in enumerate(entries, 1):
+            target = entry["target"]
+            sku = entry["sku"]
+            meta = metas.get(sku) or {
+                "sku_id": sku,
+                "stage": "detail",
+                "url": entry["pdp_url"],
+                "attempt": 1,
+                "started_at": now(),
+            }
+            indices = entry["indices"]
+            detail_response_json = graphql_batch_response_item(response_json, indices.get("detail", -1))
+            review_response_json = graphql_batch_response_item(response_json, indices.get("review", -1))
+            compare_response_json = graphql_batch_response_item(response_json, indices.get("compare", -1))
+            get_it_fast_response_json = graphql_batch_response_item(response_json, indices.get("get_it_fast", -1))
+            get_it_fast_values = get_it_fast_availability_values(get_it_fast_response_json)
+            product = ((detail_response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(detail_response_json, dict) else {}
+            success = response is not None and status_code == 200 and isinstance(product, dict) and str(product.get("skuId") or "") == str(sku)
+            paths = detail_paths_for_status(sku, target, success)
+            entry_responses = [
+                graphql_batch_response_item(response_json, indices[stage])
+                for stage in ("detail", "review", "compare", "get_it_fast")
+                if stage in indices
+            ]
+            entry_payloads = entry["payloads"]
+            operation_names = [payload.get("operationName", "") for payload in entry_payloads]
+            artifact_meta = write_direct_detail_artifacts(paths, entry_payloads, entry_responses, text, headers)
+            paths["json_response"].write_text(
+                json.dumps(entry_responses, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            paths["json_response_summary"].write_text(
+                json.dumps(
+                    {
+                        "status_code": status_code,
+                        "operation_names": operation_names,
+                        "batch_count": len(entry_responses),
+                        "sku_batch_size": len(entries),
+                        "sku_batch_index": batch_index,
+                        "batch_operation_count": len(request_payload),
+                        "batch_response_count": response_count,
+                        "response_indices": indices,
+                        "get_it_fast_in_batch": "get_it_fast" in indices,
+                        "get_it_fast_value_count": sum(1 for value in get_it_fast_values.values() if value),
+                        "errors": [
+                            item.get("errors")
+                            for item in entry_responses
+                            if isinstance(item, dict) and item.get("errors")
+                        ],
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            if paths.get("fulfillment_response"):
+                paths["fulfillment_response"].write_text("[]", encoding="utf-8")
+            if paths.get("fulfillment_meta"):
+                paths["fulfillment_meta"].write_text(
+                    json.dumps(
+                        {
+                            "sku_id": sku,
+                            "stage": "fulfillment_not_collected_in_detail",
+                            "url": entry["pdp_url"],
+                            "enabled": False,
+                            "transport": "none",
+                            "extra_network_call": False,
+                            "variant_count": 0,
+                            "success_count": 0,
+                            "value_count": 0,
+                            "error_count": 0,
+                            "options": [],
+                            "finished_at": now(),
+                        },
+                        indent=2,
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+            review_count = review_result_count_from_json(review_response_json)
+            review_ok = success and review_count is not None
+            review_paths_current = review_paths_for_status(sku, target, review_ok)
+            write_review_response_artifacts(review_paths_current, entry_payloads[1], review_response_json, text, headers)
+            review_paths_current["meta"].write_text(
+                json.dumps(
+                    {
+                        "sku_id": sku,
+                        "stage": "review20",
+                        "url": entry["pdp_url"],
+                        "attempt": meta.get("attempt", 1),
+                        "started_at": meta.get("started_at"),
+                        "success": review_ok,
+                        "status_code": status_code,
+                        "transport": transport,
+                        "fetch_mode": FETCH_MODE,
+                        "detail_mode": "direct_graphql_sku_batch",
+                        "elapsed_seconds": 0,
+                        "x_request_cost": 0,
+                        "bytes": len(text or ""),
+                        "review_count_returned": review_count if review_count is not None else 0,
+                        "finished_at": now(),
+                        "error": "" if review_ok else "review20_missing",
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            compare_ok = False
+            compare_count = 0
+            if FETCH_COMPARE and "compare" in indices:
+                recommendations = compare_recommendations_from_response(compare_response_json)
+                compare_ok = response is not None and status_code == 200 and isinstance(recommendations, list)
+                compare_count = len(recommendations) if isinstance(recommendations, list) else 0
+                compare_paths_current = compare_paths_for_status(sku, target, compare_ok)
+                compare_payload_index = ["detail", "review", "compare", "get_it_fast"].index("compare")
+                write_compare_response_artifacts(
+                    compare_paths_current,
+                    entry_payloads[compare_payload_index],
+                    compare_response_json,
+                    text,
+                    headers,
+                )
+                compare_paths_current["meta"].write_text(
+                    json.dumps(
+                        {
+                            "sku_id": sku,
+                            "stage": "compare",
+                            "url": entry["pdp_url"],
+                            "attempt": meta.get("attempt", 1),
+                            "started_at": meta.get("started_at"),
+                            "success": compare_ok,
+                            "status_code": status_code,
+                            "transport": transport,
+                            "fetch_mode": FETCH_MODE,
+                            "detail_mode": "direct_graphql_sku_batch",
+                            "elapsed_seconds": 0,
+                            "x_request_cost": 0,
+                            "bytes": len(text or ""),
+                            "recommendation_count": compare_count,
+                            "finished_at": now(),
+                            "error": "" if compare_ok else "compare_recommendations_missing",
+                        },
+                        indent=2,
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+            meta.update(
+                {
+                    "success": success,
+                    "status_code": status_code,
+                    "transport": transport,
+                    "fetch_mode": FETCH_MODE,
+                    "detail_mode": "direct_graphql_sku_batch",
+                    "fetched_this_run": True,
+                    "sku_batch_size": len(entries),
+                    "sku_batch_index": batch_index,
+                    "sku_batch_operation_count": len(request_payload),
+                    "batched_operations": ",".join(operation_names),
+                    "elapsed_seconds": elapsed,
+                    "x_request_cost": split_cost,
+                    "x_request_cost_total": split_cost,
+                    "batch_x_request_cost": batch_cost,
+                    "bytes": artifact_meta["full_bytes"],
+                    "stored_bytes": artifact_meta["stored_bytes"],
+                    "html_mode": artifact_meta["html_mode"],
+                    "apollo_payload_count": artifact_meta["apollo_payload_count"],
+                    "json_response": DETAIL_JSON_RESPONSE,
+                    "json_response_compare_name_count": 0,
+                    "fulfillment_endpoint_enabled": False,
+                    "fulfillment_direct_batch_enabled": "get_it_fast" in indices,
+                    "fulfillment_get_it_fast_batch_enabled": "get_it_fast" in indices,
+                    "fulfillment_get_it_fast_value_count": sum(1 for value in get_it_fast_values.values() if value),
+                    "fulfillment_extra_network_calls": 0,
+                    "fulfillment_endpoint_variant_count": 0,
+                    "fulfillment_endpoint_success_count": 0,
+                    "fulfillment_endpoint_value_count": 0,
+                    "fulfillment_endpoint_error_count": 0,
+                    "finished_at": now(),
+                    "error": "" if success else (error or response_error(status_code, text, "detail_graphql_missing_product")),
+                }
+            )
+            annotate_detail_final_compare(meta, sku)
+            paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+            metas[sku] = meta
+        if any(meta.get("success") for meta in metas.values()):
+            break
+    return metas
 
 
 def fetch_review20(client, target):
@@ -2938,6 +3312,24 @@ def products_from_detail(sku):
     if isinstance(review_product, dict) and str(review_product.get("skuId") or "") in allowed_sku_ids:
         products.append(review_product)
     return products
+
+
+def get_it_fast_values_from_detail(sku):
+    values = {
+        "pick_up_availability": "",
+        "fastest_delivery": "",
+        "delivery_availability": "",
+    }
+    for payload in detail_payloads(sku):
+        for event in payload.get("events", []):
+            data = event_data(event)
+            if not (isinstance(data, dict) and "fulfillmentGetItFastOptions" in data):
+                continue
+            candidate = get_it_fast_availability_values({"data": data})
+            for key in values:
+                if not values[key] and candidate.get(key):
+                    values[key] = candidate[key]
+    return values
 
 
 def compare_similar_names_from_detail(sku):
@@ -3682,6 +4074,7 @@ def output_row(target):
     html_text = detail_html_path.read_text(encoding="utf-8", errors="replace") if detail_html_path.exists() else ""
     selector_values = detail_selector_values(html_text)
     products = products_from_detail(sku)
+    get_it_fast_values = get_it_fast_values_from_detail(sku)
     compare_similar_names = compare_similar_names_from_detail(sku)
     compare_current_product = compare_current_product_from_detail(sku)
     spec_products = products + ([compare_current_product] if compare_current_product else [])
@@ -3757,12 +4150,14 @@ def output_row(target):
         "pick_up_availability": first_text_starting(
             "Pick up",
             pickup_text(pickup),
+            get_it_fast_values.get("pick_up_availability"),
             selector_values.get("pick_up_availability"),
             target.get("pick_up_availability"),
         ),
         "fastest_delivery": first_text_starting(
             "Get",
             fastest_delivery_text(shipping),
+            get_it_fast_values.get("fastest_delivery"),
             fastest_delivery_from_html(html_text),
             selector_values.get("fastest_delivery"),
             target.get("fastest_delivery"),
@@ -4001,6 +4396,12 @@ def main():
         or DETAIL_COMPARE_FORCE_FETCH
     )
     network_mode = "cache_only" if REBUILD_ONLY else ("zenrows" if can_fetch_network else "missing_api_key")
+    use_detail_sku_batch = (
+        can_fetch_network
+        and DETAIL_DIRECT_GRAPHQL
+        and DETAIL_SKU_BATCH_SIZE > 1
+        and STAGE in {"all", "detail"}
+    )
     print(
         format_log_line(
             "detail:plan",
@@ -4010,6 +4411,7 @@ def main():
             mode=fetch_mode_label,
             targets=f"{len(targets)}/{len(output_targets)}",
             workers=WORKERS,
+            sku_batch=DETAIL_SKU_BATCH_SIZE if use_detail_sku_batch else "",
             force=FORCE_REFRESH,
             rebuild=REBUILD_ONLY,
         ),
@@ -4019,7 +4421,9 @@ def main():
         format_log_line(
             "detail:network",
             transport=network_mode,
-            detail_call="gateway_graphql_post" if DETAIL_DIRECT_GRAPHQL else "pdp_render",
+            detail_call="gateway_graphql_sku_batch_post"
+            if use_detail_sku_batch
+            else ("gateway_graphql_post" if DETAIL_DIRECT_GRAPHQL else "pdp_render"),
             compare="batched" if direct_compare else ("pdp_js" if pdp_compare_js else "off"),
             fulfillment="off",
         ),
@@ -4076,6 +4480,38 @@ def main():
     compare_cost = 0.0
     if REBUILD_ONLY:
         print(format_log_line("detail:rebuild", output_targets=len(output_targets)), flush=True)
+    elif use_detail_sku_batch:
+        for offset in range(0, len(targets), DETAIL_SKU_BATCH_SIZE):
+            chunk = targets[offset : offset + DETAIL_SKU_BATCH_SIZE]
+            batch_metas = fetch_detail_sku_batch(client, chunk)
+            batch_cost = 0.0
+            for meta in batch_metas.values():
+                if meta.get("fetched_this_run"):
+                    batch_cost = max(batch_cost, float(meta.get("batch_x_request_cost") or 0))
+            detail_cost += batch_cost
+            for local_index, target in enumerate(chunk, 1):
+                index = offset + local_index
+                sku = str(target.get("sku_id") or "").strip()
+                dmeta = batch_metas.get(sku) or read_json(detail_paths(sku)["meta"])
+                rmeta = read_json(review_paths(sku)["meta"])
+                cmeta = read_json(compare_paths(sku)["meta"])
+                fetched_detail = bool(dmeta.get("fetched_this_run"))
+                with benchmark_lock:
+                    append_detail_benchmark(target, DETAIL_ROOT, DETAIL_BENCHMARKS_CSV)
+                print(
+                    process_log_line(
+                        index,
+                        len(targets),
+                        sku,
+                        dmeta,
+                        rmeta,
+                        cmeta,
+                        fetched_detail,
+                        fetched_detail,
+                        fetched_detail and FETCH_COMPARE,
+                    ),
+                    flush=True,
+                )
     elif WORKERS > 1 and len(targets) > 1:
         with ThreadPoolExecutor(max_workers=WORKERS) as executor:
             futures = [executor.submit(process_target, index, target) for index, target in enumerate(targets, 1)]

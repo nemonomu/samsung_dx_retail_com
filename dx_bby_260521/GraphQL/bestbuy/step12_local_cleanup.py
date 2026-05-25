@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -30,8 +31,11 @@ def now():
 
 
 def parse_run_date(path):
+    match = re.match(r"^(\d{8})(?:_\d+)?$", path.name)
+    if not match:
+        return None
     try:
-        return datetime.strptime(path.name, "%Y%m%d").date()
+        return datetime.strptime(match.group(1), "%Y%m%d").date()
     except ValueError:
         return None
 

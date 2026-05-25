@@ -60,7 +60,7 @@ STEPS = [
         "bsr_list",
         "bestbuy.step03_bsr_list",
         {
-            "BESTBUY_MAIN_PAGES": "6",
+            "BESTBUY_MAIN_PAGES": "2",
             "BESTBUY_MAIN_RUN_ID": "bsr",
             "BESTBUY_MAIN_ORGANIC_OFFSET": "72",
             "BESTBUY_SEARCH_SORT": "Best-Selling",
@@ -109,6 +109,7 @@ STEPS = [
             "BESTBUY_DETAIL_REQUIRE_SIMILAR": "1",
             "BESTBUY_DETAIL_RETRY_ON_MISSING_SIMILAR": "0",
             "BESTBUY_DETAIL_MAX_ATTEMPTS": "1",
+            "BESTBUY_DETAIL_SKU_BATCH_SIZE": "5",
             "BESTBUY_DETAIL_USE_DB_SELECTORS": "0",
             "BESTBUY_DETAIL_WORKERS": "3",
             "ZENROWS_TIMEOUT": "240",
@@ -127,6 +128,7 @@ STEPS = [
             "BESTBUY_DETAIL_REQUIRE_SIMILAR": "1",
             "BESTBUY_DETAIL_RETRY_ON_MISSING_SIMILAR": "0",
             "BESTBUY_DETAIL_MAX_ATTEMPTS": "1",
+            "BESTBUY_DETAIL_SKU_BATCH_SIZE": "5",
             "BESTBUY_DETAIL_USE_DB_SELECTORS": "0",
             "BESTBUY_DETAIL_WORKERS": "3",
             "BESTBUY_DETAIL_RETRY_ONLY": "1",
@@ -145,11 +147,24 @@ STEPS = [
             "ZENROWS_TIMEOUT": "240",
         },
     ),
-    Step(10, "status_check", "bestbuy.step10_status_check"),
-    Step(11, "s3_sync", "bestbuy.step11_s3_sync"),
-    Step(12, "local_cleanup", "bestbuy.step12_local_cleanup"),
-    Step(13, "db_prepare", "bestbuy.step13_db_prepare"),
-    Step(14, "db_load", "bestbuy.step14_db_load"),
+    Step(
+        10,
+        "availability_backfill",
+        "bestbuy.step08_availability_backfill",
+        {
+            "BESTBUY_AVAILABILITY_BACKFILL_CHUNK_SIZE": "1",
+            "BESTBUY_AVAILABILITY_BACKFILL_ALLOW_MULTI_SKU": "0",
+            "BESTBUY_AVAILABILITY_BACKFILL_CANDIDATE_MODE": "missing_any",
+            "BESTBUY_AVAILABILITY_BACKFILL_OVERWRITE": "0",
+            "BESTBUY_AVAILABILITY_BACKFILL_TIMEOUT": "180",
+            "ZENROWS_TIMEOUT": "180",
+        },
+    ),
+    Step(11, "status_check", "bestbuy.step10_status_check"),
+    Step(12, "s3_sync", "bestbuy.step11_s3_sync"),
+    Step(13, "local_cleanup", "bestbuy.step12_local_cleanup"),
+    Step(14, "db_prepare", "bestbuy.step13_db_prepare"),
+    Step(15, "db_load", "bestbuy.step14_db_load"),
 ]
 
 
@@ -321,6 +336,8 @@ def step_complete(step):
         return detail_html_complete()
     if step.name == "review20":
         return review20_complete()
+    if step.name == "availability_backfill":
+        return False, "always refresh availability backfill"
     if step.name == "status_check":
         return False, "always refresh status"
     if step.name == "s3_sync":
@@ -447,6 +464,11 @@ def resume_steps():
         elif step.name == "review20" and any(item.name in {"final_targets", "detail_html"} for item in selected):
             force = True
             reason = "detail source refreshed"
+        elif step.name == "availability_backfill" and any(
+            item.name in {"final_targets", "detail_html", "review20"} for item in selected
+        ):
+            force = True
+            reason = "detail output refreshed"
 
         if complete and not force and step.name != "status_check":
             print(f"[ok] step {step.key} {step.name}: {reason}")

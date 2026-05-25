@@ -3150,6 +3150,14 @@ def first_path(products, path):
     return ""
 
 
+def as_list(value):
+    if isinstance(value, list):
+        return value
+    if value in (None, "", [], {}):
+        return []
+    return [value]
+
+
 def best_path(products, path, required_keys=()):
     values = []
     for product in products:
@@ -3173,15 +3181,38 @@ def best_path(products, path, required_keys=()):
     return sorted(values, key=lambda item: item[0], reverse=True)[0][1] if values else {}
 
 
+def fulfillment_availabilities(products, detail_key, availability_key):
+    for product in products:
+        options = product.get("fulfillmentOptions") if isinstance(product, dict) else {}
+        if not isinstance(options, dict):
+            continue
+        for detail in as_list(options.get(detail_key)):
+            if not isinstance(detail, dict):
+                continue
+            for availability in as_list(detail.get(availability_key)):
+                if isinstance(availability, dict):
+                    yield availability
+
+
+def best_fulfillment_availability(products, detail_key, availability_key, required_keys=()):
+    values = []
+    for availability in fulfillment_availabilities(products, detail_key, availability_key):
+        score = sum(1 for key in required_keys if availability.get(key) not in (None, "", [], {}))
+        values.append((score, availability))
+    return sorted(values, key=lambda item: item[0], reverse=True)[0][1] if values else {}
+
+
 def best_shipping_availability(products):
     values = []
     for product in products:
         details = first_path([product], ["fulfillmentOptions", "shippingDetails"]) or []
-        for detail in details:
-            for shipping in detail.get("shippingAvailability") or []:
+        for detail in as_list(details):
+            if not isinstance(detail, dict):
+                continue
+            for shipping in as_list(detail.get("shippingAvailability")):
                 if not isinstance(shipping, dict) or not shipping.get("shippingEligible"):
                     continue
-                groups = shipping.get("customerLOSGroup") or []
+                groups = as_list(shipping.get("customerLOSGroup"))
                 default_group_id = shipping.get("defaultCustomerLosGroupId")
                 score = 1
                 if groups:
@@ -3455,8 +3486,8 @@ def pickup_text(pickup):
 def delivery_text(delivery):
     if not isinstance(delivery, dict) or not delivery.get("deliveryEligible"):
         return ""
-    slots = delivery.get("deliverySlots") or delivery.get("installationSlots") or []
-    if isinstance(slots, list) and slots:
+    slots = as_list(delivery.get("deliverySlots") or delivery.get("installationSlots"))
+    if slots:
         slot = slots[0] if isinstance(slots[0], dict) else {}
         return date_to_relative_or_phrase("Delivery as soon as", slot.get("date"))
     return ""
@@ -3465,8 +3496,8 @@ def delivery_text(delivery):
 def fastest_delivery_text(shipping):
     if not isinstance(shipping, dict) or not shipping.get("shippingEligible"):
         return ""
-    groups = shipping.get("customerLOSGroup") or []
-    if isinstance(groups, list) and groups:
+    groups = as_list(shipping.get("customerLOSGroup"))
+    if groups:
         group = groups[0] if isinstance(groups[0], dict) else {}
         default_group_id = shipping.get("defaultCustomerLosGroupId")
         for candidate in groups:
@@ -3487,9 +3518,7 @@ def fastest_delivery_text(shipping):
 def fulfillment_button_text(products):
     for product in reversed(products):
         states = first_path([product], ["fulfillmentOptions", "buttonStates"]) or []
-        if not isinstance(states, list):
-            continue
-        for state in states:
+        for state in as_list(states):
             if not isinstance(state, dict):
                 continue
             text = compact_text(state.get("displayText") or state.get("buttonState"))
@@ -3651,14 +3680,21 @@ def output_row(target):
         not_yet_reviewed = True
         review_count = 0
     final_price, original_price, savings = price_output_fields(price, target, selector_values)
-    pickup = best_path(products, ["fulfillmentOptions", "ispuDetails", 0, "ispuAvailability", 0], ("maxDate",))
-    shipping = best_shipping_availability(products)
-    delivery = best_path(
+    pickup = best_fulfillment_availability(
         products,
-        ["fulfillmentOptions", "deliveryDetails", 0, "deliveryAvailability", 0],
-        ("deliverySlots",),
+        "ispuDetails",
+        "ispuAvailability",
+        ("maxDate", "fulfillDate", "promiseByStreetDate"),
     )
-    delivery_slot = (delivery.get("deliverySlots") or [{}])[0].get("date") if isinstance(delivery, dict) else ""
+    shipping = best_shipping_availability(products)
+    delivery = best_fulfillment_availability(
+        products,
+        "deliveryDetails",
+        "deliveryAvailability",
+        ("deliverySlots", "installationSlots"),
+    )
+    delivery_slots = as_list(delivery.get("deliverySlots") or delivery.get("installationSlots")) if isinstance(delivery, dict) else []
+    delivery_slot = delivery_slots[0].get("date") if delivery_slots and isinstance(delivery_slots[0], dict) else ""
     screen = spec_value(products, "Screen Size Class") or spec_value(products, "Screen Size")
     energy = spec_value(spec_products, "Estimated Annual Electricity Use")
     model_year = spec_value(spec_products, "Model Year")

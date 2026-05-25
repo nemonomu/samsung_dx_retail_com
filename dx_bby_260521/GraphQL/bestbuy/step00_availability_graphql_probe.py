@@ -2,7 +2,7 @@ import json
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from requests import RequestException
@@ -13,6 +13,7 @@ from .step08_detail_enrichment import (
     as_list,
     best_fulfillment_availability,
     best_shipping_availability,
+    date_to_relative_or_phrase,
     delivery_text,
     fallback_review20_payload,
     fastest_delivery_text,
@@ -61,6 +62,14 @@ DETAIL_WITH_FULFILLMENT_QUERY = (
     "customerLOSGroup{customerLosGroupId minLineItemMaxDate maxLineItemMaxDate name displayDateType price}}}"
     "deliveryDetails{deliveryAvailability{deliveryEligible deliverable deliverySlots{date} installationSlots{date}}}"
     "ispuDetails{ispuAvailability{pickupEligible instoreInventoryAvailable quantity minPickupInHours maxDate fulfillDate promiseByStreetDate}}}}}"
+)
+
+DETAIL_WITH_GET_IT_FAST_QUERY = (
+    "query ProductSchemaGetItFastProbe($skuId:String!$destinationZipCode:String$locationId:String)"
+    "{productBySkuId(skuId:$skuId){skuId bsin name{short}url{pdp}}"
+    "fulfillmentGetItFastOptions(input:{destinationZipCode:$destinationZipCode locationId:$locationId})"
+    "{shippingCutOffDetails{getItBy getItByDate destinationZipCode}"
+    "storeCutOffDetails{getItBy getItByDate minPickupHours locationId}}}"
 )
 
 
@@ -143,6 +152,30 @@ def curl_block_data_len(block_text):
     return len(match.group(1)) if match else 0
 
 
+def curl_block_data_raw(block_text):
+    match = re.search(r'--data-raw \^"(.*)"(?: &)?$', str(block_text or ""), re.S)
+    return match.group(1) if match else ""
+
+
+def curl_block_json_payload(block_text):
+    raw = curl_block_data_raw(block_text)
+    if not raw:
+        return {}
+    text = readable_curl_text(raw)
+    candidates = [
+        text,
+        text.replace('\\\\\\"', '\\"'),
+        text.replace('\\\\"', '\\"'),
+    ]
+    for candidate in dict.fromkeys(candidates):
+        try:
+            value = json.loads(candidate)
+        except (TypeError, ValueError):
+            continue
+        return value if isinstance(value, dict) else {}
+    return {}
+
+
 def fulfillment_endpoint_variables(url):
     if "variables=" not in str(url or ""):
         return {}
@@ -155,10 +188,169 @@ def fulfillment_endpoint_variables(url):
         return {}
 
 
+def offset_from_utc_text(value):
+    match = re.fullmatch(r"UTC([+-])(\d{2}):?(\d{2})", str(value or "").strip())
+    if not match:
+        return None
+    sign = -1 if match.group(1) == "-" else 1
+    hours = int(match.group(2))
+    minutes = int(match.group(3))
+    return timezone(sign * timedelta(hours=hours, minutes=minutes))
+
+
+def event_local_date(event):
+    device = event.get("device") if isinstance(event, dict) else {}
+    timestamp = device.get("time") if isinstance(device, dict) else ""
+    if not timestamp:
+        return datetime.now().date()
+    try:
+        dt = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.now().date()
+    event_tz = offset_from_utc_text(device.get("timeZone") if isinstance(device, dict) else "")
+    if event_tz and dt.tzinfo:
+        dt = dt.astimezone(event_tz)
+    return dt.date()
+
+
+def days_out_text(prefix, base_date, days_out):
+    if days_out in ("", None):
+        return ""
+    try:
+        days = int(days_out)
+    except (TypeError, ValueError):
+        return ""
+    target = base_date + timedelta(days=days)
+    if days == 0:
+        return f"{prefix} today"
+    if days == 1:
+        return f"{prefix} tomorrow"
+    return f"{prefix} {target.strftime('%a, %b')} {target.day}"
+
+
+def digital_fulfillment_event_rows(event, line):
+    rows = []
+    if not isinstance(event, dict):
+        return rows
+    interaction = event.get("interaction") if isinstance(event.get("interaction"), dict) else {}
+    base_date = event_local_date(event)
+    for sku in as_list(event.get("skus")):
+        if not isinstance(sku, dict) or not isinstance(sku.get("fulfillment"), dict):
+            continue
+        rows.append(
+            {
+                "line": line,
+                "event_name": interaction.get("name", ""),
+                "sku": str(sku.get("id") or ""),
+                "base_date": base_date.isoformat(),
+                "fulfillment": sku.get("fulfillment") or {},
+            }
+        )
+    return rows
+
+
+def digital_fulfillment_rows_from_curl(text):
+    rows = []
+    parsed_event_count = 0
+    event_count = 0
+    for start_line, block_text in curl_blocks_from_text(text):
+        url = curl_block_url(block_text)
+        if "streams.bestbuy.com/customer/web-streams/v1/events/digital-experience-event" not in url:
+            continue
+        event_count += 1
+        event = curl_block_json_payload(block_text)
+        if not event:
+            continue
+        parsed_event_count += 1
+        rows.extend(digital_fulfillment_event_rows(event, start_line))
+    return rows, event_count, parsed_event_count
+
+
+def fulfillment_row_score(row, fulfillment_type):
+    fulfillment = row.get("fulfillment") if isinstance(row, dict) else {}
+    if not isinstance(fulfillment, dict) or fulfillment.get("type") != fulfillment_type:
+        return (-1, -1, -1)
+    return (
+        1 if fulfillment.get("daysOut") not in ("", None) else 0,
+        1 if fulfillment.get("cost") not in ("", None) else 0,
+        1 if fulfillment.get("isSelected") is True else 0,
+    )
+
+
+def best_digital_fulfillment_row(rows, sku, fulfillment_type):
+    candidates = [
+        row
+        for row in rows
+        if str(row.get("sku") or "") == str(sku) and (row.get("fulfillment") or {}).get("type") == fulfillment_type
+    ]
+    if not candidates:
+        return {}
+    return sorted(candidates, key=lambda row: fulfillment_row_score(row, fulfillment_type), reverse=True)[0]
+
+
+def digital_event_availability_values(rows, sku):
+    pickup = best_digital_fulfillment_row(rows, sku, "pickup")
+    shipping = best_digital_fulfillment_row(rows, sku, "shipping")
+    delivery = best_digital_fulfillment_row(rows, sku, "delivery")
+
+    pickup_fulfillment = pickup.get("fulfillment") if isinstance(pickup, dict) else {}
+    shipping_fulfillment = shipping.get("fulfillment") if isinstance(shipping, dict) else {}
+    delivery_fulfillment = delivery.get("fulfillment") if isinstance(delivery, dict) else {}
+
+    pickup_text_value = days_out_text(
+        "Pick up",
+        datetime.fromisoformat(pickup.get("base_date")).date() if pickup else datetime.now().date(),
+        pickup_fulfillment.get("daysOut") if isinstance(pickup_fulfillment, dict) else "",
+    )
+    shipping_text_value = days_out_text(
+        "Get it",
+        datetime.fromisoformat(shipping.get("base_date")).date() if shipping else datetime.now().date(),
+        shipping_fulfillment.get("daysOut") if isinstance(shipping_fulfillment, dict) else "",
+    )
+    if shipping_text_value and isinstance(shipping_fulfillment, dict) and shipping_fulfillment.get("cost") in (0, 0.0, "0", "0.0"):
+        shipping_text_value = f"{shipping_text_value} \u2022 FREE"
+    delivery_text_value = days_out_text(
+        "Delivery as soon as",
+        datetime.fromisoformat(delivery.get("base_date")).date() if delivery else datetime.now().date(),
+        delivery_fulfillment.get("daysOut") if isinstance(delivery_fulfillment, dict) else "",
+    )
+    return {
+        "pick_up_availability": pickup_text_value,
+        "fastest_delivery": shipping_text_value,
+        "delivery_availability": delivery_text_value,
+    }
+
+
+def get_it_fast_availability_values(item):
+    data = item.get("data") if isinstance(item, dict) else {}
+    connection = data.get("fulfillmentGetItFastOptions") if isinstance(data, dict) else {}
+    if not isinstance(connection, dict):
+        connection = {}
+    shipping = connection.get("shippingCutOffDetails") if isinstance(connection.get("shippingCutOffDetails"), dict) else {}
+    stores = as_list(connection.get("storeCutOffDetails"))
+    store = stores[0] if stores and isinstance(stores[0], dict) else {}
+    return {
+        "pick_up_availability": date_to_phrase_from_get_it_fast("Pick up", store),
+        "fastest_delivery": date_to_phrase_from_get_it_fast("Get it", shipping),
+        "delivery_availability": "",
+    }
+
+
+def date_to_phrase_from_get_it_fast(prefix, value):
+    if not isinstance(value, dict):
+        return ""
+    if str(value.get("getItBy") or "").strip().lower() == "today":
+        return f"{prefix} today"
+    if str(value.get("getItBy") or "").strip().lower() == "tomorrow":
+        return f"{prefix} tomorrow"
+    return date_to_relative_or_phrase(prefix, value.get("getItByDate"))
+
+
 def analyze_curl_reference_text(text):
     graphql_posts = []
     fulfillment_endpoints = []
     telemetry_days_out_count = 0
+    digital_fulfillment_rows, digital_event_count, digital_event_parsed_count = digital_fulfillment_rows_from_curl(text)
     for start_line, block_text in curl_blocks_from_text(text):
         url = curl_block_url(block_text)
         if "www.bestbuy.com/gateway/graphql" not in url:
@@ -197,6 +389,10 @@ def analyze_curl_reference_text(text):
         "graphql_posts_with_ui_text": [block for block in graphql_posts if block.get("ui_text_hits")],
         "fulfillment_endpoint_count": len(fulfillment_endpoints),
         "fulfillment_endpoint_examples": fulfillment_endpoints[:10],
+        "digital_event_count": digital_event_count,
+        "digital_event_parsed_count": digital_event_parsed_count,
+        "digital_fulfillment_event_count": len(digital_fulfillment_rows),
+        "digital_fulfillment_examples": digital_fulfillment_rows,
         "telemetry_days_out_count": telemetry_days_out_count,
     }
 
@@ -242,6 +438,28 @@ def probe_reference():
             f"line={block['line']} op={block.get('operation') or '-'} sku={info.get('sku')} "
             f"context={info.get('context')} button={info.get('button') or '-'} "
             f"shipping={info.get('has_shipping')} delivery={info.get('has_delivery')} pickup={info.get('has_pickup')}",
+            flush=True,
+        )
+    digital_rows = summary.get("digital_fulfillment_examples") or []
+    digital_skus = []
+    for sku in PROBE_SKUS + sorted({row.get("sku") for row in digital_rows if row.get("sku")}):
+        if sku and sku not in digital_skus:
+            digital_skus.append(sku)
+    for sku in digital_skus[:5]:
+        values = digital_event_availability_values(digital_rows, sku)
+        type_counts = {}
+        for row in digital_rows:
+            if row.get("sku") != sku:
+                continue
+            fulfillment_type = (row.get("fulfillment") or {}).get("type") or "-"
+            type_counts[fulfillment_type] = type_counts.get(fulfillment_type, 0) + 1
+        print(
+            "[availability_probe:digital_event] "
+            f"sku={sku} types="
+            f"{','.join(f'{key}:{value}' for key, value in sorted(type_counts.items()))} "
+            f"pickup={values.get('pick_up_availability', '')!r} "
+            f"fastest={values.get('fastest_delivery', '')!r} "
+            f"delivery={values.get('delivery_availability', '')!r}",
             flush=True,
         )
     print(f"[availability_probe:raw] {run_dir}", flush=True)
@@ -324,6 +542,20 @@ def detail_with_fulfillment_payload(sku):
     }
 
 
+def detail_with_get_it_fast_payload(sku):
+    variables = {
+        "skuId": str(sku),
+        "destinationZipCode": bestbuy_zip_code(),
+        "locationId": bestbuy_store_id(),
+    }
+    apply_bestbuy_location(variables)
+    return {
+        "operationName": "ProductSchemaGetItFastProbe",
+        "variables": variables,
+        "query": DETAIL_WITH_GET_IT_FAST_QUERY,
+    }
+
+
 def fulfillment_dynamic_payload(sku, option_marker=None):
     return {
         "operationName": "FulfillmentOptionHook_FulfillmentDynamicQuery",
@@ -373,6 +605,12 @@ def availability_values(product):
     }
 
 
+def row_availability_values(item, label):
+    if label == "detail_with_get_it_fast":
+        return get_it_fast_availability_values(item)
+    return availability_values(product_from_response(item))
+
+
 def error_summary(item):
     errors = item.get("errors") if isinstance(item, dict) else []
     output = []
@@ -397,6 +635,9 @@ def probe_sku(client, sku):
     elif PROBE_VARIANT in {"detail_with_fulfillment", "minimal"}:
         request_payload = [detail_with_fulfillment_payload(sku)]
         labels = ["detail_with_fulfillment"]
+    elif PROBE_VARIANT == "detail_with_get_it_fast":
+        request_payload = [detail_with_get_it_fast_payload(sku)]
+        labels = ["detail_with_get_it_fast"]
     elif PROBE_VARIANT == "product_schema_fulfillment":
         request_payload = [product_schema_fulfillment_payload(sku)]
         labels = ["product_schema_fulfillment"]
@@ -420,7 +661,7 @@ def probe_sku(client, sku):
     else:
         raise RuntimeError(
             "BESTBUY_AVAILABILITY_PROBE_VARIANT must be control, detail_with_fulfillment, "
-            "product_schema_fulfillment, or full"
+            "detail_with_get_it_fast, product_schema_fulfillment, or full"
         )
     started_at = now()
     start = time.perf_counter()
@@ -448,7 +689,7 @@ def probe_sku(client, sku):
     for index, label in enumerate(labels):
         item = response_item(response_json, index)
         product = product_from_response(item)
-        values = availability_values(product)
+        values = row_availability_values(item, label)
         rows.append(
             {
                 "index": index,

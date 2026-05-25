@@ -9,6 +9,9 @@ sys.path.insert(0, str(ROOT))
 from bestbuy.step00_availability_graphql_probe import (  # noqa: E402
     analyze_curl_reference_text,
     detail_with_fulfillment_payload,
+    detail_with_get_it_fast_payload,
+    digital_event_availability_values,
+    get_it_fast_availability_values,
 )
 
 
@@ -54,6 +57,45 @@ curl ^"https://www.bestbuy.com/gateway/graphql^" ^
         self.assertIn("ProductFulfillmentInput", payload["query"])
         self.assertIn("fulfillmentOptions(input:$fulfillmentInput)", payload["query"])
         self.assertNotIsInstance(payload, list)
+
+    def test_detail_with_get_it_fast_payload_is_single_operation(self):
+        payload = detail_with_get_it_fast_payload("6623791")
+
+        self.assertEqual(payload["operationName"], "ProductSchemaGetItFastProbe")
+        self.assertEqual(payload["variables"]["skuId"], "6623791")
+        self.assertIn("fulfillmentGetItFastOptions", payload["query"])
+        self.assertNotIn("fulfillmentOptions(input:$fulfillmentInput)", payload["query"])
+        self.assertNotIsInstance(payload, list)
+
+    def test_get_it_fast_values_map_pickup_and_shipping_dates(self):
+        item = {
+            "data": {
+                "fulfillmentGetItFastOptions": {
+                    "shippingCutOffDetails": {"getItByDate": "2026-05-27"},
+                    "storeCutOffDetails": [{"getItBy": "today", "getItByDate": "2026-05-25"}],
+                }
+            }
+        }
+        values = get_it_fast_availability_values(item)
+
+        self.assertEqual(values["pick_up_availability"], "Pick up today")
+        self.assertEqual(values["fastest_delivery"], "Get it Wed, May 27")
+        self.assertEqual(values["delivery_availability"], "")
+
+    def test_reference_audit_maps_digital_fulfillment_event(self):
+        sample = r"""
+curl ^"https://streams.bestbuy.com/customer/web-streams/v1/events/digital-experience-event^" ^
+  --data-raw ^"^{^\^"device^\^":^{^\^"time^\^":^\^"2026-05-25T11:44:26.578Z^\^",^\^"timeZone^\^":^\^"UTC-04:00^\^"^},^\^"interaction^\^":^{^\^"name^\^":^\^"Fulfillment Impression^\^"^},^\^"skus^\^":^[^{^\^"id^\^":^\^"6623791^\^",^\^"fulfillment^\^":^{^\^"type^\^":^\^"pickup^\^",^\^"daysOut^\^":0,^\^"cost^\^":0,^\^"isSelected^\^":true^}^},^{^\^"id^\^":^\^"6623791^\^",^\^"fulfillment^\^":^{^\^"type^\^":^\^"shipping^\^",^\^"daysOut^\^":2,^\^"cost^\^":0,^\^"isSelected^\^":false^}^},^{^\^"id^\^":^\^"6623791^\^",^\^"fulfillment^\^":^{^\^"type^\^":^\^"delivery^\^",^\^"daysOut^\^":3^}^}^]^}^" &
+"""
+        summary = analyze_curl_reference_text(sample)
+        values = digital_event_availability_values(summary["digital_fulfillment_examples"], "6623791")
+
+        self.assertEqual(summary["digital_event_count"], 1)
+        self.assertEqual(summary["digital_event_parsed_count"], 1)
+        self.assertEqual(summary["digital_fulfillment_event_count"], 3)
+        self.assertEqual(values["pick_up_availability"], "Pick up today")
+        self.assertEqual(values["fastest_delivery"], "Get it Wed, May 27 \u2022 FREE")
+        self.assertEqual(values["delivery_availability"], "Delivery as soon as Thu, May 28")
 
 
 if __name__ == "__main__":

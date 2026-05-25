@@ -41,6 +41,8 @@ CHUNK_SIZE = REQUESTED_CHUNK_SIZE if ALLOW_MULTI_SKU_FULFILLMENT else 1
 REQUEST_TIMEOUT = int(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_TIMEOUT", os.getenv("ZENROWS_TIMEOUT", "120")))
 DRY_RUN = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_DRY_RUN", "0").lower() in {"1", "true", "yes", "y"}
 LIMIT = int(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_LIMIT", "0"))
+CANDIDATE_MODE = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_CANDIDATE_MODE", "all_blank").strip().lower()
+OVERWRITE = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_OVERWRITE", "0").lower() in {"1", "true", "yes", "y"}
 
 
 def now():
@@ -110,9 +112,17 @@ def all_availability_blank(row):
     return all(not compact_text(row.get(field)) for field in AVAILABILITY_FIELDS)
 
 
+def any_availability_blank(row):
+    return any(not compact_text(row.get(field)) for field in AVAILABILITY_FIELDS)
+
+
 def backfill_candidate(row, batch_id):
     if compact_text(row.get("batch_id")) != batch_id:
         return False
+    if CANDIDATE_MODE in {"missing_any", "any_blank", "missing"}:
+        return any_availability_blank(row)
+    if CANDIDATE_MODE in {"all", "all_rows"}:
+        return True
     return all_availability_blank(row)
 
 
@@ -293,7 +303,7 @@ def apply_values(rows, row_to_sku, values_by_sku):
         row_changed = False
         for field in AVAILABILITY_FIELDS:
             value = values.get(field)
-            if value and not compact_text(row.get(field)):
+            if value and (OVERWRITE or not compact_text(row.get(field))):
                 row[field] = value
                 row_changed = True
                 changed_fields += 1
@@ -318,7 +328,7 @@ def main():
 
     lookup = build_sku_lookup(targets)
     batch_indexes = [index for index, row in enumerate(final_rows) if compact_text(row.get("batch_id")) == BACKFILL_BATCH_ID]
-    candidate_indexes = [index for index in batch_indexes if all_availability_blank(final_rows[index])]
+    candidate_indexes = [index for index in batch_indexes if backfill_candidate(final_rows[index], BACKFILL_BATCH_ID)]
     row_to_sku = {}
     missing_sku = []
     for index in candidate_indexes:
@@ -339,7 +349,8 @@ def main():
         f"[availability_backfill:plan] batch={BACKFILL_BATCH_ID} final_rows={len(final_rows)} "
         f"batch_rows={len(batch_indexes)} blank_rows={len(candidate_indexes)} mapped_rows={len(row_to_sku)} skus={len(skus)} "
         f"chunk_size={CHUNK_SIZE} requested_chunk_size={REQUESTED_CHUNK_SIZE} "
-        f"multi_sku={str(ALLOW_MULTI_SKU_FULFILLMENT).lower()} limit={LIMIT} calls={estimated_calls} dry_run={str(DRY_RUN).lower()}",
+        f"multi_sku={str(ALLOW_MULTI_SKU_FULFILLMENT).lower()} candidate_mode={CANDIDATE_MODE} "
+        f"overwrite={str(OVERWRITE).lower()} limit={LIMIT} calls={estimated_calls} dry_run={str(DRY_RUN).lower()}",
         flush=True,
     )
     if missing_sku:
@@ -378,6 +389,8 @@ def main():
         "target_csv": rel_path(TARGET_CSV),
         "final_output_csv": rel_path(FINAL_OUTPUT_CSV),
         "detail_rows_csv": rel_path(DETAIL_ROWS_CSV),
+        "candidate_mode": CANDIDATE_MODE,
+        "overwrite": OVERWRITE,
         "batch_final_rows": len(batch_indexes),
         "blank_final_rows": len(candidate_indexes),
         "mapped_final_rows": len(row_to_sku),

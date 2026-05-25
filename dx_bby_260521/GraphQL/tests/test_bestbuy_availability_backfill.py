@@ -136,6 +136,34 @@ class AvailabilityBackfillTests(unittest.TestCase):
         self.assertEqual(rows[0]["fastest_delivery"], "Get it Wed, May 27 \u2022 FREE")
         self.assertEqual(rows[0]["delivery_availability"], "")
 
+    def test_apply_values_can_overwrite_existing_availability_when_enabled(self):
+        old_overwrite = __import__("bestbuy.step08_availability_backfill", fromlist=["OVERWRITE"]).OVERWRITE
+        import bestbuy.step08_availability_backfill as backfill
+
+        rows = [
+            {
+                "pick_up_availability": "Pick up today",
+                "fastest_delivery": "Get it today",
+                "delivery_availability": "",
+            }
+        ]
+        values = {
+            "6670831": {
+                "pick_up_availability": "Pick up today",
+                "fastest_delivery": "Get it tomorrow \u2022 FREE",
+                "delivery_availability": "",
+            }
+        }
+        backfill.OVERWRITE = True
+        try:
+            updated, fields = backfill.apply_values(rows, {0: "6670831"}, values)
+        finally:
+            backfill.OVERWRITE = old_overwrite
+
+        self.assertEqual(updated, 1)
+        self.assertEqual(fields, 2)
+        self.assertEqual(rows[0]["fastest_delivery"], "Get it tomorrow \u2022 FREE")
+
 
 if __name__ == "__main__":
     unittest.main()

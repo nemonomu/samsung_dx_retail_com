@@ -93,7 +93,7 @@ STEPS = [
         "bestbuy.step08_detail_enrichment",
         {
             "BESTBUY_DETAIL_STAGE": "detail",
-            "BESTBUY_DETAIL_FETCH_COMPARE": "0",
+            "BESTBUY_DETAIL_FETCH_COMPARE": "1",
             "BESTBUY_DETAIL_JSON_RESPONSE": "1",
             "BESTBUY_DETAIL_SCROLL": "1",
             "BESTBUY_DETAIL_SCROLL_NETWORK_IDLE": "1",
@@ -111,7 +111,7 @@ STEPS = [
         },
         {
             "BESTBUY_DETAIL_STAGE": "detail",
-            "BESTBUY_DETAIL_FETCH_COMPARE": "0",
+            "BESTBUY_DETAIL_FETCH_COMPARE": "1",
             "BESTBUY_DETAIL_JSON_RESPONSE": "1",
             "BESTBUY_DETAIL_SCROLL": "1",
             "BESTBUY_DETAIL_SCROLL_NETWORK_IDLE": "1",

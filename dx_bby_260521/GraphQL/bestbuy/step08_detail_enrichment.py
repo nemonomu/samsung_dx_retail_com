@@ -47,6 +47,8 @@ REBUILD_ONLY = os.getenv("BESTBUY_DETAIL_REBUILD_ONLY", "0").lower() in {"1", "t
 FORCE_REFRESH = os.getenv("BESTBUY_DETAIL_FORCE_REFRESH", "0").lower() in {"1", "true", "yes", "y"}
 REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "240"))
 FETCH_MODE = os.getenv("BESTBUY_FETCH_MODE", os.getenv("BESTBUY_DETAIL_FETCH_MODE", "zenrows")).strip().lower()
+DETAIL_DIRECT_GRAPHQL = os.getenv("BESTBUY_DETAIL_DIRECT_GRAPHQL", "1").lower() in {"1", "true", "yes", "y"}
+DETAIL_PDP_FALLBACK = os.getenv("BESTBUY_DETAIL_PDP_FALLBACK", "0").lower() in {"1", "true", "yes", "y"}
 WORKERS = int(os.getenv("BESTBUY_DETAIL_WORKERS", "3"))
 STAGE = os.getenv("BESTBUY_DETAIL_STAGE", "detail").lower()
 SAVE_HTML_MODE = os.getenv("BESTBUY_SAVE_HTML_MODE", "slim").lower()
@@ -1903,6 +1905,83 @@ def json_response_compare_summary(json_data, sku=""):
     }
 
 
+def apollo_payload_from_graphql_response(payloads, response_json):
+    if isinstance(payloads, dict):
+        payloads = [payloads]
+    response_items = response_json if isinstance(response_json, list) else [response_json]
+    events = []
+    for index, payload in enumerate(payloads or []):
+        event_id = f"direct-graphql-{index + 1}"
+        events.append(
+            {
+                "type": "started",
+                "options": {
+                    "variables": payload.get("variables", {}),
+                    "errorPolicy": "ignore",
+                    "fetchPolicy": "cache-first",
+                    "query": payload.get("query", ""),
+                    "notifyOnNetworkStatusChange": False,
+                    "nextFetchPolicy": None,
+                },
+                "id": event_id,
+            }
+        )
+        if index < len(response_items) and isinstance(response_items[index], dict):
+            events.append({"type": "next", "value": response_items[index], "id": event_id})
+        events.append({"type": "completed", "id": event_id})
+    return [{"rehydrate": {}, "events": events}]
+
+
+def write_direct_detail_artifacts(paths, payload, response_json, response_text, headers):
+    apollo_payloads = apollo_payload_from_graphql_response(payload, response_json)
+    paths["apollo"].write_text(
+        json.dumps(apollo_payloads, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
+    )
+    if SAVE_HTML_MODE == "none":
+        if paths["html"].exists():
+            paths["html"].unlink()
+        stored = ""
+    else:
+        stored = ""
+        paths["html"].write_text(stored, encoding="utf-8")
+    paths["headers"].write_text(json.dumps(headers, indent=2, ensure_ascii=False), encoding="utf-8")
+    return {
+        "html_mode": "direct_graphql",
+        "full_bytes": len(response_text or ""),
+        "stored_bytes": len(stored or ""),
+        "apollo_payload_count": len(apollo_payloads),
+    }
+
+
+def graphql_batch_response_item(response_json, index):
+    if isinstance(response_json, list):
+        return response_json[index] if index < len(response_json) and isinstance(response_json[index], dict) else {}
+    if index == 0 and isinstance(response_json, dict):
+        return response_json
+    return {}
+
+
+def compare_recommendations_from_response(response_json):
+    data = response_json.get("data") if isinstance(response_json, dict) else {}
+    return first_path([data], ["recommendations", "subPlacements", 0, "recommendations"]) or []
+
+
+def write_compare_response_artifacts(paths, payload, response_json, response_text, headers):
+    paths["response_txt"].write_text(response_text or "", encoding="utf-8", errors="replace")
+    if response_json:
+        paths["response_json"].write_text(json.dumps(response_json, indent=2, ensure_ascii=False), encoding="utf-8")
+    paths["headers"].write_text(json.dumps(headers, indent=2, ensure_ascii=False), encoding="utf-8")
+    paths["request"].write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def write_review_response_artifacts(paths, payload, response_json, response_text, headers):
+    paths["response_txt"].write_text(response_text or "", encoding="utf-8", errors="replace")
+    if response_json:
+        paths["response_json"].write_text(json.dumps(response_json, indent=2, ensure_ascii=False), encoding="utf-8")
+    paths["headers"].write_text(json.dumps(headers, indent=2, ensure_ascii=False), encoding="utf-8")
+    paths["request"].write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
 def detail_success(sku):
     paths = detail_paths(sku)
     meta = read_json(paths["meta"])
@@ -2202,6 +2281,11 @@ PRODUCT_SCHEMA_REVIEW20_QUERY = (
 )
 
 
+FULFILLMENT_DYNAMIC_QUERY = """
+query FulfillmentOptionHook_FulfillmentDynamicQuery($skuId:String!$fulfillmentInput:ProductFulfillmentInput!$productPriceInput:ProductItemPriceInput!$openBoxCondition:Int){productBySkuId(skuId:$skuId openBoxCondition:$openBoxCondition){skuId ...FullfillmentProductBySkuIdFragment fulfillmentOptions(input:$fulfillmentInput){...FullfillmentOptionsFragment}badgesV2{label}}}fragment FullfillmentProductBySkuIdFragment on Product{brand brandId classification{class{id}}isSmallMediumBusiness releaseDateDisplayValue whatItIs eligibleGatedEventCustomerSegments{canPurchaseNow}isConstrainedHighVelocity inStoreServiceType buyingOptions{type product{openBoxCondition openBoxOptions{code}inStoreServiceType price(input:$productPriceInput){openBoxCondition}primaryImage{piscesHref}name{short}}pdpUrl}price(input:$productPriceInput){customerPrice mobileContracts{isDefaultContract purchaseType numberOfPayments}}waitlists{enrollmentPaused id name type}...MpFragment}fragment MpFragment on Product{bsinProduct{bsin products{openBoxCondition condition{type}seller{classification}skuId}}bsin seller{classification id}}fragment FullfillmentOptionsFragment on FulfillmentOptionsList{buttonStates{...ButtonStatesFragment}shippingDetails{...ShippingDetailsFragment}deliveryDetails{...DeliveryDetailsFragment}ispuDetails{...IspuDetailsFragment}}fragment ButtonStatesFragment on ButtonState{buttonState condition displayText secondaryButtonState secondaryDisplayText planButtonState hyperlinkUrl}fragment ShippingDetailsFragment on FulfillmentShippingDetail{destinationZipCode shippingAvailability{backordered condition customerLOSGroup{customerLosGroupId displayDateType maxLineItemMaxDate minLineItemMaxDate name price}levelOfServices{code id isLessThanTruckload isScheduleParcelDelivery}defaultCustomerLosGroupId downloadEligible emailEligible fulfillByVendor preorderable promiseByStreetDate whenAvailableFlag shippingEligible restrictions{category}}sku}fragment DeliveryDetailsFragment on FulfillmentDeliveryDetail{deliveryAvailability{salLocationId deliverable deliveryEligible forceSkipScheduling homeDeliveryDisplayDateType condition deliverySlots{date}deliveryServices{eligible levelsOfService{offerUnitPrice unitPrice}serviceType}installationSlots{date}backordered restrictions{category}}destinationZipCode}fragment IspuDetailsFragment on InStorePickupDetail{sku ispuAvailability{...IspuAvailabilityFragment}nearbyLocation{availability{maxDate pickupEligible quantity}distance store{...IspuStoreFragment}}nearbyLocations{availability{fulfillmentType maxDate minPickupInHours}store{...IspuStoreFragment}}sku store{...IspuStoreFragment}}fragment IspuAvailabilityFragment on InStorePickupAvailability{backordered condition displayDateType downloadEligible emailEligible fulfillDate fulfillmentType instoreInventoryAvailable inStoreOnly maxDate minPickupInHours pickupEligible preorderable promiseByStreetDate whenAvailableFlag quantity restrictions{category}inStoreServices{installationSlots{date}}}fragment IspuStoreFragment on FulfillmentPickUpStore{name storeId zip}
+""".strip()
+
+
 def fallback_review20_payload(sku):
     variables = {
         "skuId": str(sku),
@@ -2222,6 +2306,54 @@ def fallback_review20_payload(sku):
         "operationName": "ProductSchema_init",
         "variables": variables,
         "query": PRODUCT_SCHEMA_REVIEW20_QUERY,
+    }
+
+
+def fulfillment_dynamic_payload(sku):
+    variables = {
+        "skuId": str(sku),
+        "fulfillmentInput": {
+            "shipping": {
+                "destinationZipCode": "10010",
+                "effectivePlanPaidMembership": "NULL",
+            },
+            "delivery": {
+                "destinationZipCode": "10010",
+                "deliveryDateOption": "EARLIEST_AVAILABLE_DATE",
+                "effectivePlanPaidMembership": "NULL",
+            },
+            "inStorePickup": {
+                "storeId": "482",
+                "searchNearby": True,
+                "showNearbyLocations": False,
+            },
+            "profileCode": None,
+            "buttonState": {
+                "fulfillmentOption": None,
+                "context": "PDP",
+                "destinationZipCode": "10010",
+                "storeId": "482",
+                "effectivePlanPaidMembership": "NULL",
+            },
+        },
+        "productPriceInput": {
+            "customerAttributes": "",
+            "salesChannel": "LargeView",
+            "customerId": None,
+            "planPaidMemberType": "NULL",
+            "ct": "",
+            "isStoreAgent": False,
+            "locationId": "482",
+            "usePriceWithCart": True,
+            "useCabo": True,
+            "useSuco": True,
+        },
+    }
+    apply_bestbuy_location(variables)
+    return {
+        "operationName": "FulfillmentOptionHook_FulfillmentDynamicQuery",
+        "variables": variables,
+        "query": FULFILLMENT_DYNAMIC_QUERY,
     }
 
 
@@ -2316,47 +2448,143 @@ def fetch_detail(client, target):
         paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
         return meta
 
+    detail_payload = fallback_review20_payload(sku)
+    review_payload = fallback_review20_payload(sku)
+    fulfillment_payload = fulfillment_dynamic_payload(sku)
+    compare_payload = compare_product_payload(sku) if FETCH_COMPARE else None
+    request_payload = [detail_payload, review_payload, fulfillment_payload]
+    if compare_payload:
+        request_payload.append(compare_payload)
+    operation_names = [payload.get("operationName", "") for payload in request_payload]
+    fulfillment_index = 2
+    compare_index = 3 if compare_payload else None
     paths = detail_paths_for_status(sku, target, False)
     for transport in fetch_transports():
         if transport == "zenrows" and not client:
             continue
         start = time.perf_counter()
         try:
-            print(
-                f"[detail:start] sku={sku} attempt={attempt} transport={transport} "
-                f"json_response={DETAIL_JSON_RESPONSE} scroll={DETAIL_SCROLL} "
-                f"network_idle={DETAIL_SCROLL_NETWORK_IDLE} capture_hook={DETAIL_COMPARE_CAPTURE_HOOK} "
-                f"scroll_scan={DETAIL_COMPARE_SCROLL_SCAN} dom_observer={DETAIL_COMPARE_DOM_OBSERVER}",
-                flush=True,
-            )
-            response = client.get(pdp_url, params=detail_params(attempt, sku), timeout=REQUEST_TIMEOUT)
-            response_text = response.text
-            html_text = response_text
-            json_response_data = {}
             json_response_summary = {}
-            if DETAIL_JSON_RESPONSE:
-                json_response_data = parse_json_value(response_text)
-                html_text = json_response_data.get("html") or json_response_data.get("content") or ""
-                json_response_summary = json_response_compare_summary(json_response_data, sku)
-            compare_name_count = int(json_response_summary.get("compare_name_count", 0) or 0)
-            compare_debug = json_response_summary.get("html_compare_debug") or {}
-            compare_ok = (not DETAIL_REQUIRE_SIMILAR) or compare_name_count >= DETAIL_SIMILAR_MIN_NAMES
-            status = response.status_code
-            success = status == 200 and has_product_schema(html_text)
-            paths = detail_paths_for_status(sku, target, success)
-            artifact_meta = write_detail_artifacts(paths, html_text, dict(response.headers))
-            if DETAIL_JSON_RESPONSE:
-                paths["json_response"].write_text(response_text, encoding="utf-8", errors="replace")
-                paths["json_response_summary"].write_text(
-                    json.dumps(json_response_summary, indent=2, ensure_ascii=False), encoding="utf-8"
+            compare_debug = {}
+            compare_name_count = 0
+            compare_ok = True
+            if DETAIL_DIRECT_GRAPHQL:
+                response = client.post(
+                    "https://www.bestbuy.com/gateway/graphql",
+                    params=graphql_params(),
+                    headers={
+                        "accept": "application/json, text/plain, */*",
+                        "content-type": "application/json",
+                        "origin": "https://www.bestbuy.com",
+                        "referer": pdp_url,
+                    },
+                    data=json.dumps(request_payload),
+                    timeout=REQUEST_TIMEOUT,
                 )
-            error = response_error(status, html_text, "detail_html_missing_product_schema")
+                text = response.text
+                response_json = {}
+                try:
+                    response_json = response.json()
+                except ValueError:
+                    pass
+                detail_response_json = graphql_batch_response_item(response_json, 0)
+                review_response_json = graphql_batch_response_item(response_json, 1)
+                fulfillment_response_json = graphql_batch_response_item(response_json, fulfillment_index)
+                compare_response_json = graphql_batch_response_item(response_json, compare_index) if compare_index is not None else {}
+                product = ((response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(response_json, dict) else {}
+                if not product:
+                    product = ((detail_response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(detail_response_json, dict) else {}
+                if not product:
+                    product = ((fulfillment_response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(fulfillment_response_json, dict) else {}
+                success = response.status_code == 200 and isinstance(product, dict) and str(product.get("skuId") or "") == str(sku)
+                paths = detail_paths_for_status(sku, target, success)
+                artifact_meta = write_direct_detail_artifacts(paths, request_payload, response_json, text, dict(response.headers))
+                review_count = review_result_count_from_json(review_response_json)
+                review_ok = success and review_count is not None
+                review_paths_current = review_paths_for_status(sku, target, review_ok)
+                write_review_response_artifacts(review_paths_current, review_payload, review_response_json, text, dict(response.headers))
+                review_meta = {
+                    "sku_id": sku,
+                    "stage": "review20",
+                    "url": pdp_url,
+                    "attempt": attempt,
+                    "started_at": meta["started_at"],
+                    "success": review_ok,
+                    "status_code": response.status_code,
+                    "transport": transport,
+                    "fetch_mode": FETCH_MODE,
+                    "detail_mode": "direct_graphql_batch",
+                    "elapsed_seconds": 0,
+                    "x_request_cost": 0,
+                    "bytes": len(text or ""),
+                    "review_count_returned": review_count if review_count is not None else 0,
+                    "finished_at": now(),
+                    "error": "" if review_ok else "review20_missing",
+                }
+                review_paths_current["meta"].write_text(json.dumps(review_meta, indent=2, ensure_ascii=False), encoding="utf-8")
+                if compare_payload:
+                    recommendations = compare_recommendations_from_response(compare_response_json)
+                    compare_ok = response.status_code == 200 and isinstance(recommendations, list)
+                    compare_paths_current = compare_paths_for_status(sku, target, compare_ok)
+                    write_compare_response_artifacts(compare_paths_current, compare_payload, compare_response_json, text, dict(response.headers))
+                    compare_meta = {
+                        "sku_id": sku,
+                        "stage": "compare",
+                        "url": pdp_url,
+                        "attempt": attempt,
+                        "started_at": meta["started_at"],
+                        "success": compare_ok,
+                        "status_code": response.status_code,
+                        "transport": transport,
+                        "fetch_mode": FETCH_MODE,
+                        "detail_mode": "direct_graphql_batch",
+                        "elapsed_seconds": 0,
+                        "x_request_cost": 0,
+                        "bytes": len(text or ""),
+                        "recommendation_count": len(recommendations) if isinstance(recommendations, list) else 0,
+                        "finished_at": now(),
+                        "error": "" if compare_ok else "compare_recommendations_missing",
+                    }
+                    compare_paths_current["meta"].write_text(json.dumps(compare_meta, indent=2, ensure_ascii=False), encoding="utf-8")
+                error = "" if success else response_error(response.status_code, text, "detail_graphql_missing_product")
+            elif DETAIL_PDP_FALLBACK:
+                print(
+                    f"[detail:start] sku={sku} attempt={attempt} transport={transport} "
+                    f"json_response={DETAIL_JSON_RESPONSE} scroll={DETAIL_SCROLL} "
+                    f"network_idle={DETAIL_SCROLL_NETWORK_IDLE} capture_hook={DETAIL_COMPARE_CAPTURE_HOOK} "
+                    f"scroll_scan={DETAIL_COMPARE_SCROLL_SCAN} dom_observer={DETAIL_COMPARE_DOM_OBSERVER}",
+                    flush=True,
+                )
+                response = client.get(pdp_url, params=detail_params(attempt, sku), timeout=REQUEST_TIMEOUT)
+                response_text = response.text
+                html_text = response_text
+                if DETAIL_JSON_RESPONSE:
+                    json_response_data = parse_json_value(response_text)
+                    html_text = json_response_data.get("html") or json_response_data.get("content") or ""
+                    json_response_summary = json_response_compare_summary(json_response_data, sku)
+                compare_name_count = int(json_response_summary.get("compare_name_count", 0) or 0)
+                compare_debug = json_response_summary.get("html_compare_debug") or {}
+                compare_ok = (not DETAIL_REQUIRE_SIMILAR) or compare_name_count >= DETAIL_SIMILAR_MIN_NAMES
+                success = response.status_code == 200 and has_product_schema(html_text)
+                paths = detail_paths_for_status(sku, target, success)
+                artifact_meta = write_detail_artifacts(paths, html_text, dict(response.headers))
+                if DETAIL_JSON_RESPONSE:
+                    paths["json_response"].write_text(response_text, encoding="utf-8", errors="replace")
+                    paths["json_response_summary"].write_text(
+                        json.dumps(json_response_summary, indent=2, ensure_ascii=False), encoding="utf-8"
+                    )
+                error = response_error(response.status_code, html_text, "detail_html_missing_product_schema")
+            else:
+                raise RuntimeError("Set BESTBUY_DETAIL_DIRECT_GRAPHQL=1 or BESTBUY_DETAIL_PDP_FALLBACK=1")
+            status = response.status_code
             meta.update(
                 {
                     "success": success,
                     "status_code": status,
                     "transport": transport,
                     "fetch_mode": FETCH_MODE,
+                    "detail_mode": "direct_graphql_batch" if DETAIL_DIRECT_GRAPHQL else "pdp_render",
+                    "batched_operations": ",".join(operation_names),
                     "elapsed_seconds": round(time.perf_counter() - start, 3),
                     "x_request_cost": request_cost(response.headers),
                     "bytes": artifact_meta["full_bytes"],
@@ -3239,6 +3467,35 @@ def fastest_delivery_text(shipping):
     return date_to_relative_or_phrase("Get it", shipping.get("promiseByStreetDate"))
 
 
+def fulfillment_button_text(products):
+    for product in reversed(products):
+        states = first_path([product], ["fulfillmentOptions", "buttonStates"]) or []
+        if not isinstance(states, list):
+            continue
+        for state in states:
+            if not isinstance(state, dict):
+                continue
+            text = compact_text(state.get("displayText") or state.get("buttonState"))
+            if text:
+                return text
+    return ""
+
+
+def inventory_status_text(pickup, shipping, delivery):
+    if isinstance(pickup, dict):
+        if pickup.get("instoreInventoryAvailable") is True or pickup.get("pickupEligible") is True:
+            return "In Stock"
+    if isinstance(shipping, dict) and shipping.get("shippingEligible") is True:
+        return "In Stock"
+    if isinstance(delivery, dict) and delivery.get("deliveryEligible") is True:
+        return "In Stock"
+    explicit_false_values = []
+    for value, key in ((pickup, "pickupEligible"), (shipping, "shippingEligible"), (delivery, "deliveryEligible")):
+        if isinstance(value, dict) and key in value:
+            explicit_false_values.append(value.get(key) is False)
+    return "Out of Stock" if explicit_false_values and all(explicit_false_values) else ""
+
+
 def review20_content(sku):
     path = review_paths(sku)["response_json"]
     reviews = []
@@ -3378,6 +3635,7 @@ def output_row(target):
         review_count = 0
     final_price, original_price, savings = price_output_fields(price, target, selector_values)
     pickup = best_path(products, ["fulfillmentOptions", "ispuDetails", 0, "ispuAvailability", 0], ("maxDate",))
+    shipping = best_shipping_availability(products)
     delivery = best_path(
         products,
         ["fulfillmentOptions", "deliveryDetails", 0, "deliveryAvailability", 0],
@@ -3426,7 +3684,7 @@ def output_row(target):
         "fastest_delivery": first_non_empty(
             target.get("fastest_delivery"),
             selector_values.get("fastest_delivery"),
-            fastest_delivery_text(best_shipping_availability(products)),
+            fastest_delivery_text(shipping),
             fastest_delivery_from_html(html_text),
         ),
         "delivery_availability": first_non_empty(
@@ -3436,7 +3694,12 @@ def output_row(target):
             delivery_from_html(html_text),
             date_to_relative_or_phrase("Delivery as soon as", delivery_slot),
         ),
-        "sku_status": "Sponsored" if truthy(target.get("is_sponsored")) or target.get("sku_status") == "Sponsored" else "",
+        "available_quantity_for_purchase": first_non_empty(target.get("available_quantity_for_purchase"), pickup.get("quantity") if isinstance(pickup, dict) else ""),
+        "inventory_status": first_non_empty(target.get("inventory_status"), inventory_status_text(pickup, shipping, delivery)),
+        "sku_status": first_non_empty(
+            "Sponsored" if truthy(target.get("is_sponsored")) or target.get("sku_status") == "Sponsored" else "",
+            fulfillment_button_text(products),
+        ),
         "trade_in": first_non_empty(
             selector_values.get("trade_in"),
             trade_in_from_html(html_text),

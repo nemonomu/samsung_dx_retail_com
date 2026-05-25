@@ -438,7 +438,7 @@ def product_list_rows(rows, bsr_pages):
             "trend_rank": row.get("trend_rank", ""),
             "main_rank": row.get("main_rank", ""),
             "bsr_rank": row.get("bsr_rank", ""),
-            "product_url": row.get("product_url", ""),
+            "product_url": row.get("product_url") or (old_pdp_url(sku) if sku else ""),
             "calendar_week": calendar_week(),
             "batch_id": batch_id,
             "main_page_number": row.get("page", "") if row.get("main_rank") else "",

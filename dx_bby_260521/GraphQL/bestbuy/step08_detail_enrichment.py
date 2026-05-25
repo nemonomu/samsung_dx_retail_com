@@ -116,6 +116,7 @@ DETAIL_ROWS_CSV = PARSED_DIR / "detail_enriched_rows.csv"
 FAILURES_CSV = PARSED_DIR / "detail_failures.csv"
 DETAIL_BENCHMARKS_CSV = BENCHMARKS_DIR / "detail_benchmarks.csv"
 FINAL_OUTPUT_CSV = Path(os.getenv("BESTBUY_FINAL_OUTPUT_CSV", OUTPUT_ROOT / "final_output.csv"))
+PRODUCT_LIST_CSV = Path(os.getenv("BESTBUY_PRODUCT_LIST_OUTPUT", OUTPUT_ROOT / "bestbuy_product_list.csv"))
 RETRY_MISSING_SIMILAR_SOURCE_CSV = os.getenv("BESTBUY_DETAIL_RETRY_MISSING_SIMILAR_SOURCE_CSV", "").strip()
 MANIFEST_PATH = DETAIL_ROOT / "manifest_detail_enrichment.json"
 FETCH_COMPARE = os.getenv("BESTBUY_DETAIL_FETCH_COMPARE", "0").lower() in {"1", "true", "yes", "y"}
@@ -1400,6 +1401,25 @@ def write_csv(path, rows, preferred=None):
         writer.writerows(rows)
 
 
+def csv_fields(path, rows):
+    header = []
+    if path.exists():
+        with path.open("r", encoding="utf-8-sig", newline="") as f:
+            reader = csv.reader(f)
+            try:
+                header = next(reader)
+            except StopIteration:
+                pass
+    keys = list(header)
+    seen = set(header)
+    for row in rows:
+        for key in row:
+            if key not in seen:
+                seen.add(key)
+                keys.append(key)
+    return keys
+
+
 def read_json(path):
     if not path.exists():
         return {}
@@ -1407,6 +1427,60 @@ def read_json(path):
         return json.loads(path.read_text(encoding="utf-8-sig"))
     except ValueError:
         return {}
+
+
+PRODUCT_LIST_DETAIL_FIELD_SOURCES = {
+    "retailer_sku_name": ("retailer_sku_name",),
+    "offer": ("offer", "offer_count"),
+    "pick_up_availability": ("pick_up_availability",),
+    "fastest_delivery": ("fastest_delivery",),
+    "delivery_availability": ("delivery_availability",),
+    "sku_status": ("sku_status",),
+    "product_url": ("product_url",),
+}
+
+
+def row_sku_key(row):
+    return first_non_empty(
+        row.get("sku_id"),
+        row.get("sku"),
+        sku_from_product_url(row.get("product_url")),
+        row.get("item"),
+        row.get("bsin"),
+    )
+
+
+def update_product_list_from_detail_rows(detail_rows):
+    product_rows = load_csv(PRODUCT_LIST_CSV)
+    if not product_rows or not detail_rows:
+        return {"rows": 0, "updated": 0, "fields": 0}
+
+    detail_by_sku = {}
+    for row in detail_rows:
+        sku = row_sku_key(row)
+        if sku:
+            detail_by_sku.setdefault(str(sku), row)
+
+    updated = 0
+    changed_fields = 0
+    for row in product_rows:
+        sku = row_sku_key(row)
+        detail = detail_by_sku.get(str(sku)) if sku else None
+        if not detail:
+            continue
+        row_changed = False
+        for field, sources in PRODUCT_LIST_DETAIL_FIELD_SOURCES.items():
+            value = first_non_empty(*(detail.get(source) for source in sources))
+            if value and compact_text(row.get(field)) != compact_text(value):
+                row[field] = value
+                row_changed = True
+                changed_fields += 1
+        if row_changed:
+            updated += 1
+
+    if changed_fields:
+        write_csv(PRODUCT_LIST_CSV, product_rows, csv_fields(PRODUCT_LIST_CSV, product_rows))
+    return {"rows": len(product_rows), "updated": updated, "fields": changed_fields}
 
 
 def safe_part(value, default="na"):
@@ -4126,6 +4200,7 @@ def output_row(target):
         "id": "",
         "product": (target.get("category_key") or CATEGORY).upper(),
         "item": bsin,
+        "sku_id": sku,
         "account_name": "Bestbuy",
         "page_type": page_type_from_target(target),
         "count_of_reviews": "0"
@@ -4600,6 +4675,18 @@ def main():
             row.setdefault(field, "")
     final_rows = [{field: row.get(field, "") for field in fields} for row in enriched_rows]
     write_csv(FINAL_OUTPUT_CSV, final_rows, fields)
+    product_list_update = update_product_list_from_detail_rows(enriched_rows)
+    if product_list_update["fields"]:
+        print(
+            format_log_line(
+                "detail:product_list",
+                rows=product_list_update["rows"],
+                updated=product_list_update["updated"],
+                fields=product_list_update["fields"],
+                csv=rel_path(PRODUCT_LIST_CSV),
+            ),
+            flush=True,
+        )
     benchmark_rows = write_detail_benchmarks(TARGET_CSV, DETAIL_ROOT, DETAIL_BENCHMARKS_CSV)
 
     manifest = {
@@ -4648,6 +4735,9 @@ def main():
         "detail_benchmarks_csv": rel_path(DETAIL_BENCHMARKS_CSV),
         "detail_benchmark_rows": len(benchmark_rows),
         "final_output_csv": rel_path(FINAL_OUTPUT_CSV),
+        "product_list_csv": rel_path(PRODUCT_LIST_CSV),
+        "product_list_rows_updated": product_list_update["updated"],
+        "product_list_fields_updated": product_list_update["fields"],
     }
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     print(

@@ -7,9 +7,9 @@ from pathlib import Path
 
 from requests import RequestException
 
-from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, rel_path
+from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, old_pdp_url, rel_path
 from .step00_parse_pdp import absolute_bestbuy_url, nested_get
-from .step00_parse_search import listing_offer_count, merge_dict, money_text, price_value
+from .step00_parse_search import listing_availability_values, listing_offer_count, merge_dict, money_text, price_value
 from .step00_sponsored_graphql import build_sponsored_payload, post_graphql, sponsored_product_map
 
 RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
@@ -19,6 +19,12 @@ INPUT_CSV = Path(os.getenv("BESTBUY_MAIN_TARGET_INPUT", RUN_ROOT / "parsed" / "m
 OUTPUT_CSV = Path(os.getenv("BESTBUY_MAIN_TARGET_OUTPUT", RUN_ROOT / "parsed" / "main_target_occurrences.csv"))
 CHUNK_SIZE = int(os.getenv("BESTBUY_SPONSORED_CHUNK_SIZE", "10"))
 MAX_ATTEMPTS = int(os.getenv("BESTBUY_SPONSORED_MAX_ATTEMPTS", "3"))
+FETCH_SPONSORED_ENRICHMENT = os.getenv("BESTBUY_FETCH_SPONSORED_ENRICHMENT", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
 TARGET_CONTAINERS = {"organic_product", "sponsored_ingrid"}
 
 
@@ -184,12 +190,22 @@ def enrich_sponsored_row(row, product):
     if normalized_offer != "":
         row["offer"] = normalized_offer
         row["offer_count"] = normalized_offer
+    apply_listing_availability(row, raw_product)
     row["raw_product_json"] = compact_json(raw_product)
+    return row
+
+
+def apply_listing_availability(row, product):
+    values = listing_availability_values(product)
+    for key, value in values.items():
+        if value not in ("", None, [], {}):
+            row[key] = value
     return row
 
 
 def normalize_existing_listing_row(row):
     row = dict(row)
+    sku = str(row.get("sku_id") or "").strip()
     try:
         raw_product = json.loads(row.get("raw_product_json") or "{}")
     except ValueError:
@@ -204,6 +220,9 @@ def normalize_existing_listing_row(row):
     row["final_sku_price"] = row.get("final_sku_price") or money_text(row.get("customer_price"))
     row["original_sku_price"] = row.get("original_sku_price") or money_text(row.get("regular_price"))
     row["savings"] = row.get("savings") or money_text(row.get("total_savings"), drop_cents_for_whole=True)
+    if sku and not row.get("product_url"):
+        row["product_url"] = old_pdp_url(sku)
+    apply_listing_availability(row, raw_product)
     return row
 
 
@@ -243,7 +262,13 @@ def write_csv(path, rows):
         "original_sku_price",
         "savings",
         "total_savings_percent",
+        "fastest_delivery",
+        "delivery_availability",
+        "pick_up_availability",
         "offer",
+        "shipping_eligible",
+        "pickup_eligible",
+        "pickup_quantity",
         "offer_count",
     ]
     fieldnames = [key for key in preferred if key in keys]
@@ -259,7 +284,7 @@ def main():
     rows = load_rows(INPUT_CSV)
     target_rows = [row for row in rows if row.get("container_type") in TARGET_CONTAINERS]
     skus = sponsored_skus(target_rows)
-    products, calls = fetch_sponsored_products(skus) if skus else ({}, [])
+    products, calls = fetch_sponsored_products(skus) if skus and FETCH_SPONSORED_ENRICHMENT else ({}, [])
     enriched = []
     for row in target_rows:
         row = normalize_existing_listing_row(row)
@@ -280,6 +305,7 @@ def main():
         "input_row_count": len(rows),
         "target_row_count": len(enriched),
         "target_unique_sku_count": len({row.get("sku_id") for row in enriched if row.get("sku_id")}),
+        "sponsored_enrichment_enabled": FETCH_SPONSORED_ENRICHMENT,
         "sponsored_unique_sku_count": len(skus),
         "sponsored_call_count": len(calls),
         "sponsored_cost_usd": cost,

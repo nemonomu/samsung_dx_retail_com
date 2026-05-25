@@ -50,6 +50,7 @@ STEPS = [
         "bestbuy.step02_main_targets",
         {
             "BESTBUY_MAIN_TARGET_RUN_ID": "main",
+            "BESTBUY_FETCH_SPONSORED_ENRICHMENT": "0",
             "BESTBUY_GRAPHQL_PREMIUM_PROXY": "1",
             "BESTBUY_GRAPHQL_JS_RENDER": "1",
             "ZENROWS_TIMEOUT": "180",

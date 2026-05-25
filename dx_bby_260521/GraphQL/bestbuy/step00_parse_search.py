@@ -375,13 +375,34 @@ def listing_offer_count(product):
     return ""
 
 
+def listing_availability_values(product):
+    if not isinstance(product, dict):
+        return {
+            "shipping_eligible": "",
+            "pickup_eligible": "",
+            "pickup_quantity": "",
+            "fastest_delivery": "",
+            "delivery_availability": "",
+            "pick_up_availability": "",
+        }
+    shipping = first_nested(product, ["fulfillmentOptions", "shippingDetails", "shippingAvailability"], {})
+    delivery = first_nested(product, ["fulfillmentOptions", "deliveryDetails", "deliveryAvailability"], {})
+    pickup = first_nested(product, ["fulfillmentOptions", "ispuDetails", "ispuAvailability"], {})
+    return {
+        "shipping_eligible": shipping.get("shippingEligible", "") if isinstance(shipping, dict) else "",
+        "pickup_eligible": pickup.get("pickupEligible", "") if isinstance(pickup, dict) else "",
+        "pickup_quantity": pickup.get("quantity", "") if isinstance(pickup, dict) else "",
+        "fastest_delivery": fastest_delivery_text(shipping, delivery),
+        "delivery_availability": delivery_availability_text(delivery),
+        "pick_up_availability": pickup_availability_text(pickup),
+    }
+
+
 def parse_product(product, occurrence):
     price = product.get("price", {}) if isinstance(product.get("price"), dict) else {}
     review_info = product.get("reviewInfo", {}) if isinstance(product.get("reviewInfo"), dict) else {}
     primary_image = product.get("primaryImage", {}) if isinstance(product.get("primaryImage"), dict) else {}
-    shipping = first_nested(product, ["fulfillmentOptions", "shippingDetails", "shippingAvailability"], {})
-    delivery = first_nested(product, ["fulfillmentOptions", "deliveryDetails", "deliveryAvailability"], {})
-    pickup = first_nested(product, ["fulfillmentOptions", "ispuDetails", "ispuAvailability"], {})
+    availability = listing_availability_values(product)
     offer_count = listing_offer_count(product)
     customer_price = price_value(price, "displayableCustomerPrice", "customerPrice")
     regular_price = price_value(price, "displayableRegularPrice", "regularPrice")
@@ -427,12 +448,12 @@ def parse_product(product, occurrence):
         "total_savings_percent": price_value(price, "totalSavingsPercent"),
         "restricted_price_message": price.get("restrictedPriceDisplayMessage", "") if isinstance(price, dict) else "",
         "deal_expiration": price.get("dealExpirationTimeStamp", "") if isinstance(price, dict) else "",
-        "shipping_eligible": shipping.get("shippingEligible", "") if isinstance(shipping, dict) else "",
-        "pickup_eligible": pickup.get("pickupEligible", "") if isinstance(pickup, dict) else "",
-        "pickup_quantity": pickup.get("quantity", "") if isinstance(pickup, dict) else "",
-        "fastest_delivery": fastest_delivery_text(shipping, delivery),
-        "delivery_availability": delivery_availability_text(delivery),
-        "pick_up_availability": pickup_availability_text(pickup),
+        "shipping_eligible": availability["shipping_eligible"],
+        "pickup_eligible": availability["pickup_eligible"],
+        "pickup_quantity": availability["pickup_quantity"],
+        "fastest_delivery": availability["fastest_delivery"],
+        "delivery_availability": availability["delivery_availability"],
+        "pick_up_availability": availability["pick_up_availability"],
         "offer": offer_count,
         "offer_count": offer_count,
         "buying_options_json": compact_json(product.get("buyingOptions")),

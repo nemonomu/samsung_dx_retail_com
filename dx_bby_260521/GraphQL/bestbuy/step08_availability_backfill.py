@@ -28,6 +28,7 @@ FINAL_OUTPUT_CSV = Path(
 DETAIL_ROWS_CSV = Path(
     os.getenv("BESTBUY_AVAILABILITY_BACKFILL_DETAIL_ROWS_CSV", DEFAULT_BESTBUY_RUN_ROOT / "detail" / "parsed" / "detail_enriched_rows.csv")
 )
+PRODUCT_LIST_CSV = Path(os.getenv("BESTBUY_PRODUCT_LIST_OUTPUT", DEFAULT_BESTBUY_RUN_ROOT / "output" / "bestbuy_product_list.csv"))
 BACKFILL_ROOT = Path(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_ROOT", DEFAULT_BESTBUY_RUN_ROOT / "availability_backfill"))
 BACKFILL_BATCH_ID = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_BATCH_ID", os.getenv("BESTBUY_BATCH_ID", "")).strip()
 REQUESTED_CHUNK_SIZE = int(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_CHUNK_SIZE", "1"))
@@ -316,6 +317,7 @@ def main():
     started_at = now()
     final_rows = read_csv(FINAL_OUTPUT_CSV)
     detail_rows = read_csv(DETAIL_ROWS_CSV)
+    product_list_rows = read_csv(PRODUCT_LIST_CSV)
     targets = read_csv(TARGET_CSV)
     if not final_rows:
         raise RuntimeError(f"final_output.csv not found or empty: {FINAL_OUTPUT_CSV}")
@@ -363,21 +365,34 @@ def main():
 
     detail_row_to_sku = {}
     for index, row in enumerate(detail_rows):
-        if compact_text(row.get("batch_id")) != BACKFILL_BATCH_ID:
-            continue
-        if not all_availability_blank(row):
+        if not backfill_candidate(row, BACKFILL_BATCH_ID):
             continue
         sku = sku_for_row(row, lookup)
         if sku:
             detail_row_to_sku[index] = sku
 
+    product_list_row_to_sku = {}
+    for index, row in enumerate(product_list_rows):
+        if not backfill_candidate(row, BACKFILL_BATCH_ID):
+            continue
+        sku = sku_for_row(row, lookup)
+        if sku:
+            product_list_row_to_sku[index] = sku
+
     final_updated, final_changed_fields = apply_values(final_rows, row_to_sku, values_by_sku)
     detail_updated, detail_changed_fields = apply_values(detail_rows, detail_row_to_sku, values_by_sku)
+    product_list_updated, product_list_changed_fields = apply_values(
+        product_list_rows,
+        product_list_row_to_sku,
+        values_by_sku,
+    )
 
     if not DRY_RUN:
         write_csv(FINAL_OUTPUT_CSV, final_rows, csv_fields(FINAL_OUTPUT_CSV, final_rows))
         if detail_rows:
             write_csv(DETAIL_ROWS_CSV, detail_rows, csv_fields(DETAIL_ROWS_CSV, detail_rows))
+        if product_list_rows:
+            write_csv(PRODUCT_LIST_CSV, product_list_rows, csv_fields(PRODUCT_LIST_CSV, product_list_rows))
 
     call_cost = round(sum(float(call.get("x_request_cost") or 0) for call in calls), 7)
     manifest = {
@@ -389,6 +404,7 @@ def main():
         "target_csv": rel_path(TARGET_CSV),
         "final_output_csv": rel_path(FINAL_OUTPUT_CSV),
         "detail_rows_csv": rel_path(DETAIL_ROWS_CSV),
+        "product_list_csv": rel_path(PRODUCT_LIST_CSV),
         "candidate_mode": CANDIDATE_MODE,
         "overwrite": OVERWRITE,
         "batch_final_rows": len(batch_indexes),
@@ -406,6 +422,8 @@ def main():
         "final_fields_updated": final_changed_fields,
         "detail_rows_updated": detail_updated,
         "detail_fields_updated": detail_changed_fields,
+        "product_list_rows_updated": product_list_updated,
+        "product_list_fields_updated": product_list_changed_fields,
         "x_request_cost": call_cost,
         "estimated_krw_1550": round(call_cost * KRW_PER_USD, 2),
         "calls": calls,
@@ -413,6 +431,7 @@ def main():
     (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     print(
         f"[availability_backfill:output] final_updated={final_updated} detail_updated={detail_updated} "
+        f"product_list_updated={product_list_updated} "
         f"returned_skus={len(values_by_sku)} cost_usd={call_cost} raw={rel_path(run_dir)}",
         flush=True,
     )

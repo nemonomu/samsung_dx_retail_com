@@ -1717,6 +1717,32 @@ def strict_compare_response_names(body_data, sku="", allowed_sku_ids=None):
     return compare_recommendation_names(data)
 
 
+def strict_compare_response_data(body_data, sku="", allowed_sku_ids=None):
+    if allowed_sku_ids is None:
+        allowed_sku_ids = {str(sku)} if sku else set()
+    if isinstance(body_data, list):
+        for item in body_data:
+            data = strict_compare_response_data(item, sku, allowed_sku_ids)
+            if data:
+                return data
+        return {}
+    if not isinstance(body_data, dict):
+        return {}
+
+    data = body_data.get("data")
+    if not isinstance(data, dict):
+        return {}
+    if not isinstance(data.get("recommendations"), dict):
+        return {}
+
+    product = data.get("productBySkuId")
+    if not isinstance(product, dict):
+        return {}
+    if allowed_sku_ids and str(product.get("skuId") or "") not in allowed_sku_ids:
+        return {}
+    return data
+
+
 def compare_capture_entries_from_html(html_text):
     if not isinstance(html_text, str) or "bby-compare-capture" not in html_text:
         return []
@@ -2679,6 +2705,55 @@ def compare_names_from_json_response(sku):
     return []
 
 
+def compare_data_from_json_response(sku):
+    paths = detail_paths(sku)
+    json_data = read_json(paths.get("json_response"))
+    if not isinstance(json_data, dict):
+        return {}
+    html_text = json_data.get("html") or json_data.get("content") or ""
+    allowed_sku_ids = detail_resolved_sku_ids(sku)
+    allowed_sku_ids.update(sku_ids_from_html_text(html_text))
+
+    xhr = json_data.get("xhr") or []
+    if isinstance(xhr, list):
+        for request in xhr:
+            if not isinstance(request, dict):
+                continue
+            request_blob = json.dumps(request, ensure_ascii=False, separators=(",", ":"))
+            url = str(request.get("url") or "")
+            if "GetCompareProduct" not in request_blob and "/gateway/graphql" not in url:
+                continue
+            data = strict_compare_response_data(parse_json_value(request.get("body")), sku, allowed_sku_ids)
+            if data:
+                return data
+
+    for entry in compare_capture_entries_from_html(html_text):
+        entry_blob = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
+        if "GetCompareProduct" not in entry_blob and "single-compare" not in entry_blob:
+            continue
+        data = strict_compare_response_data(parse_json_value(entry.get("body")), sku, allowed_sku_ids)
+        if data:
+            return data
+    return {}
+
+
+def compare_current_product_from_detail(sku):
+    paths = compare_paths(sku)
+    response_json = read_json(paths["response_json"])
+    data = response_json.get("data") if isinstance(response_json, dict) else {}
+    if not isinstance(data, dict) or not data:
+        data = compare_data_from_detail_payloads(sku)
+    if not isinstance(data, dict) or not data:
+        data = compare_data_from_json_response(sku)
+    product = data.get("productBySkuId") if isinstance(data, dict) else {}
+    if not isinstance(product, dict):
+        return {}
+    allowed_sku_ids = detail_resolved_sku_ids(sku)
+    if allowed_sku_ids and str(product.get("skuId") or "") not in allowed_sku_ids:
+        return {}
+    return product
+
+
 def compare_recommendation_names(data):
     names = []
     subplacements = (((data.get("recommendations") or {}).get("subPlacements")) or [])
@@ -3251,6 +3326,8 @@ def output_row(target):
     selector_values = detail_selector_values(html_text)
     products = products_from_detail(sku)
     compare_similar_names = compare_similar_names_from_detail(sku)
+    compare_current_product = compare_current_product_from_detail(sku)
+    spec_products = products + ([compare_current_product] if compare_current_product else [])
     price = best_price(products)
     review_info = first_value(products, "reviewInfo") or {}
     review_count = review_count_number(review_info.get("reviewCount"), target.get("review_count"))
@@ -3279,8 +3356,8 @@ def output_row(target):
     )
     delivery_slot = (delivery.get("deliverySlots") or [{}])[0].get("date") if isinstance(delivery, dict) else ""
     screen = spec_value(products, "Screen Size Class") or spec_value(products, "Screen Size")
-    energy = spec_value(products, "Estimated Annual Electricity Use")
-    model_year = spec_value(products, "Model Year")
+    energy = spec_value(spec_products, "Estimated Annual Electricity Use")
+    model_year = spec_value(spec_products, "Model Year")
     product_name = first_path(products, ["name", "short"]) or target.get("product_name", "")
     product_url = first_path(products, ["url", "pdp"]) or target.get("product_url", "")
     bsin = first_value(products, "bsin") or target.get("bsin", "")

@@ -3691,6 +3691,8 @@ retailer_sku_name_similar = 현재 상품명 ||| 유사 TV 1 ||| 유사 TV 2 |||
 
 운영 parser는 위 operation을 직접 호출하지 않더라도, `json_response`에 캡처된 응답이 동일한 top-level 구조(`data.productBySkuId` + `data.recommendations`)를 만족하면 `retailer_sku_name_similar`로 사용할 수 있다.
 
+또한 캡처된 `GetCompareProduct` 응답의 `data.productBySkuId.specificationGroups`는 current PDP 상품의 스펙 보조 소스로만 사용할 수 있다. detail `ProductSchema_init`가 비어 있는 경우 `Model Year`, `Estimated Annual Electricity Use` 같은 스펙 필드를 보강하되, price/availability/review/name 같은 일반 detail 필드를 덮어쓰지 않는다.
+
 #### 부가 기능
 
 | 쿼리명 | 역할 |

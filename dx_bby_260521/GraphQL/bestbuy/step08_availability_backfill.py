@@ -30,7 +30,14 @@ DETAIL_ROWS_CSV = Path(
 )
 BACKFILL_ROOT = Path(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_ROOT", DEFAULT_BESTBUY_RUN_ROOT / "availability_backfill"))
 BACKFILL_BATCH_ID = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_BATCH_ID", "b_20260525_040458").strip()
-CHUNK_SIZE = int(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_CHUNK_SIZE", "15"))
+REQUESTED_CHUNK_SIZE = int(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_CHUNK_SIZE", "1"))
+ALLOW_MULTI_SKU_FULFILLMENT = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_ALLOW_MULTI_SKU", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
+CHUNK_SIZE = REQUESTED_CHUNK_SIZE if ALLOW_MULTI_SKU_FULFILLMENT else 1
 REQUEST_TIMEOUT = int(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_TIMEOUT", os.getenv("ZENROWS_TIMEOUT", "120")))
 DRY_RUN = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_DRY_RUN", "0").lower() in {"1", "true", "yes", "y"}
 
@@ -328,7 +335,8 @@ def main():
     print(
         f"[availability_backfill:plan] batch={BACKFILL_BATCH_ID} final_rows={len(final_rows)} "
         f"batch_rows={len(batch_indexes)} blank_rows={len(candidate_indexes)} mapped_rows={len(row_to_sku)} skus={len(skus)} "
-        f"chunk_size={CHUNK_SIZE} calls={estimated_calls} dry_run={str(DRY_RUN).lower()}",
+        f"chunk_size={CHUNK_SIZE} requested_chunk_size={REQUESTED_CHUNK_SIZE} "
+        f"multi_sku={str(ALLOW_MULTI_SKU_FULFILLMENT).lower()} calls={estimated_calls} dry_run={str(DRY_RUN).lower()}",
         flush=True,
     )
     if missing_sku:
@@ -373,6 +381,8 @@ def main():
         "missing_sku_rows": len(missing_sku),
         "sku_count": len(skus),
         "chunk_size": CHUNK_SIZE,
+        "requested_chunk_size": REQUESTED_CHUNK_SIZE,
+        "multi_sku_fulfillment_enabled": ALLOW_MULTI_SKU_FULFILLMENT,
         "call_count": len(calls) if calls else estimated_calls,
         "returned_sku_count": len(values_by_sku),
         "final_rows_updated": final_updated,

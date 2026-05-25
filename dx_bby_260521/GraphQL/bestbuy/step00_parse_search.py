@@ -240,6 +240,14 @@ def first_nested(value, path, default=""):
     return default if current is None else current
 
 
+def as_list(value):
+    if isinstance(value, list):
+        return value
+    if value in (None, "", [], {}):
+        return []
+    return [value]
+
+
 def pickup_availability_text(pickup):
     if not isinstance(pickup, dict) or not pickup.get("pickupEligible"):
         return ""
@@ -286,8 +294,8 @@ def delivery_availability_text(delivery):
     text = _prefixed_text(text, ["Delivery"])
     if text:
         return text
-    slots = delivery.get("deliverySlots")
-    if isinstance(slots, list) and slots:
+    slots = as_list(delivery.get("deliverySlots"))
+    if slots:
         first = slots[0] if isinstance(slots[0], dict) else {}
         slot_text = _prefixed_text(
             _first_text(first, ["displayText", "displayMessage", "message", "text", "displayDate"]),
@@ -297,8 +305,8 @@ def delivery_availability_text(delivery):
             return slot_text
         if first.get("date"):
             return _date_to_listing_text("Delivery as soon as", first.get("date"))
-    installation_slots = delivery.get("installationSlots")
-    if isinstance(installation_slots, list) and installation_slots:
+    installation_slots = as_list(delivery.get("installationSlots"))
+    if installation_slots:
         first = installation_slots[0] if isinstance(installation_slots[0], dict) else {}
         slot_text = _prefixed_text(
             _first_text(first, ["displayText", "displayMessage", "message", "text", "displayDate"]),
@@ -313,8 +321,8 @@ def delivery_availability_text(delivery):
 
 def fastest_delivery_text(shipping, delivery):
     if isinstance(shipping, dict) and shipping.get("shippingEligible"):
-        groups = shipping.get("customerLOSGroup")
-        if isinstance(groups, list) and groups:
+        groups = as_list(shipping.get("customerLOSGroup"))
+        if groups:
             group = groups[0] if isinstance(groups[0], dict) else {}
             date_value = group.get("minLineItemMaxDate") or group.get("maxLineItemMaxDate")
             price = group.get("price")

@@ -109,7 +109,7 @@ DETAIL_FULFILLMENT_ENDPOINT_FETCH = os.getenv("BESTBUY_DETAIL_FULFILLMENT_ENDPOI
 DETAIL_FULFILLMENT_ENDPOINT_TIMEOUT = int(os.getenv("BESTBUY_DETAIL_FULFILLMENT_ENDPOINT_TIMEOUT", "20"))
 DETAIL_FULFILLMENT_OPTIONS = [
     value.strip().upper()
-    for value in re.split(r"[\s,;]+", os.getenv("BESTBUY_DETAIL_FULFILLMENT_OPTIONS", "SHIPPING,DELIVERY"))
+    for value in re.split(r"[\s,;]+", os.getenv("BESTBUY_DETAIL_FULFILLMENT_OPTIONS", "ALL"))
     if value.strip() and value.strip().upper() != "INSTALLATION"
 ]
 
@@ -2422,7 +2422,7 @@ def fulfillment_endpoint_input(sku, fulfillment_option="SHIPPING"):
         "condition": "NEW",
         "profileCode": None,
     }
-    if option:
+    if option and option not in {"ALL", "ANY", "AUTO"}:
         value["buttonState"]["fulfillmentOption"] = option
     apply_bestbuy_location(value)
     return value
@@ -2494,7 +2494,7 @@ def fetch_fulfillment_endpoint_payloads(sku, pdp_url, client=None):
     }
     if not DETAIL_FULFILLMENT_ENDPOINT_FETCH:
         return result
-    options = DETAIL_FULFILLMENT_OPTIONS or ["SHIPPING"]
+    options = DETAIL_FULFILLMENT_OPTIONS or ["ALL"]
     headers = {
         "accept": "application/json, text/plain, */*",
         "origin": "https://www.bestbuy.com",

@@ -1624,6 +1624,8 @@ def compare_paths_for_status(sku, target, success):
 
 
 def target_url(target, sku):
+    if target.get("target_source") == "promotion_backfill" and sku:
+        return old_pdp_url(sku)
     url = fetchable_pdp_url(target.get("product_url"))
     # PDP URL fallback is intentionally disabled for sponsored enrichment.
     # Sponsored rows should be resolved first via productsBySkuIds in step02.

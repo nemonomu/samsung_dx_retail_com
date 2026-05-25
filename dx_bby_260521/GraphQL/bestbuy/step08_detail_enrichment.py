@@ -1250,34 +1250,34 @@ def detail_js_instructions(attempt=1, sku=""):
     instructions = [
         *([{"evaluate": detail_compare_capture_hook_script()}] if DETAIL_COMPARE_CAPTURE_HOOK else []),
         *([{"evaluate": detail_compare_dom_observer_script()}] if DETAIL_COMPARE_DOM_OBSERVER else []),
-        {"wait": 1800},
+        {"wait": 1200},
+        *(
+            [
+                {"evaluate": detail_compare_force_fetch_script(sku)},
+                {"wait": DETAIL_COMPARE_FORCE_FETCH_WAIT},
+            ]
+            if DETAIL_COMPARE_FORCE_FETCH
+            else []
+        ),
         *(
             [
                 {"evaluate": "window.__bbyCompareStartScan && window.__bbyCompareStartScan([0.18,0.24,0.30,0.36,0.43,0.53,0.62,0.72,0.58,0.44,0.32,0.24],650);"},
-                {"wait": 8500},
+                {"wait": 6500},
             ]
             if DETAIL_COMPARE_SCROLL_SCAN
             else []
         ),
         *settle,
         {"evaluate": "window.__bbyCompareScrollToText ? window.__bbyCompareScrollToText(0.32) : null;"},
-        {"wait": 3600},
+        {"wait": 3000},
         *settle,
         {"evaluate": "window.__bbyCompareScrollToText ? window.__bbyCompareScrollToText(0.43) : null;"},
-        {"wait": 2600},
+        {"wait": 2200},
         *settle,
         {"evaluate": "window.__bbyCompareScrollToText ? window.__bbyCompareScrollToText(0.25) : null;"},
-        {"wait": 2000},
+        {"wait": 1800},
         *settle,
     ]
-
-    if DETAIL_COMPARE_FORCE_FETCH:
-        instructions.extend(
-            [
-                {"evaluate": detail_compare_force_fetch_script(sku)},
-                {"wait": DETAIL_COMPARE_FORCE_FETCH_WAIT},
-            ]
-        )
 
     instructions.extend(
         [
@@ -1792,6 +1792,21 @@ def compare_debug_from_html(html_text):
     return data if isinstance(data, dict) else {}
 
 
+def compare_force_fetch_debug_from_html(html_text):
+    if not isinstance(html_text, str) or "bby-compare-force-fetch-debug" not in html_text:
+        return {}
+    pattern = re.compile(
+        r"<textarea\b(?=[^>]*\bid=[\"']bby-compare-force-fetch-debug[\"'])[^>]*>(.*?)</textarea>",
+        re.IGNORECASE | re.DOTALL,
+    )
+    matches = list(pattern.finditer(html_text))
+    if not matches:
+        return {}
+    raw = html.unescape(matches[-1].group(1) or "").strip()
+    data = parse_json_value(raw)
+    return data if isinstance(data, dict) else {}
+
+
 def sku_ids_from_html_text(html_text):
     if not isinstance(html_text, str) or not html_text:
         return set()
@@ -1849,6 +1864,7 @@ def json_response_compare_summary(json_data, sku=""):
         )
     capture_entries = compare_capture_entries_from_html(html_text)
     compare_debug = compare_debug_from_html(html_text)
+    force_fetch_debug = compare_force_fetch_debug_from_html(html_text)
     for entry in capture_entries:
         body = entry.get("body")
         body_data = parse_json_value(body)
@@ -1879,6 +1895,7 @@ def json_response_compare_summary(json_data, sku=""):
         "xhr_count": len(xhr),
         "html_compare_capture_count": len(capture_entries),
         "html_compare_debug": compare_debug,
+        "html_compare_force_fetch_debug": force_fetch_debug,
         "graphql_or_compare_hit_count": len(hits),
         "compare_name_count": len(names),
         "compare_names": names[:20],

@@ -20,7 +20,7 @@ from .step00_config import (
     url_for_page,
 )
 from .step00_graphql_query import sanitize_product_list_query
-from .step00_parse_pdp import absolute_bestbuy_url, extract_apollo_payloads, nested_get
+from .step00_parse_pdp import absolute_bestbuy_url, extract_apollo_payloads, first_nested, nested_get
 from .step00_parse_search import merge_dict, parse_product as parse_search_product
 
 BESTBUY_BASE_URL = "https://www.bestbuy.com"
@@ -416,6 +416,60 @@ def parse_page_rows(page, response_json):
     return rows
 
 
+def response_products(response_json):
+    data = response_json.get("data", {}) if isinstance(response_json, dict) else {}
+    products = []
+    documents = nested_get(data, ["detailedProductSearch", "documents"], [])
+    if isinstance(documents, list):
+        for document in documents:
+            product = document.get("product") if isinstance(document, dict) else None
+            if isinstance(product, dict):
+                products.append(product)
+    placements = nested_get(data, ["search", "withBestMedia", "placements"], [])
+    if isinstance(placements, list):
+        for placement in placements:
+            if not isinstance(placement, dict):
+                continue
+            sponsored_documents = nested_get(placement, ["documentsGridView", "sponsoredDocuments"], [])
+            if isinstance(sponsored_documents, list):
+                for document in sponsored_documents:
+                    product = document.get("product") if isinstance(document, dict) else None
+                    if isinstance(product, dict):
+                        products.append(product)
+            documents = placement.get("documents", [])
+            if isinstance(documents, list):
+                for document in documents:
+                    product = document.get("product") if isinstance(document, dict) else None
+                    if isinstance(product, dict):
+                        products.append(product)
+    return products
+
+
+def response_fulfillment_counts(response_json):
+    products = response_products(response_json)
+    with_fulfillment = 0
+    shipping = 0
+    delivery = 0
+    pickup = 0
+    for product in products:
+        options = product.get("fulfillmentOptions")
+        if isinstance(options, dict) and options:
+            with_fulfillment += 1
+            if first_nested(options, ["shippingDetails", "shippingAvailability"], {}) not in ("", None, [], {}):
+                shipping += 1
+            if first_nested(options, ["deliveryDetails", "deliveryAvailability"], {}) not in ("", None, [], {}):
+                delivery += 1
+            if first_nested(options, ["ispuDetails", "ispuAvailability"], {}) not in ("", None, [], {}):
+                pickup += 1
+    return {
+        "response_product_count": len(products),
+        "response_fulfillment_product_count": with_fulfillment,
+        "response_shipping_availability_count": shipping,
+        "response_delivery_availability_count": delivery,
+        "response_pickup_availability_count": pickup,
+    }
+
+
 def write_csv(path, rows):
     keys = set()
     for row in rows:
@@ -486,7 +540,8 @@ def page_summary(page, rows, meta, response_json):
     organic = [row for row in rows if row.get("container_type") == "organic_product"]
     ingrid = [row for row in rows if row.get("container_type") == "sponsored_ingrid"]
     carousel = [row for row in rows if row.get("container_type") == "sponsored_carousel"]
-    return {
+    fulfillment_counts = response_fulfillment_counts(response_json)
+    summary = {
         "page": page,
         "started_at": meta["started_at"],
         "finished_at": meta["finished_at"],
@@ -505,8 +560,21 @@ def page_summary(page, rows, meta, response_json):
         "sponsored_price_missing": sum(
             1 for row in ingrid + carousel if row.get("customer_price") in ("", None)
         ),
+        "rows_with_pickup_availability": sum(1 for row in rows if row.get("pick_up_availability")),
+        "rows_with_fastest_delivery": sum(1 for row in rows if row.get("fastest_delivery")),
+        "rows_with_delivery_availability": sum(1 for row in rows if row.get("delivery_availability")),
+        "rows_with_any_availability": sum(
+            1
+            for row in rows
+            if row.get("pick_up_availability")
+            or row.get("fastest_delivery")
+            or row.get("delivery_availability")
+        ),
+        "graphql_error_preview": json.dumps(errors[:2], ensure_ascii=False)[:500] if errors else "",
         "response_path": meta["response_json_path"] or meta["response_path"],
     }
+    summary.update(fulfillment_counts)
+    return summary
 
 
 def main():
@@ -588,7 +656,9 @@ def main():
             f"page={page:03d} source={source} status={meta['status_code']} elapsed={meta['elapsed_seconds']}s "
             f"cost={meta['x_request_cost']} organic={summary['organic_count']} "
             f"ingrid={summary['sponsored_ingrid_count']} carousel={summary['sponsored_carousel_count']} "
-            f"rows={summary['total_occurrence_count']}"
+            f"rows={summary['total_occurrence_count']} "
+            f"response_fulfillment={summary['response_fulfillment_product_count']}/{summary['response_product_count']} "
+            f"rows_any_availability={summary['rows_with_any_availability']}"
         )
 
     parsed_dir = RUN_ROOT / "parsed"

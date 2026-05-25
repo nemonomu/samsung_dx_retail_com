@@ -2331,7 +2331,7 @@ def fallback_review20_payload(sku):
     }
 
 
-DETAIL_FULFILLMENT_BATCH_OPTIONS = ["PICKUP", "SHIPPING", "DELIVERY"]
+DETAIL_FULFILLMENT_BATCH_OPTIONS = [None]
 
 
 def fulfillment_dynamic_payload(sku, fulfillment_option=None):
@@ -2376,6 +2376,8 @@ def fulfillment_dynamic_payload(sku, fulfillment_option=None):
         },
     }
     apply_bestbuy_location(variables)
+    # PDP's FulfillmentOptionHook request keeps productPriceInput.locationId blank.
+    variables["productPriceInput"]["locationId"] = ""
     return {
         "operationName": "FulfillmentOptionHook_FulfillmentDynamicQuery",
         "variables": variables,
@@ -2415,17 +2417,17 @@ def direct_batch_fulfillment_result(sku, response_jsons, status_code, options=No
     for index, response_json in enumerate(response_jsons):
         product = direct_batch_fulfillment_product(sku, response_json)
         signal_count = fulfillment_signal_count(product)
-        success = status_code == 200 and bool(product)
+        success = status_code == 200 and bool(product) and signal_count > 0
         if success:
             success_count += 1
             value_count += signal_count
         entries.append(
             {
-                "option": options[index] if index < len(options) else f"DIRECT_BATCH_{index + 1}",
+                "option": options[index] if index < len(options) and options[index] else "DEFAULT",
                 "success": success,
                 "status_code": status_code,
                 "signal_count": signal_count,
-                "error": "" if success else "fulfillment_dynamic_missing_product",
+                "error": "" if success else "fulfillment_dynamic_missing_values",
             }
         )
     return {
@@ -2450,27 +2452,28 @@ def fulfillment_signal_count(product):
         if not isinstance(detail, dict):
             continue
         for availability in as_list(detail.get("shippingAvailability")):
-            if isinstance(availability, dict) and any(
+            if isinstance(availability, dict) and availability.get("shippingEligible") and any(
                 availability.get(key) not in (None, "", [], {})
-                for key in ("shippingEligible", "customerLOSGroup", "promiseByStreetDate")
+                for key in ("customerLOSGroup", "promiseByStreetDate")
             ):
                 count += 1
     for detail in as_list(options.get("deliveryDetails")):
         if not isinstance(detail, dict):
             continue
         for availability in as_list(detail.get("deliveryAvailability")):
-            if isinstance(availability, dict) and any(
-                availability.get(key) not in (None, "", [], {})
-                for key in ("deliveryEligible", "deliverable", "deliverySlots")
+            if (
+                isinstance(availability, dict)
+                and availability.get("deliveryEligible")
+                and availability.get("deliverySlots") not in (None, "", [], {})
             ):
                 count += 1
     for detail in as_list(options.get("ispuDetails")):
         if not isinstance(detail, dict):
             continue
         for availability in as_list(detail.get("ispuAvailability")):
-            if isinstance(availability, dict) and any(
+            if isinstance(availability, dict) and availability.get("pickupEligible") and any(
                 availability.get(key) not in (None, "", [], {})
-                for key in ("pickupEligible", "instoreInventoryAvailable", "quantity", "minPickupInHours", "minDate", "maxDate")
+                for key in ("fulfillDate", "promiseByStreetDate", "minDate", "maxDate")
             ):
                 count += 1
     return count
@@ -2630,6 +2633,27 @@ def fetch_detail(client, target):
                             break
                 success = response.status_code == 200 and isinstance(product, dict) and str(product.get("skuId") or "") == str(sku)
                 paths = detail_paths_for_status(sku, target, success)
+                direct_response_summary = {
+                    "status_code": response.status_code,
+                    "operation_names": operation_names,
+                    "batch_count": len(response_json) if isinstance(response_json, list) else (1 if isinstance(response_json, dict) else 0),
+                    "fulfillment_indices": fulfillment_indices,
+                    "fulfillment_signal_counts": [
+                        fulfillment_signal_count(direct_batch_fulfillment_product(sku, item))
+                        for item in fulfillment_response_jsons
+                    ],
+                    "errors": [
+                        item.get("errors")
+                        for item in (response_json if isinstance(response_json, list) else [response_json])
+                        if isinstance(item, dict) and item.get("errors")
+                    ],
+                }
+                paths["json_response"].write_text(
+                    json.dumps(response_json, indent=2, ensure_ascii=False), encoding="utf-8"
+                )
+                paths["json_response_summary"].write_text(
+                    json.dumps(direct_response_summary, indent=2, ensure_ascii=False), encoding="utf-8"
+                )
                 endpoint_result = direct_batch_fulfillment_result(
                     sku,
                     fulfillment_response_jsons,

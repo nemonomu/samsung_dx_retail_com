@@ -2498,27 +2498,27 @@ def fetch_fulfillment_endpoint_payloads(sku, pdp_url, client=None):
     for option in options:
         payload = fulfillment_endpoint_payload(sku, option)
         variables_text = json.dumps(payload["variables"], ensure_ascii=False, separators=(",", ":"))
+        endpoint_url = "https://www.bestbuy.com/gateway/graphql/fulfillment"
+        target_url = f"{endpoint_url}?{urlencode({'variables': variables_text})}"
         entry = {
             "option": option,
             "success": False,
             "status_code": "",
-            "url": "https://www.bestbuy.com/gateway/graphql/fulfillment",
+            "url": target_url,
             "error": "",
         }
         try:
-            params = {"variables": variables_text}
             if client:
-                params.update(graphql_params())
                 response = client.get(
-                    "https://www.bestbuy.com/gateway/graphql/fulfillment",
-                    params=params,
+                    target_url,
+                    params=graphql_params(),
                     headers=headers,
                     timeout=REQUEST_TIMEOUT,
                 )
             else:
                 response = requests.get(
-                    "https://www.bestbuy.com/gateway/graphql/fulfillment",
-                    params=params,
+                    endpoint_url,
+                    params={"variables": variables_text},
                     headers=headers,
                     timeout=DETAIL_FULFILLMENT_ENDPOINT_TIMEOUT,
                 )

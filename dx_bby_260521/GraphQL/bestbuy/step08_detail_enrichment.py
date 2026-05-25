@@ -75,6 +75,13 @@ DETAIL_COMPARE_DOM_OBSERVER = os.getenv("BESTBUY_DETAIL_COMPARE_DOM_OBSERVER", "
     "yes",
     "y",
 }
+DETAIL_COMPARE_FORCE_FETCH = os.getenv("BESTBUY_DETAIL_COMPARE_FORCE_FETCH", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
+DETAIL_COMPARE_FORCE_FETCH_WAIT = int(os.getenv("BESTBUY_DETAIL_COMPARE_FORCE_FETCH_WAIT", "2500"))
 DETAIL_JSON_RESPONSE = os.getenv("BESTBUY_DETAIL_JSON_RESPONSE", "0").lower() in {"1", "true", "yes", "y"}
 DETAIL_JSON_WAIT = os.getenv("BESTBUY_DETAIL_JSON_WAIT", "10000")
 DETAIL_REQUIRE_SIMILAR = (
@@ -1093,6 +1100,138 @@ def detail_scroll_to_text_script(keywords, fallback_fraction):
 """
 
 
+def detail_compare_force_fetch_script():
+    payload_json = json.dumps(compare_product_payload("__BBY_SKU__"), ensure_ascii=False, separators=(",", ":"))
+    return f"""
+(() => {{
+  if (window.__bbyCompareForceFetchStarted) return;
+  window.__bbyCompareForceFetchStarted = true;
+
+  const captureId = "bby-compare-capture";
+  const debugId = "bby-compare-force-fetch-debug";
+  const payloadTemplate = {payload_json};
+
+  function readJson(text, fallback) {{
+    try {{ return JSON.parse(text); }} catch (e) {{ return fallback; }}
+  }}
+
+  function ensureTextarea(id) {{
+    let el = document.getElementById(id);
+    if (!el) {{
+      el = document.createElement("textarea");
+      el.id = id;
+      el.style.display = "none";
+      el.setAttribute("aria-hidden", "true");
+      (document.body || document.documentElement).appendChild(el);
+    }}
+    return el;
+  }}
+
+  function publishDebug(data) {{
+    try {{
+      const el = ensureTextarea(debugId);
+      const text = JSON.stringify(Object.assign({{ at: new Date().toISOString() }}, data));
+      el.value = text;
+      el.textContent = text;
+    }} catch (e) {{}}
+  }}
+
+  function publishCapture(entry) {{
+    try {{
+      const el = ensureTextarea(captureId);
+      let existing = readJson(el.value || el.textContent || "[]", []);
+      if (existing && !Array.isArray(existing) && Array.isArray(existing.captures)) existing = existing.captures;
+      if (!Array.isArray(existing)) existing = [];
+      existing.push(entry);
+      existing = existing.slice(-12);
+      const text = JSON.stringify(existing);
+      el.value = text;
+      el.textContent = text;
+      window.__bbyCompareCaptureCount = existing.length;
+    }} catch (e) {{
+      publishDebug({{ ok: false, error: "publishCapture:" + String(e) }});
+    }}
+  }}
+
+  function skuFromPage() {{
+    try {{
+      const meta = document.querySelector('meta[name="analytics-metadata"]');
+      const raw = meta && meta.getAttribute("content");
+      if (raw) {{
+        const parsed = JSON.parse(raw.replace(/&quot;/g, '"'));
+        const sku = parsed && parsed.product && parsed.product.skuId;
+        if (sku) return String(sku);
+      }}
+    }} catch (e) {{}}
+    try {{
+      const candidates = [
+        document.querySelector("[data-sku-id]"),
+        document.querySelector("[data-sku]"),
+        document.querySelector("[data-product-sku]")
+      ];
+      for (const el of candidates) {{
+        if (!el) continue;
+        const sku = el.getAttribute("data-sku-id") || el.getAttribute("data-sku") || el.getAttribute("data-product-sku");
+        if (sku) return String(sku);
+      }}
+    }} catch (e) {{}}
+    try {{
+      const text = (document.body && document.body.innerText) || "";
+      const match = text.match(/\\bSKU\\s*:?\\s*([0-9]{{4,}})\\b/i);
+      if (match) return match[1];
+    }} catch (e) {{}}
+    try {{
+      const match = String(location.href).match(/\\/sku\\/([0-9]{{4,}})/i);
+      if (match) return match[1];
+    }} catch (e) {{}}
+    return "";
+  }}
+
+  const skuId = skuFromPage();
+  if (!skuId) {{
+    publishDebug({{ ok: false, error: "sku_not_found" }});
+    return;
+  }}
+
+  const payload = JSON.parse(JSON.stringify(payloadTemplate));
+  payload.variables.skuId = skuId;
+  const requestBody = JSON.stringify(payload);
+
+  fetch("/gateway/graphql", {{
+    method: "POST",
+    credentials: "include",
+    headers: {{
+      "accept": "application/graphql-response+json,application/json;q=0.9",
+      "content-type": "application/json",
+      "x-client-id": "pdp-web",
+      "x-requested-for-operation-name": "GetCompareProduct"
+    }},
+    body: requestBody
+  }})
+    .then(async response => {{
+      const responseBody = await response.text();
+      publishCapture({{
+        source: "inrender_get_compare",
+        method: "POST",
+        status_code: response.status,
+        url: "/gateway/graphql",
+        requestBody,
+        body: responseBody
+      }});
+      publishDebug({{
+        ok: response.ok,
+        skuId,
+        status: response.status,
+        bodyLength: responseBody.length
+      }});
+    }})
+    .catch(error => {{
+      publishDebug({{ ok: false, skuId, error: String(error) }});
+    }});
+}})();
+"""
+
+
 def detail_js_instructions(attempt=1):
     compare_keywords = ["Compare similar products", "Compare similar", "Similar products"]
     settle = [{"wait_event": "networkalmostidle"}] if DETAIL_SCROLL_NETWORK_IDLE else []
@@ -1119,6 +1258,14 @@ def detail_js_instructions(attempt=1):
         {"wait": 2000},
         *settle,
     ]
+
+    if DETAIL_COMPARE_FORCE_FETCH:
+        instructions.extend(
+            [
+                {"evaluate": detail_compare_force_fetch_script()},
+                {"wait": DETAIL_COMPARE_FORCE_FETCH_WAIT},
+            ]
+        )
 
     instructions.extend(
         [
@@ -1543,11 +1690,13 @@ def body_preview(value, limit=500):
     return compact_text(text)[:limit]
 
 
-def strict_compare_response_names(body_data, sku=""):
+def strict_compare_response_names(body_data, sku="", allowed_sku_ids=None):
+    if allowed_sku_ids is None:
+        allowed_sku_ids = {str(sku)} if sku else set()
     if isinstance(body_data, list):
         names = []
         for item in body_data:
-            for name in strict_compare_response_names(item, sku):
+            for name in strict_compare_response_names(item, sku, allowed_sku_ids):
                 if name and name not in names:
                     names.append(name)
         return names
@@ -1563,7 +1712,7 @@ def strict_compare_response_names(body_data, sku=""):
     product = data.get("productBySkuId")
     if not isinstance(product, dict):
         return []
-    if sku and str(product.get("skuId") or "") != str(sku):
+    if allowed_sku_ids and str(product.get("skuId") or "") not in allowed_sku_ids:
         return []
     return compare_recommendation_names(data)
 
@@ -1605,10 +1754,30 @@ def compare_debug_from_html(html_text):
     return data if isinstance(data, dict) else {}
 
 
+def sku_ids_from_html_text(html_text):
+    if not isinstance(html_text, str) or not html_text:
+        return set()
+    sku_ids = set()
+    for pattern in (
+        r'"skuId"\s*:\s*"([0-9]{4,})"',
+        r"&quot;skuId&quot;\s*:\s*&quot;([0-9]{4,})&quot;",
+        r"\bSKU\s*:?\s*([0-9]{4,})\b",
+        r"/sku/([0-9]{4,})",
+    ):
+        for match in re.finditer(pattern, html_text, re.IGNORECASE):
+            sku_ids.add(str(match.group(1)))
+    return sku_ids
+
+
 def json_response_compare_summary(json_data, sku=""):
     xhr = (json_data.get("xhr") or []) if isinstance(json_data, dict) else []
     if not isinstance(xhr, list):
         xhr = []
+    html_text = ""
+    if isinstance(json_data, dict):
+        html_text = json_data.get("html") or json_data.get("content") or ""
+    allowed_sku_ids = detail_resolved_sku_ids(sku) if sku else set()
+    allowed_sku_ids.update(sku_ids_from_html_text(html_text))
     hits = []
     names = []
     for request in xhr:
@@ -1621,7 +1790,7 @@ def json_response_compare_summary(json_data, sku=""):
         body = request.get("body")
         body_data = parse_json_value(body)
         has_get_compare = "GetCompareProduct" in request_blob or "single-compare" in request_blob
-        request_names = strict_compare_response_names(body_data, sku)
+        request_names = strict_compare_response_names(body_data, sku, allowed_sku_ids)
         is_compare_response = bool(request_names)
         if not has_get_compare and not is_compare_response:
             request_names = []
@@ -1640,9 +1809,6 @@ def json_response_compare_summary(json_data, sku=""):
                 "body_preview": body_preview(body),
             }
         )
-    html_text = ""
-    if isinstance(json_data, dict):
-        html_text = json_data.get("html") or json_data.get("content") or ""
     capture_entries = compare_capture_entries_from_html(html_text)
     compare_debug = compare_debug_from_html(html_text)
     for entry in capture_entries:
@@ -1650,7 +1816,7 @@ def json_response_compare_summary(json_data, sku=""):
         body_data = parse_json_value(body)
         entry_blob = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
         has_get_compare = "GetCompareProduct" in entry_blob or "single-compare" in entry_blob
-        entry_names = strict_compare_response_names(body_data, sku)
+        entry_names = strict_compare_response_names(body_data, sku, allowed_sku_ids)
         is_compare_response = bool(entry_names)
         if not has_get_compare and not is_compare_response:
             continue
@@ -3405,6 +3571,8 @@ def main():
         "detail_compare_capture_hook": DETAIL_COMPARE_CAPTURE_HOOK,
         "detail_compare_scroll_scan": DETAIL_COMPARE_SCROLL_SCAN,
         "detail_compare_dom_observer": DETAIL_COMPARE_DOM_OBSERVER,
+        "detail_compare_force_fetch": DETAIL_COMPARE_FORCE_FETCH,
+        "detail_compare_force_fetch_wait": DETAIL_COMPARE_FORCE_FETCH_WAIT,
         "detail_json_response": DETAIL_JSON_RESPONSE,
         "detail_json_wait": DETAIL_JSON_WAIT,
         "detail_require_similar": DETAIL_REQUIRE_SIMILAR,

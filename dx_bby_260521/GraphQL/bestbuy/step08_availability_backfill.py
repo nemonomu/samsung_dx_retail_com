@@ -40,6 +40,7 @@ ALLOW_MULTI_SKU_FULFILLMENT = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_ALLOW_MUL
 CHUNK_SIZE = REQUESTED_CHUNK_SIZE if ALLOW_MULTI_SKU_FULFILLMENT else 1
 REQUEST_TIMEOUT = int(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_TIMEOUT", os.getenv("ZENROWS_TIMEOUT", "120")))
 DRY_RUN = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_DRY_RUN", "0").lower() in {"1", "true", "yes", "y"}
+LIMIT = int(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_LIMIT", "0"))
 
 
 def now():
@@ -327,6 +328,8 @@ def main():
         else:
             missing_sku.append(index)
     skus = unique_ordered(row_to_sku.values())
+    if LIMIT > 0:
+        skus = skus[:LIMIT]
     run_dir = BACKFILL_ROOT / datetime.now().strftime("%Y%m%d_%H%M%S")
     raw_dir = run_dir / "raw"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -336,7 +339,7 @@ def main():
         f"[availability_backfill:plan] batch={BACKFILL_BATCH_ID} final_rows={len(final_rows)} "
         f"batch_rows={len(batch_indexes)} blank_rows={len(candidate_indexes)} mapped_rows={len(row_to_sku)} skus={len(skus)} "
         f"chunk_size={CHUNK_SIZE} requested_chunk_size={REQUESTED_CHUNK_SIZE} "
-        f"multi_sku={str(ALLOW_MULTI_SKU_FULFILLMENT).lower()} calls={estimated_calls} dry_run={str(DRY_RUN).lower()}",
+        f"multi_sku={str(ALLOW_MULTI_SKU_FULFILLMENT).lower()} limit={LIMIT} calls={estimated_calls} dry_run={str(DRY_RUN).lower()}",
         flush=True,
     )
     if missing_sku:
@@ -380,6 +383,7 @@ def main():
         "mapped_final_rows": len(row_to_sku),
         "missing_sku_rows": len(missing_sku),
         "sku_count": len(skus),
+        "limit": LIMIT,
         "chunk_size": CHUNK_SIZE,
         "requested_chunk_size": REQUESTED_CHUNK_SIZE,
         "multi_sku_fulfillment_enabled": ALLOW_MULTI_SKU_FULFILLMENT,

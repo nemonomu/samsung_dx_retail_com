@@ -3860,6 +3860,72 @@ def build_outputs(targets):
     return rows, failures
 
 
+def detail_fetch_mode_label():
+    if DETAIL_DIRECT_GRAPHQL:
+        return "direct_graphql_batch"
+    if DETAIL_PDP_FALLBACK:
+        return "pdp_render"
+    return "disabled"
+
+
+def compact_log_value(value, limit=140):
+    text = compact_text(value)
+    if len(text) > limit:
+        return text[: limit - 3] + "..."
+    return text
+
+
+def process_log_line(index, total, sku, dmeta, rmeta, cmeta):
+    parts = [
+        f"[{index}/{total}]",
+        f"sku={sku}",
+        f"mode={dmeta.get('detail_mode') or detail_fetch_mode_label()}",
+        f"detail={dmeta.get('success')}",
+        f"attempt={dmeta.get('attempt')}",
+        f"run_attempts={dmeta.get('run_attempts', '')}",
+        f"similar={dmeta.get('final_compare_name_count', dmeta.get('json_response_compare_name_count', ''))}",
+        f"similar_json={dmeta.get('json_response_compare_name_count', '')}",
+        f"similar_ok={dmeta.get('final_compare_ok', dmeta.get('json_response_compare_ok', ''))}",
+        f"compare={cmeta.get('success')}",
+        f"compare_attempt={cmeta.get('attempt')}",
+        f"compare_recs={cmeta.get('recommendation_count', '')}",
+        f"review={rmeta.get('success')}",
+        f"review_attempt={rmeta.get('attempt')}",
+        f"review_run_attempts={rmeta.get('run_attempts', '')}",
+        f"reviews={rmeta.get('review_count_returned', '')}",
+    ]
+    if not dmeta.get("success") or dmeta.get("error"):
+        parts.extend(
+            [
+                f"detail_status={dmeta.get('status_code', '')}",
+                f"detail_error={compact_log_value(dmeta.get('error', ''))}",
+            ]
+        )
+    if FETCH_COMPARE and (not cmeta.get("success") or cmeta.get("error")):
+        parts.extend(
+            [
+                f"compare_status={cmeta.get('status_code', '')}",
+                f"compare_error={compact_log_value(cmeta.get('error', ''))}",
+            ]
+        )
+    if not rmeta.get("success") or rmeta.get("error"):
+        parts.extend(
+            [
+                f"review_status={rmeta.get('status_code', '')}",
+                f"review_error={compact_log_value(rmeta.get('error', ''))}",
+            ]
+        )
+    return " ".join(parts)
+
+
+def failure_stage_counts(failures):
+    counts = {}
+    for failure in failures:
+        stage = str(failure.get("stage") or "unknown")
+        counts[stage] = counts.get(stage, 0) + 1
+    return counts
+
+
 def main():
     started_at = now()
     targets = target_rows(apply_filters=True)
@@ -3879,6 +3945,30 @@ def main():
 
     if STAGE not in {"all", "detail", "review"}:
         raise RuntimeError("BESTBUY_DETAIL_STAGE must be one of: all, detail, review")
+
+    fetch_mode_label = detail_fetch_mode_label()
+    direct_compare = DETAIL_DIRECT_GRAPHQL and FETCH_COMPARE
+    pdp_compare_js = DETAIL_PDP_FALLBACK and (
+        DETAIL_COMPARE_CAPTURE_HOOK
+        or DETAIL_COMPARE_SCROLL_SCAN
+        or DETAIL_COMPARE_DOM_OBSERVER
+        or DETAIL_COMPARE_FORCE_FETCH
+    )
+    print(
+        "[detail:config] "
+        f"category={CATEGORY} batch_id={RUN_BATCH_ID} stage={STAGE} mode={fetch_mode_label} "
+        f"targets={len(targets)} output_targets={len(output_targets)} workers={WORKERS} "
+        f"force_refresh={FORCE_REFRESH} rebuild_only={REBUILD_ONLY} fetch_compare={FETCH_COMPARE} "
+        f"direct_compare_batch={direct_compare} pdp_compare_js_active={pdp_compare_js} "
+        f"json_response={DETAIL_JSON_RESPONSE} use_db_selectors={USE_DB_SELECTORS}",
+        flush=True,
+    )
+    if DETAIL_DIRECT_GRAPHQL:
+        print(
+            "[detail:compare_mode] direct_graphql_batch uses GetCompareProduct as a GraphQL payload; "
+            "PDP capture_hook/scroll_scan/dom_observer/force_fetch flags are only active in pdp_render mode.",
+            flush=True,
+        )
 
     if not can_fetch_network and not REBUILD_ONLY:
         # Cached parse-only mode is useful during local development.
@@ -3941,18 +4031,7 @@ def main():
                     review_cost += float(rmeta.get("x_request_cost_total", rmeta.get("x_request_cost") or 0) or 0)
                 if fetched_compare:
                     compare_cost += float(cmeta.get("x_request_cost_total", cmeta.get("x_request_cost") or 0) or 0)
-                print(
-                    f"[{index}/{len(targets)}] sku={sku} "
-                    f"detail={dmeta.get('success')} attempt={dmeta.get('attempt')} "
-                    f"run_attempts={dmeta.get('run_attempts', '')} "
-                    f"similar={dmeta.get('final_compare_name_count', dmeta.get('json_response_compare_name_count', ''))} "
-                    f"similar_json={dmeta.get('json_response_compare_name_count', '')} "
-                    f"similar_ok={dmeta.get('final_compare_ok', dmeta.get('json_response_compare_ok', ''))} "
-                    f"compare={cmeta.get('success')} attempt={cmeta.get('attempt')} "
-                    f"review={rmeta.get('success')} attempt={rmeta.get('attempt')} "
-                    f"review_run_attempts={rmeta.get('run_attempts', '')} "
-                    f"reviews={rmeta.get('review_count_returned', '')}"
-                )
+                print(process_log_line(index, len(targets), sku, dmeta, rmeta, cmeta), flush=True)
     else:
         for index, target in enumerate(targets, 1):
             index, sku, dmeta, rmeta, cmeta, fetched_detail, fetched_review, fetched_compare = process_target(index, target)
@@ -3962,22 +4041,23 @@ def main():
                 review_cost += float(rmeta.get("x_request_cost_total", rmeta.get("x_request_cost") or 0) or 0)
             if fetched_compare:
                 compare_cost += float(cmeta.get("x_request_cost_total", cmeta.get("x_request_cost") or 0) or 0)
-            print(
-                f"[{index}/{len(targets)}] sku={sku} "
-                f"detail={dmeta.get('success')} attempt={dmeta.get('attempt')} "
-                f"run_attempts={dmeta.get('run_attempts', '')} "
-                f"similar={dmeta.get('final_compare_name_count', dmeta.get('json_response_compare_name_count', ''))} "
-                f"similar_json={dmeta.get('json_response_compare_name_count', '')} "
-                f"similar_ok={dmeta.get('final_compare_ok', dmeta.get('json_response_compare_ok', ''))} "
-                f"compare={cmeta.get('success')} attempt={cmeta.get('attempt')} "
-                f"review={rmeta.get('success')} attempt={rmeta.get('attempt')} "
-                f"review_run_attempts={rmeta.get('run_attempts', '')} "
-                f"reviews={rmeta.get('review_count_returned', '')}"
-            )
+            print(process_log_line(index, len(targets), sku, dmeta, rmeta, cmeta), flush=True)
 
     enriched_rows, failures = build_outputs(output_targets)
     write_csv(DETAIL_ROWS_CSV, enriched_rows)
     write_csv(FAILURES_CSV, failures, ["sku_id", "stage", "attempt", "status_code", "error", "retryable"])
+    if failures:
+        print(f"[detail:failure_summary] {failure_stage_counts(failures)}", flush=True)
+        for failure in failures[:30]:
+            print(
+                "[detail:failure] "
+                f"sku={failure.get('sku_id')} stage={failure.get('stage')} "
+                f"attempt={failure.get('attempt')} status={failure.get('status_code')} "
+                f"retryable={failure.get('retryable')} error={compact_log_value(failure.get('error', ''))}",
+                flush=True,
+            )
+    else:
+        print("[detail:failure_summary] none", flush=True)
     fields = sample_fields()
     for row in enriched_rows:
         for field in fields:

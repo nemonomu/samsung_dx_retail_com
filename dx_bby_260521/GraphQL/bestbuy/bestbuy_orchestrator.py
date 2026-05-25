@@ -370,7 +370,11 @@ def run_step(step, dry_run=False, resume=False):
         print("[env] " + " ".join(f"{key}={value}" for key, value in effective_env.items()))
     if dry_run:
         return
-    subprocess.run(command, check=True, env=env)
+    try:
+        subprocess.run(command, check=True, env=env)
+    except subprocess.CalledProcessError as exc:
+        print(f"[fail] step {step.key} {step.name}: exit_code={exc.returncode}")
+        raise
 
 
 def parse_args():

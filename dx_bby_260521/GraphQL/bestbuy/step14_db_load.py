@@ -29,6 +29,7 @@ UPDATE_AVAILABILITY_ONLY = os.getenv("BESTBUY_DB_UPDATE_AVAILABILITY_ONLY", "0")
     "yes",
     "y",
 }
+UPDATE_BATCH_ID = os.getenv("BESTBUY_DB_UPDATE_BATCH_ID", "").strip()
 
 
 def now():
@@ -203,22 +204,30 @@ def update_similar_only(cur, csv_path, table_name, dry_run=False):
     }
 
 
-def update_availability_only(cur, csv_path, table_name, dry_run=False):
-    fields = ["pick_up_availability", "fastest_delivery", "delivery_availability"]
-    rows = [
+def availability_update_candidates(rows, batch_id=""):
+    return [
         row
-        for row in read_csv(csv_path)
-        if str(row.get("batch_id") or "").strip() and str(row.get("item") or "").strip()
+        for row in rows
+        if str(row.get("batch_id") or "").strip()
+        and str(row.get("item") or "").strip()
+        and (not batch_id or str(row.get("batch_id") or "").strip() == batch_id)
     ]
+
+
+def update_availability_only(cur, csv_path, table_name, dry_run=False, batch_id=UPDATE_BATCH_ID):
+    fields = ["pick_up_availability", "fastest_delivery", "delivery_availability"]
+    source_rows = read_csv(csv_path)
+    rows = availability_update_candidates(source_rows, batch_id)
     if not rows:
         return {
             "csv": rel_path(csv_path),
             "table": f"{TARGET_SCHEMA}.{table_name}",
-            "csv_rows": 0,
+            "csv_rows": len(source_rows),
             "candidate_rows": 0,
             "updated": 0,
             "dry_run": dry_run,
             "mode": "update_availability_only",
+            "batch_id_filter": batch_id,
         }
     columns = table_columns(cur, table_name) if cur else fallback_csv_columns(rows)
     required = {"batch_id", "item", *fields}
@@ -249,11 +258,12 @@ def update_availability_only(cur, csv_path, table_name, dry_run=False):
     return {
         "csv": rel_path(csv_path),
         "table": f"{TARGET_SCHEMA}.{table_name}",
-        "csv_rows": len(read_csv(csv_path)),
+        "csv_rows": len(source_rows),
         "candidate_rows": len(rows),
         "updated": updated,
         "dry_run": dry_run,
         "mode": "update_availability_only",
+        "batch_id_filter": batch_id,
         "match_keys": ["batch_id", "item"],
         "updated_columns": fields,
     }
@@ -311,6 +321,7 @@ def main():
         "dry_run": DRY_RUN,
         "update_similar_only": UPDATE_SIMILAR_ONLY,
         "update_availability_only": UPDATE_AVAILABILITY_ONLY,
+        "update_batch_id": UPDATE_BATCH_ID,
         "run_root": rel_path(RUN_ROOT),
         "final_output": final_result,
         "product_list": product_list_result,

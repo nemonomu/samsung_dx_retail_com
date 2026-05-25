@@ -23,6 +23,12 @@ PRODUCT_LIST_CSV = OUTPUT_ROOT / "bestbuy_product_list.csv"
 MANIFEST_PATH = OUTPUT_ROOT / "db_load_manifest.json"
 DRY_RUN = os.getenv("BESTBUY_DB_LOAD_DRY_RUN", "0").lower() in {"1", "true", "yes", "y"}
 UPDATE_SIMILAR_ONLY = os.getenv("BESTBUY_DB_UPDATE_SIMILAR_ONLY", "0").lower() in {"1", "true", "yes", "y"}
+UPDATE_AVAILABILITY_ONLY = os.getenv("BESTBUY_DB_UPDATE_AVAILABILITY_ONLY", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
 
 
 def now():
@@ -197,6 +203,62 @@ def update_similar_only(cur, csv_path, table_name, dry_run=False):
     }
 
 
+def update_availability_only(cur, csv_path, table_name, dry_run=False):
+    fields = ["pick_up_availability", "fastest_delivery", "delivery_availability"]
+    rows = [
+        row
+        for row in read_csv(csv_path)
+        if str(row.get("batch_id") or "").strip() and str(row.get("item") or "").strip()
+    ]
+    if not rows:
+        return {
+            "csv": rel_path(csv_path),
+            "table": f"{TARGET_SCHEMA}.{table_name}",
+            "csv_rows": 0,
+            "candidate_rows": 0,
+            "updated": 0,
+            "dry_run": dry_run,
+            "mode": "update_availability_only",
+        }
+    columns = table_columns(cur, table_name) if cur else fallback_csv_columns(rows)
+    required = {"batch_id", "item", *fields}
+    available = {name for name, _ in columns}
+    missing = sorted(required - available)
+    if missing:
+        raise RuntimeError(f"DB table is missing columns for availability update: {missing}")
+    if dry_run:
+        updated = 0
+    else:
+        assignments = ", ".join(f"{quote_ident(field)} = %s" for field in fields)
+        sql = (
+            f"UPDATE {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} "
+            f"SET {assignments} "
+            f"WHERE batch_id = %s AND item = %s"
+        )
+        updated = 0
+        for row in rows:
+            cur.execute(
+                sql,
+                (
+                    *(row.get(field) for field in fields),
+                    str(row.get("batch_id") or "").strip(),
+                    str(row.get("item") or "").strip(),
+                ),
+            )
+            updated += max(cur.rowcount, 0)
+    return {
+        "csv": rel_path(csv_path),
+        "table": f"{TARGET_SCHEMA}.{table_name}",
+        "csv_rows": len(read_csv(csv_path)),
+        "candidate_rows": len(rows),
+        "updated": updated,
+        "dry_run": dry_run,
+        "mode": "update_availability_only",
+        "match_keys": ["batch_id", "item"],
+        "updated_columns": fields,
+    }
+
+
 def main():
     started_at = now()
     config = db_config()
@@ -220,7 +282,10 @@ def main():
     if conn:
         with conn:
             with conn.cursor() as cur:
-                if UPDATE_SIMILAR_ONLY:
+                if UPDATE_AVAILABILITY_ONLY:
+                    final_result = update_availability_only(cur, FINAL_OUTPUT_CSV, final_table, DRY_RUN)
+                    product_list_result = {"skipped": True, "reason": "update_availability_only"}
+                elif UPDATE_SIMILAR_ONLY:
                     final_result = update_similar_only(cur, FINAL_OUTPUT_CSV, final_table, DRY_RUN)
                     product_list_result = {"skipped": True, "reason": "update_similar_only"}
                 else:
@@ -228,7 +293,10 @@ def main():
                     product_list_result = load_one(cur, PRODUCT_LIST_CSV, product_list_table, DRY_RUN)
         conn.close()
     else:
-        if UPDATE_SIMILAR_ONLY:
+        if UPDATE_AVAILABILITY_ONLY:
+            final_result = update_availability_only(None, FINAL_OUTPUT_CSV, final_table, DRY_RUN)
+            product_list_result = {"skipped": True, "reason": "update_availability_only"}
+        elif UPDATE_SIMILAR_ONLY:
             final_result = update_similar_only(None, FINAL_OUTPUT_CSV, final_table, DRY_RUN)
             product_list_result = {"skipped": True, "reason": "update_similar_only"}
         else:
@@ -242,6 +310,7 @@ def main():
         "category": CATEGORY,
         "dry_run": DRY_RUN,
         "update_similar_only": UPDATE_SIMILAR_ONLY,
+        "update_availability_only": UPDATE_AVAILABILITY_ONLY,
         "run_root": rel_path(RUN_ROOT),
         "final_output": final_result,
         "product_list": product_list_result,

@@ -84,6 +84,10 @@ FULFILLMENT_DYNAMIC_QUERY = (
     "ispuDetails{ispuAvailability{pickupEligible instoreInventoryAvailable quantity minPickupInHours maxDate fulfillDate promiseByStreetDate}}}}}"
 )
 
+PDP_RENDER_FULFILLMENT_DYNAMIC_QUERY = """
+query FulfillmentOptionHook_FulfillmentDynamicQuery($skuId:String!$fulfillmentInput:ProductFulfillmentInput!$productPriceInput:ProductItemPriceInput!$openBoxCondition:Int){productBySkuId(skuId:$skuId openBoxCondition:$openBoxCondition){skuId ...FullfillmentProductBySkuIdFragment fulfillmentOptions(input:$fulfillmentInput){...FullfillmentOptionsFragment}badgesV2{label}}}fragment FullfillmentProductBySkuIdFragment on Product{brand brandId classification{class{id}}isSmallMediumBusiness releaseDateDisplayValue whatItIs eligibleGatedEventCustomerSegments{canPurchaseNow}isConstrainedHighVelocity inStoreServiceType buyingOptions{type product{openBoxCondition openBoxOptions{code}inStoreServiceType price(input:$productPriceInput){openBoxCondition}primaryImage{piscesHref}name{short}}pdpUrl}price(input:$productPriceInput){customerPrice mobileContracts{isDefaultContract purchaseType numberOfPayments}}waitlists{enrollmentPaused id name type}...MpFragment}fragment MpFragment on Product{bsinProduct{bsin products{openBoxCondition condition{type}seller{classification}skuId}}bsin seller{classification id}}fragment FullfillmentOptionsFragment on FulfillmentOptionsList{buttonStates{...ButtonStatesFragment}shippingDetails{...ShippingDetailsFragment}deliveryDetails{...DeliveryDetailsFragment}ispuDetails{...IspuDetailsFragment}}fragment ButtonStatesFragment on ButtonState{buttonState condition displayText secondaryButtonState secondaryDisplayText planButtonState hyperlinkUrl}fragment ShippingDetailsFragment on FulfillmentShippingDetail{destinationZipCode shippingAvailability{backordered condition customerLOSGroup{customerLosGroupId displayDateType maxLineItemMaxDate minLineItemMaxDate name price}levelOfServices{code id isLessThanTruckload isScheduleParcelDelivery}defaultCustomerLosGroupId downloadEligible emailEligible fulfillByVendor preorderable promiseByStreetDate whenAvailableFlag shippingEligible restrictions{category}}sku}fragment DeliveryDetailsFragment on FulfillmentDeliveryDetail{deliveryAvailability{salLocationId deliverable deliveryEligible forceSkipScheduling homeDeliveryDisplayDateType condition deliverySlots{date}deliveryServices{eligible levelsOfService{offerUnitPrice unitPrice}serviceType}installationSlots{date}backordered restrictions{category}}destinationZipCode}fragment IspuDetailsFragment on InStorePickupDetail{sku ispuAvailability{...IspuAvailabilityFragment}nearbyLocation{availability{maxDate pickupEligible quantity}distance store{...IspuStoreFragment}}nearbyLocations{availability{fulfillmentType maxDate minPickupInHours}store{...IspuStoreFragment}}sku store{...IspuStoreFragment}}fragment IspuAvailabilityFragment on InStorePickupAvailability{backordered condition displayDateType downloadEligible emailEligible fulfillDate fulfillmentType instoreInventoryAvailable inStoreOnly maxDate minPickupInHours pickupEligible preorderable promiseByStreetDate whenAvailableFlag quantity restrictions{category}inStoreServices{installationSlots{date}}}fragment IspuStoreFragment on FulfillmentPickUpStore{name storeId zip}
+""".strip()
+
 AVAILABILITY_FIELD_TOKENS = (
     "ProductFulfillmentInput",
     "fulfillmentOptions(input",
@@ -568,6 +572,20 @@ def fulfillment_dynamic_payload(sku, option_marker=None):
     }
 
 
+def fulfillment_dynamic_exact_payload(sku, option_marker=None):
+    return {
+        "operationName": "FulfillmentOptionHook_FulfillmentDynamicQuery",
+        "variables": {
+            "skuId": str(sku),
+            "fulfillmentInput": fulfillment_input(option_marker),
+            "productPriceInput": product_price_input(),
+            "openBoxCondition": None,
+        },
+        "extensions": {"clientLibrary": {"name": "@apollo/client", "version": "4.1.6"}},
+        "query": PDP_RENDER_FULFILLMENT_DYNAMIC_QUERY,
+    }
+
+
 def response_item(response_json, index):
     if isinstance(response_json, list) and index < len(response_json):
         item = response_json[index]
@@ -638,6 +656,9 @@ def probe_sku(client, sku):
     elif PROBE_VARIANT == "detail_with_get_it_fast":
         request_payload = [detail_with_get_it_fast_payload(sku)]
         labels = ["detail_with_get_it_fast"]
+    elif PROBE_VARIANT == "fulfillment_dynamic_exact":
+        request_payload = [fulfillment_dynamic_exact_payload(sku, None)]
+        labels = ["fulfillment_dynamic_exact"]
     elif PROBE_VARIANT == "product_schema_fulfillment":
         request_payload = [product_schema_fulfillment_payload(sku)]
         labels = ["product_schema_fulfillment"]
@@ -661,7 +682,7 @@ def probe_sku(client, sku):
     else:
         raise RuntimeError(
             "BESTBUY_AVAILABILITY_PROBE_VARIANT must be control, detail_with_fulfillment, "
-            "detail_with_get_it_fast, product_schema_fulfillment, or full"
+            "detail_with_get_it_fast, fulfillment_dynamic_exact, product_schema_fulfillment, or full"
         )
     started_at = now()
     start = time.perf_counter()

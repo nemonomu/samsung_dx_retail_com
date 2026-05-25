@@ -11,6 +11,7 @@ from bestbuy.step00_availability_graphql_probe import (  # noqa: E402
     detail_with_fulfillment_payload,
     detail_with_get_it_fast_payload,
     digital_event_availability_values,
+    fulfillment_dynamic_exact_payload,
     get_it_fast_availability_values,
 )
 
@@ -65,6 +66,19 @@ curl ^"https://www.bestbuy.com/gateway/graphql^" ^
         self.assertEqual(payload["variables"]["skuId"], "6623791")
         self.assertIn("fulfillmentGetItFastOptions", payload["query"])
         self.assertNotIn("fulfillmentOptions(input:$fulfillmentInput)", payload["query"])
+        self.assertNotIsInstance(payload, list)
+
+    def test_fulfillment_dynamic_exact_payload_matches_pdp_render_shape(self):
+        payload = fulfillment_dynamic_exact_payload("6623791")
+
+        self.assertEqual(payload["operationName"], "FulfillmentOptionHook_FulfillmentDynamicQuery")
+        self.assertEqual(payload["variables"]["skuId"], "6623791")
+        self.assertIn("productPriceInput", payload["variables"])
+        self.assertIn("openBoxCondition", payload["variables"])
+        self.assertIn("...FullfillmentProductBySkuIdFragment", payload["query"])
+        self.assertIn("deliverySlots{date}", payload["query"])
+        self.assertIn("installationSlots{date}", payload["query"])
+        self.assertGreater(len(payload["query"]), 3000)
         self.assertNotIsInstance(payload, list)
 
     def test_get_it_fast_values_map_pickup_and_shipping_dates(self):

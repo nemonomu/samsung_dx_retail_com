@@ -17,10 +17,14 @@ from .step00_fulfillment_graphql import (
     request_cost,
     zenrows_params,
 )
-from .step08_detail_enrichment import FINAL_OUTPUT_CSV, TARGET_CSV, compact_text, write_csv
+from .step08_detail_enrichment import FINAL_OUTPUT_CSV as STEP08_FINAL_OUTPUT_CSV
+from .step08_detail_enrichment import TARGET_CSV, compact_text, write_csv
 
 
 AVAILABILITY_FIELDS = ["pick_up_availability", "fastest_delivery", "delivery_availability"]
+FINAL_OUTPUT_CSV = Path(
+    os.getenv("BESTBUY_AVAILABILITY_BACKFILL_FINAL_CSV", os.getenv("BESTBUY_FINAL_OUTPUT_CSV", STEP08_FINAL_OUTPUT_CSV))
+)
 DETAIL_ROWS_CSV = Path(
     os.getenv("BESTBUY_AVAILABILITY_BACKFILL_DETAIL_ROWS_CSV", DEFAULT_BESTBUY_RUN_ROOT / "detail" / "parsed" / "detail_enriched_rows.csv")
 )
@@ -282,7 +286,8 @@ def main():
         raise RuntimeError(f"target CSV not found or empty: {TARGET_CSV}")
 
     lookup = build_sku_lookup(targets)
-    candidate_indexes = [index for index, row in enumerate(final_rows) if backfill_candidate(row, BACKFILL_BATCH_ID)]
+    batch_indexes = [index for index, row in enumerate(final_rows) if compact_text(row.get("batch_id")) == BACKFILL_BATCH_ID]
+    candidate_indexes = [index for index in batch_indexes if all_availability_blank(final_rows[index])]
     row_to_sku = {}
     missing_sku = []
     for index in candidate_indexes:
@@ -299,7 +304,7 @@ def main():
     estimated_calls = (len(skus) + CHUNK_SIZE - 1) // CHUNK_SIZE if skus else 0
     print(
         f"[availability_backfill:plan] batch={BACKFILL_BATCH_ID} final_rows={len(final_rows)} "
-        f"blank_rows={len(candidate_indexes)} mapped_rows={len(row_to_sku)} skus={len(skus)} "
+        f"batch_rows={len(batch_indexes)} blank_rows={len(candidate_indexes)} mapped_rows={len(row_to_sku)} skus={len(skus)} "
         f"chunk_size={CHUNK_SIZE} calls={estimated_calls} dry_run={str(DRY_RUN).lower()}",
         flush=True,
     )
@@ -339,6 +344,7 @@ def main():
         "target_csv": rel_path(TARGET_CSV),
         "final_output_csv": rel_path(FINAL_OUTPUT_CSV),
         "detail_rows_csv": rel_path(DETAIL_ROWS_CSV),
+        "batch_final_rows": len(batch_indexes),
         "blank_final_rows": len(candidate_indexes),
         "mapped_final_rows": len(row_to_sku),
         "missing_sku_rows": len(missing_sku),

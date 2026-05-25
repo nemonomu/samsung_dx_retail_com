@@ -21,8 +21,6 @@ from .step00_config import (
     KRW_PER_USD,
     apply_bestbuy_location,
     bestbuy_category,
-    bestbuy_store_id,
-    bestbuy_zip_code,
     bestbuy_output_table,
     db_config,
     old_pdp_url,
@@ -2333,7 +2331,11 @@ def fallback_review20_payload(sku):
     }
 
 
-def fulfillment_dynamic_payload(sku):
+DETAIL_FULFILLMENT_BATCH_OPTIONS = ["PICKUP", "SHIPPING", "DELIVERY"]
+
+
+def fulfillment_dynamic_payload(sku, fulfillment_option=None):
+    option = str(fulfillment_option or "").strip().upper() or None
     variables = {
         "skuId": str(sku),
         "fulfillmentInput": {
@@ -2353,7 +2355,7 @@ def fulfillment_dynamic_payload(sku):
             },
             "profileCode": None,
             "buttonState": {
-                "fulfillmentOption": None,
+                "fulfillmentOption": option,
                 "context": "PDP",
                 "destinationZipCode": "10010",
                 "storeId": "482",
@@ -2381,43 +2383,6 @@ def fulfillment_dynamic_payload(sku):
     }
 
 
-def fulfillment_batch_input(sku):
-    value = {
-        "sku": str(sku),
-        "buttonState": {
-            "context": "PDP",
-            "destinationZipCode": bestbuy_zip_code(),
-            "storeId": bestbuy_store_id(),
-        },
-        "condition": "NEW",
-        "shipping": {
-            "destinationZipCode": bestbuy_zip_code(),
-            "effectivePlanPaidMembership": "NULL",
-        },
-        "delivery": {
-            "destinationZipCode": bestbuy_zip_code(),
-            "deliveryDateOption": "EARLIEST_AVAILABLE_DATE",
-            "effectivePlanPaidMembership": "NULL",
-        },
-        "inStorePickup": {
-            "storeId": bestbuy_store_id(),
-            "searchNearby": True,
-            "showNearbyLocations": False,
-        },
-        "profileCode": None,
-    }
-    apply_bestbuy_location(value)
-    return value
-
-
-def fulfillment_batch_payload(sku):
-    return {
-        "operationName": "FulfillmentEndpoint",
-        "variables": {"fulfillmentOptionsInput": fulfillment_batch_input(sku)},
-        "query": "query FulfillmentEndpoint($fulfillmentOptionsInput: ProductFulfillmentInput!) { fulfillmentOptions(input: $fulfillmentOptionsInput) { buttonStates { buttonState displayText fulfillmentOption skuId } shippingDetails { shippingAvailability { shippingEligible customerLOSGroup { customerLosGroupId maxLineItemMaxDate minLineItemMaxDate name price displayDateType } defaultCustomerLosGroupId promiseByStreetDate } destinationZipCode sku } deliveryDetails { deliveryAvailability { deliveryEligible deliverable deliverySlots { date } deliveryServices { eligible levelsOfService { offerUnitPrice unitPrice } serviceType } } destinationZipCode sku } ispuDetails { ispuAvailability { pickupEligible instoreInventoryAvailable quantity minPickupInHours minDate maxDate fulfillDate promiseByStreetDate displayDateType fulfillmentType } store { name storeId zip } sku } } }",
-    }
-
-
 def direct_batch_fulfillment_product(sku, response_json):
     data = response_json.get("data") if isinstance(response_json, dict) else {}
     product = (data.get("productBySkuId") or {}) if isinstance(data, dict) else {}
@@ -2439,26 +2404,38 @@ def direct_batch_fulfillment_response(sku, response_json):
     }
 
 
-def direct_batch_fulfillment_result(sku, response_json, status_code):
-    product = direct_batch_fulfillment_product(sku, response_json)
-    signal_count = fulfillment_signal_count(product)
-    success = status_code == 200 and bool(product)
-    return {
-        "payloads": [],
-        "responses": [],
-        "entries": [
+def direct_batch_fulfillment_result(sku, response_jsons, status_code, options=None):
+    if isinstance(response_jsons, dict):
+        response_jsons = [response_jsons]
+    response_jsons = response_jsons or []
+    options = options or [f"DIRECT_BATCH_{index + 1}" for index in range(len(response_jsons))]
+    entries = []
+    success_count = 0
+    value_count = 0
+    for index, response_json in enumerate(response_jsons):
+        product = direct_batch_fulfillment_product(sku, response_json)
+        signal_count = fulfillment_signal_count(product)
+        success = status_code == 200 and bool(product)
+        if success:
+            success_count += 1
+            value_count += signal_count
+        entries.append(
             {
-                "option": "DIRECT_BATCH",
+                "option": options[index] if index < len(options) else f"DIRECT_BATCH_{index + 1}",
                 "success": success,
                 "status_code": status_code,
                 "signal_count": signal_count,
                 "error": "" if success else "fulfillment_dynamic_missing_product",
             }
-        ],
+        )
+    return {
+        "payloads": [],
+        "responses": [],
+        "entries": entries,
         "response_texts": [],
-        "success_count": 1 if success else 0,
-        "value_count": signal_count,
-        "error_count": 0 if success else 1,
+        "success_count": success_count,
+        "value_count": value_count,
+        "error_count": len(entries) - success_count,
     }
 
 
@@ -2592,14 +2569,17 @@ def fetch_detail(client, target):
 
     detail_payload = fallback_review20_payload(sku)
     review_payload = fallback_review20_payload(sku)
-    fulfillment_payload = fulfillment_batch_payload(sku)
+    fulfillment_payloads = [
+        fulfillment_dynamic_payload(sku, option)
+        for option in DETAIL_FULFILLMENT_BATCH_OPTIONS
+    ]
     compare_payload = compare_product_payload(sku) if FETCH_COMPARE else None
-    request_payload = [detail_payload, review_payload, fulfillment_payload]
+    request_payload = [detail_payload, review_payload, *fulfillment_payloads]
     if compare_payload:
         request_payload.append(compare_payload)
     operation_names = [payload.get("operationName", "") for payload in request_payload]
-    fulfillment_index = 2
-    compare_index = 3 if compare_payload else None
+    fulfillment_indices = list(range(2, 2 + len(fulfillment_payloads)))
+    compare_index = 2 + len(fulfillment_payloads) if compare_payload else None
     paths = detail_paths_for_status(sku, target, False)
     for transport in fetch_transports():
         if transport == "zenrows" and not client:
@@ -2631,17 +2611,31 @@ def fetch_detail(client, target):
                     pass
                 detail_response_json = graphql_batch_response_item(response_json, 0)
                 review_response_json = graphql_batch_response_item(response_json, 1)
-                fulfillment_response_json = graphql_batch_response_item(response_json, fulfillment_index)
-                fulfillment_artifact_response = direct_batch_fulfillment_response(sku, fulfillment_response_json)
+                fulfillment_response_jsons = [
+                    graphql_batch_response_item(response_json, index)
+                    for index in fulfillment_indices
+                ]
+                fulfillment_artifact_responses = [
+                    direct_batch_fulfillment_response(sku, item)
+                    for item in fulfillment_response_jsons
+                ]
                 compare_response_json = graphql_batch_response_item(response_json, compare_index) if compare_index is not None else {}
                 product = ((response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(response_json, dict) else {}
                 if not product:
                     product = ((detail_response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(detail_response_json, dict) else {}
                 if not product:
-                    product = direct_batch_fulfillment_product(sku, fulfillment_response_json)
+                    for fulfillment_response_json in fulfillment_response_jsons:
+                        product = direct_batch_fulfillment_product(sku, fulfillment_response_json)
+                        if product:
+                            break
                 success = response.status_code == 200 and isinstance(product, dict) and str(product.get("skuId") or "") == str(sku)
                 paths = detail_paths_for_status(sku, target, success)
-                endpoint_result = direct_batch_fulfillment_result(sku, fulfillment_response_json, response.status_code) if success else {
+                endpoint_result = direct_batch_fulfillment_result(
+                    sku,
+                    fulfillment_response_jsons,
+                    response.status_code,
+                    DETAIL_FULFILLMENT_BATCH_OPTIONS,
+                ) if success else {
                     "payloads": [],
                     "responses": [],
                     "entries": [],
@@ -2652,8 +2646,10 @@ def fetch_detail(client, target):
                 }
                 artifact_payloads = list(request_payload)
                 artifact_responses = list(response_json) if isinstance(response_json, list) else [response_json]
-                if isinstance(artifact_responses, list) and fulfillment_index < len(artifact_responses):
-                    artifact_responses[fulfillment_index] = fulfillment_artifact_response
+                if isinstance(artifact_responses, list):
+                    for index, artifact_response in zip(fulfillment_indices, fulfillment_artifact_responses):
+                        if index < len(artifact_responses):
+                            artifact_responses[index] = artifact_response
                 artifact_text = text or ""
                 operation_names = [payload.get("operationName", "") for payload in artifact_payloads]
                 artifact_meta = write_direct_detail_artifacts(

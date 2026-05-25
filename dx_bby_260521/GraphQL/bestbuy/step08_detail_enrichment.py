@@ -109,8 +109,8 @@ DETAIL_FULFILLMENT_ENDPOINT_FETCH = os.getenv("BESTBUY_DETAIL_FULFILLMENT_ENDPOI
 DETAIL_FULFILLMENT_ENDPOINT_TIMEOUT = int(os.getenv("BESTBUY_DETAIL_FULFILLMENT_ENDPOINT_TIMEOUT", "20"))
 DETAIL_FULFILLMENT_OPTIONS = [
     value.strip().upper()
-    for value in re.split(r"[\s,;]+", os.getenv("BESTBUY_DETAIL_FULFILLMENT_OPTIONS", "SHIPPING,DELIVERY,INSTALLATION"))
-    if value.strip()
+    for value in re.split(r"[\s,;]+", os.getenv("BESTBUY_DETAIL_FULFILLMENT_OPTIONS", "SHIPPING,DELIVERY"))
+    if value.strip() and value.strip().upper() != "INSTALLATION"
 ]
 
 RAW_DETAIL_DIR = DETAIL_ROOT / "raw" / "detail_html"
@@ -211,6 +211,15 @@ def first_non_empty(*values):
     for value in values:
         if value not in ("", None, [], {}):
             return value
+    return ""
+
+
+def first_text_starting(prefix, *values):
+    prefix_text = str(prefix or "").lower()
+    for value in values:
+        text = compact_text(value)
+        if text and text.lower().startswith(prefix_text):
+            return text
     return ""
 
 
@@ -2458,7 +2467,7 @@ def fulfillment_signal_count(product):
         for availability in as_list(detail.get("deliveryAvailability")):
             if isinstance(availability, dict) and any(
                 availability.get(key) not in (None, "", [], {})
-                for key in ("deliveryEligible", "deliverable", "deliverySlots", "installationSlots")
+                for key in ("deliveryEligible", "deliverable", "deliverySlots")
             ):
                 count += 1
     for detail in as_list(options.get("ispuDetails")):
@@ -3743,7 +3752,7 @@ def pickup_text(pickup):
 def delivery_text(delivery):
     if not isinstance(delivery, dict) or not delivery.get("deliveryEligible"):
         return ""
-    slots = as_list(delivery.get("deliverySlots") or delivery.get("installationSlots"))
+    slots = as_list(delivery.get("deliverySlots"))
     if slots:
         slot = slots[0] if isinstance(slots[0], dict) else {}
         return date_to_relative_or_phrase("Delivery as soon as", slot.get("date"))
@@ -3948,9 +3957,9 @@ def output_row(target):
         products,
         "deliveryDetails",
         "deliveryAvailability",
-        ("deliverySlots", "installationSlots"),
+        ("deliverySlots",),
     )
-    delivery_slots = as_list(delivery.get("deliverySlots") or delivery.get("installationSlots")) if isinstance(delivery, dict) else []
+    delivery_slots = as_list(delivery.get("deliverySlots")) if isinstance(delivery, dict) else []
     delivery_slot = delivery_slots[0].get("date") if delivery_slots and isinstance(delivery_slots[0], dict) else ""
     screen = spec_value(products, "Screen Size Class") or spec_value(products, "Screen Size")
     energy = spec_value(spec_products, "Estimated Annual Electricity Use")
@@ -3986,23 +3995,26 @@ def output_row(target):
         "original_sku_price": original_price,
         "savings": savings,
         "offer": first_non_empty(target.get("offer"), target.get("offer_count"), offer_count(products)),
-        "pick_up_availability": first_non_empty(
-            target.get("pick_up_availability"),
-            selector_values.get("pick_up_availability"),
+        "pick_up_availability": first_text_starting(
+            "Pick up",
             pickup_text(pickup),
+            selector_values.get("pick_up_availability"),
+            target.get("pick_up_availability"),
         ),
-        "fastest_delivery": first_non_empty(
-            target.get("fastest_delivery"),
-            selector_values.get("fastest_delivery"),
+        "fastest_delivery": first_text_starting(
+            "Get",
             fastest_delivery_text(shipping),
             fastest_delivery_from_html(html_text),
+            selector_values.get("fastest_delivery"),
+            target.get("fastest_delivery"),
         ),
-        "delivery_availability": first_non_empty(
-            target.get("delivery_availability"),
-            selector_values.get("delivery_availability"),
+        "delivery_availability": first_text_starting(
+            "Delivery",
             delivery_text(delivery),
             delivery_from_html(html_text),
             date_to_relative_or_phrase("Delivery as soon as", delivery_slot),
+            selector_values.get("delivery_availability"),
+            target.get("delivery_availability"),
         ),
         "available_quantity_for_purchase": first_non_empty(target.get("available_quantity_for_purchase"), pickup.get("quantity") if isinstance(pickup, dict) else ""),
         "inventory_status": first_non_empty(target.get("inventory_status"), inventory_status_text(pickup, shipping, delivery)),
@@ -4233,7 +4245,7 @@ def main():
         )
         print(
             "[detail:fulfillment_mode] direct_graphql_batch also calls Best Buy /gateway/graphql/fulfillment "
-            "with direct HTTP, then stores it as a synthetic productBySkuId fulfillmentOptions payload.",
+            "through ZenRows when available, then stores it as a synthetic productBySkuId fulfillmentOptions payload.",
             flush=True,
         )
 

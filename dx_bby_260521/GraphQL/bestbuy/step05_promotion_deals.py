@@ -16,6 +16,15 @@ from .step00_config import (
     load_initial_urls,
     rel_path,
 )
+from .step00_parse_search import (
+    delivery_availability_text,
+    fastest_delivery_text,
+    first_nested,
+    listing_offer_count,
+    money_text,
+    pickup_availability_text,
+    price_value,
+)
 
 RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
 RUN_ROOT = Path(os.getenv("BESTBUY_PROMOTION_RUN_ROOT", DEFAULT_BESTBUY_RUN_ROOT / "promotion"))
@@ -79,6 +88,14 @@ def extract_rows_from_response(response_json, placement):
             name = name.get("short") or name.get("title") or ""
         url = product.get("url") or {}
         relative_url = url.get("relativePdp") if isinstance(url, dict) else ""
+        price = product.get("price") if isinstance(product.get("price"), dict) else {}
+        shipping = first_nested(product, ["fulfillmentOptions", "shippingDetails", "shippingAvailability"], {})
+        delivery = first_nested(product, ["fulfillmentOptions", "deliveryDetails", "deliveryAvailability"], {})
+        pickup = first_nested(product, ["fulfillmentOptions", "ispuDetails", "ispuAvailability"], {})
+        customer_price = price_value(price, "displayableCustomerPrice", "customerPrice")
+        regular_price = price_value(price, "displayableRegularPrice", "regularPrice")
+        total_savings = price_value(price, "totalSavings")
+        offer_count = listing_offer_count(product)
         rows.append(
             {
                 "promotion_type": promotion_type,
@@ -87,6 +104,17 @@ def extract_rows_from_response(response_json, placement):
                 "sku_id": sku_id,
                 "retailer_sku_name": name,
                 "product_url": f"https://www.bestbuy.com{relative_url}" if relative_url else "",
+                "customer_price": customer_price,
+                "regular_price": regular_price,
+                "total_savings": total_savings,
+                "final_sku_price": money_text(customer_price),
+                "original_sku_price": money_text(regular_price),
+                "savings": money_text(total_savings, drop_cents_for_whole=True),
+                "offer": offer_count,
+                "offer_count": offer_count,
+                "pick_up_availability": pickup_availability_text(pickup),
+                "fastest_delivery": fastest_delivery_text(shipping, delivery),
+                "delivery_availability": delivery_availability_text(delivery),
             }
         )
     return rows
@@ -258,6 +286,17 @@ def write_rows(path, rows):
                 "sku_id",
                 "retailer_sku_name",
                 "product_url",
+                "customer_price",
+                "regular_price",
+                "total_savings",
+                "final_sku_price",
+                "original_sku_price",
+                "savings",
+                "offer",
+                "offer_count",
+                "pick_up_availability",
+                "fastest_delivery",
+                "delivery_availability",
             ],
         )
         writer.writeheader()

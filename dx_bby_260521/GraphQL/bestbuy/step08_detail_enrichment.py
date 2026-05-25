@@ -2276,6 +2276,7 @@ PRODUCT_SCHEMA_REVIEW20_QUERY = (
     "buyingOptions{description pdpUrl skuId type product{price(input:{salesChannel:$salesChannel}){customerPrice}}}"
     "fulfillmentOptions(input:$fulfillmentInput){shippingDetails{shippingAvailability{shippingEligible "
     "customerLOSGroup{customerLosGroupId maxLineItemMaxDate name displayDateType price minLineItemMaxDate}}}"
+    "deliveryDetails{deliveryAvailability{deliveryEligible deliverySlots{date}}}"
     "ispuDetails{ispuAvailability{pickupEligible instoreInventoryAvailable quantity minPickupInHours maxDate}}}"
     "reviews(filter:{pageSize:20}){results{rating title text userNickname}}}}"
 )
@@ -2292,6 +2293,10 @@ def fallback_review20_payload(sku):
         "salesChannel": "LargeView",
         "fulfillmentInput": {
             "shipping": {"destinationZipCode": "10010"},
+            "delivery": {
+                "destinationZipCode": "10010",
+                "deliveryDateOption": "EARLIEST_AVAILABLE_DATE",
+            },
             "inStorePickup": {"storeId": "482"},
             "buttonState": {
                 "fulfillmentOption": "PICKUP",
@@ -3191,10 +3196,19 @@ def best_shipping_availability(products):
 def best_price(products):
     best = {}
     best_score = -1
+    candidates = []
     for product in products:
         price = product.get("price")
-        if not isinstance(price, dict):
-            continue
+        if isinstance(price, dict):
+            candidates.append(price)
+        for option in product.get("buyingOptions") or []:
+            if not isinstance(option, dict):
+                continue
+            option_product = option.get("product") if isinstance(option.get("product"), dict) else {}
+            option_price = option_product.get("price") if isinstance(option_product.get("price"), dict) else {}
+            if option_price:
+                candidates.append(option_price)
+    for price in candidates:
         score = sum(
             1
             for key in ("displayableCustomerPrice", "customerPrice", "displayableRegularPrice", "regularPrice", "totalSavings")
@@ -3216,11 +3230,13 @@ def spec_value(products, display_name):
 
 
 def offer_count(products):
-    offers = first_path(products, ["offers", "offers"]) or []
-    if offers:
-        return str(len(offers))
-    buying = first_value(products, "buyingOptions") or []
-    return str(len(buying)) if buying else ""
+    for product in reversed(products):
+        price = product.get("price") if isinstance(product, dict) else {}
+        price = price if isinstance(price, dict) else {}
+        gift_skus = price.get("giftSkus")
+        if isinstance(gift_skus, list) and gift_skus:
+            return str(len(gift_skus))
+    return ""
 
 
 HHP_PROMOTION_TYPES = {
@@ -3675,7 +3691,7 @@ def output_row(target):
         "final_sku_price": final_price,
         "original_sku_price": original_price,
         "savings": savings,
-        "offer": first_non_empty(target.get("offer"), target.get("offer_count")),
+        "offer": first_non_empty(target.get("offer"), target.get("offer_count"), offer_count(products)),
         "pick_up_availability": first_non_empty(
             target.get("pick_up_availability"),
             selector_values.get("pick_up_availability"),

@@ -351,7 +351,7 @@ def listing_offer_count(product):
     price = product.get("price", {}) if isinstance(product.get("price"), dict) else {}
     gift_skus = price.get("giftSkus")
     if isinstance(gift_skus, list) and gift_skus:
-        return len(gift_skus) + 1
+        return len(gift_skus)
     return ""
 
 

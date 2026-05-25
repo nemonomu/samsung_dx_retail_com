@@ -1,0 +1,251 @@
+BestBuy TV full run flow and DB save, easy explanation
+
+Full run is a pipeline.
+It does not start from the final DB table.
+It first gathers candidate products, adds ranking and promotion context, opens each detail page, fills final values, and then loads the finished CSV into DB.
+
+The final TV run mainly creates two files.
+
+1. final_output.csv
+   This is the final detailed result.
+   It is one row per SKU.
+   This is the main file loaded into the TV final output DB table.
+
+2. bestbuy_product_list.csv
+   This is a lighter product-list snapshot.
+   It keeps listing-level information such as page type, ranks, promotion info, URL, and basic availability when available.
+
+For TV, the usual DB tables are:
+
+- tv_retail_com_bby_v2_test
+  The detailed final output table.
+
+- bby_tv_product_list_v2_test
+  The lighter product list table.
+
+Each run has one batch_id.
+For example, b_20260524_120002.
+Rows from the same full run share the same batch_id.
+
+
+Step 01: main_list
+
+This opens the main BestBuy TV listing/search result.
+It collects listing products from BestBuy GraphQL data.
+
+Typical values collected here:
+
+- sku_id
+- bsin / item
+- product name
+- product URL
+- price fields
+- review rating/count
+- listing availability when present
+- page number
+- visual rank
+- organic rank
+- sponsored flag
+
+This is the first big pool of TV product candidates.
+
+
+Step 02: main_targets
+
+This cleans and enriches the Step 01 result.
+It removes duplicate product appearances and normalizes useful values.
+
+Typical normalized values:
+
+- customer_price
+- regular_price
+- total_savings
+- final_sku_price
+- original_sku_price
+- savings
+- offer / offer_count
+
+This gives the crawler a clean main listing target set.
+
+
+Step 03: bsr_list
+
+This collects the TV list again using Best-Selling sort.
+The goal is not just product discovery.
+The important result is Best-Selling rank context.
+
+
+Step 04: bsr_rank
+
+This converts the Step 03 Best-Selling list into a rank map.
+The final output later uses this as bsr_rank.
+
+
+Step 05: promotion_deals
+
+This collects products from BestBuy promotion/deal placements.
+
+Typical values collected currently:
+
+- promotion_type
+- promotion_placement
+- promotion_position
+- sku_id
+- retailer_sku_name
+- product_url
+
+Important note:
+If the promotion API contains price, savings, and offer data, the crawler should preserve those fields too.
+Otherwise, a promotion-only product can lose price fallback values when its detail page fails.
+
+
+Step 06: trending_deals
+
+This collects trending/deal products.
+The main value later used in final output is trend_rank.
+
+
+Step 07: final_targets
+
+This is the target-building step.
+It combines:
+
+- main listing products
+- Best-Selling rank data
+- promotion products
+- trending products
+
+Then it creates the final list of SKUs that Step 08 will enrich.
+
+Output:
+
+- output/bestbuy_final_targets.csv
+- output/bestbuy_product_list.csv
+
+For each target row, Step 07 decides the page_type:
+
+- main
+- bsr
+- promotion
+- trend
+
+If a product only came from promotion, its page_type becomes promotion.
+
+
+Step 08: detail_enrichment
+
+This is the main detail collection step.
+It takes bestbuy_final_targets.csv and enriches each SKU.
+
+For each SKU, it collects detail values from BestBuy PDP GraphQL, fulfillment GraphQL, captured compare GraphQL, and HTML fallback.
+
+Typical final fields filled here:
+
+- item
+- retailer_sku_name
+- product_url
+- count_of_reviews
+- star_rating
+- count_of_star_ratings
+- screen_size
+- final_sku_price
+- original_sku_price
+- savings
+- offer
+- pick_up_availability
+- fastest_delivery
+- delivery_availability
+- available_quantity_for_purchase
+- inventory_status
+- sku_status
+- detailed_review_content
+- recommendation_intent
+- main_rank
+- bsr_rank
+- promotion_position
+- trend_rank
+- retailer_sku_name_similar
+- estimated_annual_electricity_use
+- promotion_type
+- model_year
+- batch_id
+- country
+
+The compare similar products field is saved as:
+
+current product ||| similar product 1 ||| similar product 2 ||| similar product 3
+
+The current compare logic tries multiple paths inside the same detail run:
+
+- captured GetCompareProduct GraphQL
+- forced in-render GetCompareProduct fetch
+- hidden HTML compare capture
+- HTML compare card fallback
+
+The goal is that retailer_sku_name_similar is filled during the normal Step 08 run, not by a later manual repair.
+
+
+Step 09: review20
+
+This collects review data.
+It gets up to 20 review texts and review-related values.
+
+Typical values filled or strengthened here:
+
+- detailed_review_content
+- count_of_reviews
+- star_rating
+- recommendation_intent
+
+After review data is collected, Step 08-style output building can rebuild final_output.csv using existing detail and review artifacts.
+
+
+Step 10: status_check
+
+This checks the run result.
+It helps identify missing values, failed detail rows, failed review rows, and benchmark information.
+
+
+Step 13: db_prepare
+
+This prepares the DB tables.
+For TV, the important tables are:
+
+- tv_retail_com_bby_v2_test
+- bby_tv_product_list_v2_test
+
+The table schema is a set of columns that DB can store.
+The CSV may contain more columns than the DB table.
+Only columns that exist in the DB table can be inserted.
+
+
+Step 14: db_load
+
+This loads CSV results into DB.
+
+The load process is simple:
+
+1. Read final_output.csv.
+2. Find the actual columns that exist in the DB table.
+3. Delete existing rows with the same batch_id.
+4. Insert the new rows.
+5. Convert blank strings to NULL where needed.
+6. Convert numeric fields into DB numeric/integer types where needed.
+
+The same idea is used for bestbuy_product_list.csv and the product list DB table.
+
+
+The main operating idea
+
+Full run should finish with good final_output.csv first.
+DB loading is only the last move.
+
+So if a value is missing in DB, first check final_output.csv.
+If it is already missing in final_output.csv, the issue is in the collection or parsing logic before DB load.
+If it exists in final_output.csv but not in DB, the issue is likely DB schema or db_load column matching.
+
+For TV compare, the key goal is:
+
+retailer_sku_name_similar must be filled during the normal Step 08 detail flow.
+
+Manual post-run repair is useful for diagnosis, but it is not the operating goal.

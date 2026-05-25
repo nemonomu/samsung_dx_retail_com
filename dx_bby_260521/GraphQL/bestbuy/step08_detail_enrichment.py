@@ -2284,44 +2284,21 @@ def ensure_recommended_percent_query(query):
 
 
 PRODUCT_SCHEMA_REVIEW20_QUERY = (
-    "query ProductSchema_init($skuId:String!$salesChannel:String!$fulfillmentInput:ProductFulfillmentInput!)"
+    "query ProductSchema_init($skuId:String!$salesChannel:String!)"
     "{...ProductSchema_Fragment}"
     "fragment ProductSchema_Fragment on Query{productBySkuId(skuId:$skuId){bsin name{short}images{piscesHref}"
     "url{pdp}description{short}skuId manufacturer{modelNumber}color{displayName}brand "
     "reviewInfo{averageRating reviewCount recommendedPercent}"
     "specificationGroups{specifications{displayName value}}"
     "buyingOptions{description pdpUrl skuId type product{price(input:{salesChannel:$salesChannel}){customerPrice}}}"
-    "fulfillmentOptions(input:$fulfillmentInput){shippingDetails{shippingAvailability{shippingEligible "
-    "customerLOSGroup{customerLosGroupId maxLineItemMaxDate name displayDateType price minLineItemMaxDate}}}"
-    "deliveryDetails{deliveryAvailability{deliveryEligible deliverySlots{date}}}"
-    "ispuDetails{ispuAvailability{pickupEligible instoreInventoryAvailable quantity minPickupInHours maxDate}}}"
     "reviews(filter:{pageSize:20}){results{rating title text userNickname}}}}"
 )
-
-
-FULFILLMENT_DYNAMIC_QUERY = """
-query FulfillmentOptionHook_FulfillmentDynamicQuery($skuId:String!$fulfillmentInput:ProductFulfillmentInput!$productPriceInput:ProductItemPriceInput!$openBoxCondition:Int){productBySkuId(skuId:$skuId openBoxCondition:$openBoxCondition){skuId ...FullfillmentProductBySkuIdFragment fulfillmentOptions(input:$fulfillmentInput){...FullfillmentOptionsFragment}badgesV2{label}}}fragment FullfillmentProductBySkuIdFragment on Product{brand brandId classification{class{id}}isSmallMediumBusiness releaseDateDisplayValue whatItIs eligibleGatedEventCustomerSegments{canPurchaseNow}isConstrainedHighVelocity inStoreServiceType buyingOptions{type product{openBoxCondition openBoxOptions{code}inStoreServiceType price(input:$productPriceInput){openBoxCondition}primaryImage{piscesHref}name{short}}pdpUrl}price(input:$productPriceInput){customerPrice mobileContracts{isDefaultContract purchaseType numberOfPayments}}waitlists{enrollmentPaused id name type}...MpFragment}fragment MpFragment on Product{bsinProduct{bsin products{openBoxCondition condition{type}seller{classification}skuId}}bsin seller{classification id}}fragment FullfillmentOptionsFragment on FulfillmentOptionsList{buttonStates{...ButtonStatesFragment}shippingDetails{...ShippingDetailsFragment}deliveryDetails{...DeliveryDetailsFragment}ispuDetails{...IspuDetailsFragment}}fragment ButtonStatesFragment on ButtonState{buttonState condition displayText secondaryButtonState secondaryDisplayText planButtonState hyperlinkUrl}fragment ShippingDetailsFragment on FulfillmentShippingDetail{destinationZipCode shippingAvailability{backordered condition customerLOSGroup{customerLosGroupId displayDateType maxLineItemMaxDate minLineItemMaxDate name price}levelOfServices{code id isLessThanTruckload isScheduleParcelDelivery}defaultCustomerLosGroupId downloadEligible emailEligible fulfillByVendor preorderable promiseByStreetDate whenAvailableFlag shippingEligible restrictions{category}}sku}fragment DeliveryDetailsFragment on FulfillmentDeliveryDetail{deliveryAvailability{salLocationId deliverable deliveryEligible forceSkipScheduling homeDeliveryDisplayDateType condition deliverySlots{date}deliveryServices{eligible levelsOfService{offerUnitPrice unitPrice}serviceType}installationSlots{date}backordered restrictions{category}}destinationZipCode}fragment IspuDetailsFragment on InStorePickupDetail{sku ispuAvailability{...IspuAvailabilityFragment}nearbyLocation{availability{maxDate pickupEligible quantity}distance store{...IspuStoreFragment}}nearbyLocations{availability{fulfillmentType maxDate minPickupInHours}store{...IspuStoreFragment}}sku store{...IspuStoreFragment}}fragment IspuAvailabilityFragment on InStorePickupAvailability{backordered condition displayDateType downloadEligible emailEligible fulfillDate fulfillmentType instoreInventoryAvailable inStoreOnly maxDate minPickupInHours pickupEligible preorderable promiseByStreetDate whenAvailableFlag quantity restrictions{category}inStoreServices{installationSlots{date}}}fragment IspuStoreFragment on FulfillmentPickUpStore{name storeId zip}
-""".strip()
 
 
 def fallback_review20_payload(sku):
     variables = {
         "skuId": str(sku),
         "salesChannel": "LargeView",
-        "fulfillmentInput": {
-            "shipping": {"destinationZipCode": "10010"},
-            "delivery": {
-                "destinationZipCode": "10010",
-                "deliveryDateOption": "EARLIEST_AVAILABLE_DATE",
-            },
-            "inStorePickup": {"storeId": "482"},
-            "buttonState": {
-                "fulfillmentOption": "PICKUP",
-                "context": "PDP",
-                "destinationZipCode": "10010",
-                "storeId": "482",
-            },
-        },
     }
     apply_bestbuy_location(variables)
     return {
@@ -2329,154 +2306,6 @@ def fallback_review20_payload(sku):
         "variables": variables,
         "query": PRODUCT_SCHEMA_REVIEW20_QUERY,
     }
-
-
-DETAIL_FULFILLMENT_BATCH_OPTIONS = [None]
-
-
-def fulfillment_dynamic_payload(sku, fulfillment_option=None):
-    option = str(fulfillment_option or "").strip().upper() or None
-    variables = {
-        "skuId": str(sku),
-        "fulfillmentInput": {
-            "shipping": {
-                "destinationZipCode": "10010",
-                "effectivePlanPaidMembership": "NULL",
-            },
-            "delivery": {
-                "destinationZipCode": "10010",
-                "deliveryDateOption": "EARLIEST_AVAILABLE_DATE",
-                "effectivePlanPaidMembership": "NULL",
-            },
-            "inStorePickup": {
-                "storeId": "482",
-                "searchNearby": True,
-                "showNearbyLocations": False,
-            },
-            "profileCode": None,
-            "buttonState": {
-                "fulfillmentOption": option,
-                "context": "PDP",
-                "destinationZipCode": "10010",
-                "storeId": "482",
-                "effectivePlanPaidMembership": "NULL",
-            },
-        },
-        "productPriceInput": {
-            "customerAttributes": "",
-            "salesChannel": "LargeView",
-            "customerId": None,
-            "planPaidMemberType": "NULL",
-            "ct": "",
-            "isStoreAgent": False,
-            "locationId": "482",
-            "usePriceWithCart": True,
-            "useCabo": True,
-            "useSuco": True,
-        },
-    }
-    apply_bestbuy_location(variables)
-    # PDP's FulfillmentOptionHook request keeps productPriceInput.locationId blank.
-    variables["productPriceInput"]["locationId"] = ""
-    return {
-        "operationName": "FulfillmentOptionHook_FulfillmentDynamicQuery",
-        "variables": variables,
-        "query": FULFILLMENT_DYNAMIC_QUERY,
-    }
-
-
-def direct_batch_fulfillment_product(sku, response_json):
-    data = response_json.get("data") if isinstance(response_json, dict) else {}
-    product = (data.get("productBySkuId") or {}) if isinstance(data, dict) else {}
-    if isinstance(product, dict) and str(product.get("skuId") or "") == str(sku):
-        return product
-    options = data.get("fulfillmentOptions") if isinstance(data, dict) else {}
-    if isinstance(options, dict) and options:
-        return {"skuId": str(sku), "fulfillmentOptions": options}
-    return {}
-
-
-def direct_batch_fulfillment_response(sku, response_json):
-    product = direct_batch_fulfillment_product(sku, response_json)
-    return {
-        "data": {
-            "productBySkuId": product,
-            "fulfillmentOptions": product.get("fulfillmentOptions") if isinstance(product, dict) else {},
-        }
-    }
-
-
-def direct_batch_fulfillment_result(sku, response_jsons, status_code, options=None):
-    if isinstance(response_jsons, dict):
-        response_jsons = [response_jsons]
-    response_jsons = response_jsons or []
-    options = options or [f"DIRECT_BATCH_{index + 1}" for index in range(len(response_jsons))]
-    entries = []
-    success_count = 0
-    value_count = 0
-    for index, response_json in enumerate(response_jsons):
-        product = direct_batch_fulfillment_product(sku, response_json)
-        signal_count = fulfillment_signal_count(product)
-        success = status_code == 200 and bool(product) and signal_count > 0
-        if success:
-            success_count += 1
-            value_count += signal_count
-        entries.append(
-            {
-                "option": options[index] if index < len(options) and options[index] else "DEFAULT",
-                "success": success,
-                "status_code": status_code,
-                "signal_count": signal_count,
-                "error": "" if success else "fulfillment_dynamic_missing_values",
-            }
-        )
-    return {
-        "payloads": [],
-        "responses": [],
-        "entries": entries,
-        "response_texts": [],
-        "success_count": success_count,
-        "value_count": value_count,
-        "error_count": len(entries) - success_count,
-    }
-
-
-def fulfillment_signal_count(product):
-    if not isinstance(product, dict):
-        return 0
-    options = product.get("fulfillmentOptions")
-    if not isinstance(options, dict):
-        return 0
-    count = 0
-    for detail in as_list(options.get("shippingDetails")):
-        if not isinstance(detail, dict):
-            continue
-        for availability in as_list(detail.get("shippingAvailability")):
-            if isinstance(availability, dict) and availability.get("shippingEligible") and any(
-                availability.get(key) not in (None, "", [], {})
-                for key in ("customerLOSGroup", "promiseByStreetDate")
-            ):
-                count += 1
-    for detail in as_list(options.get("deliveryDetails")):
-        if not isinstance(detail, dict):
-            continue
-        for availability in as_list(detail.get("deliveryAvailability")):
-            if (
-                isinstance(availability, dict)
-                and availability.get("deliveryEligible")
-                and availability.get("deliverySlots") not in (None, "", [], {})
-            ):
-                count += 1
-    for detail in as_list(options.get("ispuDetails")):
-        if not isinstance(detail, dict):
-            continue
-        for availability in as_list(detail.get("ispuAvailability")):
-            if isinstance(availability, dict) and availability.get("pickupEligible") and any(
-                availability.get(key) not in (None, "", [], {})
-                for key in ("fulfillDate", "promiseByStreetDate", "minDate", "maxDate")
-            ):
-                count += 1
-    return count
 
 
 COMPARE_PRODUCT_QUERY = """
@@ -2572,17 +2401,12 @@ def fetch_detail(client, target):
 
     detail_payload = fallback_review20_payload(sku)
     review_payload = fallback_review20_payload(sku)
-    fulfillment_payloads = [
-        fulfillment_dynamic_payload(sku, option)
-        for option in DETAIL_FULFILLMENT_BATCH_OPTIONS
-    ]
     compare_payload = compare_product_payload(sku) if FETCH_COMPARE else None
-    request_payload = [detail_payload, review_payload, *fulfillment_payloads]
+    request_payload = [detail_payload, review_payload]
     if compare_payload:
         request_payload.append(compare_payload)
     operation_names = [payload.get("operationName", "") for payload in request_payload]
-    fulfillment_indices = list(range(2, 2 + len(fulfillment_payloads)))
-    compare_index = 2 + len(fulfillment_payloads) if compare_payload else None
+    compare_index = 2 if compare_payload else None
     paths = detail_paths_for_status(sku, target, False)
     for transport in fetch_transports():
         if transport == "zenrows" and not client:
@@ -2614,34 +2438,17 @@ def fetch_detail(client, target):
                     pass
                 detail_response_json = graphql_batch_response_item(response_json, 0)
                 review_response_json = graphql_batch_response_item(response_json, 1)
-                fulfillment_response_jsons = [
-                    graphql_batch_response_item(response_json, index)
-                    for index in fulfillment_indices
-                ]
-                fulfillment_artifact_responses = [
-                    direct_batch_fulfillment_response(sku, item)
-                    for item in fulfillment_response_jsons
-                ]
                 compare_response_json = graphql_batch_response_item(response_json, compare_index) if compare_index is not None else {}
                 product = ((response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(response_json, dict) else {}
                 if not product:
                     product = ((detail_response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(detail_response_json, dict) else {}
-                if not product:
-                    for fulfillment_response_json in fulfillment_response_jsons:
-                        product = direct_batch_fulfillment_product(sku, fulfillment_response_json)
-                        if product:
-                            break
                 success = response.status_code == 200 and isinstance(product, dict) and str(product.get("skuId") or "") == str(sku)
                 paths = detail_paths_for_status(sku, target, success)
                 direct_response_summary = {
                     "status_code": response.status_code,
                     "operation_names": operation_names,
                     "batch_count": len(response_json) if isinstance(response_json, list) else (1 if isinstance(response_json, dict) else 0),
-                    "fulfillment_indices": fulfillment_indices,
-                    "fulfillment_signal_counts": [
-                        fulfillment_signal_count(direct_batch_fulfillment_product(sku, item))
-                        for item in fulfillment_response_jsons
-                    ],
+                    "fulfillment_in_batch": False,
                     "errors": [
                         item.get("errors")
                         for item in (response_json if isinstance(response_json, list) else [response_json])
@@ -2654,12 +2461,7 @@ def fetch_detail(client, target):
                 paths["json_response_summary"].write_text(
                     json.dumps(direct_response_summary, indent=2, ensure_ascii=False), encoding="utf-8"
                 )
-                endpoint_result = direct_batch_fulfillment_result(
-                    sku,
-                    fulfillment_response_jsons,
-                    response.status_code,
-                    DETAIL_FULFILLMENT_BATCH_OPTIONS,
-                ) if success else {
+                endpoint_result = {
                     "payloads": [],
                     "responses": [],
                     "entries": [],
@@ -2670,10 +2472,6 @@ def fetch_detail(client, target):
                 }
                 artifact_payloads = list(request_payload)
                 artifact_responses = list(response_json) if isinstance(response_json, list) else [response_json]
-                if isinstance(artifact_responses, list):
-                    for index, artifact_response in zip(fulfillment_indices, fulfillment_artifact_responses):
-                        if index < len(artifact_responses):
-                            artifact_responses[index] = artifact_response
                 artifact_text = text or ""
                 operation_names = [payload.get("operationName", "") for payload in artifact_payloads]
                 artifact_meta = write_direct_detail_artifacts(
@@ -2693,16 +2491,16 @@ def fetch_detail(client, target):
                         json.dumps(
                             {
                                 "sku_id": sku,
-                                "stage": "fulfillment_direct_batch",
+                                "stage": "fulfillment_not_collected_in_detail",
                                 "url": pdp_url,
-                                "enabled": DETAIL_DIRECT_GRAPHQL,
-                                "transport": "direct_graphql_batch",
+                                "enabled": False,
+                                "transport": "none",
                                 "extra_network_call": False,
                                 "variant_count": len(endpoint_result.get("entries") or []),
                                 "success_count": endpoint_result.get("success_count", 0),
                                 "value_count": endpoint_result.get("value_count", 0),
                                 "error_count": endpoint_result.get("error_count", 0),
-                                "options": ["DIRECT_BATCH"],
+                                "options": [],
                                 "finished_at": now(),
                             },
                             indent=2,
@@ -2825,20 +2623,12 @@ def fetch_detail(client, target):
                     "json_response_compare_min_names": DETAIL_SIMILAR_MIN_NAMES,
                     "json_response_compare_ok": compare_ok,
                     "fulfillment_endpoint_enabled": False,
-                    "fulfillment_direct_batch_enabled": DETAIL_DIRECT_GRAPHQL,
+                    "fulfillment_direct_batch_enabled": False,
                     "fulfillment_extra_network_calls": 0,
-                    "fulfillment_endpoint_variant_count": len(endpoint_result.get("entries") or [])
-                    if DETAIL_DIRECT_GRAPHQL
-                    else 0,
-                    "fulfillment_endpoint_success_count": endpoint_result.get("success_count", 0)
-                    if DETAIL_DIRECT_GRAPHQL
-                    else 0,
-                    "fulfillment_endpoint_value_count": endpoint_result.get("value_count", 0)
-                    if DETAIL_DIRECT_GRAPHQL
-                    else 0,
-                    "fulfillment_endpoint_error_count": endpoint_result.get("error_count", 0)
-                    if DETAIL_DIRECT_GRAPHQL
-                    else 0,
+                    "fulfillment_endpoint_variant_count": 0,
+                    "fulfillment_endpoint_success_count": 0,
+                    "fulfillment_endpoint_value_count": 0,
+                    "fulfillment_endpoint_error_count": 0,
                     "finished_at": now(),
                     "error": "" if success else error,
                 }
@@ -4186,7 +3976,7 @@ def main():
         f"targets={len(targets)} output_targets={len(output_targets)} workers={WORKERS} "
         f"force_refresh={FORCE_REFRESH} rebuild_only={REBUILD_ONLY} fetch_compare={FETCH_COMPARE} "
         f"direct_compare_batch={direct_compare} pdp_compare_js_active={pdp_compare_js} "
-        f"fulfillment_in_batch={DETAIL_DIRECT_GRAPHQL} "
+        "fulfillment_in_batch=False "
         f"json_response={DETAIL_JSON_RESPONSE} use_db_selectors={USE_DB_SELECTORS}",
         flush=True,
     )
@@ -4197,8 +3987,8 @@ def main():
             flush=True,
         )
         print(
-            "[detail:fulfillment_mode] direct_graphql_batch includes fulfillmentOptions in the same "
-            "/gateway/graphql POST; no separate /gateway/graphql/fulfillment request is made.",
+            "[detail:fulfillment_mode] direct_graphql_batch does not request fulfillmentOptions; "
+            "availability is handled only by the separate availability-only flow.",
             flush=True,
         )
 
@@ -4326,7 +4116,7 @@ def main():
         "detail_retry_on_missing_similar": DETAIL_RETRY_ON_MISSING_SIMILAR,
         "detail_similar_min_names": DETAIL_SIMILAR_MIN_NAMES,
         "detail_fulfillment_endpoint_fetch": False,
-        "detail_fulfillment_direct_batch": DETAIL_DIRECT_GRAPHQL,
+        "detail_fulfillment_direct_batch": False,
         "use_db_selectors": USE_DB_SELECTORS,
         "fetch_mode": FETCH_MODE,
         "fetch_transports": fetch_transports(),

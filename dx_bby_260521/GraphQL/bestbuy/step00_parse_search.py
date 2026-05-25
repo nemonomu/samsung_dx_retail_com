@@ -3,6 +3,7 @@ import json
 import os
 import re
 import sys
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from .step00_parse_pdp import (
@@ -204,7 +205,22 @@ def money_text(value, drop_cents_for_whole=False):
 def _date_to_listing_text(prefix, value):
     if not value:
         return ""
-    return f"{prefix} {value}"
+    text = str(value).strip()
+    dt = None
+    for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z"):
+        try:
+            dt = datetime.strptime(text, fmt).date()
+            break
+        except ValueError:
+            continue
+    if dt is None:
+        return f"{prefix} {text}"
+    today = date.today()
+    if dt == today:
+        return f"{prefix} today"
+    if dt == today + timedelta(days=1):
+        return f"{prefix} tomorrow"
+    return f"{prefix} {dt.strftime('%a, %b')} {dt.day}"
 
 
 def _first_text(value, keys):
@@ -305,30 +321,26 @@ def delivery_availability_text(delivery):
             return slot_text
         if first.get("date"):
             return _date_to_listing_text("Delivery as soon as", first.get("date"))
-    installation_slots = as_list(delivery.get("installationSlots"))
-    if installation_slots:
-        first = installation_slots[0] if isinstance(installation_slots[0], dict) else {}
-        slot_text = _prefixed_text(
-            _first_text(first, ["displayText", "displayMessage", "message", "text", "displayDate"]),
-            ["Delivery"],
-        )
-        if slot_text:
-            return slot_text
-        if first.get("date"):
-            return _date_to_listing_text("Delivery as soon as", first.get("date"))
-    return "Delivery available"
+    return ""
 
 
-def fastest_delivery_text(shipping, delivery):
+def fastest_delivery_text(shipping, delivery=None):
     if isinstance(shipping, dict) and shipping.get("shippingEligible"):
         groups = as_list(shipping.get("customerLOSGroup"))
         if groups:
             group = groups[0] if isinstance(groups[0], dict) else {}
+            default_group_id = shipping.get("defaultCustomerLosGroupId")
+            for candidate in groups:
+                if not isinstance(candidate, dict):
+                    continue
+                if default_group_id not in (None, "") and str(candidate.get("customerLosGroupId")) == str(default_group_id):
+                    group = candidate
+                    break
             date_value = group.get("minLineItemMaxDate") or group.get("maxLineItemMaxDate")
             price = group.get("price")
-            suffix = " FREE" if price in (0, 0.0, "0", "0.0", None, "") else ""
+            suffix = " • FREE" if price in (0, 0.0, "0", "0.0") else ""
             if date_value:
-                return f"Get it by {date_value}{suffix}"
+                return f"{_date_to_listing_text('Get it', date_value)}{suffix}"
             group_text = _prefixed_text(
                 _first_text(group, ["displayText", "displayMessage", "message", "text"]),
                 ["Get"],
@@ -336,7 +348,7 @@ def fastest_delivery_text(shipping, delivery):
             if group_text:
                 return f"{group_text}{suffix}"
         if shipping.get("promiseByStreetDate"):
-            return _date_to_listing_text("Get it by", shipping.get("promiseByStreetDate"))
+            return _date_to_listing_text("Get it", shipping.get("promiseByStreetDate"))
         text = _first_text(
             shipping,
             [

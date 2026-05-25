@@ -2410,6 +2410,8 @@ def fulfillment_endpoint_input(sku, fulfillment_option="SHIPPING"):
             "storeId": bestbuy_store_id(),
             "effectivePlanPaidMembership": "NULL",
         },
+        "condition": "NEW",
+        "profileCode": None,
     }
     if option:
         value["buttonState"]["fulfillmentOption"] = option
@@ -2471,7 +2473,7 @@ def fulfillment_signal_count(product):
     return count
 
 
-def fetch_fulfillment_endpoint_payloads(sku, pdp_url):
+def fetch_fulfillment_endpoint_payloads(sku, pdp_url, client=None):
     result = {
         "payloads": [],
         "responses": [],
@@ -2504,12 +2506,22 @@ def fetch_fulfillment_endpoint_payloads(sku, pdp_url):
             "error": "",
         }
         try:
-            response = requests.get(
-                "https://www.bestbuy.com/gateway/graphql/fulfillment",
-                params={"variables": variables_text},
-                headers=headers,
-                timeout=DETAIL_FULFILLMENT_ENDPOINT_TIMEOUT,
-            )
+            params = {"variables": variables_text}
+            if client:
+                params.update(graphql_params())
+                response = client.get(
+                    "https://www.bestbuy.com/gateway/graphql/fulfillment",
+                    params=params,
+                    headers=headers,
+                    timeout=REQUEST_TIMEOUT,
+                )
+            else:
+                response = requests.get(
+                    "https://www.bestbuy.com/gateway/graphql/fulfillment",
+                    params=params,
+                    headers=headers,
+                    timeout=DETAIL_FULFILLMENT_ENDPOINT_TIMEOUT,
+                )
             text = response.text
             result["response_texts"].append(text or "")
             try:
@@ -2689,7 +2701,7 @@ def fetch_detail(client, target):
                     product = ((fulfillment_response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(fulfillment_response_json, dict) else {}
                 success = response.status_code == 200 and isinstance(product, dict) and str(product.get("skuId") or "") == str(sku)
                 paths = detail_paths_for_status(sku, target, success)
-                endpoint_result = fetch_fulfillment_endpoint_payloads(sku, pdp_url) if success else {
+                endpoint_result = fetch_fulfillment_endpoint_payloads(sku, pdp_url, client=client) if success else {
                     "payloads": [],
                     "responses": [],
                     "entries": [],

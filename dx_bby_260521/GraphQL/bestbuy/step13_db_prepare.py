@@ -67,7 +67,6 @@ HHP_COLUMNS = [
     ("offer", "text"),
     ("pick_up_availability", "text"),
     ("fastest_delivery", "text"),
-    ("delivery_availability", "text"),
     ("available_quantity_for_purchase", "varchar"),
     ("inventory_status", "varchar"),
     ("sku_status", "varchar"),
@@ -167,6 +166,30 @@ HHP_PRODUCT_LIST_COLUMNS = [
     ("offer", "varchar(100) NULL"),
     ("pick_up_availability", "varchar(100) NULL"),
     ("fastest_delivery", "varchar(100) NULL"),
+    ("sku_status", "varchar(100) NULL"),
+    ("promotion_type", "varchar(100) NULL"),
+    ("trend_rank", "int4 NULL"),
+    ("main_rank", "int4 NULL"),
+    ("bsr_rank", "int4 NULL"),
+    ("product_url", "text NULL"),
+    ("calendar_week", "varchar(10) NULL"),
+    ("crawl_strdatetime", "varchar(50) NULL"),
+    ("batch_id", "varchar(50) NULL"),
+    ("main_page_number", "int4 NULL"),
+    ("bsr_page_number", "int4 NULL"),
+]
+
+REF_LDY_PRODUCT_LIST_COLUMNS = [
+    ("id", "serial4 NOT NULL PRIMARY KEY"),
+    ("account_name", "varchar(50) NOT NULL"),
+    ("page_type", "varchar(50) NOT NULL"),
+    ("retailer_sku_name", "text NULL"),
+    ("final_sku_price", "varchar(50) NULL"),
+    ("savings", "varchar(50) NULL"),
+    ("comparable_pricing", "varchar(100) NULL"),
+    ("offer", "varchar(100) NULL"),
+    ("pick_up_availability", "varchar(100) NULL"),
+    ("fastest_delivery", "varchar(100) NULL"),
     ("delivery_availability", "varchar(100) NULL"),
     ("sku_status", "varchar(100) NULL"),
     ("promotion_type", "varchar(100) NULL"),
@@ -184,8 +207,8 @@ HHP_PRODUCT_LIST_COLUMNS = [
 PRODUCT_LIST_SCHEMAS = {
     "TV": TV_PRODUCT_LIST_COLUMNS,
     "HHP": HHP_PRODUCT_LIST_COLUMNS,
-    "REF": HHP_PRODUCT_LIST_COLUMNS,
-    "LDY": HHP_PRODUCT_LIST_COLUMNS,
+    "REF": REF_LDY_PRODUCT_LIST_COLUMNS,
+    "LDY": REF_LDY_PRODUCT_LIST_COLUMNS,
 }
 
 

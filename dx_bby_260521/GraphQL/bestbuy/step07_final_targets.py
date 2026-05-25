@@ -482,6 +482,29 @@ def product_list_fields():
             "bsr_page_number",
             "promotion_position",
         ]
+    if CATEGORY == "HHP":
+        return [
+            "account_name",
+            "page_type",
+            "retailer_sku_name",
+            "final_sku_price",
+            "savings",
+            "comparable_pricing",
+            "offer",
+            "pick_up_availability",
+            "fastest_delivery",
+            "sku_status",
+            "promotion_type",
+            "trend_rank",
+            "main_rank",
+            "bsr_rank",
+            "product_url",
+            "calendar_week",
+            "crawl_strdatetime",
+            "batch_id",
+            "main_page_number",
+            "bsr_page_number",
+        ]
     return [
         "account_name",
         "page_type",

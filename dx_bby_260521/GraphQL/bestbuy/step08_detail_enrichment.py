@@ -137,7 +137,6 @@ HHP_FINAL_FIELDS = [
     "offer",
     "pick_up_availability",
     "fastest_delivery",
-    "delivery_availability",
     "available_quantity_for_purchase",
     "inventory_status",
     "sku_status",
@@ -3562,6 +3561,8 @@ def recommended_percent_from_detail(sku):
 
 
 def sample_fields():
+    if CATEGORY in FALLBACK_FINAL_FIELDS:
+        return FALLBACK_FINAL_FIELDS[CATEGORY]
     config = db_config()
     table_name = bestbuy_output_table()
     if config and table_name:
@@ -3592,8 +3593,6 @@ def sample_fields():
                         return fields
         except Exception:
             pass
-    if CATEGORY in FALLBACK_FINAL_FIELDS:
-        return FALLBACK_FINAL_FIELDS[CATEGORY]
     with SAMPLE_SCHEMA_CSV.open("r", encoding="utf-8-sig", newline="") as f:
         return next(csv.reader(f))
 

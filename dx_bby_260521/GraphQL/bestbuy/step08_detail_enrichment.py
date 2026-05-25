@@ -21,6 +21,8 @@ from .step00_config import (
     KRW_PER_USD,
     apply_bestbuy_location,
     bestbuy_category,
+    bestbuy_store_id,
+    bestbuy_zip_code,
     bestbuy_output_table,
     db_config,
     old_pdp_url,
@@ -2379,10 +2381,66 @@ def fulfillment_dynamic_payload(sku):
     }
 
 
+def fulfillment_batch_input(sku):
+    value = {
+        "sku": str(sku),
+        "buttonState": {
+            "context": "PDP",
+            "destinationZipCode": bestbuy_zip_code(),
+            "storeId": bestbuy_store_id(),
+        },
+        "condition": "NEW",
+        "shipping": {
+            "destinationZipCode": bestbuy_zip_code(),
+            "effectivePlanPaidMembership": "NULL",
+        },
+        "delivery": {
+            "destinationZipCode": bestbuy_zip_code(),
+            "deliveryDateOption": "EARLIEST_AVAILABLE_DATE",
+            "effectivePlanPaidMembership": "NULL",
+        },
+        "inStorePickup": {
+            "storeId": bestbuy_store_id(),
+            "searchNearby": True,
+            "showNearbyLocations": False,
+        },
+        "profileCode": None,
+    }
+    apply_bestbuy_location(value)
+    return value
+
+
+def fulfillment_batch_payload(sku):
+    return {
+        "operationName": "FulfillmentEndpoint",
+        "variables": {"fulfillmentOptionsInput": fulfillment_batch_input(sku)},
+        "query": "query FulfillmentEndpoint($fulfillmentOptionsInput: ProductFulfillmentInput!) { fulfillmentOptions(input: $fulfillmentOptionsInput) { buttonStates { buttonState displayText fulfillmentOption skuId } shippingDetails { shippingAvailability { shippingEligible customerLOSGroup { customerLosGroupId maxLineItemMaxDate minLineItemMaxDate name price displayDateType } defaultCustomerLosGroupId promiseByStreetDate } destinationZipCode sku } deliveryDetails { deliveryAvailability { deliveryEligible deliverable deliverySlots { date } deliveryServices { eligible levelsOfService { offerUnitPrice unitPrice } serviceType } } destinationZipCode sku } ispuDetails { ispuAvailability { pickupEligible instoreInventoryAvailable quantity minPickupInHours minDate maxDate fulfillDate promiseByStreetDate displayDateType fulfillmentType } store { name storeId zip } sku } } }",
+    }
+
+
+def direct_batch_fulfillment_product(sku, response_json):
+    data = response_json.get("data") if isinstance(response_json, dict) else {}
+    product = (data.get("productBySkuId") or {}) if isinstance(data, dict) else {}
+    if isinstance(product, dict) and str(product.get("skuId") or "") == str(sku):
+        return product
+    options = data.get("fulfillmentOptions") if isinstance(data, dict) else {}
+    if isinstance(options, dict) and options:
+        return {"skuId": str(sku), "fulfillmentOptions": options}
+    return {}
+
+
+def direct_batch_fulfillment_response(sku, response_json):
+    product = direct_batch_fulfillment_product(sku, response_json)
+    return {
+        "data": {
+            "productBySkuId": product,
+            "fulfillmentOptions": product.get("fulfillmentOptions") if isinstance(product, dict) else {},
+        }
+    }
+
+
 def direct_batch_fulfillment_result(sku, response_json, status_code):
-    product = ((response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(response_json, dict) else {}
-    if not isinstance(product, dict) or str(product.get("skuId") or "") != str(sku):
-        product = {}
+    product = direct_batch_fulfillment_product(sku, response_json)
     signal_count = fulfillment_signal_count(product)
     success = status_code == 200 and bool(product)
     return {
@@ -2534,7 +2592,7 @@ def fetch_detail(client, target):
 
     detail_payload = fallback_review20_payload(sku)
     review_payload = fallback_review20_payload(sku)
-    fulfillment_payload = fulfillment_dynamic_payload(sku)
+    fulfillment_payload = fulfillment_batch_payload(sku)
     compare_payload = compare_product_payload(sku) if FETCH_COMPARE else None
     request_payload = [detail_payload, review_payload, fulfillment_payload]
     if compare_payload:
@@ -2574,12 +2632,13 @@ def fetch_detail(client, target):
                 detail_response_json = graphql_batch_response_item(response_json, 0)
                 review_response_json = graphql_batch_response_item(response_json, 1)
                 fulfillment_response_json = graphql_batch_response_item(response_json, fulfillment_index)
+                fulfillment_artifact_response = direct_batch_fulfillment_response(sku, fulfillment_response_json)
                 compare_response_json = graphql_batch_response_item(response_json, compare_index) if compare_index is not None else {}
                 product = ((response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(response_json, dict) else {}
                 if not product:
                     product = ((detail_response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(detail_response_json, dict) else {}
                 if not product:
-                    product = ((fulfillment_response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(fulfillment_response_json, dict) else {}
+                    product = direct_batch_fulfillment_product(sku, fulfillment_response_json)
                 success = response.status_code == 200 and isinstance(product, dict) and str(product.get("skuId") or "") == str(sku)
                 paths = detail_paths_for_status(sku, target, success)
                 endpoint_result = direct_batch_fulfillment_result(sku, fulfillment_response_json, response.status_code) if success else {
@@ -2593,6 +2652,8 @@ def fetch_detail(client, target):
                 }
                 artifact_payloads = list(request_payload)
                 artifact_responses = list(response_json) if isinstance(response_json, list) else [response_json]
+                if isinstance(artifact_responses, list) and fulfillment_index < len(artifact_responses):
+                    artifact_responses[fulfillment_index] = fulfillment_artifact_response
                 artifact_text = text or ""
                 operation_names = [payload.get("operationName", "") for payload in artifact_payloads]
                 artifact_meta = write_direct_detail_artifacts(

@@ -1,61 +1,74 @@
-BestBuy TV full run flow and DB save, easy explanation
+BestBuy TV full run 흐름과 DB 저장 방식 쉬운 설명
 
-Full run is a pipeline.
-It does not start from the final DB table.
-It first gathers candidate products, adds ranking and promotion context, opens each detail page, fills final values, and then loads the finished CSV into DB.
+full run은 한 번에 DB부터 채우는 작업이 아니다.
 
-The final TV run mainly creates two files.
+먼저 BestBuy에서 상품 후보를 모으고,
+그 상품들이 메인 목록인지, 베스트셀러인지, 프로모션인지, 트렌딩인지 표시하고,
+그 다음 각 상품의 상세 페이지 정보를 채워서,
+마지막에 완성된 CSV를 DB에 넣는 흐름이다.
+
+TV 기준으로 full run이 최종적으로 만드는 핵심 파일은 두 개다.
 
 1. final_output.csv
-   This is the final detailed result.
-   It is one row per SKU.
-   This is the main file loaded into the TV final output DB table.
+
+이 파일이 진짜 최종 상세 결과다.
+SKU 1개가 CSV 1행이 된다.
+DB의 TV 최종 결과 테이블에 들어가는 기준 파일이다.
 
 2. bestbuy_product_list.csv
-   This is a lighter product-list snapshot.
-   It keeps listing-level information such as page type, ranks, promotion info, URL, and basic availability when available.
 
-For TV, the usual DB tables are:
+이 파일은 조금 가벼운 상품 목록 스냅샷이다.
+상세 스펙보다는 상품이 어디에서 발견됐는지, 몇 위였는지, 어떤 프로모션에 있었는지 같은 목록 단계 정보가 중심이다.
+
+TV 기준 DB 테이블은 보통 아래 두 개를 쓴다.
 
 - tv_retail_com_bby_v2_test
-  The detailed final output table.
+  최종 상세 결과가 들어가는 테이블이다.
 
 - bby_tv_product_list_v2_test
-  The lighter product list table.
+  상품 목록 스냅샷이 들어가는 테이블이다.
 
-Each run has one batch_id.
-For example, b_20260524_120002.
-Rows from the same full run share the same batch_id.
+그리고 한 번의 실행에는 batch_id가 하나 붙는다.
+
+예를 들면:
+
+b_20260524_120002
+
+같은 full run에서 나온 row들은 모두 같은 batch_id를 가진다.
+쉽게 말하면 batch_id는 "이번 실행 묶음 이름표"다.
 
 
 Step 01: main_list
 
-This opens the main BestBuy TV listing/search result.
-It collects listing products from BestBuy GraphQL data.
+BestBuy TV 메인 목록 또는 검색 결과에서 상품들을 가져오는 단계다.
 
-Typical values collected here:
+여기서는 목록 페이지에서 보이는 기본 정보를 모은다.
+
+예를 들면:
 
 - sku_id
 - bsin / item
-- product name
-- product URL
-- price fields
-- review rating/count
-- listing availability when present
-- page number
-- visual rank
+- 상품명
+- 상품 URL
+- 가격 정보
+- 별점과 리뷰 수
+- 목록에서 보이는 availability
+- 페이지 번호
+- 화면상 순위
 - organic rank
-- sponsored flag
+- sponsored 여부
 
-This is the first big pool of TV product candidates.
+이 단계는 TV 상품 후보를 넓게 모으는 단계라고 보면 된다.
 
 
 Step 02: main_targets
 
-This cleans and enriches the Step 01 result.
-It removes duplicate product appearances and normalizes useful values.
+Step 01에서 모은 상품들을 정리하는 단계다.
 
-Typical normalized values:
+같은 상품이 여러 번 보이면 중복을 줄이고,
+가격이나 할인 정보를 보기 좋은 형태로 정리한다.
+
+주로 정리되는 값은:
 
 - customer_price
 - regular_price
@@ -63,29 +76,31 @@ Typical normalized values:
 - final_sku_price
 - original_sku_price
 - savings
-- offer / offer_count
+- offer
+- offer_count
 
-This gives the crawler a clean main listing target set.
+이 단계가 끝나면 메인 목록 기준 후보가 훨씬 깔끔해진다.
 
 
 Step 03: bsr_list
 
-This collects the TV list again using Best-Selling sort.
-The goal is not just product discovery.
-The important result is Best-Selling rank context.
+Best-Selling 정렬 기준으로 TV 목록을 다시 가져오는 단계다.
+
+여기서 중요한 건 상품 자체보다 "베스트셀러에서 몇 위인지"다.
 
 
 Step 04: bsr_rank
 
-This converts the Step 03 Best-Selling list into a rank map.
-The final output later uses this as bsr_rank.
+Step 03 결과를 순위표로 바꾸는 단계다.
+
+나중에 final_output.csv의 bsr_rank에 들어갈 값을 만드는 과정이다.
 
 
 Step 05: promotion_deals
 
-This collects products from BestBuy promotion/deal placements.
+BestBuy 프로모션/딜 영역에 있는 상품을 가져오는 단계다.
 
-Typical values collected currently:
+기본적으로 가져오는 값은:
 
 - promotion_type
 - promotion_placement
@@ -94,52 +109,73 @@ Typical values collected currently:
 - retailer_sku_name
 - product_url
 
-Important note:
-If the promotion API contains price, savings, and offer data, the crawler should preserve those fields too.
-Otherwise, a promotion-only product can lose price fallback values when its detail page fails.
+그리고 현재 보강된 로직에서는 promotion GraphQL 안에 가격/할인/offer 정보가 있으면 그것도 같이 보존한다.
+
+예를 들면:
+
+- customer_price
+- regular_price
+- total_savings
+- final_sku_price
+- original_sku_price
+- savings
+- offer
+- offer_count
+
+이게 중요한 이유는 promotion에서만 발견된 상품이 있을 수 있기 때문이다.
+
+그런 상품은 main 목록 쪽 fallback 값이 부족할 수 있다.
+만약 상세 페이지 detail 수집까지 실패하면 가격이 비어버릴 수 있다.
+그래서 promotion page에 이미 들어 있던 가격/할인/offer는 Step 05에서 버리지 않고 저장해두는 게 맞다.
 
 
 Step 06: trending_deals
 
-This collects trending/deal products.
-The main value later used in final output is trend_rank.
+트렌딩 또는 딜 페이지에 있는 상품을 가져오는 단계다.
+
+나중에 주로 trend_rank 값으로 반영된다.
 
 
 Step 07: final_targets
 
-This is the target-building step.
-It combines:
+여기서 지금까지 모은 상품 후보들을 하나로 합친다.
 
-- main listing products
-- Best-Selling rank data
-- promotion products
-- trending products
+합치는 재료는:
 
-Then it creates the final list of SKUs that Step 08 will enrich.
+- main 목록 상품
+- Best-Selling 순위 상품
+- promotion 상품
+- trending 상품
 
-Output:
+그리고 이번 full run에서 상세 페이지까지 들어갈 최종 SKU 목록을 만든다.
+
+결과 파일은:
 
 - output/bestbuy_final_targets.csv
 - output/bestbuy_product_list.csv
 
-For each target row, Step 07 decides the page_type:
+이 단계에서 각 상품의 page_type도 결정된다.
+
+예를 들면:
 
 - main
 - bsr
 - promotion
 - trend
 
-If a product only came from promotion, its page_type becomes promotion.
+어떤 상품이 promotion에서만 발견됐다면 page_type은 promotion이 된다.
 
 
 Step 08: detail_enrichment
 
-This is the main detail collection step.
-It takes bestbuy_final_targets.csv and enriches each SKU.
+가장 중요한 상세 수집 단계다.
 
-For each SKU, it collects detail values from BestBuy PDP GraphQL, fulfillment GraphQL, captured compare GraphQL, and HTML fallback.
+Step 07에서 만든 bestbuy_final_targets.csv를 읽고,
+각 SKU의 상세 정보를 채운다.
 
-Typical final fields filled here:
+여기서는 BestBuy PDP GraphQL, fulfillment GraphQL, compare GraphQL, HTML fallback을 같이 사용한다.
+
+주로 채우는 값은:
 
 - item
 - retailer_sku_name
@@ -171,81 +207,116 @@ Typical final fields filled here:
 - batch_id
 - country
 
-The compare similar products field is saved as:
+compare similar products는 아래 형태로 저장된다.
 
-current product ||| similar product 1 ||| similar product 2 ||| similar product 3
+현재 상품 ||| 유사 상품 1 ||| 유사 상품 2 ||| 유사 상품 3
 
-The current compare logic tries multiple paths inside the same detail run:
+즉 retailer_sku_name_similar는 보통 current + similar 3개, 총 4개 이름이 들어간다.
 
-- captured GetCompareProduct GraphQL
-- forced in-render GetCompareProduct fetch
-- hidden HTML compare capture
-- HTML compare card fallback
+현재 compare 수집 로직은 한 가지 방법만 쓰지 않는다.
 
-The goal is that retailer_sku_name_similar is filled during the normal Step 08 run, not by a later manual repair.
+순서대로 여러 fallback을 가진다.
+
+- 렌더 안에서 잡힌 GetCompareProduct GraphQL
+- 렌더 안에서 강제로 실행한 GetCompareProduct fetch
+- HTML 안에 숨겨둔 compare capture
+- compare 카드 HTML fallback
+
+목표는 명확하다.
+
+retailer_sku_name_similar를 나중에 수동 보정하는 것이 아니라,
+정상 Step 08 상세 수집 흐름 안에서 처음부터 채우는 것이다.
 
 
 Step 09: review20
 
-This collects review data.
-It gets up to 20 review texts and review-related values.
+리뷰를 가져오는 단계다.
 
-Typical values filled or strengthened here:
+최대 20개의 리뷰 텍스트와 리뷰 관련 값을 가져온다.
+
+주로 채우거나 보강하는 값은:
 
 - detailed_review_content
 - count_of_reviews
 - star_rating
 - recommendation_intent
 
-After review data is collected, Step 08-style output building can rebuild final_output.csv using existing detail and review artifacts.
+리뷰 수집이 끝나면 이미 저장된 detail/review 결과를 이용해서 final_output.csv를 다시 만들 수 있다.
 
 
 Step 10: status_check
 
-This checks the run result.
-It helps identify missing values, failed detail rows, failed review rows, and benchmark information.
+수집 결과 상태를 확인하는 단계다.
+
+예를 들면:
+
+- detail 실패가 있는지
+- review 실패가 있는지
+- 중요한 컬럼이 비었는지
+- benchmark가 어떤지
+- failure CSV에 무엇이 남았는지
+
+이런 것들을 확인하는 단계다.
 
 
 Step 13: db_prepare
 
-This prepares the DB tables.
-For TV, the important tables are:
+DB 테이블을 준비하는 단계다.
+
+TV 기준 중요한 테이블은:
 
 - tv_retail_com_bby_v2_test
 - bby_tv_product_list_v2_test
 
-The table schema is a set of columns that DB can store.
-The CSV may contain more columns than the DB table.
-Only columns that exist in the DB table can be inserted.
+DB 테이블에는 저장 가능한 컬럼 구조가 있다.
+이 컬럼 구조를 schema라고 생각하면 된다.
+
+주의할 점은 CSV에 컬럼이 많아도,
+DB 테이블에 그 컬럼이 없으면 DB에는 들어가지 않는다는 것이다.
 
 
 Step 14: db_load
 
-This loads CSV results into DB.
+최종 CSV를 DB에 넣는 단계다.
 
-The load process is simple:
+흐름은 단순하다.
 
-1. Read final_output.csv.
-2. Find the actual columns that exist in the DB table.
-3. Delete existing rows with the same batch_id.
-4. Insert the new rows.
-5. Convert blank strings to NULL where needed.
-6. Convert numeric fields into DB numeric/integer types where needed.
+1. final_output.csv를 읽는다.
+2. DB 테이블에 실제로 존재하는 컬럼 목록을 확인한다.
+3. 같은 batch_id로 이미 들어간 row가 있으면 먼저 지운다.
+4. CSV 컬럼과 DB 컬럼이 겹치는 것만 insert한다.
+5. 빈 문자열은 필요한 경우 NULL로 들어간다.
+6. 숫자 컬럼은 숫자 타입에 맞게 변환된다.
 
-The same idea is used for bestbuy_product_list.csv and the product list DB table.
+bestbuy_product_list.csv도 같은 방식으로 product list DB 테이블에 들어간다.
 
 
-The main operating idea
+전체 흐름을 아주 쉽게 말하면
 
-Full run should finish with good final_output.csv first.
-DB loading is only the last move.
+full run은 이런 이야기다.
 
-So if a value is missing in DB, first check final_output.csv.
-If it is already missing in final_output.csv, the issue is in the collection or parsing logic before DB load.
-If it exists in final_output.csv but not in DB, the issue is likely DB schema or db_load column matching.
+먼저 BestBuy TV 매장 안을 둘러보면서 상품 후보를 모은다.
+그 상품이 메인 목록에서 나온 건지, 베스트셀러에서 나온 건지, 프로모션에서 나온 건지 표시한다.
+그 다음 각 상품 상세 페이지에 들어가서 가격, 배송, 리뷰, 스펙, compare similar products를 채운다.
+마지막으로 완성된 final_output.csv를 DB에 저장한다.
 
-For TV compare, the key goal is:
 
-retailer_sku_name_similar must be filled during the normal Step 08 detail flow.
+문제가 생겼을 때 보는 순서
 
-Manual post-run repair is useful for diagnosis, but it is not the operating goal.
+DB에서 값이 비어 있으면 먼저 final_output.csv를 봐야 한다.
+
+final_output.csv에도 값이 비어 있으면,
+문제는 DB가 아니라 수집 또는 파싱 단계에 있다.
+
+final_output.csv에는 값이 있는데 DB에만 비어 있으면,
+그때는 DB 테이블 schema나 db_load 컬럼 매칭 문제일 가능성이 높다.
+
+
+현재 TV compare 운영 목표
+
+retailer_sku_name_similar는 full run 정상 흐름 안에서 채워져야 한다.
+
+사후 보강은 원인 분석용으로는 유용하지만,
+운영 목표는 아니다.
+
+정상 운영 목표는 Step 08 detail_enrichment 한 번의 흐름 안에서 current + similar 3개가 안정적으로 들어가는 것이다.

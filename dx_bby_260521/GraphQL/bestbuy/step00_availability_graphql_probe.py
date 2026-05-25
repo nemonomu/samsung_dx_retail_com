@@ -25,6 +25,7 @@ from .step08_detail_enrichment import (
 
 REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "240"))
 PROBE_ROOT = Path(os.getenv("BESTBUY_AVAILABILITY_PROBE_ROOT", DEFAULT_BESTBUY_RUN_ROOT / "availability_probe"))
+PROBE_MODE = os.getenv("BESTBUY_AVAILABILITY_PROBE_MODE", "reference").strip().lower()
 PROBE_SKUS = [
     value.strip()
     for value in re.split(r"[\s,;]+", os.getenv("BESTBUY_AVAILABILITY_PROBE_SKUS", os.getenv("BESTBUY_DETAIL_SKUS", "6623791")))
@@ -54,6 +55,178 @@ FULFILLMENT_DYNAMIC_QUERY = (
     "deliveryDetails{deliveryAvailability{deliveryEligible deliverable deliverySlots{date} installationSlots{date}}}"
     "ispuDetails{ispuAvailability{pickupEligible instoreInventoryAvailable quantity minPickupInHours maxDate fulfillDate promiseByStreetDate}}}}}"
 )
+
+AVAILABILITY_FIELD_TOKENS = (
+    "ProductFulfillmentInput",
+    "fulfillmentOptions(input",
+    "buttonStates",
+    "shippingDetails",
+    "deliveryDetails",
+    "ispuDetails",
+)
+UI_AVAILABILITY_TEXTS = ("Get it", "Pick up", "Delivery as soon", "FREE")
+
+
+def default_curl_reference_path():
+    configured = os.getenv("BESTBUY_AVAILABILITY_CURL_REFERENCE", "").strip()
+    if configured:
+        return Path(configured)
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        candidate = parent / "references" / "curl_tv_network.html"
+        if candidate.exists():
+            return candidate
+    return current.parents[1] / "references" / "curl_tv_network.html"
+
+
+def curl_blocks_from_text(text):
+    blocks = []
+    current = []
+    start_line = 0
+    for line_number, line in enumerate(str(text or "").splitlines(), 1):
+        if line.startswith('curl ^"'):
+            if current:
+                blocks.append((start_line, "\n".join(current)))
+            current = [line]
+            start_line = line_number
+        elif current:
+            current.append(line)
+    if current:
+        blocks.append((start_line, "\n".join(current)))
+    return blocks
+
+
+def readable_curl_text(block_text):
+    text = str(block_text or "")
+    return (
+        text.replace('^\\^"', '"')
+        .replace('^"', '"')
+        .replace("^\\n", "\\n")
+        .replace("^$", "$")
+        .replace("^^", "^")
+        .replace("^", "")
+    )
+
+
+def curl_block_url(block_text):
+    first_line = str(block_text or "").splitlines()[0] if block_text else ""
+    match = re.search(r'curl\s+"([^"]+)', readable_curl_text(first_line))
+    return match.group(1) if match else ""
+
+
+def curl_block_operation(block_text):
+    match = re.search(r"x-requested-for-operation-name:\s*([^\^\"]+)", str(block_text or ""))
+    return match.group(1).strip() if match else ""
+
+
+def curl_block_data_len(block_text):
+    match = re.search(r'--data-raw \^"(.*)"(?: &)?$', str(block_text or ""), re.S)
+    return len(match.group(1)) if match else 0
+
+
+def fulfillment_endpoint_variables(url):
+    if "variables=" not in str(url or ""):
+        return {}
+    try:
+        from urllib.parse import parse_qs, urlparse
+
+        raw = parse_qs(urlparse(url).query).get("variables", [""])[0]
+        return json.loads(raw) if raw else {}
+    except (TypeError, ValueError):
+        return {}
+
+
+def analyze_curl_reference_text(text):
+    graphql_posts = []
+    fulfillment_endpoints = []
+    telemetry_days_out_count = 0
+    for start_line, block_text in curl_blocks_from_text(text):
+        url = curl_block_url(block_text)
+        if "www.bestbuy.com/gateway/graphql" not in url:
+            if "daysOut" in block_text:
+                telemetry_days_out_count += block_text.count("daysOut")
+            continue
+        block = {
+            "line": start_line,
+            "url": url,
+            "operation": curl_block_operation(block_text),
+            "data_len": curl_block_data_len(block_text),
+            "has_availability_fields": any(token in block_text for token in AVAILABILITY_FIELD_TOKENS),
+            "ui_text_hits": [token for token in UI_AVAILABILITY_TEXTS if token in block_text],
+        }
+        if "/gateway/graphql/fulfillment" in url:
+            variables = fulfillment_endpoint_variables(url)
+            input_data = variables.get("fulfillmentOptionsInput", {}) if isinstance(variables, dict) else {}
+            button_state = input_data.get("buttonState", {}) if isinstance(input_data, dict) else {}
+            block["fulfillment_input"] = {
+                "sku": input_data.get("sku", "") if isinstance(input_data, dict) else "",
+                "condition": input_data.get("condition", "") if isinstance(input_data, dict) else "",
+                "context": button_state.get("context", "") if isinstance(button_state, dict) else "",
+                "button": button_state.get("fulfillmentOption", "") if isinstance(button_state, dict) else "",
+                "has_shipping": bool(input_data.get("shipping")) if isinstance(input_data, dict) else False,
+                "has_delivery": bool(input_data.get("delivery")) if isinstance(input_data, dict) else False,
+                "has_pickup": bool(input_data.get("inStorePickup")) if isinstance(input_data, dict) else False,
+            }
+            fulfillment_endpoints.append(block)
+        else:
+            graphql_posts.append(block)
+    return {
+        "graphql_post_count": len(graphql_posts),
+        "graphql_posts_with_availability_fields": [
+            block for block in graphql_posts if block.get("has_availability_fields")
+        ],
+        "graphql_posts_with_ui_text": [block for block in graphql_posts if block.get("ui_text_hits")],
+        "fulfillment_endpoint_count": len(fulfillment_endpoints),
+        "fulfillment_endpoint_examples": fulfillment_endpoints[:10],
+        "telemetry_days_out_count": telemetry_days_out_count,
+    }
+
+
+def probe_reference():
+    reference_path = default_curl_reference_path()
+    if not reference_path.exists():
+        raise RuntimeError(f"Missing curl reference: {reference_path}")
+    text = reference_path.read_text(encoding="utf-8", errors="replace")
+    summary = analyze_curl_reference_text(text)
+    run_dir = PROBE_ROOT / datetime.now().strftime("%Y%m%d_%H%M%S") / "curl_reference"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "reference_path": str(reference_path),
+                **summary,
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    graphql_availability_count = len(summary["graphql_posts_with_availability_fields"])
+    graphql_ui_text_count = len(summary["graphql_posts_with_ui_text"])
+    print(
+        "[availability_probe:reference] "
+        f"file={reference_path} graphql_posts={summary['graphql_post_count']} "
+        f"fulfillment_endpoint_calls={summary['fulfillment_endpoint_count']}",
+        flush=True,
+    )
+    print(
+        "[availability_probe:graphql] "
+        f"availability_field_posts={graphql_availability_count} "
+        f"ui_text_posts={graphql_ui_text_count} telemetry_daysOut={summary['telemetry_days_out_count']}",
+        flush=True,
+    )
+    for block in summary["fulfillment_endpoint_examples"][:5]:
+        info = block.get("fulfillment_input", {})
+        print(
+            "[availability_probe:fulfillment_endpoint] "
+            f"line={block['line']} op={block.get('operation') or '-'} sku={info.get('sku')} "
+            f"context={info.get('context')} button={info.get('button') or '-'} "
+            f"shipping={info.get('has_shipping')} delivery={info.get('has_delivery')} pickup={info.get('has_pickup')}",
+            flush=True,
+        )
+    print(f"[availability_probe:raw] {run_dir}", flush=True)
+    return run_dir, summary
 
 
 def now():
@@ -269,6 +442,11 @@ def probe_sku(client, sku):
 
 
 def main():
+    if PROBE_MODE in {"reference", "curl", "curl_reference", "audit"}:
+        probe_reference()
+        return
+    if PROBE_MODE not in {"live", "network"}:
+        raise RuntimeError("BESTBUY_AVAILABILITY_PROBE_MODE must be reference or live")
     api_key = os.getenv("ZENROWS_API_KEY")
     if not api_key:
         raise RuntimeError("Set ZENROWS_API_KEY in .env")

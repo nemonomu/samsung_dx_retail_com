@@ -1,0 +1,415 @@
+BestBuy compare similar products 수집 로직 쉬운 설명
+====================================================
+
+목표
+----
+
+우리가 하려는 것은 BestBuy 상품 페이지에서 "Compare similar products" 영역을 가져오는 것이다.
+최종 DB에는 아래처럼 들어가야 한다.
+
+현재 상품명 ||| 비슷한 상품 1 ||| 비슷한 상품 2 ||| 비슷한 상품 3
+
+예:
+
+Pioneer - 65" TV ||| Pioneer - 70" TV ||| Pioneer - 55" TV ||| Toshiba - 65" TV
+
+첫 번째는 현재 상품이고, 뒤 3개는 BestBuy가 추천한 비슷한 상품이다.
+
+
+왜 문제가 생겼나
+----------------
+
+BestBuy 페이지에는 compare 영역이 처음부터 항상 들어있지 않다.
+페이지를 열자마자 보이는 것이 아니라, 브라우저가 스크롤하거나 특정 위치에 도착하면 나중에 불러오는 구조다.
+
+그래서 크롤러가 페이지를 받아왔을 때 어떤 상품은 compare 데이터가 있고, 어떤 상품은 아직 안 불러온 상태였다.
+
+
+기본 로직
+---------
+
+기본 흐름은 아래와 같다.
+
+1. BestBuy 상품 페이지를 ZenRows로 한 번 연다.
+2. 페이지 안에서 BestBuy가 자기 서버에 보내는 GraphQL 요청들을 지켜본다.
+3. 그중 GetCompareProduct 라는 요청을 찾는다.
+4. 그 응답 안에서 현재 상품 + 비슷한 상품 3개 이름을 꺼낸다.
+5. retailer_sku_name_similar 컬럼에 저장한다.
+
+여기서 핵심은 GetCompareProduct다.
+BestBuy가 compare 영역을 만들 때 내부적으로 쓰는 GraphQL 이름이 이것이다.
+
+
+보강 로직 1: 기다리고 스크롤하기
+-------------------------------
+
+그냥 페이지를 열고 끝내지 않는다.
+
+compare 영역이 있을 만한 위치까지 스크롤해보고,
+조금 기다리고,
+다시 위아래로 살짝 움직여본다.
+
+사람이 페이지를 보다가 아래로 내리면 compare 영역이 로딩되는 것과 비슷한 방식이다.
+
+
+보강 로직 2: BestBuy 요청을 옆에서 잡기
+--------------------------------------
+
+페이지 안에서 fetch / XHR 요청이 발생하면,
+그중 compare 관련 응답을 숨겨진 메모장 같은 곳에 복사해둔다.
+
+ZenRows 결과 HTML 안에 아래 같은 숨겨진 흔적을 남긴다.
+
+bby-compare-capture
+
+나중에 Python parser가 이 숨겨진 데이터를 보고 compare 상품명을 꺼낼 수 있다.
+
+
+보강 로직 3: HTML 카드 fallback
+------------------------------
+
+어떤 경우에는 GraphQL 응답은 못 잡았지만, 화면 HTML에는 이미 compare 카드들이 생겨 있다.
+
+이 경우 GraphQL 응답을 못 잡았다고 포기하지 않고,
+HTML 안에서 카드 이름을 직접 읽는다.
+
+찾는 카드:
+
+GPC-sku-card
+
+이 덕분에 어떤 SKU는 로그에는 similar=0처럼 보였지만,
+최종 CSV에는 값이 들어갈 수 있었다.
+
+즉 기존 로그의 similar=0은 JSON capture 기준이고,
+최종 output 성공 여부와 항상 같은 의미는 아니다.
+
+
+보강 로직 4: 첫 detail render 안에서 compare를 직접 실행
+------------------------------------------------------
+
+기존에는 BestBuy가 알아서 GetCompareProduct를 보내주길 기다렸다.
+
+이제는 첫 detail render 안에서 브라우저에게 이렇게 시킨다.
+
+"지금 이 상품 SKU로 GetCompareProduct 요청을 직접 한 번 실행해봐.
+그리고 결과를 숨겨진 capture 영역에 저장해둬."
+
+중요한 점은 이것이 ZenRows를 한 번 더 호출하는 것이 아니라는 것이다.
+
+이미 열린 BestBuy 페이지 안에서 JavaScript가 BestBuy 서버에 compare 요청을 한 번 보내는 것이다.
+따라서 ZenRows detail 요청 수는 그대로 1회다.
+
+흐름:
+
+ZenRows 요청 1회
+  -> BestBuy 페이지 열림
+  -> 페이지 안에서 GetCompareProduct 실행
+  -> 결과를 HTML 안의 bby-compare-capture에 저장
+
+그래서 추가 ZenRows 비용은 발생하지 않는다.
+
+
+현재 실행 순서
+-------------
+
+현재 1회 detail render 안의 순서는 아래와 같다.
+
+1. 페이지를 연다.
+2. 요청 감시 장치를 설치한다.
+3. DOM observer를 설치한다.
+4. target SKU 기준으로 GetCompareProduct를 먼저 실행한다.
+5. 결과를 hidden capture에 저장한다.
+6. 기존처럼 scroll scan / DOM 탐색 / HTML card fallback도 수행한다.
+7. final parser가 JSON capture -> HTML capture -> GPC card 순서로 similar를 추출한다.
+
+예전에는 스크롤을 많이 한 뒤 마지막쯤 force fetch를 실행했다.
+이제는 compare GraphQL을 먼저 실행하고, 스크롤/HTML 방식은 보조 fallback으로 둔다.
+
+
+retry와 비용
+------------
+
+retry는 같은 SKU를 ZenRows로 다시 여는 것을 뜻한다.
+그러면 비용이 또 들어간다.
+
+따라서 정상 운영 기본값에서는 retry가 없어야 한다.
+
+현재 원칙:
+
+상품 하나당 ZenRows detail render는 1회.
+그 1회 안에서 compare를 최대한 확실히 잡는다.
+빈 값이라고 다시 호출하지 않는다.
+
+운영 기본값:
+
+BESTBUY_DETAIL_FETCH_COMPARE=0
+BESTBUY_DETAIL_COMPARE_FORCE_FETCH=1
+BESTBUY_DETAIL_RETRY_ON_MISSING_SIMILAR=0
+BESTBUY_DETAIL_MAX_ATTEMPTS=1
+
+
+한 문장 요약
+------------
+
+BestBuy 상품 페이지를 한 번만 열고,
+그 안에서 compare GraphQL을 먼저 직접 실행해서 저장하고,
+그래도 안 되면 페이지가 만든 compare HTML 카드까지 읽어서
+current + similar 3개를 채우는 구조다.
+
+
+이번에 실제로 보강한 내용
+------------------------
+
+처음에는 313개 중 52개 상품의 retailer_sku_name_similar가 비어 있었다.
+
+기존 보강으로 37개는 회복됐고,
+마지막에 15개가 남았다.
+
+남은 15개를 보면 두 종류가 섞여 있었다.
+
+1. detail render는 성공했지만 compare GraphQL capture가 안 잡힌 상품
+2. detail render가 422 / 0 bytes로 실패해서 compare를 잡을 기회 자체가 부족했던 상품
+
+그래서 retry를 켜는 대신,
+첫 detail render 안에서 compare를 더 빨리, 더 확실하게 남기도록 바꿨다.
+
+
+보강 1: force fetch를 scroll scan보다 먼저 실행
+---------------------------------------------
+
+예전 흐름은 대략 이랬다.
+
+페이지 열기
+-> 스크롤 많이 하기
+-> compare 영역 기다리기
+-> 마지막쯤 GetCompareProduct 강제 실행
+
+이 방식은 어떤 상품에서 문제가 있었다.
+페이지가 중간에 실패하거나, compare 영역이 늦게 생기면 강제 실행까지 도달하지 못할 수 있었다.
+
+그래서 순서를 바꿨다.
+
+현재 흐름:
+
+페이지 열기
+-> 요청 감시 장치 설치
+-> DOM observer 설치
+-> GetCompareProduct를 먼저 강제 실행
+-> 결과를 bby-compare-capture에 저장
+-> 그 다음 기존 scroll scan / HTML card fallback 수행
+
+즉 이제는 "스크롤하다가 compare가 나오면 잡자"가 아니라,
+먼저 "이 SKU의 compare 데이터를 바로 받아서 저장하자"가 된다.
+
+
+보강 2: target SKU fallback 추가
+-------------------------------
+
+브라우저 안에서 GetCompareProduct를 실행하려면 SKU가 필요하다.
+
+기존에는 페이지 안에서 SKU를 찾으려고 했다.
+
+예:
+
+- analytics meta
+- data-sku-id
+- 본문 SKU 텍스트
+- URL의 /sku/숫자
+
+그런데 어떤 BestBuy URL은 canonical URL처럼 숫자 SKU가 URL에 없고,
+페이지 안에서도 SKU를 늦게 넣는 경우가 있다.
+
+그래서 Python 쪽에서 이미 알고 있는 target SKU를 JavaScript에 같이 넘기도록 했다.
+
+즉 페이지에서 SKU를 못 찾으면,
+마지막으로 크롤러가 알고 있는 SKU를 사용한다.
+
+예:
+
+target SKU = 6623797
+
+페이지에서 SKU 감지 실패
+-> fallback으로 6623797 사용
+-> GetCompareProduct 실행
+
+이 보강으로 canonical URL / 짧은 product URL / 늦게 로딩되는 SKU 케이스가 안정화된다.
+
+
+보강 3: script 안의 skuId도 탐색
+-------------------------------
+
+BestBuy 페이지 안에는 화면에는 보이지 않지만 script 안에 skuId가 들어 있는 경우가 있다.
+
+그래서 SKU 감지 범위를 늘렸다.
+
+이제는 document.scripts 안에서도 아래 같은 패턴을 찾는다.
+
+"skuId": "6623797"
+
+이 값이 있으면 그것도 GetCompareProduct 실행에 사용한다.
+
+
+보강 4: force fetch debug 저장
+-----------------------------
+
+강제 실행이 성공했는지 실패했는지 나중에 확인할 수 있도록 debug marker도 남긴다.
+
+저장 위치:
+
+bby-compare-force-fetch-debug
+
+여기에는 대략 이런 정보가 남는다.
+
+- 사용한 skuId
+- 요청 성공 여부
+- HTTP status
+- 응답 body 길이
+- 실패 시 error
+
+즉 나중에 compare가 비었을 때,
+"force fetch가 아예 안 돌았나?"
+"SKU를 못 찾았나?"
+"BestBuy 응답이 비었나?"
+를 확인할 수 있다.
+
+
+보강 5: similar 로그 의미 수정
+-----------------------------
+
+예전 로그의 similar=0은 헷갈릴 수 있었다.
+
+왜냐하면 그 값은 JSON capture 기준이었기 때문이다.
+
+어떤 SKU는 JSON capture에서는 0이지만,
+HTML card fallback으로 final output에는 정상 값이 들어갔다.
+
+그래서 로그 의미를 나눴다.
+
+similar_json = JSON compare capture에서 잡힌 similar 개수
+similar = final parser 기준으로 잡힌 이름 개수
+
+예:
+
+similar=4 similar_json=3
+
+이 뜻은:
+
+JSON에서 similar 3개를 잡았고,
+최종 output은 현재 상품 + similar 3개로 총 4개가 완성됐다는 뜻이다.
+
+예:
+
+similar=52 similar_json=0
+
+이 뜻은:
+
+JSON capture는 못 잡았지만,
+HTML card fallback에서 카드 이름을 많이 찾았다는 뜻이다.
+최종 저장은 앞 4개만 사용한다.
+
+
+보강 6: compare 응답의 current product specs를 스펙 fallback으로 사용
+---------------------------------------------------------------
+
+GetCompareProduct 응답 안에는 similar 상품만 있는 것이 아니다.
+현재 상품의 productBySkuId도 같이 들어 있다.
+
+그 안에는 specificationGroups가 있고,
+여기서 아래 필드를 얻을 수 있다.
+
+- Model Year
+- Estimated Annual Electricity Use
+
+그래서 detail ProductSchema가 비어 있는 경우,
+compare 응답의 current product spec을 보조 소스로 사용하도록 했다.
+
+단, 안전하게 범위를 제한했다.
+
+사용하는 것:
+
+- Model Year
+- Estimated Annual Electricity Use
+
+사용하지 않는 것:
+
+- price
+- availability
+- review
+- name
+- product_url
+
+즉 compare 응답으로 일반 detail 필드를 덮어쓰지 않는다.
+스펙 일부만 보조로 사용한다.
+
+
+실제 검증 결과
+--------------
+
+처음 상태:
+
+313개 중 52개가 retailer_sku_name_similar blank.
+
+중간 보강 후:
+
+37개 회복.
+15개 blank 남음.
+
+마지막 15개 probe:
+
+3개 먼저 테스트:
+
+- 6623797
+- 6623787
+- 6579462
+
+결과:
+
+모두 detail=True
+모두 similar=4
+모두 similar_json=3
+
+이후 나머지 12개 테스트:
+
+- 6579463
+- 6618211
+- 6635751
+- 6621482
+- 6621473
+- 6673082
+- 6577017
+- 6673096
+- 6578184
+- 6593576
+- 6595344
+- 6625838
+
+결과:
+
+모두 similar_ok=True.
+
+최종 확인:
+
+blank_similar 0
+
+즉 313개 전체에서 retailer_sku_name_similar blank가 0이 됐다.
+
+
+비용 관점
+---------
+
+이번 보강은 retry 방식이 아니다.
+
+정상 운영 기본값은 아래와 같다.
+
+BESTBUY_DETAIL_RETRY_ON_MISSING_SIMILAR=0
+BESTBUY_DETAIL_MAX_ATTEMPTS=1
+
+즉 similar가 비었다고 ZenRows detail render를 다시 호출하지 않는다.
+
+대신 첫 detail render 안에서:
+
+1. compare GraphQL을 먼저 강제 실행하고
+2. hidden capture에 저장하고
+3. 그래도 안 되면 기존 HTML card fallback을 사용한다.
+
+따라서 compare_cost_usd_this_run은 0.0으로 유지된다.

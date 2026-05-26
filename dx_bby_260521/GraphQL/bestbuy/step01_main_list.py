@@ -40,6 +40,7 @@ RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
 RUN_ID = os.getenv("BESTBUY_MAIN_RUN_ID", "main")
 RUN_ROOT = Path(os.getenv("BESTBUY_RUN_ROOT", DEFAULT_BESTBUY_RUN_ROOT)) / RUN_ID
 SOURCE_HTML_PATH = Path(os.getenv("BESTBUY_MAIN_SOURCE_HTML", "references/bestbuy_main_search_page_sample.html"))
+SOURCE_PAYLOAD_PATH = Path(os.getenv("BESTBUY_MAIN_SOURCE_PAYLOAD", "references/page_001_request.json"))
 FORCE_REFRESH = os.getenv("BESTBUY_FORCE_REFRESH", "0").lower() in {"1", "true", "yes", "y"}
 CATEGORY = bestbuy_category()
 URLS = load_initial_urls()
@@ -85,6 +86,46 @@ def find_started_operation(html_text, target_name):
                     "event_id": event.get("id", ""),
                 }
     raise RuntimeError(f"Could not find Apollo operation: {target_name}")
+
+
+def load_product_list_operation(target_name="PlpView_ProductList_Init"):
+    source_html_candidates = [
+        SOURCE_HTML_PATH,
+        Path("../../references/bestbuy_main_search_page_sample.html"),
+    ]
+    source_payload_candidates = [
+        SOURCE_PAYLOAD_PATH,
+        Path("../../references/rdp/page_001_request.json"),
+    ]
+
+    for path in source_html_candidates:
+        if path.exists():
+            html_text = path.read_text(encoding="utf-8", errors="replace")
+            operation = find_started_operation(html_text, target_name)
+            operation["source_path"] = rel_path(path)
+            operation["source_type"] = "html"
+            return operation
+
+    for path in source_payload_candidates:
+        if not path.exists():
+            continue
+        payload = read_json(path)
+        if payload.get("operationName") != target_name:
+            continue
+        operation = {
+            "operationName": payload["operationName"],
+            "query": payload.get("query", ""),
+            "variables": payload.get("variables", {}),
+            "event_id": "",
+            "source_path": rel_path(path),
+            "source_type": "payload",
+        }
+        if not operation["query"]:
+            continue
+        return operation
+
+    searched = [str(path) for path in source_html_candidates + source_payload_candidates]
+    raise FileNotFoundError(f"Could not find {target_name} source template. searched={searched}")
 
 
 def prepare_product_list_payload(operation, page):
@@ -586,8 +627,7 @@ def main():
     run_started_at = now()
     run_start = time.perf_counter()
 
-    html_text = SOURCE_HTML_PATH.read_text(encoding="utf-8", errors="replace")
-    operation = find_started_operation(html_text, "PlpView_ProductList_Init")
+    operation = load_product_list_operation("PlpView_ProductList_Init")
     client = ZenRowsClient(api_key) if api_key else None
 
     all_rows = []
@@ -598,7 +638,10 @@ def main():
         realtime_benchmarks_path.unlink()
 
     print(f"RUN_ROOT={RUN_ROOT}")
-    print(f"SEARCH_TERM={SEARCH_TERM} pages={SEARCH_PAGES} endpoint={GRAPHQL_ENDPOINT}")
+    print(
+        f"SEARCH_TERM={SEARCH_TERM} pages={SEARCH_PAGES} endpoint={GRAPHQL_ENDPOINT} "
+        f"template={operation.get('source_path', '')}"
+    )
     print(f"benchmark_start={run_started_at}")
 
     for page in range(1, SEARCH_PAGES + 1):
@@ -695,6 +738,8 @@ def main():
         "fetch_mode": FETCH_MODE,
         "fetch_transports": fetch_transports(),
         "source_html": rel_path(SOURCE_HTML_PATH),
+        "source_template": operation.get("source_path", ""),
+        "source_template_type": operation.get("source_type", ""),
         "expected_post_calls": SEARCH_PAGES,
         "actual_post_calls": len(page_benchmarks),
         "total_x_request_cost": round(total_cost, 7),

@@ -80,6 +80,23 @@ class Step08LogTests(unittest.TestCase):
         self.assertNotIn("fulfillmentOptions(input:$fulfillmentInput)", payload["query"])
         self.assertNotIsInstance(payload, list)
 
+    def test_fulfillment_dynamic_payload_is_same_batch_operation(self):
+        payload = step08.fulfillment_dynamic_payload("6623791")
+
+        self.assertEqual(payload["operationName"], "FulfillmentOptionHook_FulfillmentDynamicQuery")
+        self.assertEqual(payload["variables"]["skuId"], "6623791")
+        self.assertIn("fulfillmentInput", payload["variables"])
+        self.assertIn("productPriceInput", payload["variables"])
+        self.assertIn("fulfillmentOption", payload["variables"]["fulfillmentInput"]["buttonState"])
+        self.assertIsNone(payload["variables"]["fulfillmentInput"]["buttonState"]["fulfillmentOption"])
+        self.assertNotIn("usePriceWithCart", payload["variables"]["productPriceInput"])
+        self.assertIn("ProductFulfillmentInput", payload["query"])
+        self.assertIn("fulfillmentOptions(input:$fulfillmentInput)", payload["query"])
+        self.assertIn("shippingAvailability", payload["query"])
+        self.assertIn("deliveryAvailability", payload["query"])
+        self.assertIn("ispuAvailability", payload["query"])
+        self.assertNotIsInstance(payload, list)
+
     def test_get_it_fast_values_fill_pickup_and_fastest_only(self):
         item = {
             "data": {
@@ -93,14 +110,16 @@ class Step08LogTests(unittest.TestCase):
         values = step08.get_it_fast_availability_values(item)
 
         self.assertEqual(values["pick_up_availability"], "Pick up today")
-        self.assertEqual(values["fastest_delivery"], "Get it tomorrow")
+        self.assertEqual(values["fastest_delivery"], "Get it tomorrow \u2022 FREE")
         self.assertEqual(values["delivery_availability"], "")
 
     def test_detail_batch_request_entries_maps_multiple_skus(self):
         old_fetch_compare = step08.FETCH_COMPARE
         old_fetch_get_it_fast = step08.FETCH_GET_IT_FAST
+        old_fetch_fulfillment_dynamic = step08.FETCH_FULFILLMENT_DYNAMIC
         step08.FETCH_COMPARE = True
         step08.FETCH_GET_IT_FAST = True
+        step08.FETCH_FULFILLMENT_DYNAMIC = False
         try:
             payloads, entries = step08.detail_batch_request_entries(
                 [
@@ -111,6 +130,7 @@ class Step08LogTests(unittest.TestCase):
         finally:
             step08.FETCH_COMPARE = old_fetch_compare
             step08.FETCH_GET_IT_FAST = old_fetch_get_it_fast
+            step08.FETCH_FULFILLMENT_DYNAMIC = old_fetch_fulfillment_dynamic
 
         self.assertEqual(len(entries), 2)
         self.assertEqual(len(payloads), 8)
@@ -118,6 +138,32 @@ class Step08LogTests(unittest.TestCase):
         self.assertEqual(entries[1]["indices"], {"detail": 4, "review": 5, "compare": 6, "get_it_fast": 7})
         self.assertEqual(payloads[0]["variables"]["skuId"], "6639210")
         self.assertEqual(payloads[4]["variables"]["skuId"], "6670264")
+
+    def test_detail_batch_request_entries_can_use_fulfillment_dynamic_instead_of_get_it_fast(self):
+        old_fetch_compare = step08.FETCH_COMPARE
+        old_fetch_get_it_fast = step08.FETCH_GET_IT_FAST
+        old_fetch_fulfillment_dynamic = step08.FETCH_FULFILLMENT_DYNAMIC
+        step08.FETCH_COMPARE = True
+        step08.FETCH_GET_IT_FAST = True
+        step08.FETCH_FULFILLMENT_DYNAMIC = True
+        try:
+            payloads, entries = step08.detail_batch_request_entries(
+                [
+                    {"sku_id": "6639210", "product_url": "https://www.bestbuy.com/site/-/6639210.p?skuId=6639210"},
+                ]
+            )
+        finally:
+            step08.FETCH_COMPARE = old_fetch_compare
+            step08.FETCH_GET_IT_FAST = old_fetch_get_it_fast
+            step08.FETCH_FULFILLMENT_DYNAMIC = old_fetch_fulfillment_dynamic
+
+        self.assertEqual(entries[0]["indices"], {"detail": 0, "review": 1, "compare": 2, "fulfillment_dynamic": 3})
+        self.assertEqual([payload["operationName"] for payload in payloads], [
+            "ProductSchema_init",
+            "ProductSchema_init",
+            "GetCompareProduct",
+            "FulfillmentOptionHook_FulfillmentDynamicQuery",
+        ])
 
 
 if __name__ == "__main__":

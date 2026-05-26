@@ -128,12 +128,36 @@ FETCH_GET_IT_FAST = os.getenv("BESTBUY_DETAIL_FETCH_GET_IT_FAST", "0").lower() i
     "yes",
     "y",
 }
+FETCH_FULFILLMENT_DYNAMIC = os.getenv("BESTBUY_DETAIL_FETCH_FULFILLMENT_DYNAMIC", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
 RUN_BATCH_ID = os.getenv("BESTBUY_BATCH_ID") or f"b_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 TARGET_SKUS = {
     value.strip().lower()
     for value in re.split(r"[\s,;]+", os.getenv("BESTBUY_DETAIL_SKUS", ""))
     if value.strip()
 }
+
+
+def hhp_compare_v2_fallback_enabled():
+    return CATEGORY == "HHP" and os.getenv("BESTBUY_HHP_COMPARE_V2_FALLBACK", "1").lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+    }
+
+
+def hhp_trade_in_data_enabled():
+    return CATEGORY == "HHP" and os.getenv("BESTBUY_HHP_TRADE_IN_DATA", "1").lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+    }
 
 HHP_FINAL_FIELDS = [
     "id",
@@ -587,6 +611,15 @@ def fastest_delivery_date_phrase(date_value):
     return f"Get it by {dt.strftime('%a, %b')} {dt.day}"
 
 
+def with_free_suffix(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    if re.search(r"\bfree\b", text, re.I):
+        return text
+    return f"{text} \u2022 FREE"
+
+
 def date_to_phrase_from_get_it_fast(prefix, value):
     if not isinstance(value, dict):
         return ""
@@ -603,10 +636,10 @@ def fastest_delivery_from_get_it_fast(value):
         return ""
     get_it_by = str(value.get("getItBy") or "").strip().lower()
     if get_it_by == "today":
-        return "Get it today"
+        return with_free_suffix("Get it today")
     if get_it_by == "tomorrow":
-        return "Get it tomorrow"
-    return fastest_delivery_date_phrase(value.get("getItByDate"))
+        return with_free_suffix("Get it tomorrow")
+    return with_free_suffix(fastest_delivery_date_phrase(value.get("getItByDate")))
 
 
 def get_it_fast_availability_values(item):
@@ -664,6 +697,8 @@ def trade_in_from_html(html_text):
     soup = BeautifulSoup(html_text, "html.parser")
     title_node = soup.find(attrs={"data-testid": "trade-in-check-your-value"})
     body_node = soup.find(attrs={"data-testid": "trade-in-save-when-you-trade"})
+    if body_node is None:
+        body_node = soup.find(attrs={"data-testid": re.compile(r"^trade-in-save-up-to-", re.I)})
     title = compact_text(title_node.get_text(" ", strip=True) if title_node else "")
     body = compact_text(body_node.get_text(" ", strip=True) if body_node else "")
     if title and body:
@@ -684,6 +719,42 @@ def trade_in_text_match(value):
     )
 
 
+def money_amount_text(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    match = re.search(r"\$?\s*([\d,]+(?:\.\d{1,2})?)", text)
+    if not match:
+        return ""
+    try:
+        amount = float(match.group(1).replace(",", ""))
+    except ValueError:
+        return ""
+    return f"${amount:,.2f}"
+
+
+def trade_in_from_offer_data(data, include_generic=True):
+    if not isinstance(data, dict):
+        return ""
+    product = data.get("productBySkuId") if "productBySkuId" in data else data
+    if not isinstance(product, dict):
+        return ""
+    offer = product.get("tradeInOffer")
+    if isinstance(offer, dict):
+        candidates = []
+        for carrier_offer in as_list(offer.get("offerCarrierValue")):
+            if isinstance(carrier_offer, dict):
+                candidates.append(carrier_offer.get("carrierUpToValue"))
+        candidates.extend([offer.get("value"), offer.get("disclaimer")])
+        for candidate in candidates:
+            amount = money_amount_text(candidate)
+            if amount:
+                return f"Check your trade-in value. Save up to {amount} when you trade in a similar device."
+    if include_generic and product.get("isPurchaseWithTradeInEligible") is True:
+        return "Check your trade-in value. Save when you trade in a similar device."
+    return ""
+
+
 def nested_strings(value):
     if isinstance(value, str):
         yield value
@@ -699,6 +770,9 @@ def trade_in_from_products(products):
     for product in reversed(products):
         if not isinstance(product, dict):
             continue
+        amount_text = trade_in_from_offer_data(product, include_generic=False)
+        if amount_text:
+            return amount_text
         if product.get("isPurchaseWithTradeInEligible") is True:
             return "Check your trade-in value. Save when you trade in a similar device."
         for value in nested_strings(product.get("operationalAttributes") or {}):
@@ -1927,13 +2001,13 @@ def strict_compare_response_names(body_data, sku="", allowed_sku_ids=None):
     data = body_data.get("data")
     if not isinstance(data, dict):
         return []
-    if not isinstance(data.get("recommendations"), dict):
+    if not isinstance(data.get("recommendations"), dict) and not isinstance(data.get("recommendationsV2"), dict):
         return []
 
     product = data.get("productBySkuId")
-    if not isinstance(product, dict):
+    if product is not None and not isinstance(product, dict):
         return []
-    if allowed_sku_ids and str(product.get("skuId") or "") not in allowed_sku_ids:
+    if isinstance(product, dict) and allowed_sku_ids and str(product.get("skuId") or "") not in allowed_sku_ids:
         return []
     return compare_recommendation_names(data)
 
@@ -1953,13 +2027,13 @@ def strict_compare_response_data(body_data, sku="", allowed_sku_ids=None):
     data = body_data.get("data")
     if not isinstance(data, dict):
         return {}
-    if not isinstance(data.get("recommendations"), dict):
+    if not isinstance(data.get("recommendations"), dict) and not isinstance(data.get("recommendationsV2"), dict):
         return {}
 
     product = data.get("productBySkuId")
-    if not isinstance(product, dict):
+    if product is not None and not isinstance(product, dict):
         return {}
-    if allowed_sku_ids and str(product.get("skuId") or "") not in allowed_sku_ids:
+    if isinstance(product, dict) and allowed_sku_ids and str(product.get("skuId") or "") not in allowed_sku_ids:
         return {}
     return data
 
@@ -2051,7 +2125,12 @@ def json_response_compare_summary(json_data, sku=""):
             continue
         body = request.get("body")
         body_data = parse_json_value(body)
-        has_get_compare = "GetCompareProduct" in request_blob or "single-compare" in request_blob
+        has_get_compare = (
+            "GetCompareProduct" in request_blob
+            or "single-compare" in request_blob
+            or "ProductCarousel_Recommendations" in request_blob
+            or "pdp-compare" in request_blob
+        )
         request_names = strict_compare_response_names(body_data, sku, allowed_sku_ids)
         is_compare_response = bool(request_names)
         if not has_get_compare and not is_compare_response:
@@ -2078,7 +2157,12 @@ def json_response_compare_summary(json_data, sku=""):
         body = entry.get("body")
         body_data = parse_json_value(body)
         entry_blob = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
-        has_get_compare = "GetCompareProduct" in entry_blob or "single-compare" in entry_blob
+        has_get_compare = (
+            "GetCompareProduct" in entry_blob
+            or "single-compare" in entry_blob
+            or "ProductCarousel_Recommendations" in entry_blob
+            or "pdp-compare" in entry_blob
+        )
         entry_names = strict_compare_response_names(body_data, sku, allowed_sku_ids)
         is_compare_response = bool(entry_names)
         if not has_get_compare and not is_compare_response:
@@ -2170,7 +2254,11 @@ def graphql_batch_response_item(response_json, index):
 
 def compare_recommendations_from_response(response_json):
     data = response_json.get("data") if isinstance(response_json, dict) else {}
-    return first_path([data], ["recommendations", "subPlacements", 0, "recommendations"]) or []
+    return (
+        first_path([data], ["recommendations", "subPlacements", 0, "recommendations"])
+        or first_path([data], ["recommendationsV2", "subPlacements", 0, "recommendations"])
+        or []
+    )
 
 
 def write_compare_response_artifacts(paths, payload, response_json, response_text, headers):
@@ -2482,7 +2570,7 @@ PRODUCT_SCHEMA_REVIEW20_QUERY = (
     "query ProductSchema_init($skuId:String!$salesChannel:String!)"
     "{...ProductSchema_Fragment}"
     "fragment ProductSchema_Fragment on Query{productBySkuId(skuId:$skuId){bsin name{short}images{piscesHref}"
-    "url{pdp}description{short}skuId manufacturer{modelNumber}color{displayName}brand "
+    "url{pdp}description{short}skuId manufacturer{modelNumber}color{displayName}brand badgesV2{label} "
     "isPurchaseWithTradeInEligible connectionType{code} "
     "productVariationDetailDisplay{type title variationTypes{definition displayName rawName}"
     "productVariations{shortName color colorCategory sku variations{rawName value}"
@@ -2501,6 +2589,11 @@ PRODUCT_SCHEMA_GET_IT_FAST_QUERY = (
     "{shippingCutOffDetails{getItBy getItByDate destinationZipCode}"
     "storeCutOffDetails{getItBy getItByDate minPickupHours locationId}}}"
 )
+
+
+PDP_FULFILLMENT_DYNAMIC_QUERY = """
+query FulfillmentOptionHook_FulfillmentDynamicQuery($skuId:String!$fulfillmentInput:ProductFulfillmentInput!$productPriceInput:ProductItemPriceInput!$openBoxCondition:Int){productBySkuId(skuId:$skuId openBoxCondition:$openBoxCondition){skuId ...FullfillmentProductBySkuIdFragment fulfillmentOptions(input:$fulfillmentInput){...FullfillmentOptionsFragment}badgesV2{label}}}fragment FullfillmentProductBySkuIdFragment on Product{brand brandId classification{class{id}}isSmallMediumBusiness releaseDateDisplayValue whatItIs eligibleGatedEventCustomerSegments{canPurchaseNow}isConstrainedHighVelocity inStoreServiceType buyingOptions{type product{openBoxCondition openBoxOptions{code}inStoreServiceType price(input:$productPriceInput){openBoxCondition}primaryImage{piscesHref}name{short}}pdpUrl}price(input:$productPriceInput){customerPrice mobileContracts{isDefaultContract purchaseType numberOfPayments}}waitlists{enrollmentPaused id name type}...MpFragment}fragment MpFragment on Product{bsinProduct{bsin products{openBoxCondition condition{type}seller{classification}skuId}}bsin seller{classification id}}fragment FullfillmentOptionsFragment on FulfillmentOptionsList{buttonStates{...ButtonStatesFragment}shippingDetails{...ShippingDetailsFragment}deliveryDetails{...DeliveryDetailsFragment}ispuDetails{...IspuDetailsFragment}}fragment ButtonStatesFragment on ButtonState{buttonState condition displayText secondaryButtonState secondaryDisplayText planButtonState hyperlinkUrl}fragment ShippingDetailsFragment on FulfillmentShippingDetail{destinationZipCode shippingAvailability{backordered condition customerLOSGroup{customerLosGroupId displayDateType maxLineItemMaxDate minLineItemMaxDate name price}levelOfServices{code id isLessThanTruckload isScheduleParcelDelivery}defaultCustomerLosGroupId downloadEligible emailEligible fulfillByVendor preorderable promiseByStreetDate whenAvailableFlag shippingEligible restrictions{category}}sku}fragment DeliveryDetailsFragment on FulfillmentDeliveryDetail{deliveryAvailability{salLocationId deliverable deliveryEligible forceSkipScheduling homeDeliveryDisplayDateType condition deliverySlots{date}deliveryServices{eligible levelsOfService{offerUnitPrice unitPrice}serviceType}installationSlots{date}backordered restrictions{category}}destinationZipCode}fragment IspuDetailsFragment on InStorePickupDetail{sku ispuAvailability{...IspuAvailabilityFragment}nearbyLocation{availability{maxDate pickupEligible quantity}distance store{...IspuStoreFragment}}nearbyLocations{availability{fulfillmentType maxDate minPickupInHours}store{...IspuStoreFragment}}sku store{...IspuStoreFragment}}fragment IspuAvailabilityFragment on InStorePickupAvailability{backordered condition displayDateType downloadEligible emailEligible fulfillDate fulfillmentType instoreInventoryAvailable inStoreOnly maxDate minPickupInHours pickupEligible preorderable promiseByStreetDate whenAvailableFlag quantity restrictions{category}inStoreServices{installationSlots{date}}}fragment IspuStoreFragment on FulfillmentPickUpStore{name storeId zip}
+""".strip()
 
 
 def fallback_review20_payload(sku):
@@ -2527,6 +2620,61 @@ def get_it_fast_payload(sku):
         "operationName": "ProductSchemaGetItFastProbe",
         "variables": variables,
         "query": PRODUCT_SCHEMA_GET_IT_FAST_QUERY,
+    }
+
+
+def fulfillment_dynamic_input(option_marker=None):
+    zip_code = str(bestbuy_zip_code())
+    store_id = str(bestbuy_store_id())
+    variables = {
+        "shipping": {
+            "destinationZipCode": zip_code,
+            "effectivePlanPaidMembership": "NULL",
+        },
+        "delivery": {
+            "destinationZipCode": zip_code,
+            "deliveryDateOption": "EARLIEST_AVAILABLE_DATE",
+            "effectivePlanPaidMembership": "NULL",
+        },
+        "inStorePickup": {
+            "storeId": store_id,
+            "searchNearby": True,
+            "showNearbyLocations": False,
+        },
+        "profileCode": None,
+        "buttonState": {
+            "fulfillmentOption": option_marker,
+            "context": "PDP",
+            "destinationZipCode": zip_code,
+            "storeId": store_id,
+            "effectivePlanPaidMembership": "NULL",
+        },
+    }
+    return apply_bestbuy_location(variables)
+
+
+def fulfillment_product_price_input():
+    return {
+        "customerAttributes": "",
+        "salesChannel": "LargeView",
+        "customerId": None,
+        "planPaidMemberType": "NULL",
+        "ct": "",
+        "isStoreAgent": False,
+        "locationId": "",
+    }
+
+
+def fulfillment_dynamic_payload(sku):
+    return {
+        "operationName": "FulfillmentOptionHook_FulfillmentDynamicQuery",
+        "variables": {
+            "skuId": str(sku),
+            "fulfillmentInput": fulfillment_dynamic_input(None),
+            "productPriceInput": fulfillment_product_price_input(),
+        },
+        "extensions": {"clientLibrary": {"name": "@apollo/client", "version": "4.1.6"}},
+        "query": PDP_FULFILLMENT_DYNAMIC_QUERY,
     }
 
 
@@ -2583,6 +2731,112 @@ def compare_product_payload(sku):
     }
 
 
+COMPARE_RECOMMENDATIONS_V2_QUERY = """
+query ProductCarousel_Recommendations(
+  $placement: String!,
+  $site: String!,
+  $skus: [String!],
+  $limit: Int!,
+  $partyId: String,
+  $ut: String,
+  $vt: String,
+  $storeIdRecs: [String!],
+  $pageType: String,
+  $filterValue: [String!],
+  $filterType: String!,
+  $referer: String
+) {
+  recommendationsV2(
+    identity: {partyId: $partyId, ut: $ut, vt: $vt}
+    filter: {type: $filterType, values: $filterValue}
+    input: {
+      placement: $placement,
+      site: $site,
+      skus: $skus,
+      limit: $limit,
+      storeIds: $storeIdRecs,
+      pageType: $pageType,
+      referer: $referer
+    }
+  ) {
+    subPlacements {
+      id
+      name
+      ep
+      title
+      recommendations {
+        id
+        ep
+        rank
+        item {
+          ... on Product {
+            skuId
+            name { short title }
+            url { relativePdp skuSpecificUrl }
+            primaryImage { piscesHref }
+            reviewInfo { averageRating reviewCount }
+            openBoxCondition
+          }
+        }
+      }
+    }
+  }
+}
+""".strip()
+
+
+def compare_recommendations_v2_payload(sku):
+    return {
+        "operationName": "ProductCarousel_Recommendations",
+        "variables": {
+            "placement": "pdp-compare",
+            "site": "dotcom-l",
+            "skus": [str(sku)],
+            "limit": 15,
+            "partyId": None,
+            "ut": "",
+            "vt": "",
+            "storeIdRecs": [str(bestbuy_store_id())],
+            "pageType": "Product Detail Page",
+            "filterValue": [],
+            "filterType": "",
+            "referer": "www.bestbuy.com",
+        },
+        "extensions": {"clientLibrary": {"name": "@apollo/client", "version": "4.1.6"}},
+        "query": COMPARE_RECOMMENDATIONS_V2_QUERY,
+    }
+
+
+TRADE_IN_DATA_QUERY = """
+query GetTradeInData($skuId: String!) {
+  productBySkuId(skuId: $skuId) {
+    tradeInOffer {
+      purchaseSku
+      value
+      tradeInSku
+      disclaimer
+      offerCarrierValue {
+        carrierCode
+        carrierLink
+        carrierUpToValue
+        disclaimerCallouts
+        purchaseType
+      }
+    }
+  }
+}
+""".strip()
+
+
+def trade_in_data_payload(sku):
+    return {
+        "operationName": "GetTradeInData",
+        "variables": {"skuId": str(sku)},
+        "extensions": {"clientLibrary": {"name": "@apollo/client", "version": "4.1.6"}},
+        "query": TRADE_IN_DATA_QUERY,
+    }
+
+
 def detail_batch_payloads_for_sku(sku):
     payloads = []
     indices = {}
@@ -2595,7 +2849,16 @@ def detail_batch_payloads_for_sku(sku):
     if FETCH_COMPARE:
         indices["compare"] = len(payloads)
         payloads.append(compare_product_payload(sku))
-    if FETCH_GET_IT_FAST:
+        if hhp_compare_v2_fallback_enabled():
+            indices["compare_v2"] = len(payloads)
+            payloads.append(compare_recommendations_v2_payload(sku))
+    if hhp_trade_in_data_enabled():
+        indices["trade_in"] = len(payloads)
+        payloads.append(trade_in_data_payload(sku))
+    if FETCH_FULFILLMENT_DYNAMIC:
+        indices["fulfillment_dynamic"] = len(payloads)
+        payloads.append(fulfillment_dynamic_payload(sku))
+    elif FETCH_GET_IT_FAST:
         indices["get_it_fast"] = len(payloads)
         payloads.append(get_it_fast_payload(sku))
     return payloads, indices
@@ -2664,16 +2927,32 @@ def fetch_detail(client, target):
     detail_payload = fallback_review20_payload(sku)
     review_payload = fallback_review20_payload(sku)
     compare_payload = compare_product_payload(sku) if FETCH_COMPARE else None
-    get_it_fast_batch_payload = get_it_fast_payload(sku) if FETCH_GET_IT_FAST else None
+    compare_v2_payload = compare_recommendations_v2_payload(sku) if FETCH_COMPARE and hhp_compare_v2_fallback_enabled() else None
+    trade_in_payload = trade_in_data_payload(sku) if hhp_trade_in_data_enabled() else None
+    fulfillment_dynamic_payload_obj = fulfillment_dynamic_payload(sku) if FETCH_FULFILLMENT_DYNAMIC else None
+    get_it_fast_batch_payload = get_it_fast_payload(sku) if FETCH_GET_IT_FAST and not FETCH_FULFILLMENT_DYNAMIC else None
     request_payload = [detail_payload, review_payload]
+    compare_index = None
+    compare_v2_index = None
+    trade_in_index = None
     if compare_payload:
+        compare_index = len(request_payload)
         request_payload.append(compare_payload)
+    if compare_v2_payload:
+        compare_v2_index = len(request_payload)
+        request_payload.append(compare_v2_payload)
+    if trade_in_payload:
+        trade_in_index = len(request_payload)
+        request_payload.append(trade_in_payload)
+    fulfillment_dynamic_index = None
+    if fulfillment_dynamic_payload_obj:
+        fulfillment_dynamic_index = len(request_payload)
+        request_payload.append(fulfillment_dynamic_payload_obj)
     get_it_fast_index = None
     if get_it_fast_batch_payload:
         get_it_fast_index = len(request_payload)
         request_payload.append(get_it_fast_batch_payload)
     operation_names = [payload.get("operationName", "") for payload in request_payload]
-    compare_index = 2 if compare_payload else None
     paths = detail_paths_for_status(sku, target, False)
     for transport in fetch_transports():
         if transport == "zenrows" and not client:
@@ -2685,6 +2964,7 @@ def fetch_detail(client, target):
             compare_name_count = 0
             compare_ok = True
             get_it_fast_values = {}
+            trade_in_data_text = ""
             if DETAIL_DIRECT_GRAPHQL:
                 response = client.post(
                     "https://www.bestbuy.com/gateway/graphql",
@@ -2707,10 +2987,26 @@ def fetch_detail(client, target):
                 detail_response_json = graphql_batch_response_item(response_json, 0)
                 review_response_json = graphql_batch_response_item(response_json, 1)
                 compare_response_json = graphql_batch_response_item(response_json, compare_index) if compare_index is not None else {}
+                compare_v2_response_json = (
+                    graphql_batch_response_item(response_json, compare_v2_index) if compare_v2_index is not None else {}
+                )
+                trade_in_response_json = (
+                    graphql_batch_response_item(response_json, trade_in_index) if trade_in_index is not None else {}
+                )
+                fulfillment_dynamic_response_json = (
+                    graphql_batch_response_item(response_json, fulfillment_dynamic_index)
+                    if fulfillment_dynamic_index is not None
+                    else {}
+                )
                 get_it_fast_response_json = (
                     graphql_batch_response_item(response_json, get_it_fast_index) if get_it_fast_index is not None else {}
                 )
                 get_it_fast_values = get_it_fast_availability_values(get_it_fast_response_json)
+                trade_in_data_text = (
+                    trade_in_from_offer_data(trade_in_response_json.get("data") or {}, include_generic=False)
+                    if isinstance(trade_in_response_json, dict)
+                    else ""
+                )
                 product = ((response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(response_json, dict) else {}
                 if not product:
                     product = ((detail_response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(detail_response_json, dict) else {}
@@ -2720,8 +3016,25 @@ def fetch_detail(client, target):
                     "status_code": response.status_code,
                     "operation_names": operation_names,
                     "batch_count": len(response_json) if isinstance(response_json, list) else (1 if isinstance(response_json, dict) else 0),
-                    "fulfillment_in_batch": bool(get_it_fast_batch_payload),
-                    "product_fulfillment_options_in_batch": False,
+                    "fulfillment_in_batch": bool(fulfillment_dynamic_payload_obj or get_it_fast_batch_payload),
+                    "product_fulfillment_options_in_batch": bool(fulfillment_dynamic_payload_obj),
+                    "fulfillment_dynamic_in_batch": bool(fulfillment_dynamic_payload_obj),
+                    "fulfillment_dynamic_has_options": bool(
+                        first_path(
+                            [
+                                ((fulfillment_dynamic_response_json.get("data") or {}).get("productBySkuId") or {})
+                                if isinstance(fulfillment_dynamic_response_json, dict)
+                                else {}
+                            ],
+                            ["fulfillmentOptions"],
+                        )
+                    ),
+                    "compare_v2_in_batch": bool(compare_v2_payload),
+                    "compare_v2_name_count": len(compare_recommendation_names(compare_v2_response_json.get("data") or {}))
+                    if isinstance(compare_v2_response_json, dict)
+                    else 0,
+                    "trade_in_data_in_batch": bool(trade_in_payload),
+                    "trade_in_data_text": trade_in_data_text,
                     "get_it_fast_in_batch": bool(get_it_fast_batch_payload),
                     "get_it_fast_value_count": sum(1 for value in get_it_fast_values.values() if value),
                     "errors": [
@@ -2758,24 +3071,50 @@ def fetch_detail(client, target):
                 )
                 if paths.get("fulfillment_response"):
                     paths["fulfillment_response"].write_text(
-                        json.dumps(endpoint_result.get("entries") or [], indent=2, ensure_ascii=False),
+                        json.dumps(
+                            [fulfillment_dynamic_response_json]
+                            if fulfillment_dynamic_payload_obj
+                            else endpoint_result.get("entries") or [],
+                            indent=2,
+                            ensure_ascii=False,
+                        ),
                         encoding="utf-8",
                     )
                 if paths.get("fulfillment_meta"):
+                    fulfillment_dynamic_has_options = bool(
+                        first_path(
+                            [
+                                ((fulfillment_dynamic_response_json.get("data") or {}).get("productBySkuId") or {})
+                                if isinstance(fulfillment_dynamic_response_json, dict)
+                                else {}
+                            ],
+                            ["fulfillmentOptions"],
+                        )
+                    )
                     paths["fulfillment_meta"].write_text(
                         json.dumps(
                             {
                                 "sku_id": sku,
-                                "stage": "fulfillment_not_collected_in_detail",
+                                "stage": "fulfillment_collected_in_detail"
+                                if fulfillment_dynamic_payload_obj
+                                else "fulfillment_not_collected_in_detail",
                                 "url": pdp_url,
-                                "enabled": False,
-                                "transport": "none",
+                                "enabled": bool(fulfillment_dynamic_payload_obj),
+                                "transport": transport if fulfillment_dynamic_payload_obj else "none",
                                 "extra_network_call": False,
-                                "variant_count": len(endpoint_result.get("entries") or []),
-                                "success_count": endpoint_result.get("success_count", 0),
-                                "value_count": endpoint_result.get("value_count", 0),
+                                "variant_count": 1
+                                if fulfillment_dynamic_payload_obj
+                                else len(endpoint_result.get("entries") or []),
+                                "success_count": 1
+                                if fulfillment_dynamic_has_options
+                                else endpoint_result.get("success_count", 0),
+                                "value_count": 1
+                                if fulfillment_dynamic_has_options
+                                else endpoint_result.get("value_count", 0),
                                 "error_count": endpoint_result.get("error_count", 0),
-                                "options": [],
+                                "options": ["FulfillmentOptionHook_FulfillmentDynamicQuery"]
+                                if fulfillment_dynamic_payload_obj
+                                else [],
                                 "finished_at": now(),
                             },
                             indent=2,
@@ -2808,7 +3147,14 @@ def fetch_detail(client, target):
                 review_paths_current["meta"].write_text(json.dumps(review_meta, indent=2, ensure_ascii=False), encoding="utf-8")
                 if compare_payload:
                     recommendations = compare_recommendations_from_response(compare_response_json)
-                    compare_ok = response.status_code == 200 and isinstance(recommendations, list)
+                    fallback_names = (
+                        compare_recommendation_names(compare_v2_response_json.get("data") or {})
+                        if isinstance(compare_v2_response_json, dict)
+                        else []
+                    )
+                    compare_ok = response.status_code == 200 and (
+                        isinstance(recommendations, list) or isinstance(fallback_names, list)
+                    )
                     compare_paths_current = compare_paths_for_status(sku, target, compare_ok)
                     write_compare_response_artifacts(compare_paths_current, compare_payload, compare_response_json, text, dict(response.headers))
                     compare_meta = {
@@ -2825,7 +3171,11 @@ def fetch_detail(client, target):
                         "elapsed_seconds": 0,
                         "x_request_cost": 0,
                         "bytes": len(text or ""),
-                        "recommendation_count": len(recommendations) if isinstance(recommendations, list) else 0,
+                        "recommendation_count": max(
+                            len(recommendations) if isinstance(recommendations, list) else 0,
+                            len(fallback_names),
+                        ),
+                        "fallback_recommendation_count": len(fallback_names),
                         "finished_at": now(),
                         "error": "" if compare_ok else "compare_recommendations_missing",
                     }
@@ -2901,11 +3251,14 @@ def fetch_detail(client, target):
                     "json_response_compare_min_names": DETAIL_SIMILAR_MIN_NAMES,
                     "json_response_compare_ok": compare_ok,
                     "fulfillment_endpoint_enabled": False,
-                    "fulfillment_direct_batch_enabled": bool(get_it_fast_batch_payload),
+                    "fulfillment_direct_batch_enabled": bool(fulfillment_dynamic_payload_obj or get_it_fast_batch_payload),
+                    "fulfillment_dynamic_batch_enabled": bool(fulfillment_dynamic_payload_obj),
                     "fulfillment_get_it_fast_batch_enabled": bool(get_it_fast_batch_payload),
                     "fulfillment_get_it_fast_value_count": sum(1 for value in get_it_fast_values.values() if value)
                     if DETAIL_DIRECT_GRAPHQL
                     else 0,
+                    "hhp_trade_in_data_batch_enabled": bool(trade_in_payload),
+                    "hhp_trade_in_data_text": trade_in_data_text,
                     "fulfillment_extra_network_calls": 0,
                     "fulfillment_endpoint_variant_count": 0,
                     "fulfillment_endpoint_success_count": 0,
@@ -3015,14 +3368,30 @@ def fetch_detail_sku_batch(client, targets):
             detail_response_json = graphql_batch_response_item(response_json, indices.get("detail", -1))
             review_response_json = graphql_batch_response_item(response_json, indices.get("review", -1))
             compare_response_json = graphql_batch_response_item(response_json, indices.get("compare", -1))
+            compare_v2_response_json = graphql_batch_response_item(response_json, indices.get("compare_v2", -1))
+            trade_in_response_json = graphql_batch_response_item(response_json, indices.get("trade_in", -1))
+            fulfillment_dynamic_response_json = graphql_batch_response_item(response_json, indices.get("fulfillment_dynamic", -1))
             get_it_fast_response_json = graphql_batch_response_item(response_json, indices.get("get_it_fast", -1))
             get_it_fast_values = get_it_fast_availability_values(get_it_fast_response_json)
+            trade_in_data_text = (
+                trade_in_from_offer_data(trade_in_response_json.get("data") or {}, include_generic=False)
+                if isinstance(trade_in_response_json, dict)
+                else ""
+            )
             product = ((detail_response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(detail_response_json, dict) else {}
             success = response is not None and status_code == 200 and isinstance(product, dict) and str(product.get("skuId") or "") == str(sku)
             paths = detail_paths_for_status(sku, target, success)
             entry_responses = [
                 graphql_batch_response_item(response_json, indices[stage])
-                for stage in ("detail", "review", "compare", "get_it_fast")
+                for stage in (
+                    "detail",
+                    "review",
+                    "compare",
+                    "compare_v2",
+                    "trade_in",
+                    "fulfillment_dynamic",
+                    "get_it_fast",
+                )
                 if stage in indices
             ]
             entry_payloads = entry["payloads"]
@@ -3043,6 +3412,25 @@ def fetch_detail_sku_batch(client, targets):
                         "batch_operation_count": len(request_payload),
                         "batch_response_count": response_count,
                         "response_indices": indices,
+                        "compare_v2_in_batch": "compare_v2" in indices,
+                        "compare_v2_name_count": len(compare_recommendation_names(compare_v2_response_json.get("data") or {}))
+                        if isinstance(compare_v2_response_json, dict)
+                        else 0,
+                        "trade_in_data_in_batch": "trade_in" in indices,
+                        "trade_in_data_text": trade_in_data_text,
+                        "fulfillment_in_batch": "fulfillment_dynamic" in indices or "get_it_fast" in indices,
+                        "product_fulfillment_options_in_batch": "fulfillment_dynamic" in indices,
+                        "fulfillment_dynamic_in_batch": "fulfillment_dynamic" in indices,
+                        "fulfillment_dynamic_has_options": bool(
+                            first_path(
+                                [
+                                    ((fulfillment_dynamic_response_json.get("data") or {}).get("productBySkuId") or {})
+                                    if isinstance(fulfillment_dynamic_response_json, dict)
+                                    else {}
+                                ],
+                                ["fulfillmentOptions"],
+                            )
+                        ),
                         "get_it_fast_in_batch": "get_it_fast" in indices,
                         "get_it_fast_value_count": sum(1 for value in get_it_fast_values.values() if value),
                         "errors": [
@@ -3057,22 +3445,43 @@ def fetch_detail_sku_batch(client, targets):
                 encoding="utf-8",
             )
             if paths.get("fulfillment_response"):
-                paths["fulfillment_response"].write_text("[]", encoding="utf-8")
+                paths["fulfillment_response"].write_text(
+                    json.dumps(
+                        [fulfillment_dynamic_response_json] if "fulfillment_dynamic" in indices else [],
+                        indent=2,
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
             if paths.get("fulfillment_meta"):
+                fulfillment_dynamic_has_options = bool(
+                    first_path(
+                        [
+                            ((fulfillment_dynamic_response_json.get("data") or {}).get("productBySkuId") or {})
+                            if isinstance(fulfillment_dynamic_response_json, dict)
+                            else {}
+                        ],
+                        ["fulfillmentOptions"],
+                    )
+                )
                 paths["fulfillment_meta"].write_text(
                     json.dumps(
                         {
                             "sku_id": sku,
-                            "stage": "fulfillment_not_collected_in_detail",
+                            "stage": "fulfillment_collected_in_detail"
+                            if "fulfillment_dynamic" in indices
+                            else "fulfillment_not_collected_in_detail",
                             "url": entry["pdp_url"],
-                            "enabled": False,
-                            "transport": "none",
+                            "enabled": "fulfillment_dynamic" in indices,
+                            "transport": transport if "fulfillment_dynamic" in indices else "none",
                             "extra_network_call": False,
-                            "variant_count": 0,
-                            "success_count": 0,
-                            "value_count": 0,
+                            "variant_count": 1 if "fulfillment_dynamic" in indices else 0,
+                            "success_count": 1 if fulfillment_dynamic_has_options else 0,
+                            "value_count": 1 if fulfillment_dynamic_has_options else 0,
                             "error_count": 0,
-                            "options": [],
+                            "options": ["FulfillmentOptionHook_FulfillmentDynamicQuery"]
+                            if "fulfillment_dynamic" in indices
+                            else [],
                             "finished_at": now(),
                         },
                         indent=2,
@@ -3113,10 +3522,20 @@ def fetch_detail_sku_batch(client, targets):
             compare_count = 0
             if FETCH_COMPARE and "compare" in indices:
                 recommendations = compare_recommendations_from_response(compare_response_json)
-                compare_ok = response is not None and status_code == 200 and isinstance(recommendations, list)
+                fallback_names = (
+                    compare_recommendation_names(compare_v2_response_json.get("data") or {})
+                    if isinstance(compare_v2_response_json, dict)
+                    else []
+                )
+                compare_ok = response is not None and status_code == 200 and (
+                    isinstance(recommendations, list) or isinstance(fallback_names, list)
+                )
                 compare_count = len(recommendations) if isinstance(recommendations, list) else 0
                 compare_paths_current = compare_paths_for_status(sku, target, compare_ok)
-                compare_payload_index = ["detail", "review", "compare", "get_it_fast"].index("compare")
+                compare_payload_index = next(
+                    (idx for idx, payload in enumerate(entry_payloads) if payload.get("operationName") == "GetCompareProduct"),
+                    2,
+                )
                 write_compare_response_artifacts(
                     compare_paths_current,
                     entry_payloads[compare_payload_index],
@@ -3140,7 +3559,8 @@ def fetch_detail_sku_batch(client, targets):
                             "elapsed_seconds": 0,
                             "x_request_cost": 0,
                             "bytes": len(text or ""),
-                            "recommendation_count": compare_count,
+                            "recommendation_count": max(compare_count, len(fallback_names)),
+                            "fallback_recommendation_count": len(fallback_names),
                             "finished_at": now(),
                             "error": "" if compare_ok else "compare_recommendations_missing",
                         },
@@ -3172,9 +3592,12 @@ def fetch_detail_sku_batch(client, targets):
                     "json_response": DETAIL_JSON_RESPONSE,
                     "json_response_compare_name_count": 0,
                     "fulfillment_endpoint_enabled": False,
-                    "fulfillment_direct_batch_enabled": "get_it_fast" in indices,
+                    "fulfillment_direct_batch_enabled": "fulfillment_dynamic" in indices or "get_it_fast" in indices,
+                    "fulfillment_dynamic_batch_enabled": "fulfillment_dynamic" in indices,
                     "fulfillment_get_it_fast_batch_enabled": "get_it_fast" in indices,
                     "fulfillment_get_it_fast_value_count": sum(1 for value in get_it_fast_values.values() if value),
+                    "hhp_trade_in_data_batch_enabled": "trade_in" in indices,
+                    "hhp_trade_in_data_text": trade_in_data_text,
                     "fulfillment_extra_network_calls": 0,
                     "fulfillment_endpoint_variant_count": 0,
                     "fulfillment_endpoint_success_count": 0,
@@ -3494,6 +3917,8 @@ def compare_similar_names_from_detail(sku):
 
     source_names = compare_recommendation_names(data) if isinstance(data, dict) else []
     if not source_names:
+        source_names = recommendation_names_from_detail_payloads(sku)
+    if not source_names:
         source_names = compare_names_from_json_response(sku)
     if not source_names:
         source_names = compare_names_from_detail_html(sku)
@@ -3561,7 +3986,12 @@ def compare_data_from_json_response(sku):
 
     for entry in compare_capture_entries_from_html(html_text):
         entry_blob = json.dumps(entry, ensure_ascii=False, separators=(",", ":"))
-        if "GetCompareProduct" not in entry_blob and "single-compare" not in entry_blob:
+        if (
+            "GetCompareProduct" not in entry_blob
+            and "single-compare" not in entry_blob
+            and "ProductCarousel_Recommendations" not in entry_blob
+            and "pdp-compare" not in entry_blob
+        ):
             continue
         data = strict_compare_response_data(parse_json_value(entry.get("body")), sku, allowed_sku_ids)
         if data:
@@ -3588,17 +4018,19 @@ def compare_current_product_from_detail(sku):
 
 def compare_recommendation_names(data):
     names = []
-    subplacements = (((data.get("recommendations") or {}).get("subPlacements")) or [])
-    for subplacement in subplacements:
-        if not isinstance(subplacement, dict):
-            continue
-        for recommendation in subplacement.get("recommendations") or []:
-            if not isinstance(recommendation, dict):
+    if not isinstance(data, dict):
+        return names
+    for root_key in ("recommendations", "recommendationsV2"):
+        subplacements = (((data.get(root_key) or {}).get("subPlacements")) or [])
+        for subplacement in subplacements:
+            if not isinstance(subplacement, dict):
                 continue
-            item = recommendation.get("item") or {}
-            name = product_short_name(item)
-            if name and name not in names:
-                names.append(name)
+            for recommendation in subplacement.get("recommendations") or []:
+                if not isinstance(recommendation, dict):
+                    continue
+                for name in product_names_from_value(recommendation):
+                    if name and name not in names:
+                        names.append(name)
     return names
 
 
@@ -3640,6 +4072,27 @@ def recommendation_names_from_detail_payloads(sku):
     return names
 
 
+def trade_in_from_detail_payloads(sku):
+    fallback = ""
+    for payload in detail_payloads(sku):
+        for event in payload.get("events", []):
+            if event.get("type") not in {"next", "data"}:
+                continue
+            data = event_data(event)
+            if not isinstance(data, dict):
+                continue
+            amount_text = trade_in_from_offer_data(data, include_generic=False)
+            if amount_text:
+                return amount_text
+            if not fallback:
+                fallback = trade_in_from_offer_data(data, include_generic=True)
+            for value in nested_strings(data):
+                match = trade_in_text_match(value)
+                if match:
+                    return compact_text(match.group(1))
+    return fallback
+
+
 def compare_names_from_detail_html(sku):
     paths = detail_paths(sku)
     html_path = paths.get("html")
@@ -3671,11 +4124,20 @@ def compare_data_from_detail_payloads(sku):
         for event in payload.get("events", []):
             if event.get("type") != "started":
                 continue
-            if operation_name(event) != "GetCompareProduct":
-                continue
+            op_name = operation_name(event)
             variables = event_variables(event)
-            if str(variables.get("skuId") or "") in allowed_sku_ids:
+            if op_name == "GetCompareProduct" and str(variables.get("skuId") or "") in allowed_sku_ids:
                 compare_event_ids.add(str(event.get("id") or ""))
+            elif op_name == "ProductCarousel_Recommendations":
+                skus = variables.get("skus")
+                if isinstance(skus, str):
+                    request_skus = {skus}
+                elif isinstance(skus, list):
+                    request_skus = {str(value) for value in skus if value not in (None, "")}
+                else:
+                    request_skus = set()
+                if request_skus & allowed_sku_ids:
+                    compare_event_ids.add(str(event.get("id") or ""))
         if not compare_event_ids:
             continue
         for event in payload.get("events", []):
@@ -3871,7 +4333,7 @@ def hhp_promotion_type(products, html_text):
             name = compact_text(html.unescape(re.sub(r"<[^>]+>", " ", value)))
             if name and name.lower() in HHP_PROMOTION_TYPES and name not in names:
                 names.append(name)
-    return " ||| ".join(names)
+    return names[0] if names else ""
 
 
 def recommendation(products):
@@ -4082,18 +4544,6 @@ def fastest_delivery_text(shipping):
                 phrase = f"{phrase} \u2022 FREE"
             return phrase
     return fastest_delivery_date_phrase(shipping.get("promiseByStreetDate"))
-
-
-def fulfillment_button_text(products):
-    for product in reversed(products):
-        states = first_path([product], ["fulfillmentOptions", "buttonStates"]) or []
-        for state in as_list(states):
-            if not isinstance(state, dict):
-                continue
-            text = compact_text(state.get("displayText") or state.get("buttonState"))
-            if text:
-                return text
-    return ""
 
 
 def inventory_status_text(pickup, shipping, delivery):
@@ -4325,13 +4775,13 @@ def output_row(target):
         ),
         "available_quantity_for_purchase": first_non_empty(target.get("available_quantity_for_purchase"), pickup.get("quantity") if isinstance(pickup, dict) else ""),
         "inventory_status": first_non_empty(target.get("inventory_status"), inventory_status_text(pickup, shipping, delivery)),
-        "sku_status": first_non_empty(
-            "Sponsored" if truthy(target.get("is_sponsored")) or target.get("sku_status") == "Sponsored" else "",
-            fulfillment_button_text(products),
-        ),
+        "sku_status": "Sponsored"
+        if truthy(target.get("is_sponsored")) or str(target.get("sku_status") or "").strip().lower() == "sponsored"
+        else "",
         "trade_in": first_non_empty(
             selector_values.get("trade_in"),
             trade_in_from_html(html_text),
+            trade_in_from_detail_payloads(sku),
             trade_in_from_products(products),
         ),
         "hhp_storage": hhp_attrs.get("hhp_storage", ""),
@@ -4581,7 +5031,9 @@ def main():
             if use_detail_sku_batch
             else ("gateway_graphql_post" if DETAIL_DIRECT_GRAPHQL else "pdp_render"),
             compare="batched" if direct_compare else ("pdp_js" if pdp_compare_js else "off"),
-            fulfillment="off",
+            fulfillment="dynamic_batched"
+            if FETCH_FULFILLMENT_DYNAMIC
+            else ("get_it_fast_batched" if FETCH_GET_IT_FAST else "off"),
         ),
         flush=True,
     )
@@ -4798,7 +5250,9 @@ def main():
         "detail_retry_on_missing_similar": DETAIL_RETRY_ON_MISSING_SIMILAR,
         "detail_similar_min_names": DETAIL_SIMILAR_MIN_NAMES,
         "detail_fulfillment_endpoint_fetch": False,
-        "detail_fulfillment_direct_batch": False,
+        "detail_fulfillment_direct_batch": FETCH_FULFILLMENT_DYNAMIC or FETCH_GET_IT_FAST,
+        "detail_fulfillment_dynamic_batch": FETCH_FULFILLMENT_DYNAMIC,
+        "detail_get_it_fast_batch": FETCH_GET_IT_FAST and not FETCH_FULFILLMENT_DYNAMIC,
         "use_db_selectors": USE_DB_SELECTORS,
         "fetch_mode": FETCH_MODE,
         "fetch_transports": fetch_transports(),

@@ -47,6 +47,7 @@ ALLOW_MULTI_SKU_FULFILLMENT = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_ALLOW_MUL
 CHUNK_SIZE = REQUESTED_CHUNK_SIZE if ALLOW_MULTI_SKU_FULFILLMENT else 1
 REQUEST_TIMEOUT = int(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_TIMEOUT", os.getenv("ZENROWS_TIMEOUT", "120")))
 DRY_RUN = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_DRY_RUN", "0").lower() in {"1", "true", "yes", "y"}
+SKIP = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_SKIP", "0").lower() in {"1", "true", "yes", "y"}
 LIMIT = int(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_LIMIT", "0"))
 CANDIDATE_MODE = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_CANDIDATE_MODE", "missing_any").strip().lower()
 OVERWRITE = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_OVERWRITE", "0").lower() in {"1", "true", "yes", "y"}
@@ -347,6 +348,27 @@ def apply_values(rows, row_to_sku, values_by_sku):
 
 def main():
     started_at = now()
+    if SKIP:
+        run_dir = BACKFILL_ROOT / datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_dir.mkdir(parents=True, exist_ok=True)
+        manifest = {
+            "run_type": "step08_availability_backfill",
+            "started_at": started_at,
+            "finished_at": now(),
+            "skipped": True,
+            "reason": "BESTBUY_AVAILABILITY_BACKFILL_SKIP=1",
+            "batch_id": BACKFILL_BATCH_ID,
+            "call_count": 0,
+            "x_request_cost": 0,
+            "estimated_krw_1550": 0,
+        }
+        (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(
+            f"[availability_backfill:skip] batch={BACKFILL_BATCH_ID} reason=BESTBUY_AVAILABILITY_BACKFILL_SKIP=1 "
+            f"calls=0 raw={rel_path(run_dir)}",
+            flush=True,
+        )
+        return
     final_rows = read_csv(FINAL_OUTPUT_CSV)
     detail_rows = read_csv(DETAIL_ROWS_CSV)
     product_list_rows = read_csv(PRODUCT_LIST_CSV)

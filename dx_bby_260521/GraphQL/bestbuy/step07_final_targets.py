@@ -84,6 +84,10 @@ def truthy(value):
     return value is True or str(value or "").strip().lower() in {"1", "true", "yes", "y", "sponsored"}
 
 
+def row_is_sponsored(row):
+    return truthy(row.get("is_sponsored")) or str(row.get("sku_status") or "").strip().lower() == "sponsored"
+
+
 def unique_main_rows(rows):
     sorted_rows = sorted(
         rows,
@@ -139,7 +143,7 @@ def main_attribute_map(rows):
         if not sku:
             continue
         target = attrs.setdefault(sku, {})
-        if truthy(row.get("is_sponsored")) or str(row.get("sku_status") or "").strip().lower() == "sponsored":
+        if row_is_sponsored(row):
             target["is_sponsored"] = "True"
             target["sku_status"] = "Sponsored"
         for key in fill_keys:
@@ -315,11 +319,13 @@ def enrich_rows(rows, bsr, promotions, trends, main_attrs):
         attrs = main_attrs.get(sku) or {}
         for key, value in attrs.items():
             out[key] = first_non_empty(out.get(key), value)
-        if truthy(attrs.get("is_sponsored")) or truthy(out.get("is_sponsored")):
+        if row_is_sponsored(attrs) or row_is_sponsored(out):
             out["is_sponsored"] = "True"
             out["sku_status"] = "Sponsored"
         bsr_attrs = bsr.get(sku) or {}
         for key, value in bsr_attrs.items():
+            if key in {"is_sponsored", "sku_status"}:
+                continue
             out[key] = first_non_empty(out.get(key), value)
         out["product_name"] = first_non_empty(out.get("product_name"), bsr_attrs.get("product_name"))
         out["product_url"] = first_non_empty(out.get("product_url"), bsr_attrs.get("product_url"))
@@ -434,7 +440,7 @@ def product_list_rows(rows, bsr_pages):
             "pick_up_availability": row.get("pick_up_availability", ""),
             "fastest_delivery": row.get("fastest_delivery", ""),
             "delivery_availability": row.get("delivery_availability", ""),
-            "sku_status": "Sponsored" if truthy(row.get("is_sponsored")) else "",
+            "sku_status": "Sponsored" if row_is_sponsored(row) else "",
             "promotion_type": row.get("promotion_type", ""),
             "trend_rank": row.get("trend_rank", ""),
             "main_rank": row.get("main_rank", ""),

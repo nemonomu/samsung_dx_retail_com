@@ -12,6 +12,9 @@ from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, bestbuy_dated_run_root, has
 
 PYTHON = sys.executable
 TARGET_SIZE = 300
+CATEGORY_SEARCH_TERMS = {
+    "HHP": "cellphone",
+}
 
 
 @dataclass(frozen=True)
@@ -116,6 +119,7 @@ STEPS = [
             "BESTBUY_DETAIL_LIMIT": "0",
             "BESTBUY_DETAIL_SKUS": "",
             "BESTBUY_DETAIL_FETCH_GET_IT_FAST": "0",
+            "BESTBUY_DETAIL_FETCH_FULFILLMENT_DYNAMIC": "0",
             "BESTBUY_DETAIL_MAX_ATTEMPTS": "1",
             "BESTBUY_DETAIL_SKU_BATCH_SIZE": "5",
             "BESTBUY_DETAIL_USE_DB_SELECTORS": "0",
@@ -141,6 +145,7 @@ STEPS = [
             "BESTBUY_DETAIL_LIMIT": "0",
             "BESTBUY_DETAIL_SKUS": "",
             "BESTBUY_DETAIL_FETCH_GET_IT_FAST": "0",
+            "BESTBUY_DETAIL_FETCH_FULFILLMENT_DYNAMIC": "0",
             "BESTBUY_DETAIL_MAX_ATTEMPTS": "1",
             "BESTBUY_DETAIL_SKU_BATCH_SIZE": "5",
             "BESTBUY_DETAIL_USE_DB_SELECTORS": "0",
@@ -161,6 +166,7 @@ STEPS = [
             "BESTBUY_DETAIL_REBUILD_ONLY": "0",
             "BESTBUY_DETAIL_RETRY_MISSING_SIMILAR": "0",
             "BESTBUY_DETAIL_FETCH_GET_IT_FAST": "0",
+            "BESTBUY_DETAIL_FETCH_FULFILLMENT_DYNAMIC": "0",
             "ZENROWS_TIMEOUT": "240",
         },
         {
@@ -172,6 +178,7 @@ STEPS = [
             "BESTBUY_DETAIL_REBUILD_ONLY": "0",
             "BESTBUY_DETAIL_RETRY_MISSING_SIMILAR": "0",
             "BESTBUY_DETAIL_FETCH_GET_IT_FAST": "0",
+            "BESTBUY_DETAIL_FETCH_FULFILLMENT_DYNAMIC": "0",
             "ZENROWS_TIMEOUT": "240",
         },
     ),
@@ -185,6 +192,7 @@ STEPS = [
             "BESTBUY_AVAILABILITY_BACKFILL_CANDIDATE_MODE": "all_rows",
             "BESTBUY_AVAILABILITY_BACKFILL_OVERWRITE": "1",
             "BESTBUY_AVAILABILITY_BACKFILL_CLEAR_EXISTING_FIELDS": "1",
+            "BESTBUY_AVAILABILITY_BACKFILL_SKIP": "0",
             "BESTBUY_AVAILABILITY_BACKFILL_LIMIT": "0",
             "BESTBUY_AVAILABILITY_BACKFILL_TIMEOUT": "180",
             "ZENROWS_TIMEOUT": "180",
@@ -440,12 +448,18 @@ def run_step(step, dry_run=False, resume=False):
         else:
             for key, value in step.resume_env.items():
                 env.setdefault(key, value)
+    category_overrides = {}
+    category_key = env.get("BESTBUY_CATEGORY", "").strip().upper()
+    if step.name in {"main_list", "bsr_list"} and category_key in CATEGORY_SEARCH_TERMS:
+        category_overrides["BESTBUY_SEARCH_TERM"] = CATEGORY_SEARCH_TERMS[category_key]
+        env.update(category_overrides)
     apply_run_path_env(env)
     command = [PYTHON, "-m", step.module]
     print(f"[run] step {step.key} {step.name}: {' '.join(command)}")
     effective_env = {key: env.get(key, value) for key, value in step.env.items()}
     if resume:
         effective_env.update({key: env.get(key, value) for key, value in step.resume_env.items()})
+    effective_env.update(category_overrides)
     if effective_env:
         print("[env] " + " ".join(f"{key}={value}" for key, value in effective_env.items()))
     if dry_run:

@@ -3733,6 +3733,86 @@ retailer_sku_name_similar = 현재 상품명 ||| 유사 TV 1 ||| 유사 TV 2 |||
 | `pdp-compare-mp` | **Compare similar products** (우리가 쓰는 것) |
 | `pdp-complementary-mp` | 함께 사면 좋은 상품 (보완 추천) |
 
+### Compare similar products 운영 메모
+
+Best Buy PDP는 `/sku/{sku}` URL로 들어가도 렌더 후 canonical 상품이 다른 `skuId`로 바뀔 수 있습니다. 예: `/sku/6622476` 요청이 실제 PDP 본문에서는 `SKU: 12316887`로 렌더되는 케이스.
+
+이때 compare lazy module이 정상 렌더되고 `GetCompareProduct` 호출도 발생했더라도, 파서가 `variables.skuId == 원래 요청 SKU`만 허용하면 compare 결과를 스스로 버려서 `compare_count=0`이 됩니다. 따라서 compare parser는 원래 SKU뿐 아니라 detail HTML/Apollo payload에서 확인한 resolved/canonical `skuId`도 허용해야 합니다.
+
+운영 판정 기준:
+
+- HTML에 `Compare similar`, `Similar products`, `data-testid="GPC-sku-card"`, `carousel-add-to-cart-*` 흔적이 있으면 lazy trigger는 성공한 것입니다. 이 경우는 hook/parser 보강 대상입니다.
+- HTML에도 compare 카드 흔적이 없으면 아직 lazy module을 DOM에 생성시키지 못한 것입니다. 이 경우는 scroll/resize/intersection trigger 보강 대상입니다.
+
+최종 저장 형태는 기존처럼 `current + similar 3` 총 4개를 유지합니다. GraphQL capture가 실패하거나 canonical SKU mismatch로 버려지는 경우에는 저장된 HTML의 `GPC-sku-card`를 fallback으로 파싱하되, 이 fallback은 이미 저장된 HTML 파일을 읽는 로컬 처리라 ZenRows/API 추가 비용이 없습니다.
+
+#### GetCompareProduct 참조 스펙
+
+PDP의 실제 compare lazy module에서 확인된 operation은 `GetCompareProduct`입니다.
+
+```text
+URL: POST https://www.bestbuy.com/gateway/graphql
+operationName: GetCompareProduct
+variables:
+  placement: single-compare
+  site: dotcom-l
+  limit: 3
+  skuId: <resolved PDP skuId>
+headers:
+  accept: application/graphql-response+json,application/json;q=0.9
+  content-type: application/json
+  origin: https://www.bestbuy.com
+  x-client-id: pdp-web
+  x-requested-for-operation-name: GetCompareProduct
+```
+
+쿼리 핵심:
+
+```graphql
+query GetCompareProduct($placement: String!, $site: String!, $limit: Int!, $skuId: String!) {
+  productBySkuId(skuId: $skuId) {
+    description { long }
+    name { short }
+    primaryImage { piscesHref }
+    reviewInfo { averageRating reviewCount conFeatures { name } proFeatures { name } }
+    specificationGroups { name specifications { definition displayName value } }
+    url { relativePdp }
+    skuId
+    openBoxCondition
+  }
+  recommendations(filter: {placement: $placement, site: $site, limit: $limit, skus: [$skuId]}) {
+    subPlacements {
+      recommendations {
+        ep
+        id
+        item {
+          ... on Product {
+            description { long }
+            name { short }
+            primaryImage { piscesHref }
+            reviewInfo { averageRating reviewCount conFeatures { name } proFeatures { name } }
+            specificationGroups { name specifications { definition displayName value } }
+            url { relativePdp }
+            skuId
+            openBoxCondition
+          }
+        }
+      }
+      ep
+      id
+      name
+    }
+  }
+}
+```
+
+파싱 원칙:
+
+- `data.productBySkuId`를 1번 카드, 즉 현재 PDP 상품으로 둡니다.
+- `data.recommendations.subPlacements[0].recommendations[].item`을 similar 카드로 붙입니다.
+- `item`은 단종/비노출 SKU에서 `null`일 수 있으므로 건너뜁니다.
+- 저장 필드는 기존 정책대로 앞 4개만 사용합니다: `current + similar 3`.
+
 ### 💡 새 쿼리 활용 프롬프트
 
 위 목록에서 쓰고 싶은 쿼리 발견했을 때 — 그대로 복붙:

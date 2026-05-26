@@ -1,8 +1,0 @@
-__pycache__/
-.env
-.env.*
-!.env.example
-log/
-archive/
-graphql_collect_test_local.jsonl
-*.diagnostics.json

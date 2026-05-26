@@ -48,6 +48,25 @@ Thumbs.db
 # Logs
 *.log
 
+# Local crawler runs, probes, and copied runtime artifacts
+data/
+**/data/
+local_*/
+local_*_test/
+local_*_probe*/
+bestbuy/
+bestbuy_dev_log/
+references/rdp/
+references/*.html
+references/*.json
+references/*.csv
+references/*.pkl
+*_request.json
+*_response.json
+*_headers.json
+*_meta.json
+*_response.txt
+
 # Database
 *.db
 *.sqlite
@@ -56,6 +75,7 @@ Thumbs.db
 # Cookies and session files
 *.pkl
 *_cookies.pkl
+*cookies*.json
 *_storage_state.json
 walmart_storage_state.json
 

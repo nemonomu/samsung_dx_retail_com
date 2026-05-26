@@ -75,6 +75,8 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         script = (ROOT / "bby_hhp_test10_task.bat").read_text(encoding="utf-8")
 
         self.assertIn('set "BESTBUY_FORCE_STEP_ENV=0"', script)
+        self.assertIn('set "BESTBUY_FINAL_TARGET_SIZE=7"', script)
+        self.assertIn('set "BESTBUY_BSR_RANK_LIMIT=20"', script)
         self.assertIn('set "BESTBUY_FINAL_ROW_LIMIT=10"', script)
         self.assertIn('set "BESTBUY_DB_LOAD_DRY_RUN=1"', script)
         self.assertIn('call "%~dp0_bby_daily_task.bat" HHP', script)

@@ -2352,6 +2352,10 @@ def next_attempt(meta_path, url):
     return int(meta.get("attempt", 0) or 0) + 1
 
 
+def attempt_cap_blocks_retry(attempt):
+    return not FORCE_REFRESH and not RETRY_ONLY and attempt > MAX_ATTEMPTS
+
+
 def target_match_keys(row):
     keys = set()
     for field in ("sku_id", "bsin", "item"):
@@ -2950,7 +2954,7 @@ def fetch_detail(client, target):
         return read_json(current_paths["meta"])
     attempt = next_attempt(current_paths["meta"], pdp_url)
     meta = {"sku_id": sku, "stage": "detail", "url": pdp_url, "attempt": attempt, "started_at": now()}
-    if not FORCE_REFRESH and attempt > MAX_ATTEMPTS:
+    if attempt_cap_blocks_retry(attempt):
         paths = detail_paths_for_status(sku, target, False)
         meta.update({"success": False, "error": "max_attempts_exceeded"})
         paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -3338,7 +3342,7 @@ def fetch_detail_sku_batch(client, targets):
             continue
         attempt = next_attempt(current_paths["meta"], pdp_url)
         meta = {"sku_id": sku, "stage": "detail", "url": pdp_url, "attempt": attempt, "started_at": now()}
-        if not FORCE_REFRESH and attempt > MAX_ATTEMPTS:
+        if attempt_cap_blocks_retry(attempt):
             paths = detail_paths_for_status(sku, target, False)
             meta.update({"success": False, "error": "max_attempts_exceeded", "finished_at": now()})
             paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -3655,7 +3659,7 @@ def fetch_review20(client, target):
         return read_json(current_paths["meta"])
     attempt = next_attempt(current_paths["meta"], pdp_url)
     meta = {"sku_id": sku, "stage": "review20", "url": pdp_url, "attempt": attempt, "started_at": now()}
-    if not FORCE_REFRESH and attempt > MAX_ATTEMPTS:
+    if attempt_cap_blocks_retry(attempt):
         paths = review_paths_for_status(sku, target, False)
         meta.update({"success": False, "error": "max_attempts_exceeded"})
         paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -3759,7 +3763,7 @@ def fetch_compare(client, target):
         return read_json(current_paths["meta"])
     attempt = next_attempt(current_paths["meta"], pdp_url)
     meta = {"sku_id": sku, "stage": "compare", "url": pdp_url, "attempt": attempt, "started_at": now()}
-    if attempt > MAX_ATTEMPTS:
+    if attempt_cap_blocks_retry(attempt):
         paths = compare_paths_for_status(sku, target, False)
         meta.update({"success": False, "error": "max_attempts_exceeded"})
         paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")

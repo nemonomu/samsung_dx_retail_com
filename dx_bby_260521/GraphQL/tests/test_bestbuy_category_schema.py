@@ -289,6 +289,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertEqual(attrs["ldy_loading_type"], "Front Load")
 
         fallback_attrs = ldy_attributes_from_product([], "LG 5.0 Cu. Ft. Top Load Washer")
+        self.assertEqual(fallback_attrs["ldy_capacity"], "5.0 cubic feet")
         self.assertEqual(fallback_attrs["ldy_loading_type"], "Top Load")
 
     def test_hhp_trade_in_text_from_html_and_detail_product(self):

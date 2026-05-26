@@ -4393,6 +4393,14 @@ def ldy_loading_type_from_name(product_name):
     return ""
 
 
+def ldy_capacity_from_name(product_name):
+    text = compact_text(product_name)
+    match = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:cu\.?\s*ft\.?|cubic\s+feet)\b", text, re.I)
+    if not match:
+        return ""
+    return f"{match.group(1)} cubic feet"
+
+
 def ldy_attributes_from_product(products, product_name):
     capacity = first_non_empty(
         spec_value_by_names(
@@ -4406,6 +4414,7 @@ def ldy_attributes_from_product(products, product_name):
             ],
         ),
         spec_value_containing(products, "capacity"),
+        ldy_capacity_from_name(product_name),
     )
     loading_type = first_non_empty(
         spec_value_by_names(

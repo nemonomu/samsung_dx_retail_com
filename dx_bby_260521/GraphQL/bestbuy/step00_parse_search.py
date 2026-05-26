@@ -223,14 +223,49 @@ def _date_to_listing_text(prefix, value):
     return f"{prefix} {dt.strftime('%a, %b')} {dt.day}"
 
 
-def _normalize_get_it_by_text(text):
+def _date_to_fastest_delivery_text(value):
+    if not value:
+        return ""
+    text = str(value).strip()
+    dt = None
+    for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%S.%f%z"):
+        try:
+            dt = datetime.strptime(text, fmt).date()
+            break
+        except ValueError:
+            continue
+    if dt is None:
+        return _normalize_fastest_delivery_text(f"Get it {text}")
+    today = date.today()
+    if dt == today:
+        return "Get it today"
+    if dt == today + timedelta(days=1):
+        return "Get it tomorrow"
+    return f"Get it by {dt.strftime('%a, %b')} {dt.day}"
+
+
+def _normalize_fastest_delivery_text(text):
     normalized = str(text or "").strip()
     if not normalized:
         return ""
-    if normalized.lower().startswith("get it by "):
+    relative_match = re.match(r"(?i)^get it\s+(?:by\s+)?(today|tomorrow)(\b.*)?$", normalized)
+    if relative_match:
+        return f"Get it {relative_match.group(1).lower()}{relative_match.group(2) or ''}"
+    if re.match(
+        r"(?i)^get it\s+by\s+("
+        r"mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|"
+        r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|"
+        r"sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+        r")(\b|,)",
+        normalized,
+    ):
         return normalized
     if re.match(
-        r"(?i)^get it\s+(today|tomorrow|mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)(\b|,)",
+        r"(?i)^get it\s+("
+        r"mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|"
+        r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|"
+        r"sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+        r")(\b|,)",
         normalized,
     ):
         return f"Get it by {normalized[len('Get it '):]}"
@@ -354,15 +389,15 @@ def fastest_delivery_text(shipping, delivery=None):
             price = group.get("price")
             suffix = " • FREE" if price in (0, 0.0, "0", "0.0") else ""
             if date_value:
-                return f"{_date_to_listing_text('Get it by', date_value)}{suffix}"
+                return f"{_date_to_fastest_delivery_text(date_value)}{suffix}"
             group_text = _prefixed_text(
                 _first_text(group, ["displayText", "displayMessage", "message", "text"]),
                 ["Get"],
             )
             if group_text:
-                return f"{_normalize_get_it_by_text(group_text)}{suffix}"
+                return f"{_normalize_fastest_delivery_text(group_text)}{suffix}"
         if shipping.get("promiseByStreetDate"):
-            return _date_to_listing_text("Get it by", shipping.get("promiseByStreetDate"))
+            return _date_to_fastest_delivery_text(shipping.get("promiseByStreetDate"))
         text = _first_text(
             shipping,
             [
@@ -377,7 +412,7 @@ def fastest_delivery_text(shipping, delivery=None):
         )
         text = _prefixed_text(text, ["Get"])
         if text:
-            return _normalize_get_it_by_text(text)
+            return _normalize_fastest_delivery_text(text)
     return ""
 
 

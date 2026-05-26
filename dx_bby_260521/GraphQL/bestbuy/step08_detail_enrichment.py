@@ -530,6 +530,22 @@ def date_to_relative_or_phrase(prefix, date_value):
     return f"{prefix} {dt.strftime('%a, %b')} {dt.day}"
 
 
+def fastest_delivery_date_phrase(date_value):
+    if not date_value:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(date_value)[:10])
+    except ValueError:
+        return ""
+    today = datetime.now().date()
+    target = dt.date()
+    if target == today:
+        return "Get it today"
+    if (target - today).days == 1:
+        return "Get it tomorrow"
+    return f"Get it by {dt.strftime('%a, %b')} {dt.day}"
+
+
 def date_to_phrase_from_get_it_fast(prefix, value):
     if not isinstance(value, dict):
         return ""
@@ -539,6 +555,17 @@ def date_to_phrase_from_get_it_fast(prefix, value):
     if get_it_by == "tomorrow":
         return f"{prefix} tomorrow"
     return date_to_relative_or_phrase(prefix, value.get("getItByDate"))
+
+
+def fastest_delivery_from_get_it_fast(value):
+    if not isinstance(value, dict):
+        return ""
+    get_it_by = str(value.get("getItBy") or "").strip().lower()
+    if get_it_by == "today":
+        return "Get it today"
+    if get_it_by == "tomorrow":
+        return "Get it tomorrow"
+    return fastest_delivery_date_phrase(value.get("getItByDate"))
 
 
 def get_it_fast_availability_values(item):
@@ -553,7 +580,7 @@ def get_it_fast_availability_values(item):
     store = stores[0] if stores and isinstance(stores[0], dict) else {}
     return {
         "pick_up_availability": date_to_phrase_from_get_it_fast("Pick up", store),
-        "fastest_delivery": date_to_phrase_from_get_it_fast("Get it by", shipping),
+        "fastest_delivery": fastest_delivery_from_get_it_fast(shipping),
         "delivery_availability": "",
     }
 
@@ -4001,12 +4028,12 @@ def fastest_delivery_text(shipping):
                 group = candidate
                 break
         date_value = group.get("minLineItemMaxDate") or group.get("maxLineItemMaxDate")
-        phrase = date_to_relative_or_phrase("Get it by", date_value)
+        phrase = fastest_delivery_date_phrase(date_value)
         if phrase:
             if group.get("price") in (0, 0.0, "0", "0.0"):
                 phrase = f"{phrase} \u2022 FREE"
             return phrase
-    return date_to_relative_or_phrase("Get it by", shipping.get("promiseByStreetDate"))
+    return fastest_delivery_date_phrase(shipping.get("promiseByStreetDate"))
 
 
 def fulfillment_button_text(products):

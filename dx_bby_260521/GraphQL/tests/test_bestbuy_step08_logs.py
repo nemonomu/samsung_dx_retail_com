@@ -93,7 +93,7 @@ class Step08LogTests(unittest.TestCase):
         values = step08.get_it_fast_availability_values(item)
 
         self.assertEqual(values["pick_up_availability"], "Pick up today")
-        self.assertEqual(values["fastest_delivery"], "Get it by tomorrow")
+        self.assertEqual(values["fastest_delivery"], "Get it tomorrow")
         self.assertEqual(values["delivery_availability"], "")
 
     def test_detail_batch_request_entries_maps_multiple_skus(self):

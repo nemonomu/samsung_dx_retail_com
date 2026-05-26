@@ -16,6 +16,7 @@ from .step08_detail_enrichment import (
     date_to_relative_or_phrase,
     delivery_text,
     fallback_review20_payload,
+    fastest_delivery_from_get_it_fast,
     fastest_delivery_text,
     graphql_params,
     pickup_text,
@@ -232,6 +233,17 @@ def days_out_text(prefix, base_date, days_out):
     return f"{prefix} {target.strftime('%a, %b')} {target.day}"
 
 
+def fastest_delivery_days_out_text(base_date, days_out):
+    if days_out in ("", None):
+        return ""
+    try:
+        days = int(days_out)
+    except (TypeError, ValueError):
+        return ""
+    prefix = "Get it" if days in (0, 1) else "Get it by"
+    return days_out_text(prefix, base_date, days)
+
+
 def digital_fulfillment_event_rows(event, line):
     rows = []
     if not isinstance(event, dict):
@@ -306,8 +318,7 @@ def digital_event_availability_values(rows, sku):
         datetime.fromisoformat(pickup.get("base_date")).date() if pickup else datetime.now().date(),
         pickup_fulfillment.get("daysOut") if isinstance(pickup_fulfillment, dict) else "",
     )
-    shipping_text_value = days_out_text(
-        "Get it by",
+    shipping_text_value = fastest_delivery_days_out_text(
         datetime.fromisoformat(shipping.get("base_date")).date() if shipping else datetime.now().date(),
         shipping_fulfillment.get("daysOut") if isinstance(shipping_fulfillment, dict) else "",
     )
@@ -335,7 +346,7 @@ def get_it_fast_availability_values(item):
     store = stores[0] if stores and isinstance(stores[0], dict) else {}
     return {
         "pick_up_availability": date_to_phrase_from_get_it_fast("Pick up", store),
-        "fastest_delivery": date_to_phrase_from_get_it_fast("Get it by", shipping),
+        "fastest_delivery": fastest_delivery_from_get_it_fast(shipping),
         "delivery_availability": "",
     }
 

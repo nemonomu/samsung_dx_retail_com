@@ -1,5 +1,6 @@
 import sys
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 
 
@@ -116,6 +117,38 @@ class AvailabilityBackfillTests(unittest.TestCase):
         values = parse_fulfillment_response(response)
 
         self.assertEqual(values, {})
+
+    def test_parse_fulfillment_keeps_relative_fastest_delivery_without_by(self):
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        response = {
+            "data": {
+                "fulfillmentOptions": {
+                    "shippingDetails": [
+                        {
+                            "sku": "6670264",
+                            "shippingAvailability": [
+                                {
+                                    "condition": "NEW",
+                                    "shippingEligible": True,
+                                    "defaultCustomerLosGroupId": "standard",
+                                    "customerLOSGroup": [
+                                        {
+                                            "customerLosGroupId": "standard",
+                                            "minLineItemMaxDate": tomorrow,
+                                            "price": 0,
+                                        }
+                                    ],
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        }
+
+        values = parse_fulfillment_response(response)
+
+        self.assertEqual(values["6670264"]["fastest_delivery"], "Get it tomorrow \u2022 FREE")
 
     def test_parse_batch_fulfillment_response_groups_values_by_sku(self):
         response = {

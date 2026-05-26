@@ -539,6 +539,8 @@ def main():
     trending_input = existing_path(TRENDING_INPUT, TRENDING_FALLBACK_INPUT)
     promotion_rows = load_rows(promotion_input)
     trending_rows = load_rows(trending_input)
+    if CATEGORY == "HHP":
+        promotion_rows = []
 
     main_rows = unique_main_rows(main_input_rows)
     main_attrs = main_attribute_map(main_input_rows)

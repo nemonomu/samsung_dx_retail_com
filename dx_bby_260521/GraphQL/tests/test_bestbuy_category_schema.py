@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from bestbuy.step00_config import BESTBUY_OUTPUT_TABLES  # noqa: E402
-from bestbuy.step08_detail_enrichment import HHP_FINAL_FIELDS  # noqa: E402
+from bestbuy.step08_detail_enrichment import HHP_FINAL_FIELDS, PRODUCT_LIST_DETAIL_FIELD_SOURCES  # noqa: E402
 from bestbuy.step13_db_prepare import HHP_COLUMNS, LDY_COLUMNS, REF_COLUMNS  # noqa: E402
 
 
@@ -80,6 +80,17 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn('set "BESTBUY_FINAL_ROW_LIMIT=10"', script)
         self.assertIn('set "BESTBUY_DB_LOAD_DRY_RUN=1"', script)
         self.assertIn('call "%~dp0_bby_daily_task.bat" HHP', script)
+
+    def test_detail_promotion_type_can_backfill_hhp_product_list(self):
+        self.assertEqual(PRODUCT_LIST_DETAIL_FIELD_SOURCES["promotion_type"], ("promotion_type",))
+
+    def test_hhp_promotion_listing_is_explicitly_skipped(self):
+        orchestrator = (ROOT / "bestbuy" / "bestbuy_orchestrator.py").read_text(encoding="utf-8")
+        final_targets = (ROOT / "bestbuy" / "step07_final_targets.py").read_text(encoding="utf-8")
+
+        self.assertIn("HHP promotion page is not collected", orchestrator)
+        self.assertIn('if CATEGORY == "HHP":', final_targets)
+        self.assertIn("promotion_rows = []", final_targets)
 
 
 if __name__ == "__main__":

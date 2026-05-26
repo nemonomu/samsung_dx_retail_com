@@ -314,6 +314,8 @@ def bsr_rank_complete():
 
 
 def promotion_complete():
+    if os.getenv("BESTBUY_CATEGORY", "").strip().upper() == "HHP":
+        return True, "HHP promotion page is not collected"
     if not has_target_url("promotion"):
         return True, "no promotion URL for category"
     path = run_root() / "promotion" / "parsed" / "all_promotion_products.csv"
@@ -414,9 +416,13 @@ def run_step(step, dry_run=False, resume=False):
     if not step.implemented:
         print(f"[skip] step {step.key} {step.name}: not implemented yet")
         return
-    if step.name == "promotion_deals" and not has_target_url("promotion"):
-        print(f"[skip] step {step.key} {step.name}: no promotion URL for category")
-        return
+    if step.name == "promotion_deals":
+        if os.getenv("BESTBUY_CATEGORY", "").strip().upper() == "HHP":
+            print(f"[skip] step {step.key} {step.name}: HHP promotion page is not collected")
+            return
+        if not has_target_url("promotion"):
+            print(f"[skip] step {step.key} {step.name}: no promotion URL for category")
+            return
     if step.name == "trending_deals" and not has_target_url("trend"):
         print(f"[skip] step {step.key} {step.name}: no trend URL for category")
         return

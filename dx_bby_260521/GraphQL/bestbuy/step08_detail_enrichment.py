@@ -1452,6 +1452,7 @@ PRODUCT_LIST_DETAIL_FIELD_SOURCES = {
     "fastest_delivery": ("fastest_delivery",),
     "delivery_availability": ("delivery_availability",),
     "sku_status": ("sku_status",),
+    "promotion_type": ("promotion_type",),
     "product_url": ("product_url",),
 }
 

@@ -10,7 +10,6 @@ from bestbuy.step00_fulfillment_graphql import parse_fulfillment_response  # noq
 from bestbuy.step08_availability_backfill import (  # noqa: E402
     all_availability_blank,
     apply_values,
-    backfill_candidate,
     build_sku_lookup,
     item_from_product_url,
     sku_for_row,
@@ -18,7 +17,10 @@ from bestbuy.step08_availability_backfill import (  # noqa: E402
 
 
 class AvailabilityBackfillTests(unittest.TestCase):
-    def test_candidate_requires_batch_and_all_three_availability_fields_blank(self):
+    def test_candidate_default_missing_any_requires_batch_and_any_blank_field(self):
+        import bestbuy.step08_availability_backfill as backfill
+
+        old_mode = backfill.CANDIDATE_MODE
         row = {
             "batch_id": "b_20260525_040458",
             "pick_up_availability": "",
@@ -26,12 +28,39 @@ class AvailabilityBackfillTests(unittest.TestCase):
             "delivery_availability": "",
         }
 
-        self.assertTrue(all_availability_blank(row))
-        self.assertTrue(backfill_candidate(row, "b_20260525_040458"))
+        backfill.CANDIDATE_MODE = "missing_any"
+        try:
+            self.assertTrue(all_availability_blank(row))
+            self.assertTrue(backfill.backfill_candidate(row, "b_20260525_040458"))
 
-        row["fastest_delivery"] = "Get it Wed, May 27 \u2022 FREE"
-        self.assertFalse(all_availability_blank(row))
-        self.assertFalse(backfill_candidate(row, "b_20260525_040458"))
+            row["fastest_delivery"] = "Get it Wed, May 27 \u2022 FREE"
+            self.assertFalse(all_availability_blank(row))
+            self.assertTrue(backfill.backfill_candidate(row, "b_20260525_040458"))
+
+            row["pick_up_availability"] = "Pick up Thu, May 28"
+            row["delivery_availability"] = "Delivery as soon as Fri, May 29"
+            self.assertFalse(backfill.backfill_candidate(row, "b_20260525_040458"))
+            self.assertFalse(backfill.backfill_candidate(row, "b_other"))
+        finally:
+            backfill.CANDIDATE_MODE = old_mode
+
+    def test_candidate_all_rows_reprocesses_existing_availability(self):
+        import bestbuy.step08_availability_backfill as backfill
+
+        old_mode = backfill.CANDIDATE_MODE
+        row = {
+            "batch_id": "b_20260525_040458",
+            "pick_up_availability": "Pick up today",
+            "fastest_delivery": "Get it today",
+            "delivery_availability": "Delivery as soon as Sat, May 30",
+        }
+
+        backfill.CANDIDATE_MODE = "all_rows"
+        try:
+            self.assertTrue(backfill.backfill_candidate(row, "b_20260525_040458"))
+            self.assertFalse(backfill.backfill_candidate(row, "b_other"))
+        finally:
+            backfill.CANDIDATE_MODE = old_mode
 
     def test_sku_lookup_maps_final_output_item_to_target_sku(self):
         lookup = build_sku_lookup(
@@ -64,7 +93,12 @@ class AvailabilityBackfillTests(unittest.TestCase):
                                 {
                                     "condition": "NEW",
                                     "deliveryEligible": True,
-                                    "deliverySlots": [{"date": "2026-05-29"}],
+                                    "deliverySlots": [
+                                        {
+                                            "date": "2026-05-29",
+                                            "displayText": "Delivery as soon as Fri, May 29",
+                                        }
+                                    ],
                                 }
                             ],
                         }
@@ -78,6 +112,7 @@ class AvailabilityBackfillTests(unittest.TestCase):
                                     "pickupEligible": True,
                                     "instoreInventoryAvailable": True,
                                     "maxDate": "2026-05-25",
+                                    "displayText": "Pick up today",
                                 }
                             ],
                         }
@@ -93,7 +128,7 @@ class AvailabilityBackfillTests(unittest.TestCase):
                                     "customerLOSGroup": [
                                         {
                                             "customerLosGroupId": "standard",
-                                            "minLineItemMaxDate": "2026-05-27",
+                                            "displayText": "Get it Wed, May 27",
                                             "price": 0,
                                         }
                                     ],
@@ -163,6 +198,36 @@ class AvailabilityBackfillTests(unittest.TestCase):
         self.assertEqual(updated, 1)
         self.assertEqual(fields, 2)
         self.assertEqual(rows[0]["fastest_delivery"], "Get it tomorrow \u2022 FREE")
+
+    def test_apply_values_can_clear_existing_availability_before_authoritative_backfill(self):
+        import bestbuy.step08_availability_backfill as backfill
+
+        old_clear = backfill.CLEAR_EXISTING_FIELDS
+        rows = [
+            {
+                "pick_up_availability": "Pick up today",
+                "fastest_delivery": "Get it today",
+                "delivery_availability": "Delivery as soon as Sat, May 30",
+            }
+        ]
+        values = {
+            "6670831": {
+                "pick_up_availability": "Pick up Thu, May 28",
+                "fastest_delivery": "Get it Fri, May 29 \u2022 FREE",
+                "delivery_availability": "",
+            }
+        }
+        backfill.CLEAR_EXISTING_FIELDS = True
+        try:
+            updated, fields = backfill.apply_values(rows, {0: "6670831"}, values)
+        finally:
+            backfill.CLEAR_EXISTING_FIELDS = old_clear
+
+        self.assertEqual(updated, 1)
+        self.assertEqual(fields, 3)
+        self.assertEqual(rows[0]["pick_up_availability"], "Pick up Thu, May 28")
+        self.assertEqual(rows[0]["fastest_delivery"], "Get it Fri, May 29 \u2022 FREE")
+        self.assertEqual(rows[0]["delivery_availability"], "")
 
 
 if __name__ == "__main__":

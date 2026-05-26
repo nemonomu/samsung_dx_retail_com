@@ -46,6 +46,12 @@ DRY_RUN = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_DRY_RUN", "0").lower() in {"1
 LIMIT = int(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_LIMIT", "0"))
 CANDIDATE_MODE = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_CANDIDATE_MODE", "missing_any").strip().lower()
 OVERWRITE = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_OVERWRITE", "0").lower() in {"1", "true", "yes", "y"}
+CLEAR_EXISTING_FIELDS = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_CLEAR_EXISTING_FIELDS", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
 
 
 def now():
@@ -306,6 +312,13 @@ def apply_values(rows, row_to_sku, values_by_sku):
         row_changed = False
         for field in AVAILABILITY_FIELDS:
             value = values.get(field)
+            if CLEAR_EXISTING_FIELDS:
+                desired = value or ""
+                if row.get(field, "") != desired:
+                    row[field] = desired
+                    row_changed = True
+                    changed_fields += 1
+                continue
             if value and (OVERWRITE or not compact_text(row.get(field))):
                 row[field] = value
                 row_changed = True
@@ -354,7 +367,8 @@ def main():
         f"batch_rows={len(batch_indexes)} blank_rows={len(candidate_indexes)} mapped_rows={len(row_to_sku)} skus={len(skus)} "
         f"chunk_size={CHUNK_SIZE} requested_chunk_size={REQUESTED_CHUNK_SIZE} "
         f"multi_sku={str(ALLOW_MULTI_SKU_FULFILLMENT).lower()} candidate_mode={CANDIDATE_MODE} "
-        f"overwrite={str(OVERWRITE).lower()} limit={LIMIT} calls={estimated_calls} dry_run={str(DRY_RUN).lower()}",
+        f"overwrite={str(OVERWRITE).lower()} clear_existing={str(CLEAR_EXISTING_FIELDS).lower()} "
+        f"limit={LIMIT} calls={estimated_calls} dry_run={str(DRY_RUN).lower()}",
         flush=True,
     )
     if missing_sku:
@@ -409,6 +423,7 @@ def main():
         "product_list_csv": rel_path(PRODUCT_LIST_CSV),
         "candidate_mode": CANDIDATE_MODE,
         "overwrite": OVERWRITE,
+        "clear_existing_fields": CLEAR_EXISTING_FIELDS,
         "batch_final_rows": len(batch_indexes),
         "blank_final_rows": len(candidate_indexes),
         "mapped_final_rows": len(row_to_sku),

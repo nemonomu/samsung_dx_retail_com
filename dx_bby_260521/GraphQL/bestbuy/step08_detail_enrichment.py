@@ -121,7 +121,7 @@ PRODUCT_LIST_CSV = Path(os.getenv("BESTBUY_PRODUCT_LIST_OUTPUT", OUTPUT_ROOT / "
 RETRY_MISSING_SIMILAR_SOURCE_CSV = os.getenv("BESTBUY_DETAIL_RETRY_MISSING_SIMILAR_SOURCE_CSV", "").strip()
 MANIFEST_PATH = DETAIL_ROOT / "manifest_detail_enrichment.json"
 FETCH_COMPARE = os.getenv("BESTBUY_DETAIL_FETCH_COMPARE", "0").lower() in {"1", "true", "yes", "y"}
-FETCH_GET_IT_FAST = os.getenv("BESTBUY_DETAIL_FETCH_GET_IT_FAST", "1" if CATEGORY == "TV" else "0").lower() in {
+FETCH_GET_IT_FAST = os.getenv("BESTBUY_DETAIL_FETCH_GET_IT_FAST", "0").lower() in {
     "1",
     "true",
     "yes",
@@ -3395,6 +3395,8 @@ def get_it_fast_values_from_detail(sku):
         "fastest_delivery": "",
         "delivery_availability": "",
     }
+    if not FETCH_GET_IT_FAST:
+        return values
     for payload in detail_payloads(sku):
         for event in payload.get("events", []):
             data = event_data(event)
@@ -4292,6 +4294,9 @@ def output_row(target):
     }
     if CATEGORY != "HHP":
         row["shipping_info"] = ""
+    if CATEGORY == "TV":
+        for field in AVAILABILITY_FIELDS:
+            row[field] = ""
     for field, value in selector_values.items():
         row.setdefault(field, value)
     return row

@@ -1586,6 +1586,12 @@ PRODUCT_LIST_DETAIL_FIELD_SOURCES = {
 }
 
 
+PRESERVE_EXISTING_AVAILABILITY = os.getenv(
+    "BESTBUY_DETAIL_PRESERVE_EXISTING_AVAILABILITY",
+    "1",
+).lower() in {"1", "true", "yes", "y"}
+
+
 def row_sku_key(row):
     return first_non_empty(
         row.get("sku_id"),
@@ -1594,6 +1600,32 @@ def row_sku_key(row):
         row.get("item"),
         row.get("bsin"),
     )
+
+
+def preserve_existing_availability(rows):
+    if not PRESERVE_EXISTING_AVAILABILITY or not FINAL_OUTPUT_CSV.exists() or not rows:
+        return 0
+    existing_rows = load_csv(FINAL_OUTPUT_CSV)
+    existing_by_sku = {}
+    for row in existing_rows:
+        sku = row_sku_key(row)
+        if sku:
+            existing_by_sku.setdefault(str(sku), row)
+
+    updated = 0
+    for row in rows:
+        sku = row_sku_key(row)
+        existing = existing_by_sku.get(str(sku)) if sku else None
+        if not existing:
+            continue
+        row_changed = False
+        for field in ALL_AVAILABILITY_FIELDS:
+            if not compact_text(row.get(field)) and compact_text(existing.get(field)):
+                row[field] = existing.get(field, "")
+                row_changed = True
+        if row_changed:
+            updated += 1
+    return updated
 
 
 def update_product_list_from_detail_rows(detail_rows):
@@ -5207,6 +5239,12 @@ def main():
         for field in fields:
             row.setdefault(field, "")
     final_rows = [{field: row.get(field, "") for field in fields} for row in enriched_rows]
+    preserved_availability = preserve_existing_availability(final_rows)
+    if preserved_availability:
+        print(
+            format_log_line("detail:preserve_availability", rows=preserved_availability),
+            flush=True,
+        )
     write_csv(FINAL_OUTPUT_CSV, final_rows, fields)
     product_list_update = update_product_list_from_detail_rows(enriched_rows)
     if product_list_update["fields"]:

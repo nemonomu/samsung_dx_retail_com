@@ -14,11 +14,13 @@ import bestbuy.step08_detail_enrichment as detail_step  # noqa: E402
 from bestbuy.step08_detail_enrichment import (  # noqa: E402
     COMPARE_RECOMMENDATIONS_V2_QUERY,
     HHP_FINAL_FIELDS,
+    LDY_FINAL_FIELDS,
     PRODUCT_LIST_DETAIL_FIELD_SOURCES,
     PRODUCT_SCHEMA_REVIEW20_QUERY,
     TRADE_IN_DATA_QUERY,
     compare_recommendation_names,
     hhp_attributes_from_product,
+    ldy_attributes_from_product,
     trade_in_from_offer_data,
     trade_in_from_html,
     trade_in_from_products,
@@ -85,6 +87,40 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn("ref_refrigerator_type", column_names(REF_COLUMNS))
         self.assertIn("ldy_capacity", column_names(LDY_COLUMNS))
         self.assertIn("ldy_loading_type", column_names(LDY_COLUMNS))
+
+    def test_ldy_final_output_uses_confirmed_insert_columns_only(self):
+        expected = [
+            "id",
+            "country",
+            "product",
+            "item",
+            "account_name",
+            "page_type",
+            "count_of_reviews",
+            "retailer_sku_name",
+            "product_url",
+            "star_rating",
+            "count_of_star_ratings",
+            "final_sku_price",
+            "original_sku_price",
+            "savings",
+            "offer",
+            "pick_up_availability",
+            "delivery_availability",
+            "sku_status",
+            "detailed_review_content",
+            "recommendation_intent",
+            "main_rank",
+            "bsr_rank",
+            "retailer_sku_name_similar",
+            "ldy_capacity",
+            "ldy_loading_type",
+            "calendar_week",
+            "crawl_strdatetime",
+            "batch_id",
+        ]
+
+        self.assertEqual(LDY_FINAL_FIELDS, expected)
 
     def test_hhp_test10_runner_keeps_run_limited_and_dry(self):
         script = (ROOT / "bby_hhp_test10_task.bat").read_text(encoding="utf-8")
@@ -169,6 +205,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn('if CATEGORY == "HHP":', final_targets)
         self.assertIn("promotion_rows = []", final_targets)
         self.assertEqual(CATEGORY_SEARCH_TERMS["HHP"], "cellphone")
+        self.assertEqual(CATEGORY_SEARCH_TERMS["LDY"], "washing machine")
 
     def test_hhp_promotion_type_comes_from_detail_badge(self):
         old_category = detail_step.CATEGORY
@@ -230,6 +267,29 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertEqual(attrs["hhp_carrier"], "Unlocked")
         self.assertEqual(attrs["hhp_storage"], "128 gigabytes")
         self.assertEqual(attrs["hhp_color"], "Black")
+
+    def test_ldy_capacity_and_loading_type_from_specs_or_name(self):
+        attrs = ldy_attributes_from_product(
+            [
+                {
+                    "specificationGroups": [
+                        {
+                            "specifications": [
+                                {"displayName": "Washer Capacity", "value": "4.5 cubic feet"},
+                                {"displayName": "Load Type", "value": "Front Load"},
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "Samsung washer",
+        )
+
+        self.assertEqual(attrs["ldy_capacity"], "4.5 cubic feet")
+        self.assertEqual(attrs["ldy_loading_type"], "Front Load")
+
+        fallback_attrs = ldy_attributes_from_product([], "LG 5.0 Cu. Ft. Top Load Washer")
+        self.assertEqual(fallback_attrs["ldy_loading_type"], "Top Load")
 
     def test_hhp_trade_in_text_from_html_and_detail_product(self):
         html = (

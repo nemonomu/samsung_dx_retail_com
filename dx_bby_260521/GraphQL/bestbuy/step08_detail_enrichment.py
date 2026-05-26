@@ -194,8 +194,40 @@ HHP_FINAL_FIELDS = [
     "batch_id",
 ]
 
+LDY_FINAL_FIELDS = [
+    "id",
+    "country",
+    "product",
+    "item",
+    "account_name",
+    "page_type",
+    "count_of_reviews",
+    "retailer_sku_name",
+    "product_url",
+    "star_rating",
+    "count_of_star_ratings",
+    "final_sku_price",
+    "original_sku_price",
+    "savings",
+    "offer",
+    "pick_up_availability",
+    "delivery_availability",
+    "sku_status",
+    "detailed_review_content",
+    "recommendation_intent",
+    "main_rank",
+    "bsr_rank",
+    "retailer_sku_name_similar",
+    "ldy_capacity",
+    "ldy_loading_type",
+    "calendar_week",
+    "crawl_strdatetime",
+    "batch_id",
+]
+
 FALLBACK_FINAL_FIELDS = {
     "HHP": HHP_FINAL_FIELDS,
+    "LDY": LDY_FINAL_FIELDS,
 }
 
 
@@ -4328,6 +4360,72 @@ def spec_value(products, display_name):
     return ""
 
 
+def spec_value_by_names(products, display_names):
+    wanted = {str(name or "").strip().lower() for name in display_names if str(name or "").strip()}
+    for product in reversed(products):
+        for group in product.get("specificationGroups") or []:
+            for spec in group.get("specifications") or []:
+                name = str(spec.get("displayName") or "").strip().lower()
+                if name in wanted:
+                    return spec.get("value", "")
+    return ""
+
+
+def spec_value_containing(products, *needles):
+    needles = [str(value or "").strip().lower() for value in needles if str(value or "").strip()]
+    if not needles:
+        return ""
+    for product in reversed(products):
+        for group in product.get("specificationGroups") or []:
+            for spec in group.get("specifications") or []:
+                name = str(spec.get("displayName") or "").strip().lower()
+                if all(needle in name for needle in needles):
+                    return spec.get("value", "")
+    return ""
+
+
+def ldy_loading_type_from_name(product_name):
+    text = compact_text(product_name).lower()
+    if re.search(r"\bfront[- ]load(?:ing)?\b", text):
+        return "Front Load"
+    if re.search(r"\btop[- ]load(?:ing)?\b", text):
+        return "Top Load"
+    return ""
+
+
+def ldy_attributes_from_product(products, product_name):
+    capacity = first_non_empty(
+        spec_value_by_names(
+            products,
+            [
+                "Capacity",
+                "Washer Capacity",
+                "Total Capacity",
+                "Product Capacity",
+                "Tub Capacity",
+            ],
+        ),
+        spec_value_containing(products, "capacity"),
+    )
+    loading_type = first_non_empty(
+        spec_value_by_names(
+            products,
+            [
+                "Load Type",
+                "Loading Type",
+                "Washer Load Type",
+                "Washer Loading Type",
+            ],
+        ),
+        spec_value_containing(products, "load", "type"),
+        ldy_loading_type_from_name(product_name),
+    )
+    return {
+        "ldy_capacity": capacity,
+        "ldy_loading_type": loading_type,
+    }
+
+
 def offer_count(products):
     for product in reversed(products):
         price = product.get("price") if isinstance(product, dict) else {}
@@ -4758,6 +4856,7 @@ def output_row(target):
     product_url = first_path(products, ["url", "pdp"]) or target.get("product_url", "")
     bsin = first_value(products, "bsin") or target.get("bsin", "")
     hhp_attrs = hhp_attributes_from_product(products, product_name, sku) if CATEGORY == "HHP" else {}
+    ldy_attrs = ldy_attributes_from_product(spec_products, product_name) if CATEGORY == "LDY" else {}
 
     crawl_dt = datetime.now()
     row = {
@@ -4823,6 +4922,8 @@ def output_row(target):
         "hhp_storage": hhp_attrs.get("hhp_storage", ""),
         "hhp_color": hhp_attrs.get("hhp_color", ""),
         "hhp_carrier": hhp_attrs.get("hhp_carrier", ""),
+        "ldy_capacity": ldy_attrs.get("ldy_capacity", ""),
+        "ldy_loading_type": ldy_attrs.get("ldy_loading_type", ""),
         "detailed_review_content": "" if not_yet_reviewed else review20_content(sku),
         "summarized_review_content": "",
         "top_mentions": "",

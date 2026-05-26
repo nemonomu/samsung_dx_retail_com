@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
+from .step00_availability_policy import inactive_availability_fields
 from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, KRW_PER_USD, bestbuy_category, old_pdp_url, rel_path
 
 RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
@@ -464,6 +465,9 @@ def product_list_rows(rows, bsr_pages):
             common["crawl_strdatetime"] = crawl_dt
             if CATEGORY == "HHP":
                 common.pop("delivery_availability", None)
+        for field in inactive_availability_fields(CATEGORY):
+            if field in common:
+                common[field] = ""
         output.append(common)
     return output
 

@@ -14,6 +14,7 @@ PYTHON = sys.executable
 TARGET_SIZE = 300
 CATEGORY_SEARCH_TERMS = {
     "HHP": "cellphone",
+    "LDY": "washing machine",
 }
 
 

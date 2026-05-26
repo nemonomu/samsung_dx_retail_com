@@ -89,6 +89,34 @@ class AvailabilityBackfillTests(unittest.TestCase):
             {0: "6639210"},
         )
 
+    def test_parse_fulfillment_does_not_invent_generic_pickup_available(self):
+        response = {
+            "data": {
+                "fulfillmentOptions": {
+                    "ispuDetails": [
+                        {
+                            "sku": "6632331",
+                            "ispuAvailability": [
+                                {
+                                    "condition": "NEW",
+                                    "pickupEligible": True,
+                                    "instoreInventoryAvailable": False,
+                                    "maxDate": None,
+                                    "fulfillDate": None,
+                                    "promiseByStreetDate": None,
+                                    "minPickupInHours": None,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        }
+
+        values = parse_fulfillment_response(response)
+
+        self.assertEqual(values, {})
+
     def test_parse_batch_fulfillment_response_groups_values_by_sku(self):
         response = {
             "data": {

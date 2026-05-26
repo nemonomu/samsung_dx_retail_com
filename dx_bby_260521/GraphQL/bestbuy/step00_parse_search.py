@@ -289,7 +289,7 @@ def pickup_availability_text(pickup):
     if hours not in (None, ""):
         suffix = "hour" if str(hours) == "1" else "hours"
         return f"Pick up in {hours} {suffix}"
-    return "Pick up available"
+    return ""
 
 
 def delivery_availability_text(delivery):

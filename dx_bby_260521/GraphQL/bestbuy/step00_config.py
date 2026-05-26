@@ -20,9 +20,9 @@ OUTPUT_TABLE_REGISTRY = os.getenv("COMMON_OUTPUT_TABLE_REGISTRY", "public.common
 
 BESTBUY_OUTPUT_TABLES = {
     "TV": "tv_retail_com_bby_v2_test",
-    "HHP": "hhp_retail_com_bby_v2_test",
-    "REF": "ref_retail_com_bby",
-    "LDY": "ldy_retail_com_bby",
+    "HHP": "hhp_retail_com",
+    "REF": "ref_retail_com",
+    "LDY": "ldy_retail_com",
 }
 
 BESTBUY_PRODUCT_LIST_TABLES = {

@@ -90,6 +90,7 @@ STEPS = [
             "BESTBUY_FINAL_TARGET_SIZE": "300",
             "BESTBUY_MAIN_RANK_LIMIT": "300",
             "BESTBUY_BSR_RANK_LIMIT": "100",
+            "BESTBUY_FINAL_ROW_LIMIT": "0",
         },
     ),
     Step(

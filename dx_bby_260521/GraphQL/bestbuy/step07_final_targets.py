@@ -41,6 +41,7 @@ TARGET_SIZE = int(os.getenv("BESTBUY_FINAL_TARGET_SIZE", "300"))
 CATEGORY = bestbuy_category()
 MAIN_RANK_LIMIT = int(os.getenv("BESTBUY_MAIN_RANK_LIMIT", "300") or "300")
 BSR_RANK_LIMIT = int(os.getenv("BESTBUY_BSR_RANK_LIMIT", "100") or "100")
+FINAL_ROW_LIMIT = int(os.getenv("BESTBUY_FINAL_ROW_LIMIT", "0") or "0")
 
 PROMOTION_FALLBACK_INPUT = (
     RUN_ROOT / "promotion" / "parsed" / "all_promotion_products.csv"
@@ -557,6 +558,8 @@ def main():
         trending_map(trending_rows),
         main_attrs,
     )
+    if FINAL_ROW_LIMIT > 0:
+        final_rows = final_rows[:FINAL_ROW_LIMIT]
     write_csv(OUTPUT_CSV, final_rows)
     listing_rows = product_list_rows(final_rows, bsr_page_map(bsr_rows))
     write_csv(PRODUCT_LIST_CSV, listing_rows, product_list_fields())
@@ -568,6 +571,7 @@ def main():
         "target_size": TARGET_SIZE,
         "main_rank_limit": MAIN_RANK_LIMIT,
         "bsr_rank_limit": BSR_RANK_LIMIT,
+        "final_row_limit": FINAL_ROW_LIMIT,
         "main_input": rel_path(MAIN_INPUT),
         "bsr_input": rel_path(BSR_INPUT),
         "promotion_input": rel_path(promotion_input),

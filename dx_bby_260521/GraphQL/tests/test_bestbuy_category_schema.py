@@ -8,7 +8,16 @@ sys.path.insert(0, str(ROOT))
 
 from bestbuy.step00_config import BESTBUY_OUTPUT_TABLES  # noqa: E402
 from bestbuy.step00_availability_policy import ALL_AVAILABILITY_FIELDS  # noqa: E402
-from bestbuy.step08_detail_enrichment import HHP_FINAL_FIELDS, PRODUCT_LIST_DETAIL_FIELD_SOURCES  # noqa: E402
+from bestbuy.step08_detail_enrichment import (  # noqa: E402
+    HHP_FINAL_FIELDS,
+    PRODUCT_LIST_DETAIL_FIELD_SOURCES,
+    PRODUCT_SCHEMA_REVIEW20_QUERY,
+    hhp_attributes_from_product,
+    fastest_delivery_from_html,
+    pickup_availability_from_html,
+    trade_in_from_html,
+    trade_in_from_products,
+)
 from bestbuy.step13_db_prepare import HHP_COLUMNS, LDY_COLUMNS, REF_COLUMNS  # noqa: E402
 
 
@@ -102,6 +111,59 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn("HHP promotion page is not collected", orchestrator)
         self.assertIn('if CATEGORY == "HHP":', final_targets)
         self.assertIn("promotion_rows = []", final_targets)
+
+    def test_hhp_carrier_prefers_selected_carrier_over_compatibility_list(self):
+        product = {
+            "specificationGroups": [
+                {
+                    "specifications": [
+                        {"displayName": "Carrier", "value": "Unlocked"},
+                        {
+                            "displayName": "Carrier Compatibility",
+                            "value": "AT&T, Boost Mobile, Cricket, Verizon, Visible",
+                        },
+                        {"displayName": "Built-in Storage", "value": "128 gigabytes"},
+                        {"displayName": "Color", "value": "Black"},
+                    ]
+                }
+            ],
+            "color": {"displayName": "Black"},
+        }
+
+        attrs = hhp_attributes_from_product(
+            product,
+            "Samsung - Galaxy A17 5G 128GB (Unlocked) - Black",
+        )
+
+        self.assertEqual(attrs["hhp_carrier"], "Unlocked")
+        self.assertEqual(attrs["hhp_storage"], "128 gigabytes")
+        self.assertEqual(attrs["hhp_color"], "Black")
+
+    def test_hhp_trade_in_text_from_html_and_detail_product(self):
+        html = (
+            '<span data-testid="trade-in-check-your-value">Check your trade-in value.</span>'
+            '<span data-testid="trade-in-save-when-you-trade">Save when you trade in a similar device.</span>'
+        )
+
+        self.assertEqual(
+            trade_in_from_html(html),
+            "Check your trade-in value. Save when you trade in a similar device.",
+        )
+        self.assertEqual(
+            trade_in_from_products([{"isPurchaseWithTradeInEligible": True}]),
+            "Check your trade-in value. Save when you trade in a similar device.",
+        )
+        self.assertIn("isPurchaseWithTradeInEligible", PRODUCT_SCHEMA_REVIEW20_QUERY)
+
+    def test_hhp_html_fulfillment_tiles(self):
+        html = (
+            '<div aria-label="Pickup Ready Today" data-testid="pdp-pickup-tile-6665489"></div>'
+            '<div aria-label="Shipping Get it Tomorrow" data-testid="pdp-shipping-tile-6665489"></div>'
+            '<span>FREE shipping to </span>'
+        )
+
+        self.assertEqual(pickup_availability_from_html(html), "Pick up today")
+        self.assertEqual(fastest_delivery_from_html(html), "Get it tomorrow \u2022 FREE")
 
 
 if __name__ == "__main__":

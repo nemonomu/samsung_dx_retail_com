@@ -456,6 +456,8 @@ def product_list_rows(rows, bsr_pages):
             common["savings"] = money_int(row.get("total_savings"))
             common["comparable_pricing"] = money(row.get("regular_price"))
             common["crawl_strdatetime"] = crawl_dt
+            if CATEGORY == "HHP":
+                common.pop("delivery_availability", None)
         output.append(common)
     return output
 

@@ -387,15 +387,15 @@ def hhp_attributes_from_product(product, product_name):
                 else:
                     attrs[field] = clean_hhp_color(value)
                 break
-    carrier_compatibility = spec_value(products, "Carrier Compatibility")
-    if carrier_compatibility:
-        attrs["hhp_carrier"] = clean_hhp_carrier_compatibility(carrier_compatibility)
-    else:
-        for name in ("Carrier", "Wireless Carrier"):
-            value = spec_value(products, name)
-            if value:
-                attrs["hhp_carrier"] = clean_hhp_carrier(value)
-                break
+    for name in ("Carrier", "Wireless Carrier"):
+        value = spec_value(products, name)
+        if value:
+            attrs["hhp_carrier"] = clean_hhp_carrier(value)
+            break
+    if not attrs["hhp_carrier"]:
+        carrier_compatibility = spec_value(products, "Carrier Compatibility")
+        if carrier_compatibility:
+            attrs["hhp_carrier"] = clean_hhp_carrier_compatibility(carrier_compatibility)
     return attrs
 
 
@@ -579,6 +579,66 @@ def html_match(pattern, html_text, flags=re.I | re.S):
     return compact_text(match.group(1)) if match else ""
 
 
+def normalize_fastest_delivery_phrase(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    text = re.sub(r"(?i)^shipping\s+", "", text).strip()
+    relative_match = re.match(r"(?i)^get it\s+(?:by\s+)?(today|tomorrow)(\b.*)?$", text)
+    if relative_match:
+        suffix = relative_match.group(2) or ""
+        return f"Get it {relative_match.group(1).lower()}{suffix}"
+    if re.match(
+        r"(?i)^get it\s+by\s+("
+        r"mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|"
+        r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|"
+        r"sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+        r")(\b|,)",
+        text,
+    ):
+        return text
+    if re.match(
+        r"(?i)^get it\s+("
+        r"mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|"
+        r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|"
+        r"sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
+        r")(\b|,)",
+        text,
+    ):
+        return f"Get it by {text[len('Get it '):]}"
+    return text if text.lower().startswith("get it") else ""
+
+
+def normalize_pickup_phrase(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    text = re.sub(r"(?i)^pickup\s+ready\s+", "Pick up ", text).strip()
+    text = re.sub(r"(?i)^pickup\s+", "Pick up ", text).strip()
+    relative_match = re.match(r"(?i)^pick up\s+(today|tomorrow)(\b.*)?$", text)
+    if relative_match:
+        suffix = relative_match.group(2) or ""
+        return f"Pick up {relative_match.group(1).lower()}{suffix}"
+    return text if text.lower().startswith("pick up") else ""
+
+
+def html_context_has_free_shipping(html_text, value):
+    text = str(value or "")
+    if not text:
+        return False
+    index = html_text.find(text)
+    if index < 0:
+        return False
+    return "free shipping" in html_text[index : index + 2500].lower()
+
+
+def maybe_append_free_shipping(value, html_text, source_text):
+    text = compact_text(value)
+    if text and "free" not in text.lower() and html_context_has_free_shipping(html_text, source_text):
+        return f"{text} \u2022 FREE"
+    return text
+
+
 def recommendation_from_html(html_text):
     match = re.search(
         r"<span[^>]*>\s*(\d+%)\s*</span>\s*&nbsp;\s*would recommend to a friend",
@@ -591,11 +651,33 @@ def recommendation_from_html(html_text):
 
 
 def fastest_delivery_from_html(html_text):
-    for pattern in (r'aria-label="(Get it[^"]+)"', r">\s*(Get it[^<]+)</"):
-        value = html_match(pattern, html_text)
-        if value and value.lower().startswith("get"):
-            return compact_text(value)
+    if not html_text:
+        return ""
+    soup = BeautifulSoup(html_text, "html.parser")
+    for node in soup.find_all(attrs={"aria-label": True}):
+        label = compact_text(node.get("aria-label"))
+        value = normalize_fastest_delivery_phrase(label)
+        if value:
+            return maybe_append_free_shipping(value, html_text, label)
+    for pattern in (r'aria-label="((?:Shipping\s+)?Get it[^"]+)"', r">\s*(Get it[^<]+)</"):
+        raw_value = html_match(pattern, html_text)
+        value = normalize_fastest_delivery_phrase(raw_value)
+        if value:
+            return maybe_append_free_shipping(value, html_text, raw_value)
     return ""
+
+
+def pickup_availability_from_html(html_text):
+    if not html_text:
+        return ""
+    soup = BeautifulSoup(html_text, "html.parser")
+    for node in soup.find_all(attrs={"aria-label": True}):
+        label = compact_text(node.get("aria-label"))
+        value = normalize_pickup_phrase(label)
+        if value:
+            return value
+    value = html_match(r'aria-label="(Pickup[^"]+)"', html_text) or html_match(r">\s*(Pick up[^<]+)</")
+    return normalize_pickup_phrase(value)
 
 
 def delivery_from_html(html_text):
@@ -615,7 +697,7 @@ def trade_in_from_html(html_text):
     title = compact_text(title_node.get_text(" ", strip=True) if title_node else "")
     body = compact_text(body_node.get_text(" ", strip=True) if body_node else "")
     if title and body:
-        return f"{title}{body}"
+        return compact_text(f"{title} {body}")
     if title:
         return title
     text = compact_text(soup.get_text(" "))
@@ -647,6 +729,8 @@ def trade_in_from_products(products):
     for product in reversed(products):
         if not isinstance(product, dict):
             continue
+        if product.get("isPurchaseWithTradeInEligible") is True:
+            return "Check your trade-in value. Save when you trade in a similar device."
         for value in nested_strings(product.get("operationalAttributes") or {}):
             match = trade_in_text_match(value)
             if match:
@@ -2429,6 +2513,7 @@ PRODUCT_SCHEMA_REVIEW20_QUERY = (
     "{...ProductSchema_Fragment}"
     "fragment ProductSchema_Fragment on Query{productBySkuId(skuId:$skuId){bsin name{short}images{piscesHref}"
     "url{pdp}description{short}skuId manufacturer{modelNumber}color{displayName}brand "
+    "isPurchaseWithTradeInEligible connectionType{code} "
     "reviewInfo{averageRating reviewCount recommendedPercent}"
     "specificationGroups{specifications{displayName value}}"
     "buyingOptions{description pdpUrl skuId type product{price(input:{salesChannel:$salesChannel}){customerPrice}}}"
@@ -4246,6 +4331,7 @@ def output_row(target):
             "Pick up",
             pickup_text(pickup),
             get_it_fast_values.get("pick_up_availability"),
+            pickup_availability_from_html(html_text),
             selector_values.get("pick_up_availability"),
             target.get("pick_up_availability"),
         ),

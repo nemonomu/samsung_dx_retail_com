@@ -51,7 +51,7 @@ class ListingAvailabilityTests(unittest.TestCase):
         values = listing_availability_values(product_with_listing_fulfillment())
 
         self.assertEqual(values["pick_up_availability"], "Pick up today")
-        self.assertEqual(values["fastest_delivery"], "Get it Wed, May 27 \u2022 FREE")
+        self.assertEqual(values["fastest_delivery"], "Get it by Wed, May 27 \u2022 FREE")
         self.assertEqual(values["delivery_availability"], "Delivery as soon as Thu, May 28")
         self.assertTrue(values["shipping_eligible"])
         self.assertTrue(values["pickup_eligible"])
@@ -61,7 +61,7 @@ class ListingAvailabilityTests(unittest.TestCase):
         row = parse_product(product_with_listing_fulfillment(), {"page": 1})
 
         self.assertEqual(row["pick_up_availability"], "Pick up today")
-        self.assertEqual(row["fastest_delivery"], "Get it Wed, May 27 \u2022 FREE")
+        self.assertEqual(row["fastest_delivery"], "Get it by Wed, May 27 \u2022 FREE")
         self.assertEqual(row["delivery_availability"], "Delivery as soon as Thu, May 28")
         self.assertEqual(row["offer_count"], 2)
 
@@ -74,7 +74,7 @@ class ListingAvailabilityTests(unittest.TestCase):
         )
 
         self.assertEqual(row["pick_up_availability"], "Pick up today")
-        self.assertEqual(row["fastest_delivery"], "Get it Wed, May 27 \u2022 FREE")
+        self.assertEqual(row["fastest_delivery"], "Get it by Wed, May 27 \u2022 FREE")
         self.assertEqual(row["delivery_availability"], "Delivery as soon as Thu, May 28")
         self.assertEqual(row["offer_count"], 2)
 

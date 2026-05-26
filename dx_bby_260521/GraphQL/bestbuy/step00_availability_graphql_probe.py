@@ -307,7 +307,7 @@ def digital_event_availability_values(rows, sku):
         pickup_fulfillment.get("daysOut") if isinstance(pickup_fulfillment, dict) else "",
     )
     shipping_text_value = days_out_text(
-        "Get it",
+        "Get it by",
         datetime.fromisoformat(shipping.get("base_date")).date() if shipping else datetime.now().date(),
         shipping_fulfillment.get("daysOut") if isinstance(shipping_fulfillment, dict) else "",
     )
@@ -335,7 +335,7 @@ def get_it_fast_availability_values(item):
     store = stores[0] if stores and isinstance(stores[0], dict) else {}
     return {
         "pick_up_availability": date_to_phrase_from_get_it_fast("Pick up", store),
-        "fastest_delivery": date_to_phrase_from_get_it_fast("Get it", shipping),
+        "fastest_delivery": date_to_phrase_from_get_it_fast("Get it by", shipping),
         "delivery_availability": "",
     }
 

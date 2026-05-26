@@ -179,7 +179,7 @@ class AvailabilityBackfillTests(unittest.TestCase):
 
         self.assertEqual(values["6635801"]["pick_up_availability"], "Pick up today")
         self.assertEqual(values["6635801"]["delivery_availability"], "Delivery as soon as Fri, May 29")
-        self.assertEqual(values["6623791"]["fastest_delivery"], "Get it Wed, May 27 \u2022 FREE")
+        self.assertEqual(values["6623791"]["fastest_delivery"], "Get it by Wed, May 27 \u2022 FREE")
 
     def test_apply_values_only_fills_blank_availability_fields(self):
         rows = [

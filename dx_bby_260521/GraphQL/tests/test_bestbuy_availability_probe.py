@@ -102,7 +102,7 @@ curl ^"https://www.bestbuy.com/gateway/graphql^" ^
             values = get_it_fast_availability_values(item)
 
         self.assertEqual(values["pick_up_availability"], "Pick up today")
-        self.assertEqual(values["fastest_delivery"], "Get it Wed, May 27")
+        self.assertEqual(values["fastest_delivery"], "Get it by Wed, May 27")
         self.assertEqual(values["delivery_availability"], "")
 
     def test_reference_audit_maps_digital_fulfillment_event(self):
@@ -117,7 +117,7 @@ curl ^"https://streams.bestbuy.com/customer/web-streams/v1/events/digital-experi
         self.assertEqual(summary["digital_event_parsed_count"], 1)
         self.assertEqual(summary["digital_fulfillment_event_count"], 3)
         self.assertEqual(values["pick_up_availability"], "Pick up today")
-        self.assertEqual(values["fastest_delivery"], "Get it Wed, May 27 \u2022 FREE")
+        self.assertEqual(values["fastest_delivery"], "Get it by Wed, May 27 \u2022 FREE")
         self.assertEqual(values["delivery_availability"], "Delivery as soon as Thu, May 28")
 
 

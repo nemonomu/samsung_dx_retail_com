@@ -223,6 +223,20 @@ def _date_to_listing_text(prefix, value):
     return f"{prefix} {dt.strftime('%a, %b')} {dt.day}"
 
 
+def _normalize_get_it_by_text(text):
+    normalized = str(text or "").strip()
+    if not normalized:
+        return ""
+    if normalized.lower().startswith("get it by "):
+        return normalized
+    if re.match(
+        r"(?i)^get it\s+(today|tomorrow|mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)(\b|,)",
+        normalized,
+    ):
+        return f"Get it by {normalized[len('Get it '):]}"
+    return normalized
+
+
 def _first_text(value, keys):
     if not isinstance(value, dict):
         return ""
@@ -340,15 +354,15 @@ def fastest_delivery_text(shipping, delivery=None):
             price = group.get("price")
             suffix = " • FREE" if price in (0, 0.0, "0", "0.0") else ""
             if date_value:
-                return f"{_date_to_listing_text('Get it', date_value)}{suffix}"
+                return f"{_date_to_listing_text('Get it by', date_value)}{suffix}"
             group_text = _prefixed_text(
                 _first_text(group, ["displayText", "displayMessage", "message", "text"]),
                 ["Get"],
             )
             if group_text:
-                return f"{group_text}{suffix}"
+                return f"{_normalize_get_it_by_text(group_text)}{suffix}"
         if shipping.get("promiseByStreetDate"):
-            return _date_to_listing_text("Get it", shipping.get("promiseByStreetDate"))
+            return _date_to_listing_text("Get it by", shipping.get("promiseByStreetDate"))
         text = _first_text(
             shipping,
             [
@@ -363,7 +377,7 @@ def fastest_delivery_text(shipping, delivery=None):
         )
         text = _prefixed_text(text, ["Get"])
         if text:
-            return text
+            return _normalize_get_it_by_text(text)
     return ""
 
 

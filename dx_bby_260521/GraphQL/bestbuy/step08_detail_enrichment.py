@@ -553,7 +553,7 @@ def get_it_fast_availability_values(item):
     store = stores[0] if stores and isinstance(stores[0], dict) else {}
     return {
         "pick_up_availability": date_to_phrase_from_get_it_fast("Pick up", store),
-        "fastest_delivery": date_to_phrase_from_get_it_fast("Get it", shipping),
+        "fastest_delivery": date_to_phrase_from_get_it_fast("Get it by", shipping),
         "delivery_availability": "",
     }
 
@@ -4001,12 +4001,12 @@ def fastest_delivery_text(shipping):
                 group = candidate
                 break
         date_value = group.get("minLineItemMaxDate") or group.get("maxLineItemMaxDate")
-        phrase = date_to_relative_or_phrase("Get it", date_value)
+        phrase = date_to_relative_or_phrase("Get it by", date_value)
         if phrase:
             if group.get("price") in (0, 0.0, "0", "0.0"):
                 phrase = f"{phrase} \u2022 FREE"
             return phrase
-    return date_to_relative_or_phrase("Get it", shipping.get("promiseByStreetDate"))
+    return date_to_relative_or_phrase("Get it by", shipping.get("promiseByStreetDate"))
 
 
 def fulfillment_button_text(products):

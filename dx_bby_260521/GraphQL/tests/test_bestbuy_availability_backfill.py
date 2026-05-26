@@ -11,6 +11,7 @@ from bestbuy.step08_availability_backfill import (  # noqa: E402
     all_availability_blank,
     apply_values,
     build_sku_lookup,
+    filter_row_to_sku_for_selected_skus,
     item_from_product_url,
     sku_for_row,
 )
@@ -80,6 +81,12 @@ class AvailabilityBackfillTests(unittest.TestCase):
         self.assertEqual(
             item_from_product_url("https://www.bestbuy.com/product/name/J3ZYG2V5VV/sku/6639210"),
             "J3ZYG2V5VV",
+        )
+
+    def test_limited_backfill_only_maps_selected_skus(self):
+        self.assertEqual(
+            filter_row_to_sku_for_selected_skus({0: "6639210", 1: "6670264", 2: "6607832"}, ["6639210"]),
+            {0: "6639210"},
         )
 
     def test_parse_batch_fulfillment_response_groups_values_by_sku(self):

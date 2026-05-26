@@ -185,6 +185,13 @@ def unique_ordered(values):
     return result
 
 
+def filter_row_to_sku_for_selected_skus(row_to_sku, selected_skus):
+    selected = set(selected_skus)
+    if not selected:
+        return {}
+    return {index: sku for index, sku in row_to_sku.items() if sku in selected}
+
+
 def fulfillment_headers():
     return {
         "accept": "application/json, text/plain, */*",
@@ -357,6 +364,7 @@ def main():
     skus = unique_ordered(row_to_sku.values())
     if LIMIT > 0:
         skus = skus[:LIMIT]
+    row_to_sku = filter_row_to_sku_for_selected_skus(row_to_sku, skus)
     run_dir = BACKFILL_ROOT / datetime.now().strftime("%Y%m%d_%H%M%S")
     raw_dir = run_dir / "raw"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -386,6 +394,7 @@ def main():
         sku = sku_for_row(row, lookup)
         if sku:
             detail_row_to_sku[index] = sku
+    detail_row_to_sku = filter_row_to_sku_for_selected_skus(detail_row_to_sku, skus)
 
     product_list_row_to_sku = {}
     for index, row in enumerate(product_list_rows):
@@ -394,6 +403,7 @@ def main():
         sku = sku_for_row(row, lookup)
         if sku:
             product_list_row_to_sku[index] = sku
+    product_list_row_to_sku = filter_row_to_sku_for_selected_skus(product_list_row_to_sku, skus)
 
     final_updated, final_changed_fields = apply_values(final_rows, row_to_sku, values_by_sku)
     detail_updated, detail_changed_fields = apply_values(detail_rows, detail_row_to_sku, values_by_sku)

@@ -28,6 +28,7 @@ from .step00_config import (
     old_pdp_url,
     rel_path,
 )
+from .step00_availability_policy import ALL_AVAILABILITY_FIELDS
 from .step00_detail_benchmarks import append_detail_benchmark, write_detail_benchmarks
 from .step00_parse_pdp import event_data, extract_apollo_payloads
 
@@ -4311,7 +4312,7 @@ def output_row(target):
     if CATEGORY != "HHP":
         row["shipping_info"] = ""
     if CATEGORY == "TV":
-        for field in AVAILABILITY_FIELDS:
+        for field in ALL_AVAILABILITY_FIELDS:
             row[field] = ""
     for field, value in selector_values.items():
         row.setdefault(field, value)

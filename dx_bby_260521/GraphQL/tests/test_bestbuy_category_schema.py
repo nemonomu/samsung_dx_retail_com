@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from bestbuy.step00_config import BESTBUY_OUTPUT_TABLES  # noqa: E402
+from bestbuy.step00_availability_policy import ALL_AVAILABILITY_FIELDS  # noqa: E402
 from bestbuy.step08_detail_enrichment import HHP_FINAL_FIELDS, PRODUCT_LIST_DETAIL_FIELD_SOURCES  # noqa: E402
 from bestbuy.step13_db_prepare import HHP_COLUMNS, LDY_COLUMNS, REF_COLUMNS  # noqa: E402
 
@@ -83,6 +84,16 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
 
     def test_detail_promotion_type_can_backfill_hhp_product_list(self):
         self.assertEqual(PRODUCT_LIST_DETAIL_FIELD_SOURCES["promotion_type"], ("promotion_type",))
+
+    def test_tv_detail_output_uses_defined_availability_fields(self):
+        step08 = (ROOT / "bestbuy" / "step08_detail_enrichment.py").read_text(encoding="utf-8")
+
+        self.assertIn("ALL_AVAILABILITY_FIELDS", step08)
+        self.assertEqual(
+            ALL_AVAILABILITY_FIELDS,
+            ["pick_up_availability", "fastest_delivery", "delivery_availability"],
+        )
+        self.assertNotIn("for field in AVAILABILITY_FIELDS", step08)
 
     def test_hhp_promotion_listing_is_explicitly_skipped(self):
         orchestrator = (ROOT / "bestbuy" / "bestbuy_orchestrator.py").read_text(encoding="utf-8")

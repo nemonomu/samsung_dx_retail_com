@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from .step00_availability_policy import active_availability_fields
 from .step00_config import (
     DEFAULT_BESTBUY_RUN_ROOT,
     bestbuy_category,
@@ -237,7 +238,7 @@ def availability_update_candidates(rows, batch_id=""):
 
 
 def update_availability_only(cur, csv_path, table_name, dry_run=False, batch_id=UPDATE_BATCH_ID):
-    fields = ["pick_up_availability", "fastest_delivery", "delivery_availability"]
+    fields = active_availability_fields(CATEGORY)
     source_rows = read_csv(csv_path)
     rows = availability_update_candidates(source_rows, batch_id)
     if not rows:

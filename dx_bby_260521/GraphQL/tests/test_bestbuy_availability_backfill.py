@@ -271,6 +271,8 @@ class AvailabilityBackfillTests(unittest.TestCase):
         import bestbuy.step08_availability_backfill as backfill
 
         old_clear = backfill.CLEAR_EXISTING_FIELDS
+        old_active = list(backfill.ACTIVE_AVAILABILITY_FIELDS)
+        old_inactive = list(backfill.INACTIVE_AVAILABILITY_FIELDS)
         rows = [
             {
                 "pick_up_availability": "Pick up today",
@@ -286,10 +288,54 @@ class AvailabilityBackfillTests(unittest.TestCase):
             }
         }
         backfill.CLEAR_EXISTING_FIELDS = True
+        backfill.ACTIVE_AVAILABILITY_FIELDS = [
+            "pick_up_availability",
+            "fastest_delivery",
+            "delivery_availability",
+        ]
+        backfill.INACTIVE_AVAILABILITY_FIELDS = []
         try:
             updated, fields = backfill.apply_values(rows, {0: "6670831"}, values)
         finally:
             backfill.CLEAR_EXISTING_FIELDS = old_clear
+            backfill.ACTIVE_AVAILABILITY_FIELDS = old_active
+            backfill.INACTIVE_AVAILABILITY_FIELDS = old_inactive
+
+        self.assertEqual(updated, 1)
+        self.assertEqual(fields, 3)
+        self.assertEqual(rows[0]["pick_up_availability"], "Pick up Thu, May 28")
+        self.assertEqual(rows[0]["fastest_delivery"], "Get it Fri, May 29 \u2022 FREE")
+        self.assertEqual(rows[0]["delivery_availability"], "")
+
+    def test_apply_values_clears_category_inactive_availability_fields(self):
+        import bestbuy.step08_availability_backfill as backfill
+
+        old_clear = backfill.CLEAR_EXISTING_FIELDS
+        old_active = list(backfill.ACTIVE_AVAILABILITY_FIELDS)
+        old_inactive = list(backfill.INACTIVE_AVAILABILITY_FIELDS)
+        rows = [
+            {
+                "pick_up_availability": "",
+                "fastest_delivery": "",
+                "delivery_availability": "Delivery as soon as Sat, May 30",
+            }
+        ]
+        values = {
+            "6670831": {
+                "pick_up_availability": "Pick up Thu, May 28",
+                "fastest_delivery": "Get it Fri, May 29 \u2022 FREE",
+                "delivery_availability": "Delivery as soon as Sat, May 30",
+            }
+        }
+        backfill.CLEAR_EXISTING_FIELDS = True
+        backfill.ACTIVE_AVAILABILITY_FIELDS = ["pick_up_availability", "fastest_delivery"]
+        backfill.INACTIVE_AVAILABILITY_FIELDS = ["delivery_availability"]
+        try:
+            updated, fields = backfill.apply_values(rows, {0: "6670831"}, values)
+        finally:
+            backfill.CLEAR_EXISTING_FIELDS = old_clear
+            backfill.ACTIVE_AVAILABILITY_FIELDS = old_active
+            backfill.INACTIVE_AVAILABILITY_FIELDS = old_inactive
 
         self.assertEqual(updated, 1)
         self.assertEqual(fields, 3)

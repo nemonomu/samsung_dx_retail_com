@@ -8,7 +8,8 @@ from pathlib import Path
 from requests import RequestException
 from zenrows import ZenRowsClient
 
-from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, KRW_PER_USD, rel_path
+from .step00_availability_policy import ALL_AVAILABILITY_FIELDS, active_availability_fields, inactive_availability_fields
+from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, KRW_PER_USD, bestbuy_category, rel_path
 from .step00_fulfillment_graphql import (
     FULFILLMENT_ENDPOINT,
     fulfillment_url,
@@ -20,7 +21,10 @@ from .step00_fulfillment_graphql import (
 from .step08_detail_enrichment import TARGET_CSV, compact_text, write_csv
 
 
-AVAILABILITY_FIELDS = ["pick_up_availability", "fastest_delivery", "delivery_availability"]
+CATEGORY = bestbuy_category()
+AVAILABILITY_FIELDS = ALL_AVAILABILITY_FIELDS
+ACTIVE_AVAILABILITY_FIELDS = active_availability_fields(CATEGORY)
+INACTIVE_AVAILABILITY_FIELDS = inactive_availability_fields(CATEGORY)
 RUN_ROOT = Path(os.getenv("BESTBUY_RUN_ROOT", DEFAULT_BESTBUY_RUN_ROOT))
 OUTPUT_ROOT = Path(os.getenv("BESTBUY_OUTPUT_ROOT", RUN_ROOT / "output"))
 DETAIL_ROOT = Path(os.getenv("BESTBUY_DETAIL_RUN_ROOT", RUN_ROOT / "detail"))
@@ -118,11 +122,11 @@ def ensure_item_from_url(row):
 
 
 def all_availability_blank(row):
-    return all(not compact_text(row.get(field)) for field in AVAILABILITY_FIELDS)
+    return all(not compact_text(row.get(field)) for field in ACTIVE_AVAILABILITY_FIELDS)
 
 
 def any_availability_blank(row):
-    return any(not compact_text(row.get(field)) for field in AVAILABILITY_FIELDS)
+    return any(not compact_text(row.get(field)) for field in ACTIVE_AVAILABILITY_FIELDS)
 
 
 def backfill_candidate(row, batch_id):
@@ -299,7 +303,7 @@ def fetch_availability(skus, raw_dir):
                 "response_path": rel_path(chunk_dir / "response.json"),
             }
         )
-        value_count = sum(1 for values in returned.values() for field in AVAILABILITY_FIELDS if values.get(field))
+        value_count = sum(1 for values in returned.values() for field in ACTIVE_AVAILABILITY_FIELDS if values.get(field))
         print(
             f"[availability_backfill:chunk] {index}/{len(chunks)} skus={len(chunk)} "
             f"status={status} returned={len(returned)} values={value_count} cost={cost}",
@@ -318,6 +322,12 @@ def apply_values(rows, row_to_sku, values_by_sku):
         values = values_by_sku.get(sku) or {}
         row_changed = False
         for field in AVAILABILITY_FIELDS:
+            if field in INACTIVE_AVAILABILITY_FIELDS:
+                if row.get(field, "") != "":
+                    row[field] = ""
+                    row_changed = True
+                    changed_fields += 1
+                continue
             value = values.get(field)
             if CLEAR_EXISTING_FIELDS:
                 desired = value or ""
@@ -376,6 +386,7 @@ def main():
         f"chunk_size={CHUNK_SIZE} requested_chunk_size={REQUESTED_CHUNK_SIZE} "
         f"multi_sku={str(ALLOW_MULTI_SKU_FULFILLMENT).lower()} candidate_mode={CANDIDATE_MODE} "
         f"overwrite={str(OVERWRITE).lower()} clear_existing={str(CLEAR_EXISTING_FIELDS).lower()} "
+        f"active_fields={','.join(ACTIVE_AVAILABILITY_FIELDS)} "
         f"limit={LIMIT} calls={estimated_calls} dry_run={str(DRY_RUN).lower()}",
         flush=True,
     )
@@ -434,6 +445,8 @@ def main():
         "candidate_mode": CANDIDATE_MODE,
         "overwrite": OVERWRITE,
         "clear_existing_fields": CLEAR_EXISTING_FIELDS,
+        "active_availability_fields": ACTIVE_AVAILABILITY_FIELDS,
+        "inactive_availability_fields": INACTIVE_AVAILABILITY_FIELDS,
         "batch_final_rows": len(batch_indexes),
         "blank_final_rows": len(candidate_indexes),
         "mapped_final_rows": len(row_to_sku),

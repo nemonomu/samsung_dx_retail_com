@@ -62,6 +62,8 @@ def detail_meta_counts():
     review_cost = 0.0
 
     for path in detail_dir.rglob("*_meta.json"):
+        if path.name.endswith("_fulfillment_meta.json"):
+            continue
         meta = read_json(path)
         if meta.get("success") is True:
             detail_success += 1

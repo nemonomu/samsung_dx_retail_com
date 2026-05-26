@@ -1,7 +1,11 @@
+import json
+import os
+
 from .step00_config import BESTBUY_OUTPUT_TABLES, BESTBUY_PRODUCT_LIST_TABLES, db_config
 
 
 TARGET_SCHEMA = "public"
+DRY_RUN = os.getenv("BESTBUY_DB_LOAD_DRY_RUN", "0").lower() in {"1", "true", "yes", "y"}
 
 
 COMMON_COLUMNS = [
@@ -279,6 +283,9 @@ def main():
 
     config = db_config()
     if not config:
+        if DRY_RUN:
+            print(json.dumps({"dry_run": True, "skipped": True, "reason": "DB_CONFIG is missing"}))
+            return
         raise RuntimeError("DB_CONFIG is missing")
 
     conn = psycopg2.connect(

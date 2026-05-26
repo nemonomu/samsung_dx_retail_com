@@ -367,7 +367,55 @@ def hhp_attributes_from_name(name):
     return attrs
 
 
-def hhp_attributes_from_product(product, product_name):
+def hhp_variation_attrs_from_product(product, sku=""):
+    sku = compact_text(sku)
+    attrs = {"hhp_storage": "", "hhp_color": "", "hhp_carrier": ""}
+    products = product if isinstance(product, list) else [product]
+    candidates = []
+
+    def collect_candidate(value):
+        if isinstance(value, dict):
+            variations = value.get("variations")
+            if isinstance(variations, list) and variations:
+                candidates.append(value)
+            for child in value.values():
+                collect_candidate(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect_candidate(child)
+
+    collect_candidate(products)
+    selected = []
+    for candidate in candidates:
+        candidate_sku = first_non_empty(
+            candidate.get("sku"),
+            first_path([candidate], ["product", "skuId"]),
+            first_path([candidate], ["bsinProduct", "featuredSKU", "skuId"]),
+            first_path([candidate], ["bsinProduct", "featuredSKU", "product", "skuId"]),
+        )
+        if sku and str(candidate_sku) == sku:
+            selected.append(candidate)
+    if not selected and len(candidates) == 1:
+        selected = candidates
+
+    for candidate in selected:
+        for variation in as_list(candidate.get("variations")):
+            if not isinstance(variation, dict):
+                continue
+            raw_name = compact_text(variation.get("rawName") or variation.get("displayName")).lower()
+            value = compact_text(variation.get("value"))
+            if not value:
+                continue
+            if "carrier" in raw_name:
+                attrs["hhp_carrier"] = clean_hhp_carrier(value)
+            elif "color" in raw_name:
+                attrs["hhp_color"] = clean_hhp_color(value)
+            elif "storage" in raw_name or "capacity" in raw_name:
+                attrs["hhp_storage"] = clean_hhp_storage(value)
+    return attrs
+
+
+def hhp_attributes_from_product(product, product_name, sku=""):
     products = product if isinstance(product, list) else [product]
     product = products[-1] if products else {}
     attrs = hhp_attributes_from_name(product_name)
@@ -392,6 +440,10 @@ def hhp_attributes_from_product(product, product_name):
         if value:
             attrs["hhp_carrier"] = clean_hhp_carrier(value)
             break
+    variation_attrs = hhp_variation_attrs_from_product(products, sku or first_value(products, "skuId"))
+    for field, value in variation_attrs.items():
+        if value:
+            attrs[field] = value
     if not attrs["hhp_carrier"]:
         carrier_compatibility = spec_value(products, "Carrier Compatibility")
         if carrier_compatibility:
@@ -579,66 +631,6 @@ def html_match(pattern, html_text, flags=re.I | re.S):
     return compact_text(match.group(1)) if match else ""
 
 
-def normalize_fastest_delivery_phrase(value):
-    text = compact_text(value)
-    if not text:
-        return ""
-    text = re.sub(r"(?i)^shipping\s+", "", text).strip()
-    relative_match = re.match(r"(?i)^get it\s+(?:by\s+)?(today|tomorrow)(\b.*)?$", text)
-    if relative_match:
-        suffix = relative_match.group(2) or ""
-        return f"Get it {relative_match.group(1).lower()}{suffix}"
-    if re.match(
-        r"(?i)^get it\s+by\s+("
-        r"mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|"
-        r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|"
-        r"sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
-        r")(\b|,)",
-        text,
-    ):
-        return text
-    if re.match(
-        r"(?i)^get it\s+("
-        r"mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?|"
-        r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|"
-        r"sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?"
-        r")(\b|,)",
-        text,
-    ):
-        return f"Get it by {text[len('Get it '):]}"
-    return text if text.lower().startswith("get it") else ""
-
-
-def normalize_pickup_phrase(value):
-    text = compact_text(value)
-    if not text:
-        return ""
-    text = re.sub(r"(?i)^pickup\s+ready\s+", "Pick up ", text).strip()
-    text = re.sub(r"(?i)^pickup\s+", "Pick up ", text).strip()
-    relative_match = re.match(r"(?i)^pick up\s+(today|tomorrow)(\b.*)?$", text)
-    if relative_match:
-        suffix = relative_match.group(2) or ""
-        return f"Pick up {relative_match.group(1).lower()}{suffix}"
-    return text if text.lower().startswith("pick up") else ""
-
-
-def html_context_has_free_shipping(html_text, value):
-    text = str(value or "")
-    if not text:
-        return False
-    index = html_text.find(text)
-    if index < 0:
-        return False
-    return "free shipping" in html_text[index : index + 2500].lower()
-
-
-def maybe_append_free_shipping(value, html_text, source_text):
-    text = compact_text(value)
-    if text and "free" not in text.lower() and html_context_has_free_shipping(html_text, source_text):
-        return f"{text} \u2022 FREE"
-    return text
-
-
 def recommendation_from_html(html_text):
     match = re.search(
         r"<span[^>]*>\s*(\d+%)\s*</span>\s*&nbsp;\s*would recommend to a friend",
@@ -651,33 +643,11 @@ def recommendation_from_html(html_text):
 
 
 def fastest_delivery_from_html(html_text):
-    if not html_text:
-        return ""
-    soup = BeautifulSoup(html_text, "html.parser")
-    for node in soup.find_all(attrs={"aria-label": True}):
-        label = compact_text(node.get("aria-label"))
-        value = normalize_fastest_delivery_phrase(label)
-        if value:
-            return maybe_append_free_shipping(value, html_text, label)
-    for pattern in (r'aria-label="((?:Shipping\s+)?Get it[^"]+)"', r">\s*(Get it[^<]+)</"):
-        raw_value = html_match(pattern, html_text)
-        value = normalize_fastest_delivery_phrase(raw_value)
-        if value:
-            return maybe_append_free_shipping(value, html_text, raw_value)
+    for pattern in (r'aria-label="(Get it[^"]+)"', r">\s*(Get it[^<]+)</"):
+        value = html_match(pattern, html_text)
+        if value and value.lower().startswith("get"):
+            return compact_text(value)
     return ""
-
-
-def pickup_availability_from_html(html_text):
-    if not html_text:
-        return ""
-    soup = BeautifulSoup(html_text, "html.parser")
-    for node in soup.find_all(attrs={"aria-label": True}):
-        label = compact_text(node.get("aria-label"))
-        value = normalize_pickup_phrase(label)
-        if value:
-            return value
-    value = html_match(r'aria-label="(Pickup[^"]+)"', html_text) or html_match(r">\s*(Pick up[^<]+)</")
-    return normalize_pickup_phrase(value)
 
 
 def delivery_from_html(html_text):
@@ -2514,6 +2484,9 @@ PRODUCT_SCHEMA_REVIEW20_QUERY = (
     "fragment ProductSchema_Fragment on Query{productBySkuId(skuId:$skuId){bsin name{short}images{piscesHref}"
     "url{pdp}description{short}skuId manufacturer{modelNumber}color{displayName}brand "
     "isPurchaseWithTradeInEligible connectionType{code} "
+    "productVariationDetailDisplay{type title variationTypes{definition displayName rawName}"
+    "productVariations{shortName color colorCategory sku variations{rawName value}"
+    "product{name{short}skuId}}}"
     "reviewInfo{averageRating reviewCount recommendedPercent}"
     "specificationGroups{specifications{displayName value}}"
     "buyingOptions{description pdpUrl skuId type product{price(input:{salesChannel:$salesChannel}){customerPrice}}}"
@@ -4298,7 +4271,7 @@ def output_row(target):
     product_name = first_path(products, ["name", "short"]) or target.get("product_name", "")
     product_url = first_path(products, ["url", "pdp"]) or target.get("product_url", "")
     bsin = first_value(products, "bsin") or target.get("bsin", "")
-    hhp_attrs = hhp_attributes_from_product(products, product_name) if CATEGORY == "HHP" else {}
+    hhp_attrs = hhp_attributes_from_product(products, product_name, sku) if CATEGORY == "HHP" else {}
 
     crawl_dt = datetime.now()
     row = {
@@ -4331,7 +4304,6 @@ def output_row(target):
             "Pick up",
             pickup_text(pickup),
             get_it_fast_values.get("pick_up_availability"),
-            pickup_availability_from_html(html_text),
             selector_values.get("pick_up_availability"),
             target.get("pick_up_availability"),
         ),

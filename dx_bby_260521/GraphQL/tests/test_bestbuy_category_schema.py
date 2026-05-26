@@ -13,8 +13,6 @@ from bestbuy.step08_detail_enrichment import (  # noqa: E402
     PRODUCT_LIST_DETAIL_FIELD_SOURCES,
     PRODUCT_SCHEMA_REVIEW20_QUERY,
     hhp_attributes_from_product,
-    fastest_delivery_from_html,
-    pickup_availability_from_html,
     trade_in_from_html,
     trade_in_from_products,
 )
@@ -114,10 +112,21 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
 
     def test_hhp_carrier_prefers_selected_carrier_over_compatibility_list(self):
         product = {
+            "skuId": "6665489",
+            "productVariationDetailDisplay": {
+                "productVariations": [
+                    {
+                        "sku": "6665489",
+                        "variations": [
+                            {"rawName": "Cell_Phones:Carrier", "value": "Unlocked"},
+                            {"rawName": "Communications:Color", "value": "Black"},
+                        ],
+                    }
+                ]
+            },
             "specificationGroups": [
                 {
                     "specifications": [
-                        {"displayName": "Carrier", "value": "Unlocked"},
                         {
                             "displayName": "Carrier Compatibility",
                             "value": "AT&T, Boost Mobile, Cricket, Verizon, Visible",
@@ -132,7 +141,8 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
 
         attrs = hhp_attributes_from_product(
             product,
-            "Samsung - Galaxy A17 5G 128GB (Unlocked) - Black",
+            "Samsung - Galaxy A17 5G 128GB - Black",
+            "6665489",
         )
 
         self.assertEqual(attrs["hhp_carrier"], "Unlocked")
@@ -154,16 +164,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             "Check your trade-in value. Save when you trade in a similar device.",
         )
         self.assertIn("isPurchaseWithTradeInEligible", PRODUCT_SCHEMA_REVIEW20_QUERY)
-
-    def test_hhp_html_fulfillment_tiles(self):
-        html = (
-            '<div aria-label="Pickup Ready Today" data-testid="pdp-pickup-tile-6665489"></div>'
-            '<div aria-label="Shipping Get it Tomorrow" data-testid="pdp-shipping-tile-6665489"></div>'
-            '<span>FREE shipping to </span>'
-        )
-
-        self.assertEqual(pickup_availability_from_html(html), "Pick up today")
-        self.assertEqual(fastest_delivery_from_html(html), "Get it tomorrow \u2022 FREE")
+        self.assertIn("productVariationDetailDisplay", PRODUCT_SCHEMA_REVIEW20_QUERY)
 
 
 if __name__ == "__main__":

@@ -17,10 +17,10 @@ from .step00_config import (
 
 TARGET_SCHEMA = "public"
 CATEGORY = bestbuy_category()
-RUN_ROOT = Path(DEFAULT_BESTBUY_RUN_ROOT)
-OUTPUT_ROOT = RUN_ROOT / "output"
+RUN_ROOT = Path(os.getenv("BESTBUY_RUN_ROOT", DEFAULT_BESTBUY_RUN_ROOT))
+OUTPUT_ROOT = Path(os.getenv("BESTBUY_OUTPUT_ROOT", RUN_ROOT / "output"))
 FINAL_OUTPUT_CSV = Path(os.getenv("BESTBUY_FINAL_OUTPUT_CSV", OUTPUT_ROOT / "final_output.csv"))
-PRODUCT_LIST_CSV = OUTPUT_ROOT / "bestbuy_product_list.csv"
+PRODUCT_LIST_CSV = Path(os.getenv("BESTBUY_PRODUCT_LIST_OUTPUT", OUTPUT_ROOT / "bestbuy_product_list.csv"))
 MANIFEST_PATH = OUTPUT_ROOT / "db_load_manifest.json"
 DRY_RUN = os.getenv("BESTBUY_DB_LOAD_DRY_RUN", "0").lower() in {"1", "true", "yes", "y"}
 UPDATE_SIMILAR_ONLY = os.getenv("BESTBUY_DB_UPDATE_SIMILAR_ONLY", "0").lower() in {"1", "true", "yes", "y"}

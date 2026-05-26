@@ -17,19 +17,21 @@ from .step00_fulfillment_graphql import (
     request_cost,
     zenrows_params,
 )
-from .step08_detail_enrichment import FINAL_OUTPUT_CSV as STEP08_FINAL_OUTPUT_CSV
 from .step08_detail_enrichment import TARGET_CSV, compact_text, write_csv
 
 
 AVAILABILITY_FIELDS = ["pick_up_availability", "fastest_delivery", "delivery_availability"]
+RUN_ROOT = Path(os.getenv("BESTBUY_RUN_ROOT", DEFAULT_BESTBUY_RUN_ROOT))
+OUTPUT_ROOT = Path(os.getenv("BESTBUY_OUTPUT_ROOT", RUN_ROOT / "output"))
+DETAIL_ROOT = Path(os.getenv("BESTBUY_DETAIL_RUN_ROOT", RUN_ROOT / "detail"))
 FINAL_OUTPUT_CSV = Path(
-    os.getenv("BESTBUY_AVAILABILITY_BACKFILL_FINAL_CSV", os.getenv("BESTBUY_FINAL_OUTPUT_CSV", STEP08_FINAL_OUTPUT_CSV))
+    os.getenv("BESTBUY_AVAILABILITY_BACKFILL_FINAL_CSV", os.getenv("BESTBUY_FINAL_OUTPUT_CSV", OUTPUT_ROOT / "final_output.csv"))
 )
 DETAIL_ROWS_CSV = Path(
-    os.getenv("BESTBUY_AVAILABILITY_BACKFILL_DETAIL_ROWS_CSV", DEFAULT_BESTBUY_RUN_ROOT / "detail" / "parsed" / "detail_enriched_rows.csv")
+    os.getenv("BESTBUY_AVAILABILITY_BACKFILL_DETAIL_ROWS_CSV", DETAIL_ROOT / "parsed" / "detail_enriched_rows.csv")
 )
-PRODUCT_LIST_CSV = Path(os.getenv("BESTBUY_PRODUCT_LIST_OUTPUT", DEFAULT_BESTBUY_RUN_ROOT / "output" / "bestbuy_product_list.csv"))
-BACKFILL_ROOT = Path(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_ROOT", DEFAULT_BESTBUY_RUN_ROOT / "availability_backfill"))
+PRODUCT_LIST_CSV = Path(os.getenv("BESTBUY_PRODUCT_LIST_OUTPUT", OUTPUT_ROOT / "bestbuy_product_list.csv"))
+BACKFILL_ROOT = Path(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_ROOT", RUN_ROOT / "availability_backfill"))
 BACKFILL_BATCH_ID = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_BATCH_ID", os.getenv("BESTBUY_BATCH_ID", "")).strip()
 REQUESTED_CHUNK_SIZE = int(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_CHUNK_SIZE", "1"))
 ALLOW_MULTI_SKU_FULFILLMENT = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_ALLOW_MULTI_SKU", "0").lower() in {

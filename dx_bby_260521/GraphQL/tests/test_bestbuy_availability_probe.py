@@ -1,6 +1,8 @@
 import sys
 import unittest
+from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +16,7 @@ from bestbuy.step00_availability_graphql_probe import (  # noqa: E402
     fulfillment_dynamic_exact_payload,
     get_it_fast_availability_values,
 )
+import bestbuy.step08_detail_enrichment as detail_enrichment  # noqa: E402
 
 
 class AvailabilityProbeReferenceTests(unittest.TestCase):
@@ -82,6 +85,11 @@ curl ^"https://www.bestbuy.com/gateway/graphql^" ^
         self.assertNotIsInstance(payload, list)
 
     def test_get_it_fast_values_map_pickup_and_shipping_dates(self):
+        class FrozenDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 5, 25, 12, 0, 0, tzinfo=tz)
+
         item = {
             "data": {
                 "fulfillmentGetItFastOptions": {
@@ -90,7 +98,8 @@ curl ^"https://www.bestbuy.com/gateway/graphql^" ^
                 }
             }
         }
-        values = get_it_fast_availability_values(item)
+        with patch.object(detail_enrichment, "datetime", FrozenDateTime):
+            values = get_it_fast_availability_values(item)
 
         self.assertEqual(values["pick_up_availability"], "Pick up today")
         self.assertEqual(values["fastest_delivery"], "Get it Wed, May 27")

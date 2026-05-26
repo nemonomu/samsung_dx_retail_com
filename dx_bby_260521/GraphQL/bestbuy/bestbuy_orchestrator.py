@@ -199,6 +199,28 @@ def run_root(env=None):
     return Path(merged.get("BESTBUY_RUN_ROOT", DEFAULT_BESTBUY_RUN_ROOT))
 
 
+def apply_run_path_env(env):
+    root = Path(env.get("BESTBUY_RUN_ROOT", DEFAULT_BESTBUY_RUN_ROOT))
+    output_root = root / "output"
+    detail_root = root / "detail"
+    derived_paths = {
+        "BESTBUY_OUTPUT_ROOT": output_root,
+        "BESTBUY_DETAIL_RUN_ROOT": detail_root,
+        "BESTBUY_DETAIL_TARGET_CSV": output_root / "bestbuy_final_targets.csv",
+        "BESTBUY_FINAL_OUTPUT_CSV": output_root / "final_output.csv",
+        "BESTBUY_PRODUCT_LIST_OUTPUT": output_root / "bestbuy_product_list.csv",
+        "BESTBUY_AVAILABILITY_BACKFILL_FINAL_CSV": output_root / "final_output.csv",
+        "BESTBUY_AVAILABILITY_BACKFILL_DETAIL_ROWS_CSV": detail_root / "parsed" / "detail_enriched_rows.csv",
+        "BESTBUY_AVAILABILITY_BACKFILL_ROOT": root / "availability_backfill",
+    }
+    force_paths = env.get("BESTBUY_FORCE_RUN_PATH_ENV", "1").lower() in {"1", "true", "yes", "y"}
+    for key, path in derived_paths.items():
+        if force_paths:
+            env[key] = str(path)
+        else:
+            env.setdefault(key, str(path))
+
+
 def path_exists(path):
     return Path(path).exists()
 
@@ -406,6 +428,7 @@ def run_step(step, dry_run=False, resume=False):
         else:
             for key, value in step.resume_env.items():
                 env.setdefault(key, value)
+    apply_run_path_env(env)
     command = [PYTHON, "-m", step.module]
     print(f"[run] step {step.key} {step.name}: {' '.join(command)}")
     effective_env = {key: env.get(key, value) for key, value in step.env.items()}

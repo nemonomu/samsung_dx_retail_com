@@ -3244,6 +3244,7 @@ def fetch_detail(client, target):
                             len(fallback_names),
                         ),
                         "fallback_recommendation_count": len(fallback_names),
+                        "fallback_recommendation_names": fallback_names[:15],
                         "finished_at": now(),
                         "error": "" if compare_ok else "compare_recommendations_missing",
                     }
@@ -3629,6 +3630,7 @@ def fetch_detail_sku_batch(client, targets):
                             "bytes": len(text or ""),
                             "recommendation_count": max(compare_count, len(fallback_names)),
                             "fallback_recommendation_count": len(fallback_names),
+                            "fallback_recommendation_names": fallback_names[:15],
                             "finished_at": now(),
                             "error": "" if compare_ok else "compare_recommendations_missing",
                         },
@@ -3979,11 +3981,16 @@ def compare_similar_names_from_detail(sku):
     paths = compare_paths(sku)
     response_json = read_json(paths["response_json"])
     data = response_json.get("data") if isinstance(response_json, dict) else {}
+    compare_meta = read_json(paths.get("meta"))
 
     if not isinstance(data, dict) or not data:
         data = compare_data_from_detail_payloads(sku)
 
     source_names = compare_recommendation_names(data) if isinstance(data, dict) else []
+    if not source_names and isinstance(compare_meta, dict):
+        fallback_names = compare_meta.get("fallback_recommendation_names")
+        if isinstance(fallback_names, list):
+            source_names = [clean_text(name) for name in fallback_names if clean_text(name)]
     if not source_names:
         source_names = recommendation_names_from_detail_payloads(sku)
     if not source_names:

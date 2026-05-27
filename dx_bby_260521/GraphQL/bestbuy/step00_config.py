@@ -39,8 +39,29 @@ PROTECTED_PROD_OUTPUT_TABLES = {
 }
 
 
+def env_candidate_paths(path=None):
+    override = path or os.getenv("BESTBUY_ENV_PATH", "").strip()
+    if override:
+        return [Path(override)]
+
+    candidates = [REPO_ROOT / ".env", Path.cwd() / ".env"]
+    candidates.extend(parent / ".env" for parent in REPO_ROOT.parents[:4])
+
+    unique = []
+    seen = set()
+    for candidate in candidates:
+        key = str(candidate.resolve()) if candidate.exists() else str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
 def load_env(path=None):
-    env_path = Path(path or (REPO_ROOT / ".env"))
+    env_path = next((candidate for candidate in env_candidate_paths(path) if candidate.exists()), None)
+    if env_path is None:
+        return
     if not env_path.exists():
         return
     lines = env_path.read_text(encoding="utf-8", errors="ignore").splitlines()

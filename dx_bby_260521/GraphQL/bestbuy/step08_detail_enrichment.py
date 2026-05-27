@@ -225,9 +225,41 @@ LDY_FINAL_FIELDS = [
     "batch_id",
 ]
 
+REF_FINAL_FIELDS = [
+    "id",
+    "country",
+    "product",
+    "item",
+    "account_name",
+    "page_type",
+    "count_of_reviews",
+    "retailer_sku_name",
+    "product_url",
+    "star_rating",
+    "count_of_star_ratings",
+    "final_sku_price",
+    "original_sku_price",
+    "savings",
+    "offer",
+    "pick_up_availability",
+    "delivery_availability",
+    "sku_status",
+    "detailed_review_content",
+    "recommendation_intent",
+    "main_rank",
+    "bsr_rank",
+    "retailer_sku_name_similar",
+    "ref_capacity",
+    "ref_refrigerator_type",
+    "calendar_week",
+    "crawl_strdatetime",
+    "batch_id",
+]
+
 FALLBACK_FINAL_FIELDS = {
     "HHP": HHP_FINAL_FIELDS,
     "LDY": LDY_FINAL_FIELDS,
+    "REF": REF_FINAL_FIELDS,
 }
 
 
@@ -390,39 +422,6 @@ def clean_hhp_storage(value):
     return f"{number} gigabytes"
 
 
-def hhp_attributes_from_name(name):
-    text = compact_text(name)
-    attrs = {"hhp_storage": "", "hhp_color": "", "hhp_carrier": ""}
-    if not text:
-        return attrs
-
-    storage_match = re.search(r"(?i)\b(\d+(?:\.\d+)?)\s*(TB|GB)\b", text)
-    if storage_match:
-        number = storage_match.group(1)
-        unit = storage_match.group(2).upper()
-        attrs["hhp_storage"] = clean_hhp_storage(f"{number}{unit}")
-
-    paren_values = re.findall(r"\(([^()]*)\)", text)
-    for value in reversed(paren_values):
-        carrier = clean_hhp_carrier(value)
-        if carrier:
-            attrs["hhp_carrier"] = carrier
-            break
-
-    if not attrs["hhp_carrier"]:
-        attrs["hhp_carrier"] = clean_hhp_carrier(text)
-
-    # Best Buy HHP titles usually end with "- Color" after carrier/storage.
-    parts = [part.strip() for part in re.split(r"\s+-\s+", text) if part.strip()]
-    if len(parts) >= 2:
-        color = clean_hhp_color(parts[-1])
-        if not re.search(r"(?i)\b(class|series|gb|tb|unlocked|verizon|at&t|t-mobile)\b", color):
-            attrs["hhp_color"] = color
-        elif color and len(color.split()) <= 4:
-            attrs["hhp_color"] = color
-    return attrs
-
-
 def hhp_variation_attrs_from_product(product, sku=""):
     sku = compact_text(sku)
     attrs = {"hhp_storage": "", "hhp_color": "", "hhp_carrier": ""}
@@ -474,7 +473,7 @@ def hhp_variation_attrs_from_product(product, sku=""):
 def hhp_attributes_from_product(product, product_name, sku=""):
     products = product if isinstance(product, list) else [product]
     product = products[-1] if products else {}
-    attrs = hhp_attributes_from_name(product_name)
+    attrs = {"hhp_storage": "", "hhp_color": "", "hhp_carrier": ""}
     color = first_path([product], ["color", "displayName"])
     if color:
         attrs["hhp_color"] = clean_hhp_color(color)
@@ -2639,6 +2638,7 @@ PRODUCT_SCHEMA_REVIEW20_QUERY = (
     "{...ProductSchema_Fragment}"
     "fragment ProductSchema_Fragment on Query{productBySkuId(skuId:$skuId){bsin name{short}images{piscesHref}"
     "url{pdp}description{short}skuId manufacturer{modelNumber}color{displayName}brand badgesV2{label} "
+    "operationalAttributes{displayName values} whatItIs "
     "isPurchaseWithTradeInEligible connectionType{code} "
     "productVariationDetailDisplay{type title variationTypes{definition displayName rawName}"
     "productVariations{shortName color colorCategory sku variations{rawName value}"
@@ -4384,23 +4384,6 @@ def spec_value_containing(products, *needles):
     return ""
 
 
-def ldy_loading_type_from_name(product_name):
-    text = compact_text(product_name).lower()
-    if re.search(r"\bfront[- ]load(?:ing)?\b", text):
-        return "Front Load"
-    if re.search(r"\btop[- ]load(?:ing)?\b", text):
-        return "Top Load"
-    return ""
-
-
-def ldy_capacity_from_name(product_name):
-    text = compact_text(product_name)
-    match = re.search(r"\b(\d+(?:\.\d+)?)\s*(?:cu\.?\s*ft\.?|cubic\s+feet)\b", text, re.I)
-    if not match:
-        return ""
-    return f"{match.group(1)} cubic feet"
-
-
 def ldy_attributes_from_product(products, product_name):
     capacity = first_non_empty(
         spec_value_by_names(
@@ -4414,7 +4397,6 @@ def ldy_attributes_from_product(products, product_name):
             ],
         ),
         spec_value_containing(products, "capacity"),
-        ldy_capacity_from_name(product_name),
     )
     loading_type = first_non_empty(
         spec_value_by_names(
@@ -4427,11 +4409,43 @@ def ldy_attributes_from_product(products, product_name):
             ],
         ),
         spec_value_containing(products, "load", "type"),
-        ldy_loading_type_from_name(product_name),
     )
     return {
         "ldy_capacity": capacity,
         "ldy_loading_type": loading_type,
+    }
+
+
+def ref_attributes_from_product(products, product_name):
+    capacity = first_non_empty(
+        spec_value_by_names(
+            products,
+            [
+                "Total Capacity",
+                "Total Capacity (cu. ft.)",
+                "Total Interior Capacity",
+                "Total Volume",
+            ],
+        ),
+        spec_value_containing(products, "total", "capacity"),
+    )
+    refrigerator_type = first_non_empty(
+        spec_value_by_names(
+            products,
+            [
+                "Refrigerator Style",
+                "Refrigerator Type",
+                "Configuration",
+                "Product Type",
+                "Appliance Type",
+            ],
+        ),
+        spec_value_containing(products, "refrigerator", "type"),
+        spec_value_containing(products, "refrigerator", "style"),
+    )
+    return {
+        "ref_capacity": capacity,
+        "ref_refrigerator_type": refrigerator_type,
     }
 
 
@@ -4866,6 +4880,7 @@ def output_row(target):
     bsin = first_value(products, "bsin") or target.get("bsin", "")
     hhp_attrs = hhp_attributes_from_product(products, product_name, sku) if CATEGORY == "HHP" else {}
     ldy_attrs = ldy_attributes_from_product(spec_products, product_name) if CATEGORY == "LDY" else {}
+    ref_attrs = ref_attributes_from_product(spec_products, product_name) if CATEGORY == "REF" else {}
 
     crawl_dt = datetime.now()
     row = {
@@ -4889,7 +4904,7 @@ def output_row(target):
         "count_of_star_ratings": "0"
         if not_yet_reviewed
         else int_commas(review_info.get("reviewCount") or target.get("review_count")),
-        "screen_size": first_non_empty(screen, selector_values.get("screen_size"), screen_size_from_name(product_name)),
+        "screen_size": first_non_empty(screen, selector_values.get("screen_size")),
         "final_sku_price": final_price,
         "original_sku_price": original_price,
         "savings": savings,
@@ -4933,6 +4948,8 @@ def output_row(target):
         "hhp_carrier": hhp_attrs.get("hhp_carrier", ""),
         "ldy_capacity": ldy_attrs.get("ldy_capacity", ""),
         "ldy_loading_type": ldy_attrs.get("ldy_loading_type", ""),
+        "ref_capacity": ref_attrs.get("ref_capacity", ""),
+        "ref_refrigerator_type": ref_attrs.get("ref_refrigerator_type", ""),
         "detailed_review_content": "" if not_yet_reviewed else review20_content(sku),
         "summarized_review_content": "",
         "top_mentions": "",

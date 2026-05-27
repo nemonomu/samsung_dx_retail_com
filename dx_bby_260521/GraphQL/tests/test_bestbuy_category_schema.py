@@ -17,10 +17,12 @@ from bestbuy.step08_detail_enrichment import (  # noqa: E402
     LDY_FINAL_FIELDS,
     PRODUCT_LIST_DETAIL_FIELD_SOURCES,
     PRODUCT_SCHEMA_REVIEW20_QUERY,
+    REF_FINAL_FIELDS,
     TRADE_IN_DATA_QUERY,
     compare_recommendation_names,
     hhp_attributes_from_product,
     ldy_attributes_from_product,
+    ref_attributes_from_product,
     trade_in_from_offer_data,
     trade_in_from_html,
     trade_in_from_products,
@@ -122,6 +124,40 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
 
         self.assertEqual(LDY_FINAL_FIELDS, expected)
 
+    def test_ref_final_output_uses_confirmed_insert_columns_only(self):
+        expected = [
+            "id",
+            "country",
+            "product",
+            "item",
+            "account_name",
+            "page_type",
+            "count_of_reviews",
+            "retailer_sku_name",
+            "product_url",
+            "star_rating",
+            "count_of_star_ratings",
+            "final_sku_price",
+            "original_sku_price",
+            "savings",
+            "offer",
+            "pick_up_availability",
+            "delivery_availability",
+            "sku_status",
+            "detailed_review_content",
+            "recommendation_intent",
+            "main_rank",
+            "bsr_rank",
+            "retailer_sku_name_similar",
+            "ref_capacity",
+            "ref_refrigerator_type",
+            "calendar_week",
+            "crawl_strdatetime",
+            "batch_id",
+        ]
+
+        self.assertEqual(REF_FINAL_FIELDS, expected)
+
     def test_hhp_test10_runner_keeps_run_limited_and_dry(self):
         script = (ROOT / "bby_hhp_test10_task.bat").read_text(encoding="utf-8")
 
@@ -131,6 +167,16 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn('set "BESTBUY_FINAL_ROW_LIMIT=10"', script)
         self.assertIn('set "BESTBUY_DB_LOAD_DRY_RUN=1"', script)
         self.assertIn('call "%~dp0_bby_daily_task.bat" HHP', script)
+
+    def test_ref_test10_runner_keeps_run_limited_and_dry(self):
+        script = (ROOT / "bby_ref_test10_task.bat").read_text(encoding="utf-8")
+
+        self.assertIn('set "BESTBUY_FORCE_STEP_ENV=0"', script)
+        self.assertIn('set "BESTBUY_FINAL_TARGET_SIZE=7"', script)
+        self.assertIn('set "BESTBUY_BSR_RANK_LIMIT=20"', script)
+        self.assertIn('set "BESTBUY_FINAL_ROW_LIMIT=10"', script)
+        self.assertIn('set "BESTBUY_DB_LOAD_DRY_RUN=1"', script)
+        self.assertIn('call "%~dp0_bby_daily_task.bat" REF', script)
 
     def test_detail_promotion_type_can_backfill_hhp_product_list(self):
         self.assertEqual(PRODUCT_LIST_DETAIL_FIELD_SOURCES["promotion_type"], ("promotion_type",))
@@ -145,6 +191,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         )
         self.assertNotIn("for field in AVAILABILITY_FIELDS", step08)
         self.assertNotIn("fulfillment_button_text(products)", step08)
+        self.assertNotIn("screen_size_from_name(product_name)", step08)
 
     def test_final_targets_propagate_sponsored_status_after_sku_dedupe(self):
         rows = [
@@ -205,6 +252,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn('if CATEGORY == "HHP":', final_targets)
         self.assertIn("promotion_rows = []", final_targets)
         self.assertEqual(CATEGORY_SEARCH_TERMS["HHP"], "cellphone")
+        self.assertEqual(CATEGORY_SEARCH_TERMS["REF"], "refrigerator")
         self.assertEqual(CATEGORY_SEARCH_TERMS["LDY"], "washing machine")
 
     def test_hhp_promotion_type_comes_from_detail_badge(self):
@@ -268,7 +316,16 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertEqual(attrs["hhp_storage"], "128 gigabytes")
         self.assertEqual(attrs["hhp_color"], "Black")
 
-    def test_ldy_capacity_and_loading_type_from_specs_or_name(self):
+        no_product_name_fallback_attrs = hhp_attributes_from_product(
+            {},
+            "Samsung - Galaxy A17 5G 128GB (Unlocked) - Black",
+            "6665489",
+        )
+        self.assertEqual(no_product_name_fallback_attrs["hhp_carrier"], "")
+        self.assertEqual(no_product_name_fallback_attrs["hhp_storage"], "")
+        self.assertEqual(no_product_name_fallback_attrs["hhp_color"], "")
+
+    def test_ldy_capacity_and_loading_type_from_specs_only(self):
         attrs = ldy_attributes_from_product(
             [
                 {
@@ -288,9 +345,129 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertEqual(attrs["ldy_capacity"], "4.5 cubic feet")
         self.assertEqual(attrs["ldy_loading_type"], "Front Load")
 
-        fallback_attrs = ldy_attributes_from_product([], "LG 5.0 Cu. Ft. Top Load Washer")
-        self.assertEqual(fallback_attrs["ldy_capacity"], "5.0 cubic feet")
-        self.assertEqual(fallback_attrs["ldy_loading_type"], "Top Load")
+        no_product_name_fallback_attrs = ldy_attributes_from_product(
+            [],
+            "LG 5.0 Cu. Ft. Top Load Washer",
+        )
+        self.assertEqual(no_product_name_fallback_attrs["ldy_capacity"], "")
+        self.assertEqual(no_product_name_fallback_attrs["ldy_loading_type"], "")
+
+    def test_ref_capacity_and_type_from_specs_only(self):
+        attrs = ref_attributes_from_product(
+            [
+                {
+                    "specificationGroups": [
+                        {
+                            "specifications": [
+                                {"displayName": "Total Capacity", "value": "28 cubic feet"},
+                                {"displayName": "Refrigerator Style", "value": "French Door"},
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "Samsung refrigerator",
+        )
+
+        self.assertEqual(attrs["ref_capacity"], "28 cubic feet")
+        self.assertEqual(attrs["ref_refrigerator_type"], "French Door")
+
+        no_product_name_fallback_attrs = ref_attributes_from_product(
+            [],
+            "LG 26 Cu. Ft. Side-by-Side Refrigerator",
+        )
+        self.assertEqual(no_product_name_fallback_attrs["ref_capacity"], "")
+        self.assertEqual(no_product_name_fallback_attrs["ref_refrigerator_type"], "")
+
+        non_total_spec_attrs = ref_attributes_from_product(
+            [
+                {
+                    "specificationGroups": [
+                        {
+                            "specifications": [
+                                {"displayName": "Capacity", "value": "7.8 cubic feet"},
+                                {"displayName": "Freezer Capacity", "value": "7.8 cubic feet"},
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "KitchenAid - 36 in. Wide 26 cu. ft. Multi-Door French Door Refrigerator",
+        )
+        self.assertEqual(non_total_spec_attrs["ref_capacity"], "")
+
+        box_contents_attrs = ref_attributes_from_product(
+            [
+                {
+                    "operationalAttributes": [
+                        {
+                            "displayName": "Box_Contents",
+                            "values": ["KitchenAid 26 cu. ft. French Door Refrigerator"],
+                        }
+                    ],
+                    "specificationGroups": [
+                        {
+                            "specifications": [
+                                {"displayName": "Total Capacity", "value": "7.8 cubic feet"},
+                                {"displayName": "Refrigerator Style", "value": "French Door"},
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "KitchenAid refrigerator",
+        )
+        self.assertEqual(box_contents_attrs["ref_capacity"], "7.8 cubic feet")
+        self.assertEqual(box_contents_attrs["ref_refrigerator_type"], "French Door")
+        self.assertIn("operationalAttributes", PRODUCT_SCHEMA_REVIEW20_QUERY)
+
+        j3_attrs = ref_attributes_from_product(
+            [
+                {
+                    "operationalAttributes": [
+                        {
+                            "displayName": "Box_Contents",
+                            "values": ["KitchenAid 26 cu. ft. French Door Refrigerator"],
+                        }
+                    ],
+                    "specificationGroups": [
+                        {
+                            "specifications": [
+                                {"displayName": "Total Capacity", "value": "7.8 cubic feet"},
+                                {"displayName": "Refrigerator Capacity", "value": "18.4 cubic feet"},
+                                {"displayName": "Freezer Capacity", "value": "7.8 cubic feet"},
+                                {"displayName": "Refrigerator Style", "value": "French Door"},
+                            ]
+                        }
+                    ],
+                }
+            ],
+            "KitchenAid - 36 in. Wide 26 cu. ft. Multi-Door French Door Refrigerator",
+        )
+        self.assertEqual(j3_attrs["ref_capacity"], "7.8 cubic feet")
+        self.assertEqual(j3_attrs["ref_refrigerator_type"], "French Door")
+
+        style_attrs = ref_attributes_from_product(
+            [
+                {
+                    "operationalAttributes": [
+                        {
+                            "displayName": "Box_Contents",
+                            "values": ["Insignia 18.6 cu. ft. Bottom Freezer Refrigerator"],
+                        }
+                    ],
+                    "specificationGroups": [
+                        {
+                            "specifications": [
+                                {"displayName": "Refrigerator Style", "value": "Bottom Freezer"},
+                            ]
+                        }
+                    ],
+                }
+            ],
+            "",
+        )
+        self.assertEqual(style_attrs["ref_refrigerator_type"], "Bottom Freezer")
 
     def test_hhp_trade_in_text_from_html_and_detail_product(self):
         html = (

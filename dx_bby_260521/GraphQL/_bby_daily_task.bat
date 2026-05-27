@@ -15,17 +15,12 @@ for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss
 set "TASK_LOG=%TASK_LOG_DIR%\daily_task_%TASK_TS%.log"
 for /f %%i in ('powershell -NoProfile -Command "[int][double]::Parse((Get-Date -UFormat %%s))"') do set "TASK_START_EPOCH=%%i"
 
-if exist "%LOCK_FILE%" (
-  echo [%DATE% %TIME%] Previous BestBuy %CATEGORY% task is still locked. >> "%TASK_LOG%"
-  echo lock_file=%LOCK_FILE% >> "%TASK_LOG%"
-  echo [%DATE% %TIME%] Previous BestBuy %CATEGORY% task is still locked.
-  echo lock_file=%LOCK_FILE%
-  exit /b 2
-)
+python -m bestbuy.step00_daily_lock acquire --lock "%LOCK_FILE%" --category "%CATEGORY%" --log "%TASK_LOG%" --root "%~dp0"
+set "LOCK_STATUS=%ERRORLEVEL%"
+if "%LOCK_STATUS%"=="2" exit /b 2
+if not "%LOCK_STATUS%"=="0" exit /b %LOCK_STATUS%
 
-echo %DATE% %TIME% > "%LOCK_FILE%"
-
-echo ================================================== > "%TASK_LOG%"
+echo ================================================== >> "%TASK_LOG%"
 echo BestBuy %CATEGORY% daily task started >> "%TASK_LOG%"
 echo cwd=%CD% >> "%TASK_LOG%"
 echo task_log=%TASK_LOG% >> "%TASK_LOG%"
@@ -40,6 +35,7 @@ echo ==================================================
 powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%~dp0run_bestbuy_fullrun.bat' '%CATEGORY%' 2>&1 | Tee-Object -FilePath '%TASK_LOG%' -Append; exit $LASTEXITCODE"
 set "EXIT_CODE=%ERRORLEVEL%"
 
+python -m bestbuy.step00_daily_lock release --lock "%LOCK_FILE%" --category "%CATEGORY%" --log "%TASK_LOG%" --root "%~dp0" >nul 2>nul
 if exist "%LOCK_FILE%" del "%LOCK_FILE%"
 
 for /f %%i in ('powershell -NoProfile -Command "[int][double]::Parse((Get-Date -UFormat %%s))"') do set "TASK_END_EPOCH=%%i"

@@ -84,7 +84,12 @@ STEPS = [
         "bestbuy.step05_promotion_deals",
         {"BESTBUY_PROMOTION_PLACEMENT": "all", "ZENROWS_TIMEOUT": "180"},
     ),
-    Step(6, "trending_deals", "bestbuy.step06_trending_deals"),
+    Step(
+        6,
+        "trending_deals",
+        "bestbuy.step06_trending_deals",
+        {"BESTBUY_TRENDING_WAIT_MS_SEQUENCE": "8000,20000,35000", "ZENROWS_TIMEOUT": "240"},
+    ),
     Step(
         7,
         "final_targets",

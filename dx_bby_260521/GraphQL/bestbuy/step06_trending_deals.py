@@ -26,6 +26,8 @@ LIVE_FETCH = os.getenv("BESTBUY_TRENDING_LIVE", "1").lower() in {"1", "true", "y
 REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "180"))
 TRENDING_URL = os.getenv("BESTBUY_TRENDING_URL", load_initial_urls().get("trending_tvs_projectors", ""))
 LIMIT = int(os.getenv("BESTBUY_TRENDING_LIMIT", "10"))
+WAIT_MS = os.getenv("ZENROWS_WAIT_MS") or os.getenv("BESTBUY_TRENDING_WAIT_MS") or "8000"
+WAIT_MS_SEQUENCE = os.getenv("BESTBUY_TRENDING_WAIT_MS_SEQUENCE", "").strip()
 REQUIRE_ROWS = os.getenv(
     "BESTBUY_TRENDING_REQUIRE_ROWS",
     "1",
@@ -228,7 +230,20 @@ def write_rows(path, rows):
         writer.writerows(rows)
 
 
-def live_html():
+def trending_wait_sequence():
+    raw_values = WAIT_MS_SEQUENCE or ",".join([WAIT_MS, "20000", "35000"])
+    values = []
+    seen = set()
+    for raw in raw_values.split(","):
+        value = str(raw or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        values.append(value)
+    return values or [WAIT_MS]
+
+
+def live_html(wait_ms=None, attempt=1):
     api_key = os.getenv("ZENROWS_API_KEY")
     if not api_key:
         raise RuntimeError("Set ZENROWS_API_KEY in .env")
@@ -238,11 +253,7 @@ def live_html():
     raw_dir = RUN_ROOT / "raw" / "live_page"
     raw_dir.mkdir(parents=True, exist_ok=True)
     client = ZenRowsClient(api_key)
-    wait_ms = (
-        os.getenv("ZENROWS_WAIT_MS")
-        or os.getenv("BESTBUY_TRENDING_WAIT_MS")
-        or "8000"
-    )
+    wait_ms = str(wait_ms or WAIT_MS or "8000")
     start = time.perf_counter()
     response = client.get(
         TRENDING_URL,
@@ -257,12 +268,19 @@ def live_html():
     elapsed = round(time.perf_counter() - start, 3)
     text = response.text
     html_path = raw_dir / "trending_page.html"
+    attempt_html_path = raw_dir / f"trending_page_attempt{attempt}.html"
     headers_path = raw_dir / "trending_page_headers.json"
+    attempt_headers_path = raw_dir / f"trending_page_attempt{attempt}_headers.json"
     html_path.write_text(text, encoding="utf-8", errors="replace")
+    attempt_html_path.write_text(text, encoding="utf-8", errors="replace")
     headers_path.write_text(json.dumps(dict(response.headers), indent=2, ensure_ascii=False), encoding="utf-8")
+    attempt_headers_path.write_text(
+        json.dumps(dict(response.headers), indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     summary = {
         "started_at": now(),
         "live": True,
+        "attempt": attempt,
         "url": TRENDING_URL,
         "status_code": response.status_code,
         "elapsed_seconds": elapsed,
@@ -270,7 +288,9 @@ def live_html():
         "wait_ms": wait_ms,
         "bytes": len(text or ""),
         "html": rel_path(html_path),
+        "attempt_html": rel_path(attempt_html_path),
         "headers": rel_path(headers_path),
+        "attempt_headers": rel_path(attempt_headers_path),
         "success": response.status_code == 200,
     }
     (RUN_ROOT / "summary_live_fetch.json").write_text(
@@ -286,10 +306,29 @@ def main():
         write_rows(OUTPUT_CSV, [])
         print(f"skipped trending: no trend URL for category -> {OUTPUT_CSV}")
         return
-    html_text = live_html() if LIVE_FETCH else INPUT_HTML.read_text(encoding="utf-8", errors="ignore")
-    rows = parse_trending_products(html_text, LIMIT)
+    rows = []
+    attempted_waits = []
+    if LIVE_FETCH:
+        for attempt, wait_ms in enumerate(trending_wait_sequence(), 1):
+            attempted_waits.append(wait_ms)
+            html_text = live_html(wait_ms=wait_ms, attempt=attempt)
+            rows = parse_trending_products(html_text, LIMIT)
+            if rows:
+                break
+            print(
+                f"[trending:retry] attempt={attempt} wait_ms={wait_ms} rows=0 "
+                "reason=no SpotlightProduct/network SKU rows",
+                flush=True,
+            )
+    else:
+        html_text = INPUT_HTML.read_text(encoding="utf-8", errors="ignore")
+        rows = parse_trending_products(html_text, LIMIT)
     if LIVE_FETCH and REQUIRE_ROWS and not rows:
-        raise RuntimeError("Trending live fetch returned 0 GraphQL SpotlightProduct rows; retry with a larger BESTBUY_TRENDING_WAIT_MS")
+        raise RuntimeError(
+            "Trending live fetch returned 0 GraphQL SpotlightProduct rows after waits="
+            + ",".join(attempted_waits)
+            + "; retry with a larger BESTBUY_TRENDING_WAIT_MS_SEQUENCE"
+        )
     write_rows(OUTPUT_CSV, rows)
     print(f"wrote {len(rows)} rows -> {OUTPUT_CSV}")
     for row in rows:

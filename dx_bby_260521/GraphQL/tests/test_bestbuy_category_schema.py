@@ -38,7 +38,7 @@ def column_names(columns):
 
 class BestBuyCategorySchemaTests(unittest.TestCase):
     def test_output_table_names_match_confirmed_targets(self):
-        self.assertEqual(BESTBUY_OUTPUT_TABLES["HHP"], "hhp_retail_com")
+        self.assertEqual(BESTBUY_OUTPUT_TABLES["HHP"], "hhp_retail_com_bby_v2_test")
         self.assertEqual(BESTBUY_OUTPUT_TABLES["LDY"], "ldy_retail_com")
         self.assertEqual(BESTBUY_OUTPUT_TABLES["REF"], "ref_retail_com")
 

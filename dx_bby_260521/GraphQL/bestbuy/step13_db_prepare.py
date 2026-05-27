@@ -6,6 +6,12 @@ from .step00_config import BESTBUY_OUTPUT_TABLES, BESTBUY_PRODUCT_LIST_TABLES, d
 
 TARGET_SCHEMA = "public"
 DRY_RUN = os.getenv("BESTBUY_DB_LOAD_DRY_RUN", "0").lower() in {"1", "true", "yes", "y"}
+ADD_MISSING_COLUMNS = os.getenv("BESTBUY_DB_PREPARE_ADD_MISSING_COLUMNS", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
 
 
 COMMON_COLUMNS = [
@@ -257,9 +263,38 @@ def table_exists(cur, table_name, schema=TARGET_SCHEMA):
     return bool(cur.fetchone()[0])
 
 
+def existing_column_names(cur, table_name, schema=TARGET_SCHEMA):
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = %s AND table_name = %s
+        """,
+        (schema, table_name),
+    )
+    return {row[0] for row in cur.fetchall()}
+
+
 def create_table(cur, table_name, columns):
     column_sql = ",\n  ".join(f"{quote_ident(name)} {data_type}" for name, data_type in columns)
     cur.execute(f"CREATE TABLE {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} (\n  {column_sql}\n)")
+
+
+def add_missing_columns(cur, table_name, columns):
+    existing = existing_column_names(cur, table_name)
+    missing = [(name, data_type) for name, data_type in columns if name not in existing]
+    if not missing:
+        return []
+    if any(name == "id" for name, _ in missing):
+        raise RuntimeError(f"Existing table is missing required id column: {TARGET_SCHEMA}.{table_name}")
+    if not ADD_MISSING_COLUMNS:
+        return missing
+    for name, data_type in missing:
+        cur.execute(
+            f"ALTER TABLE {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} "
+            f"ADD COLUMN {quote_ident(name)} {data_type}"
+        )
+    return missing
 
 
 def create_product_list_indexes(cur, table_name, crawl_column):
@@ -298,17 +333,30 @@ def main():
     )
     created = []
     skipped = []
+    altered = []
+    missing_not_added = []
     with conn:
         with conn.cursor() as cur:
             for category, columns in SCHEMAS.items():
                 table_name = BESTBUY_OUTPUT_TABLES[category]
                 if table_exists(cur, table_name):
+                    missing = add_missing_columns(cur, table_name, columns)
+                    if missing and ADD_MISSING_COLUMNS:
+                        altered.append({"table": table_name, "columns": [name for name, _ in missing]})
+                    elif missing:
+                        missing_not_added.append({"table": table_name, "columns": [name for name, _ in missing]})
                     skipped.append(table_name)
                     continue
                 create_table(cur, table_name, columns)
                 created.append(table_name)
             for category, table_name in BESTBUY_PRODUCT_LIST_TABLES.items():
                 if table_exists(cur, table_name):
+                    columns = PRODUCT_LIST_SCHEMAS.get(category, HHP_PRODUCT_LIST_COLUMNS)
+                    missing = add_missing_columns(cur, table_name, columns)
+                    if missing and ADD_MISSING_COLUMNS:
+                        altered.append({"table": table_name, "columns": [name for name, _ in missing]})
+                    elif missing:
+                        missing_not_added.append({"table": table_name, "columns": [name for name, _ in missing]})
                     skipped.append(table_name)
                     continue
                 columns = PRODUCT_LIST_SCHEMAS.get(category, HHP_PRODUCT_LIST_COLUMNS)
@@ -317,7 +365,15 @@ def main():
                 create_product_list_indexes(cur, table_name, crawl_column)
                 created.append(table_name)
     conn.close()
-    print({"created": created, "skipped_existing": skipped})
+    print(
+        {
+            "created": created,
+            "skipped_existing": skipped,
+            "altered_existing": altered,
+            "missing_not_added": missing_not_added,
+            "add_missing_columns": ADD_MISSING_COLUMNS,
+        }
+    )
 
 
 if __name__ == "__main__":

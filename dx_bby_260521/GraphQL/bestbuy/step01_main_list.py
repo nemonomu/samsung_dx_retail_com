@@ -41,6 +41,7 @@ RUN_ID = os.getenv("BESTBUY_MAIN_RUN_ID", "main")
 RUN_ROOT = Path(os.getenv("BESTBUY_RUN_ROOT", DEFAULT_BESTBUY_RUN_ROOT)) / RUN_ID
 SOURCE_HTML_PATH = Path(os.getenv("BESTBUY_MAIN_SOURCE_HTML", "references/bestbuy_main_search_page_sample.html"))
 SOURCE_PAYLOAD_PATH = Path(os.getenv("BESTBUY_MAIN_SOURCE_PAYLOAD", "references/page_001_request.json"))
+ALLOW_HTML_TEMPLATE = os.getenv("BESTBUY_MAIN_ALLOW_HTML_TEMPLATE", "0").lower() in {"1", "true", "yes", "y"}
 FORCE_REFRESH = os.getenv("BESTBUY_FORCE_REFRESH", "0").lower() in {"1", "true", "yes", "y"}
 CATEGORY = bestbuy_category()
 URLS = load_initial_urls()
@@ -89,22 +90,14 @@ def find_started_operation(html_text, target_name):
 
 
 def load_product_list_operation(target_name="PlpView_ProductList_Init"):
-    source_html_candidates = [
-        SOURCE_HTML_PATH,
-        Path("../../references/bestbuy_main_search_page_sample.html"),
-    ]
     source_payload_candidates = [
         SOURCE_PAYLOAD_PATH,
         Path("../../references/rdp/page_001_request.json"),
     ]
-
-    for path in source_html_candidates:
-        if path.exists():
-            html_text = path.read_text(encoding="utf-8", errors="replace")
-            operation = find_started_operation(html_text, target_name)
-            operation["source_path"] = rel_path(path)
-            operation["source_type"] = "html"
-            return operation
+    source_html_candidates = [
+        SOURCE_HTML_PATH,
+        Path("../../references/bestbuy_main_search_page_sample.html"),
+    ]
 
     for path in source_payload_candidates:
         if not path.exists():
@@ -124,8 +117,21 @@ def load_product_list_operation(target_name="PlpView_ProductList_Init"):
             continue
         return operation
 
-    searched = [str(path) for path in source_html_candidates + source_payload_candidates]
-    raise FileNotFoundError(f"Could not find {target_name} source template. searched={searched}")
+    if ALLOW_HTML_TEMPLATE:
+        for path in source_html_candidates:
+            if path.exists():
+                html_text = path.read_text(encoding="utf-8", errors="replace")
+                operation = find_started_operation(html_text, target_name)
+                operation["source_path"] = rel_path(path)
+                operation["source_type"] = "html"
+                return operation
+
+    searched = [str(path) for path in source_payload_candidates + source_html_candidates]
+    raise FileNotFoundError(
+        f"Could not find {target_name} GraphQL request payload. searched={searched}. "
+        "Set BESTBUY_MAIN_SOURCE_PAYLOAD to a saved /gateway/graphql request body. "
+        "Set BESTBUY_MAIN_ALLOW_HTML_TEMPLATE=1 only for one-off local migration."
+    )
 
 
 def prepare_product_list_payload(operation, page):
@@ -738,6 +744,8 @@ def main():
         "fetch_mode": FETCH_MODE,
         "fetch_transports": fetch_transports(),
         "source_html": rel_path(SOURCE_HTML_PATH),
+        "source_payload": rel_path(SOURCE_PAYLOAD_PATH),
+        "allow_html_template": ALLOW_HTML_TEMPLATE,
         "source_template": operation.get("source_path", ""),
         "source_template_type": operation.get("source_type", ""),
         "expected_post_calls": SEARCH_PAGES,

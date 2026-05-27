@@ -24,6 +24,7 @@ FINAL_OUTPUT_CSV = Path(os.getenv("BESTBUY_FINAL_OUTPUT_CSV", OUTPUT_ROOT / "fin
 PRODUCT_LIST_CSV = Path(os.getenv("BESTBUY_PRODUCT_LIST_OUTPUT", OUTPUT_ROOT / "bestbuy_product_list.csv"))
 MANIFEST_PATH = OUTPUT_ROOT / "db_load_manifest.json"
 DRY_RUN = os.getenv("BESTBUY_DB_LOAD_DRY_RUN", "0").lower() in {"1", "true", "yes", "y"}
+STRICT_COLUMNS = os.getenv("BESTBUY_DB_STRICT_COLUMNS", "1").lower() in {"1", "true", "yes", "y"}
 UPDATE_SIMILAR_ONLY = os.getenv("BESTBUY_DB_UPDATE_SIMILAR_ONLY", "0").lower() in {"1", "true", "yes", "y"}
 UPDATE_AVAILABILITY_ONLY = os.getenv("BESTBUY_DB_UPDATE_AVAILABILITY_ONLY", "0").lower() in {
     "1",
@@ -108,12 +109,13 @@ def delete_existing_batch(cur, table_name, columns, rows):
 
 def insert_rows(cur, table_name, columns, rows):
     if not rows:
-        return {"inserted": 0, "deleted_existing": 0, "columns": []}
+        return {"inserted": 0, "deleted_existing": 0, "columns": [], "missing_table_columns": []}
+    missing = validate_insert_columns(table_name, columns, rows)
     insert_columns = [(name, data_type) for name, data_type in columns if name != "id"]
     csv_fields = set(rows[0].keys())
     insert_columns = [(name, data_type) for name, data_type in insert_columns if name in csv_fields]
     if not insert_columns:
-        return {"inserted": 0, "deleted_existing": 0, "columns": []}
+        return {"inserted": 0, "deleted_existing": 0, "columns": [], "missing_table_columns": missing}
 
     deleted = delete_existing_batch(cur, table_name, columns, rows)
     column_sql = ", ".join(quote_ident(name) for name, _ in insert_columns)
@@ -128,12 +130,14 @@ def insert_rows(cur, table_name, columns, rows):
         "inserted": len(values),
         "deleted_existing": deleted,
         "columns": [name for name, _ in insert_columns],
+        "missing_table_columns": missing,
     }
 
 
-def plan_rows(columns, rows):
+def plan_rows(columns, rows, table_name="<dry-run>"):
     if not rows:
-        return {"inserted": 0, "deleted_existing": 0, "columns": []}
+        return {"inserted": 0, "deleted_existing": 0, "columns": [], "missing_table_columns": []}
+    missing = validate_insert_columns(table_name, columns, rows)
     insert_columns = [(name, data_type) for name, data_type in columns if name != "id"]
     csv_fields = set(rows[0].keys())
     insert_columns = [(name, data_type) for name, data_type in insert_columns if name in csv_fields]
@@ -141,6 +145,7 @@ def plan_rows(columns, rows):
         "inserted": len(rows) if insert_columns else 0,
         "deleted_existing": 0,
         "columns": [name for name, _ in insert_columns],
+        "missing_table_columns": missing,
     }
 
 
@@ -150,12 +155,28 @@ def fallback_csv_columns(rows):
     return [(name, "text") for name in rows[0].keys()]
 
 
+def csv_columns(rows):
+    if not rows:
+        return []
+    return [name for name in rows[0].keys() if name != "id"]
+
+
+def validate_insert_columns(table_name, columns, rows):
+    missing = sorted(set(csv_columns(rows)) - {name for name, _ in columns})
+    if missing and STRICT_COLUMNS:
+        raise RuntimeError(
+            f"DB table is missing columns required by CSV insert: {TARGET_SCHEMA}.{table_name} "
+            f"missing={missing}"
+        )
+    return missing
+
+
 def load_one(cur, csv_path, table_name, dry_run=False):
     rows = read_csv(csv_path)
     columns = table_columns(cur, table_name) if cur else fallback_csv_columns(rows)
     if not columns:
         raise RuntimeError(f"DB table not found or has no columns: {TARGET_SCHEMA}.{table_name}")
-    result = plan_rows(columns, rows) if dry_run else insert_rows(cur, table_name, columns, rows)
+    result = plan_rows(columns, rows, table_name) if dry_run else insert_rows(cur, table_name, columns, rows)
     result.update(
         {
             "csv": rel_path(csv_path),

@@ -11,6 +11,7 @@ from bestbuy.step00_availability_policy import ALL_AVAILABILITY_FIELDS  # noqa: 
 from bestbuy.bestbuy_orchestrator import CATEGORY_SEARCH_TERMS  # noqa: E402
 import bestbuy.step07_final_targets as final_targets_step  # noqa: E402
 import bestbuy.step06_trending_deals as trending_step  # noqa: E402
+import bestbuy.step14_db_load as db_load_step  # noqa: E402
 import bestbuy.step08_detail_enrichment as detail_step  # noqa: E402
 from bestbuy.step08_detail_enrichment import (  # noqa: E402
     COMPARE_RECOMMENDATIONS_V2_QUERY,
@@ -159,6 +160,28 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
 
         self.assertEqual(REF_FINAL_FIELDS, expected)
 
+    def test_db_load_fails_when_csv_columns_are_missing_from_table(self):
+        rows = [{"id": "", "batch_id": "b_test", "hhp_storage": "128 gigabytes"}]
+
+        with self.assertRaisesRegex(RuntimeError, "hhp_storage"):
+            db_load_step.plan_rows([("id", "serial"), ("batch_id", "text")], rows, "hhp_retail_com")
+
+        result = db_load_step.plan_rows(
+            [("id", "serial"), ("batch_id", "text"), ("hhp_storage", "text")],
+            rows,
+            "hhp_retail_com",
+        )
+
+        self.assertEqual(result["missing_table_columns"], [])
+        self.assertEqual(result["columns"], ["batch_id", "hhp_storage"])
+
+    def test_db_prepare_adds_missing_columns_for_existing_tables(self):
+        step13 = (ROOT / "bestbuy" / "step13_db_prepare.py").read_text(encoding="utf-8")
+
+        self.assertIn("BESTBUY_DB_PREPARE_ADD_MISSING_COLUMNS", step13)
+        self.assertIn("ALTER TABLE", step13)
+        self.assertIn("ADD COLUMN", step13)
+
     def test_hhp_test10_runner_keeps_run_limited_and_dry(self):
         script = (ROOT / "bby_hhp_test10_task.bat").read_text(encoding="utf-8")
 
@@ -274,6 +297,53 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertEqual(rows[0]["sku_id"], "1234567")
         self.assertEqual(rows[0]["retailer_sku_name"], "Example TV")
         self.assertEqual(rows[0]["source"], "json_response_spotlight_product_connection")
+
+    def test_trending_parser_reads_direct_graphql_spotlight_connection(self):
+        rows = trending_step.parse_trending_products_from_graphql(
+            {
+                "data": {
+                    "story": {
+                        "__typename": "SpotlightProductConnection",
+                        "storyHeader": "Trending Deals in Cell Phones & Accessories",
+                        "edges": [
+                            {
+                                "node": {
+                                    "__typename": "SpotlightProduct",
+                                    "sku": "7654321",
+                                    "bsin": "BSIN1234",
+                                    "product": {
+                                        "name": {"short": "Example Phone"},
+                                        "url": {"relativePdp": "/site/example-phone/7654321.p"},
+                                    },
+                                },
+                            }
+                        ],
+                    }
+                }
+            },
+            limit=10,
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["sku_id"], "7654321")
+        self.assertEqual(rows[0]["bsin"], "BSIN1234")
+        self.assertEqual(rows[0]["retailer_sku_name"], "Example Phone")
+        self.assertEqual(rows[0]["product_url"], "https://www.bestbuy.com/site/example-phone/7654321.p")
+        self.assertEqual(rows[0]["source"], "direct_graphql_spotlight_product_connection")
+
+    def test_trending_step_is_direct_graphql_by_default(self):
+        orchestrator = (ROOT / "bestbuy" / "bestbuy_orchestrator.py").read_text(encoding="utf-8")
+
+        self.assertIn('"BESTBUY_TRENDING_FETCH_MODE": "direct_graphql"', orchestrator)
+        self.assertIn('"BESTBUY_TRENDING_ALLOW_RENDER_FALLBACK": "0"', orchestrator)
+
+    def test_listing_step_requires_saved_graphql_payload_by_default(self):
+        step01 = (ROOT / "bestbuy" / "step01_main_list.py").read_text(encoding="utf-8")
+        orchestrator = (ROOT / "bestbuy" / "bestbuy_orchestrator.py").read_text(encoding="utf-8")
+
+        self.assertIn('BESTBUY_MAIN_ALLOW_HTML_TEMPLATE", "0"', step01)
+        self.assertIn("if ALLOW_HTML_TEMPLATE:", step01)
+        self.assertIn('"BESTBUY_MAIN_ALLOW_HTML_TEMPLATE": "0"', orchestrator)
 
     def test_hhp_promotion_type_comes_from_detail_badge(self):
         old_category = detail_step.CATEGORY

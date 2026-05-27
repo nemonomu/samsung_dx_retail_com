@@ -17,6 +17,12 @@ CATEGORY_SEARCH_TERMS = {
     "REF": "refrigerator",
     "LDY": "washing machine",
 }
+HHP_TRENDING_PAGE_PAYLOAD_ENV = {
+    "BESTBUY_TRENDING_FETCH_MODE": "page_payload",
+    "BESTBUY_TRENDING_ALLOW_RENDER_FALLBACK": "1",
+    "BESTBUY_TRENDING_ALLOW_NETWORK_SKUS": "0",
+    "BESTBUY_TRENDING_REQUIRE_ROWS": "1",
+}
 
 
 @dataclass(frozen=True)
@@ -467,6 +473,9 @@ def run_step(step, dry_run=False, resume=False):
     if step.name in {"main_list", "bsr_list"} and category_key in CATEGORY_SEARCH_TERMS:
         category_overrides["BESTBUY_SEARCH_TERM"] = CATEGORY_SEARCH_TERMS[category_key]
         env.update(category_overrides)
+    if step.name == "trending_deals" and category_key == "HHP":
+        category_overrides.update(HHP_TRENDING_PAGE_PAYLOAD_ENV)
+        env.update(HHP_TRENDING_PAGE_PAYLOAD_ENV)
     apply_run_path_env(env)
     command = [PYTHON, "-m", step.module]
     print(f"[run] step {step.key} {step.name}: {' '.join(command)}")

@@ -19,6 +19,7 @@ INPUT_HTML = Path(os.getenv("BESTBUY_TRENDING_HTML", "references/bestbuy_tv_tren
 RUN_ROOT = Path(os.getenv("BESTBUY_TRENDING_RUN_ROOT", DEFAULT_BESTBUY_RUN_ROOT / "trending"))
 GRAPHQL_ENDPOINT = os.getenv("BESTBUY_GRAPHQL_ENDPOINT", "https://www.bestbuy.com/gateway/graphql")
 FETCH_MODE = os.getenv("BESTBUY_TRENDING_FETCH_MODE", "auto").strip().lower()
+PAGE_PAYLOAD_FETCH_MODES = {"html", "page", "live_html", "legacy_html", "page_payload", "rsc_payload", "doc_payload"}
 SOURCE_PAYLOAD_ENV = os.getenv("BESTBUY_TRENDING_SOURCE_PAYLOAD", "").strip()
 SOURCE_PAYLOAD_PATH = Path(
     SOURCE_PAYLOAD_ENV or f"references/bestbuy_trending_{CATEGORY.lower()}_request.json"
@@ -479,13 +480,16 @@ def use_direct_graphql():
         return True
     if FETCH_MODE == "auto":
         return existing_source_payload_path() is not None
-    if FETCH_MODE in {"html", "page", "live_html", "legacy_html"}:
+    if FETCH_MODE in PAGE_PAYLOAD_FETCH_MODES:
         return False
-    raise ValueError("BESTBUY_TRENDING_FETCH_MODE must be one of: auto, graphql, direct_graphql, html")
+    raise ValueError(
+        "BESTBUY_TRENDING_FETCH_MODE must be one of: auto, graphql, direct_graphql, "
+        "html, page_payload"
+    )
 
 
 def use_render_fallback():
-    if FETCH_MODE in {"html", "page", "live_html", "legacy_html"}:
+    if FETCH_MODE in PAGE_PAYLOAD_FETCH_MODES:
         return True
     return FETCH_MODE == "auto" and ALLOW_RENDER_FALLBACK
 
@@ -658,7 +662,7 @@ def main():
         rows = parse_trending_products_from_capture(html_text, {}, LIMIT)
     if LIVE_FETCH and REQUIRE_ROWS and not rows:
         raise RuntimeError(
-            "Trending live fetch returned 0 GraphQL SpotlightProduct rows after waits="
+            "Trending live fetch returned 0 SpotlightProduct rows after waits="
             + ",".join(attempted_waits)
             + "; retry with a larger BESTBUY_TRENDING_WAIT_MS_SEQUENCE"
         )

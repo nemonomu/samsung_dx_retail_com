@@ -8,7 +8,7 @@ sys.path.insert(0, str(ROOT))
 
 from bestbuy.step00_config import BESTBUY_OUTPUT_TABLES  # noqa: E402
 from bestbuy.step00_availability_policy import ALL_AVAILABILITY_FIELDS  # noqa: E402
-from bestbuy.bestbuy_orchestrator import CATEGORY_SEARCH_TERMS  # noqa: E402
+from bestbuy.bestbuy_orchestrator import CATEGORY_SEARCH_TERMS, HHP_TRENDING_PAGE_PAYLOAD_ENV  # noqa: E402
 import bestbuy.step07_final_targets as final_targets_step  # noqa: E402
 import bestbuy.step06_trending_deals as trending_step  # noqa: E402
 import bestbuy.step14_db_load as db_load_step  # noqa: E402
@@ -336,6 +336,8 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
 
         self.assertIn('"BESTBUY_TRENDING_FETCH_MODE": "direct_graphql"', orchestrator)
         self.assertIn('"BESTBUY_TRENDING_ALLOW_RENDER_FALLBACK": "0"', orchestrator)
+        self.assertEqual(HHP_TRENDING_PAGE_PAYLOAD_ENV["BESTBUY_TRENDING_FETCH_MODE"], "page_payload")
+        self.assertEqual(HHP_TRENDING_PAGE_PAYLOAD_ENV["BESTBUY_TRENDING_ALLOW_NETWORK_SKUS"], "0")
 
     def test_listing_step_requires_saved_graphql_payload_by_default(self):
         step01 = (ROOT / "bestbuy" / "step01_main_list.py").read_text(encoding="utf-8")

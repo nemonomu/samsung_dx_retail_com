@@ -10,6 +10,7 @@ from bestbuy.step00_config import BESTBUY_OUTPUT_TABLES  # noqa: E402
 from bestbuy.step00_availability_policy import ALL_AVAILABILITY_FIELDS  # noqa: E402
 from bestbuy.bestbuy_orchestrator import CATEGORY_SEARCH_TERMS  # noqa: E402
 import bestbuy.step07_final_targets as final_targets_step  # noqa: E402
+import bestbuy.step06_trending_deals as trending_step  # noqa: E402
 import bestbuy.step08_detail_enrichment as detail_step  # noqa: E402
 from bestbuy.step08_detail_enrichment import (  # noqa: E402
     COMPARE_RECOMMENDATIONS_V2_QUERY,
@@ -254,6 +255,25 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertEqual(CATEGORY_SEARCH_TERMS["HHP"], "cellphone")
         self.assertEqual(CATEGORY_SEARCH_TERMS["REF"], "refrigerator")
         self.assertEqual(CATEGORY_SEARCH_TERMS["LDY"], "washing machine")
+
+    def test_trending_parser_reads_json_response_xhr_when_html_is_shell(self):
+        xhr_body = (
+            '{"__typename":"SpotlightProductConnection","storyHeader":"Trending Deals in TVs & Projectors",'
+            '"__typename":"SpotlightProduct","sku":"1234567","name":{"short":"Example TV"},'
+            '"url":{"pdp":"/site/example-tv/1234567.p"},"bsin":"ABCD1234",'
+            '"originalSkuId":"1234567"}'
+        )
+
+        rows = trending_step.parse_trending_products_from_capture(
+            "<html><head><title>Trending</title></head></html>",
+            {"xhr": [{"url": "https://www.bestbuy.com/gateway/graphql", "body": xhr_body}]},
+            limit=10,
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["sku_id"], "1234567")
+        self.assertEqual(rows[0]["retailer_sku_name"], "Example TV")
+        self.assertEqual(rows[0]["source"], "json_response_spotlight_product_connection")
 
     def test_hhp_promotion_type_comes_from_detail_badge(self):
         old_category = detail_step.CATEGORY

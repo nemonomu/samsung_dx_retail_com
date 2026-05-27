@@ -28,6 +28,7 @@ TRENDING_URL = os.getenv("BESTBUY_TRENDING_URL", load_initial_urls().get("trendi
 LIMIT = int(os.getenv("BESTBUY_TRENDING_LIMIT", "10"))
 WAIT_MS = os.getenv("ZENROWS_WAIT_MS") or os.getenv("BESTBUY_TRENDING_WAIT_MS") or "8000"
 WAIT_MS_SEQUENCE = os.getenv("BESTBUY_TRENDING_WAIT_MS_SEQUENCE", "").strip()
+JSON_RESPONSE = os.getenv("BESTBUY_TRENDING_JSON_RESPONSE", "1").lower() in {"1", "true", "yes", "y"}
 REQUIRE_ROWS = os.getenv(
     "BESTBUY_TRENDING_REQUIRE_ROWS",
     "1",
@@ -210,6 +211,68 @@ def parse_trending_products(html_text, limit=10):
     return rows
 
 
+def parse_json_value(text):
+    try:
+        return json.loads(text)
+    except (TypeError, ValueError):
+        return {}
+
+
+def json_response_xhr_items(json_data):
+    if not isinstance(json_data, dict):
+        return []
+    xhr = json_data.get("xhr") or []
+    return xhr if isinstance(xhr, list) else []
+
+
+def json_response_capture_texts(json_data):
+    if not isinstance(json_data, (dict, list)):
+        return []
+
+    texts = []
+    seen = set()
+
+    def add_text(value):
+        if value is None:
+            return
+        if isinstance(value, (dict, list)):
+            value = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        value = str(value or "")
+        if not value:
+            return
+        key = (len(value), value[:500])
+        if key in seen:
+            return
+        seen.add(key)
+        texts.append(value)
+
+    if isinstance(json_data, dict):
+        for key in ("html", "content", "body", "response", "responseText", "text"):
+            add_text(json_data.get(key))
+        for request in json_response_xhr_items(json_data):
+            if isinstance(request, dict):
+                for key in ("body", "response", "responseText", "content", "text", "html"):
+                    add_text(request.get(key))
+                add_text(request)
+            else:
+                add_text(request)
+    add_text(json_data)
+    return texts
+
+
+def parse_trending_products_from_capture(html_text, json_data=None, limit=10):
+    rows = parse_trending_products(html_text or "", limit=limit)
+    if rows:
+        return rows
+    for capture_text in json_response_capture_texts(json_data):
+        rows = parse_trending_products(capture_text, limit=limit)
+        if rows:
+            for row in rows:
+                row["source"] = f"json_response_{row.get('source') or 'capture'}"
+            return rows
+    return []
+
+
 def write_rows(path, rows):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8-sig") as f:
@@ -255,28 +318,37 @@ def live_html(wait_ms=None, attempt=1):
     client = ZenRowsClient(api_key)
     wait_ms = str(wait_ms or WAIT_MS or "8000")
     start = time.perf_counter()
-    response = client.get(
-        TRENDING_URL,
-        params={
-            "js_render": "true",
-            "premium_proxy": "true",
-            "proxy_country": "us",
-            **({"wait": wait_ms} if wait_ms else {}),
-        },
-        timeout=REQUEST_TIMEOUT,
-    )
+    params = {
+        "js_render": "true",
+        "premium_proxy": "true",
+        "proxy_country": "us",
+        **({"wait": wait_ms} if wait_ms else {}),
+    }
+    if JSON_RESPONSE:
+        params["json_response"] = "true"
+    response = client.get(TRENDING_URL, params=params, timeout=REQUEST_TIMEOUT)
     elapsed = round(time.perf_counter() - start, 3)
     text = response.text
+    json_data = parse_json_value(text) if JSON_RESPONSE else {}
+    html_text = text
+    if isinstance(json_data, dict):
+        html_text = str(json_data.get("html") or json_data.get("content") or "")
     html_path = raw_dir / "trending_page.html"
     attempt_html_path = raw_dir / f"trending_page_attempt{attempt}.html"
+    json_path = raw_dir / "trending_page_json_response.json"
+    attempt_json_path = raw_dir / f"trending_page_attempt{attempt}_json_response.json"
     headers_path = raw_dir / "trending_page_headers.json"
     attempt_headers_path = raw_dir / f"trending_page_attempt{attempt}_headers.json"
-    html_path.write_text(text, encoding="utf-8", errors="replace")
-    attempt_html_path.write_text(text, encoding="utf-8", errors="replace")
+    html_path.write_text(html_text, encoding="utf-8", errors="replace")
+    attempt_html_path.write_text(html_text, encoding="utf-8", errors="replace")
+    if JSON_RESPONSE:
+        json_path.write_text(text, encoding="utf-8", errors="replace")
+        attempt_json_path.write_text(text, encoding="utf-8", errors="replace")
     headers_path.write_text(json.dumps(dict(response.headers), indent=2, ensure_ascii=False), encoding="utf-8")
     attempt_headers_path.write_text(
         json.dumps(dict(response.headers), indent=2, ensure_ascii=False), encoding="utf-8"
     )
+    xhr_items = json_response_xhr_items(json_data)
     summary = {
         "started_at": now(),
         "live": True,
@@ -286,9 +358,14 @@ def live_html(wait_ms=None, attempt=1):
         "elapsed_seconds": elapsed,
         "x_request_cost": response.headers.get("x-request-cost", ""),
         "wait_ms": wait_ms,
+        "json_response": JSON_RESPONSE,
         "bytes": len(text or ""),
+        "html_bytes": len(html_text or ""),
+        "json_xhr_count": len(xhr_items),
         "html": rel_path(html_path),
         "attempt_html": rel_path(attempt_html_path),
+        "json": rel_path(json_path) if JSON_RESPONSE else "",
+        "attempt_json": rel_path(attempt_json_path) if JSON_RESPONSE else "",
         "headers": rel_path(headers_path),
         "attempt_headers": rel_path(attempt_headers_path),
         "success": response.status_code == 200,
@@ -298,7 +375,7 @@ def live_html(wait_ms=None, attempt=1):
     )
     if response.status_code != 200:
         raise RuntimeError(f"Trending live fetch failed: status={response.status_code}")
-    return text
+    return html_text, json_data
 
 
 def main():
@@ -311,18 +388,18 @@ def main():
     if LIVE_FETCH:
         for attempt, wait_ms in enumerate(trending_wait_sequence(), 1):
             attempted_waits.append(wait_ms)
-            html_text = live_html(wait_ms=wait_ms, attempt=attempt)
-            rows = parse_trending_products(html_text, LIMIT)
+            html_text, json_data = live_html(wait_ms=wait_ms, attempt=attempt)
+            rows = parse_trending_products_from_capture(html_text, json_data, LIMIT)
             if rows:
                 break
             print(
                 f"[trending:retry] attempt={attempt} wait_ms={wait_ms} rows=0 "
-                "reason=no SpotlightProduct/network SKU rows",
+                "reason=no SpotlightProduct/network SKU rows in html/json_response",
                 flush=True,
             )
     else:
         html_text = INPUT_HTML.read_text(encoding="utf-8", errors="ignore")
-        rows = parse_trending_products(html_text, LIMIT)
+        rows = parse_trending_products_from_capture(html_text, {}, LIMIT)
     if LIVE_FETCH and REQUIRE_ROWS and not rows:
         raise RuntimeError(
             "Trending live fetch returned 0 GraphQL SpotlightProduct rows after waits="

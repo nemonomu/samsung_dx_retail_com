@@ -391,6 +391,23 @@ def clean_hhp_carrier_compatibility(value):
     return ", ".join(cleaned)
 
 
+def hhp_carrier_field_name(value):
+    name = compact_text(value).lower().replace("_", " ")
+    if not name or "compatibility" in name:
+        return False
+    tail = name.rsplit(":", 1)[-1].strip()
+    return tail in {"carrier", "wireless carrier"}
+
+
+def hhp_title_mentions_unlocked(product_name):
+    return bool(re.search(r"(?i)\bunlocked\b", compact_text(product_name)))
+
+
+def hhp_spec_unlocked_yes(products):
+    value = spec_value(products, "Unlocked")
+    return compact_text(value).lower() in {"yes", "true", "1", "y"}
+
+
 def clean_hhp_color(value):
     text = compact_text(value)
     if not text:
@@ -461,7 +478,7 @@ def hhp_variation_attrs_from_product(product, sku=""):
             value = compact_text(variation.get("value"))
             if not value:
                 continue
-            if "carrier" in raw_name:
+            if hhp_carrier_field_name(raw_name):
                 attrs["hhp_carrier"] = clean_hhp_carrier(value)
             elif "color" in raw_name:
                 attrs["hhp_color"] = clean_hhp_color(value)
@@ -500,9 +517,8 @@ def hhp_attributes_from_product(product, product_name, sku=""):
         if value:
             attrs[field] = value
     if not attrs["hhp_carrier"]:
-        carrier_compatibility = spec_value(products, "Carrier Compatibility")
-        if carrier_compatibility:
-            attrs["hhp_carrier"] = clean_hhp_carrier_compatibility(carrier_compatibility)
+        if hhp_title_mentions_unlocked(product_name) and hhp_spec_unlocked_yes(products):
+            attrs["hhp_carrier"] = "Unlocked"
     return attrs
 
 

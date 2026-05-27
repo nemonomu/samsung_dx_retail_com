@@ -417,6 +417,64 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertEqual(no_product_name_fallback_attrs["hhp_storage"], "")
         self.assertEqual(no_product_name_fallback_attrs["hhp_color"], "")
 
+    def test_hhp_carrier_uses_unlocked_fallback_only_when_title_and_spec_match(self):
+        product = {
+            "specificationGroups": [
+                {
+                    "specifications": [
+                        {"displayName": "Carrier Compatibility", "value": "AT&T, Verizon, T-Mobile"},
+                        {"displayName": "Unlocked", "value": "Yes"},
+                    ]
+                }
+            ]
+        }
+
+        attrs = hhp_attributes_from_product(
+            product,
+            "Nokia - 2780 Flip Phone (Unlocked) - Black",
+            "6584894",
+        )
+        self.assertEqual(attrs["hhp_carrier"], "Unlocked")
+
+        title_only_attrs = hhp_attributes_from_product(
+            {
+                "specificationGroups": [
+                    {
+                        "specifications": [
+                            {"displayName": "Carrier Compatibility", "value": "AT&T, Verizon, T-Mobile"},
+                        ]
+                    }
+                ]
+            },
+            "Nokia - 2780 Flip Phone (Unlocked) - Black",
+            "6584894",
+        )
+        self.assertEqual(title_only_attrs["hhp_carrier"], "")
+
+        spec_only_attrs = hhp_attributes_from_product(
+            product,
+            "Nokia - 2780 Flip Phone - Black",
+            "6584894",
+        )
+        self.assertEqual(spec_only_attrs["hhp_carrier"], "")
+
+    def test_hhp_carrier_does_not_use_carrier_compatibility_as_carrier(self):
+        attrs = hhp_attributes_from_product(
+            {
+                "specificationGroups": [
+                    {
+                        "specifications": [
+                            {"displayName": "Carrier Compatibility", "value": "AT&T, Verizon, T-Mobile"},
+                        ]
+                    }
+                ]
+            },
+            "Nokia - 2780 Flip Phone - Black",
+            "6584894",
+        )
+
+        self.assertEqual(attrs["hhp_carrier"], "")
+
     def test_ldy_capacity_and_loading_type_from_specs_only(self):
         attrs = ldy_attributes_from_product(
             [

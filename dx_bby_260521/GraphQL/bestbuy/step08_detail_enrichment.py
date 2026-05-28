@@ -596,10 +596,7 @@ def price_output_fields(price, target, selector_values):
 def no_longer_available_price_fields(final_price, original_price="", savings="", unavailable=False):
     if not unavailable:
         return final_price, original_price, savings
-    text = compact_text(final_price)
-    if not text or "no longer" in text.lower():
-        return "no longer available", "", ""
-    return final_price, original_price, savings
+    return "no longer available", "", ""
 
 
 def numeric_rating(value):
@@ -2706,6 +2703,7 @@ def review20_payload(html_text):
     apply_bestbuy_location(payload.get("variables", {}))
     payload["query"] = payload["query"].replace("reviews(filter:{pageSize:5})", "reviews(filter:{pageSize:20})")
     payload["query"] = ensure_recommended_percent_query(payload.get("query") or "")
+    payload["query"] = ensure_dotcom_display_status_query(payload.get("query") or "")
     return payload
 
 
@@ -2719,11 +2717,22 @@ def ensure_recommended_percent_query(query):
     )
 
 
+def ensure_dotcom_display_status_query(query):
+    if not query or "dotComDisplayStatus" in query:
+        return query
+    return re.sub(
+        r"(productBySkuId\s*\([^)]*\)\s*\{)",
+        r"\1dotComDisplayStatus ",
+        query,
+        count=1,
+    )
+
+
 PRODUCT_SCHEMA_REVIEW20_QUERY = (
     "query ProductSchema_init($skuId:String!$salesChannel:String!)"
     "{...ProductSchema_Fragment}"
     "fragment ProductSchema_Fragment on Query{productBySkuId(skuId:$skuId){bsin name{short}images{piscesHref}"
-    "url{pdp}description{short}skuId manufacturer{modelNumber}color{displayName}brand badgesV2{label} "
+    "url{pdp}description{short}skuId dotComDisplayStatus manufacturer{modelNumber}color{displayName}brand badgesV2{label} "
     "operationalAttributes{displayName values} whatItIs "
     "isPurchaseWithTradeInEligible connectionType{code} "
     "productVariationDetailDisplay{type title variationTypes{definition displayName rawName}"
@@ -3061,6 +3070,7 @@ def review20_payload_for_sku(sku):
     apply_bestbuy_location(payload.get("variables", {}))
     payload["query"] = payload["query"].replace("reviews(filter:{pageSize:5})", "reviews(filter:{pageSize:20})")
     payload["query"] = ensure_recommended_percent_query(payload.get("query") or "")
+    payload["query"] = ensure_dotcom_display_status_query(payload.get("query") or "")
     return payload
 
 
@@ -4922,6 +4932,16 @@ def is_detail_no_longer_available_text(*values):
     return any(phrase in haystack for phrase in NO_LONGER_AVAILABLE_PHRASES)
 
 
+def is_detail_no_longer_available_product(product):
+    if not isinstance(product, dict):
+        return False
+    return compact_text(product.get("dotComDisplayStatus")).lower() == "inactive"
+
+
+def has_detail_no_longer_available_product(products):
+    return any(is_detail_no_longer_available_product(product) for product in products)
+
+
 def detail_no_longer_available(sku):
     paths = detail_paths(sku)
     html_path = paths.get("html")
@@ -4963,8 +4983,12 @@ def output_row(target):
     if review_count == 0 or (rating_number == 0 and review_count in (None, 0)):
         not_yet_reviewed = True
         review_count = 0
-    no_longer_available = detail_no_longer_available(sku) or is_detail_no_longer_available_text(
-        selector_values.get("final_sku_price_no_longer_available")
+    no_longer_available = (
+        has_detail_no_longer_available_product(products)
+        or detail_no_longer_available(sku)
+        or is_detail_no_longer_available_text(
+            selector_values.get("final_sku_price_no_longer_available")
+        )
     )
     final_price, original_price, savings = no_longer_available_price_fields(
         *price_output_fields(price, target, selector_values),

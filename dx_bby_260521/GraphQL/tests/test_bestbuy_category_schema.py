@@ -267,8 +267,10 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         )
         self.assertEqual(
             detail_step.no_longer_available_price_fields("$429.99", "$499.99", "$70", unavailable=True),
-            ("$429.99", "$499.99", "$70"),
+            ("no longer available", "", ""),
         )
+        self.assertTrue(detail_step.is_detail_no_longer_available_product({"dotComDisplayStatus": "inactive"}))
+        self.assertFalse(detail_step.is_detail_no_longer_available_product({"dotComDisplayStatus": "active"}))
 
     def test_no_longer_available_detector_ignores_generic_review_text(self):
         self.assertTrue(
@@ -282,6 +284,11 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             )
         )
         self.assertNotIn("no longer available", detail_step.NO_LONGER_AVAILABLE_PHRASES)
+
+    def test_product_schema_query_includes_dotcom_display_status(self):
+        self.assertIn("dotComDisplayStatus", detail_step.PRODUCT_SCHEMA_REVIEW20_QUERY)
+        query = "query X($skuId:String!){productBySkuId(skuId:$skuId){skuId name{short}}}"
+        self.assertIn("dotComDisplayStatus", detail_step.ensure_dotcom_display_status_query(query))
 
     def test_item_mst_model_uses_top_pdp_model_only(self):
         payload = {

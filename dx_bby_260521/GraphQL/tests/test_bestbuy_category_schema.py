@@ -537,6 +537,16 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
 
         self.assertEqual(len(selected), 1)
 
+    def test_product_list_price_normalization_handles_money_text(self):
+        self.assertEqual(
+            final_targets_step.normalized_product_list_prices("999.99", "1,199.99", ""),
+            ("$999.99", "$1,199.99", "$200"),
+        )
+        self.assertEqual(
+            final_targets_step.normalized_product_list_prices("$999.99", "$999.99", "$0"),
+            ("$999.99", "", ""),
+        )
+
     def test_hhp_promotion_listing_is_explicitly_skipped(self):
         orchestrator = (ROOT / "bestbuy" / "bestbuy_orchestrator.py").read_text(encoding="utf-8")
         final_targets = (ROOT / "bestbuy" / "step07_final_targets.py").read_text(encoding="utf-8")

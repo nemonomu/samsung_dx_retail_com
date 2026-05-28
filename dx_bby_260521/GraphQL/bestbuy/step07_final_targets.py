@@ -1,6 +1,7 @@
 import csv
 import json
 import os
+import re
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -425,19 +426,21 @@ def write_csv(path, rows, preferred=None):
 def money(value):
     if value in ("", None):
         return ""
+    text = str(value).strip()
     try:
-        return f"${float(value):,.2f}"
+        return f"${float(text.replace('$', '').replace(',', '')):,.2f}"
     except (TypeError, ValueError):
-        return str(value)
+        return text
 
 
 def money_int(value):
     if value in ("", None):
         return ""
+    text = str(value).strip()
     try:
-        return f"${int(round(float(value))):,}"
+        return f"${int(round(float(text.replace('$', '').replace(',', '')))):,}"
     except (TypeError, ValueError):
-        return str(value)
+        return text
 
 
 def numeric_money(value):

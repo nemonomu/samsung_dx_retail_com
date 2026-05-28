@@ -213,6 +213,37 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn('set "BESTBUY_DETAIL_SKUS="', script)
         self.assertIn('set "BESTBUY_DB_LOAD_DRY_RUN=0"', script)
         self.assertIn('set "BESTBUY_DB_UPDATE_SIMILAR_ONLY=0"', script)
+        self.assertIn('set "BESTBUY_FORCE_RUN_PATH_ENV="', script)
+        self.assertIn('set "BESTBUY_RUN_ROOT="', script)
+        self.assertIn('set "BESTBUY_ITEM_MST_OUTPUT_CSV="', script)
+
+    def test_tv_hhp_daily_task_runs_only_tv_then_hhp_with_clean_env(self):
+        script = (ROOT / "bby_tv_hhp_daily_task.bat").read_text(encoding="utf-8")
+
+        self.assertIn('set "CHAIN_ORDER=TV HHP"', script)
+        self.assertIn("call :run_category TV", script)
+        self.assertIn("call :run_category HHP", script)
+        self.assertNotIn("call :run_category LDY", script)
+        self.assertNotIn("call :run_category REF", script)
+        self.assertIn("call :clear_operational_env", script)
+        self.assertIn('set "BESTBUY_PRESERVE_RUN_ENV="', script)
+        self.assertIn('set "BESTBUY_RUN_ROOT="', script)
+        self.assertIn('call "%~dp0_bby_daily_task.bat" %CATEGORY%', script)
+
+    def test_tv_and_hhp_daily_wrappers_force_production_env(self):
+        tv_script = (ROOT / "bby_tv_daily_task.bat").read_text(encoding="utf-8")
+        hhp_script = (ROOT / "bby_hhp_daily_task.bat").read_text(encoding="utf-8")
+
+        self.assertIn('set "BESTBUY_PRESERVE_RUN_ENV="', tv_script)
+        self.assertIn('set "BESTBUY_PRESERVE_RUN_ENV="', hhp_script)
+        self.assertIn('call "%~dp0_bby_daily_task.bat" TV', tv_script)
+        self.assertIn('call "%~dp0_bby_daily_task.bat" HHP', hhp_script)
+
+    def test_daily_lock_falls_back_to_wmi_when_cim_fails(self):
+        script = (ROOT / "bestbuy" / "step00_daily_lock.py").read_text(encoding="utf-8")
+
+        self.assertIn("Get-CimInstance Win32_Process", script)
+        self.assertIn("Get-WmiObject Win32_Process", script)
 
     def test_fullrun_resets_db_update_only_modes(self):
         script = (ROOT / "run_bestbuy_fullrun.bat").read_text(encoding="utf-8")

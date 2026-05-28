@@ -34,7 +34,13 @@ def active_bestbuy_processes(category, root):
 $category = {powershell_string(category)}
 $root = {powershell_string(root)}
 $currentPid = {current_pid}
-$matches = Get-CimInstance Win32_Process | Where-Object {{
+$processes = @()
+try {{
+    $processes = Get-CimInstance Win32_Process -ErrorAction Stop
+}} catch {{
+    $processes = Get-WmiObject Win32_Process -ErrorAction Stop
+}}
+$matches = $processes | Where-Object {{
     $_.ProcessId -ne $currentPid -and
     $_.CommandLine -and
     (

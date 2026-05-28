@@ -355,6 +355,53 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertEqual(rows[0]["hhp_storage"], "128 gigabytes")
         self.assertNotIn("screen_size", rows[0])
 
+    def test_item_mst_insert_uses_no_sku_when_top_model_is_missing(self):
+        self.assertEqual(
+            item_mst_step.value_for_insert({"sku": ""}, "sku", "text"),
+            "no sku",
+        )
+        self.assertEqual(
+            item_mst_step.value_for_insert({"account_name": ""}, "account_name", "text"),
+            "Bestbuy",
+        )
+
+    def test_item_mst_existing_sku_is_not_overwritten(self):
+        updates = item_mst_step.missing_only_updates(
+            {
+                "sku": "NEW-MODEL",
+                "product_url": "https://new.example",
+                "screen_size": "65 inches",
+                "estimated_annual_electricity_use": "140",
+            },
+            {
+                "sku": "EXISTING-MODEL",
+                "product_url": "https://old.example",
+                "screen_size": "65 inches",
+                "estimated_annual_electricity_use": "",
+            },
+            item_mst_step.table_columns("TV"),
+        )
+
+        self.assertNotIn("sku", [name for name, _, _ in updates])
+        self.assertNotIn("product_url", [name for name, _, _ in updates])
+        self.assertIn("estimated_annual_electricity_use", [name for name, _, _ in updates])
+
+    def test_item_mst_missing_existing_sku_can_be_filled_once(self):
+        updates = item_mst_step.missing_only_updates(
+            {
+                "sku": "QN65Q7FAAFXZA",
+                "product_url": "https://www.bestbuy.com/product/tv/ABC123",
+                "screen_size": "65 inches",
+            },
+            {"sku": "no sku", "product_url": "", "screen_size": ""},
+            item_mst_step.table_columns("TV"),
+        )
+
+        by_name = {name: value for name, _, value in updates}
+        self.assertEqual(by_name["sku"], "QN65Q7FAAFXZA")
+        self.assertEqual(by_name["product_url"], "https://www.bestbuy.com/product/tv/ABC123")
+        self.assertEqual(by_name["screen_size"], "65 inches")
+
     def test_tv_detail_output_uses_defined_availability_fields(self):
         step08 = (ROOT / "bestbuy" / "step08_detail_enrichment.py").read_text(encoding="utf-8")
 

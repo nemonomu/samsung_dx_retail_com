@@ -265,6 +265,10 @@ def create_table(cur, table_name, columns):
         f"CREATE INDEX {quote_ident(f'idx_{table_name[:45]}_item')} "
         f"ON {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} USING btree (item)"
     )
+    cur.execute(
+        f"CREATE INDEX {quote_ident(f'idx_{table_name[:37]}_item_account')} "
+        f"ON {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} USING btree (item, account_name)"
+    )
 
 
 def ensure_table(cur, table_name, columns):
@@ -295,40 +299,78 @@ def normalize_db_value(value, data_type):
     return value
 
 
+def is_missing_master_value(value):
+    return compact_text(value).lower() in {"", "no sku", "none", "null", "[null]"}
+
+
+def value_for_insert(row, name, data_type):
+    value = row.get(name)
+    if name == "account_name" and is_missing_master_value(value):
+        value = "Bestbuy"
+    elif name == "sku" and is_missing_master_value(value):
+        value = "no sku"
+    return normalize_db_value(value, data_type)
+
+
+def missing_only_updates(row, existing_values, columns):
+    updates = []
+    protected = {"id", "item", "account_name", "created_at", "updated_at", "is_product", "is_checked"}
+    for name, data_type in columns:
+        if name in protected:
+            continue
+        incoming = row.get(name)
+        if is_missing_master_value(incoming):
+            continue
+        if name == "sku":
+            if is_missing_master_value(existing_values.get(name)):
+                updates.append((name, data_type, incoming))
+            continue
+        if is_missing_master_value(existing_values.get(name)):
+            updates.append((name, data_type, incoming))
+    return updates
+
+
 def load_rows(cur, table_name, columns, rows, dry_run=False):
     if dry_run:
-        return {"inserted": len(rows), "updated": 0, "dry_run": True}
+        return {"inserted": len(rows), "updated": 0, "skipped_existing": 0, "dry_run": True}
 
     data_columns = [(name, data_type) for name, data_type in columns if name != "id"]
     insert_columns = data_columns
-    update_columns = [
+    select_columns = [
         (name, data_type)
         for name, data_type in data_columns
-        if name not in {"created_at", "is_checked"}
+        if name not in {"item", "account_name", "created_at", "updated_at", "is_product", "is_checked"}
     ]
     inserted = 0
     updated = 0
+    skipped_existing = 0
     for row in rows:
         item = compact_text(row.get("item"))
+        account_name = compact_text(row.get("account_name")) or "Bestbuy"
         if not item:
             continue
+        select_sql = ", ".join(quote_ident(name) for name, _ in select_columns)
         cur.execute(
-            f"SELECT 1 FROM {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} WHERE item = %s LIMIT 1",
-            (item,),
+            f"SELECT {select_sql} FROM {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} "
+            f"WHERE item = %s AND account_name = %s LIMIT 1",
+            (item, account_name),
         )
         existing = cur.fetchone()
         if existing:
-            assignments = ", ".join(f"{quote_ident(name)} = %s" for name, _ in update_columns)
+            existing_values = {name: existing[index] for index, (name, _) in enumerate(select_columns)}
+            update_columns = missing_only_updates(row, existing_values, data_columns)
+            if not update_columns:
+                skipped_existing += 1
+                continue
+            if any(name == "updated_at" for name, _ in data_columns):
+                update_columns.append(("updated_at", "timestamp", datetime.now().isoformat(timespec="seconds")))
+            assignments = ", ".join(f"{quote_ident(name)} = %s" for name, _, _ in update_columns)
             sql = (
                 f"UPDATE {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} "
-                f"SET {assignments} WHERE item = %s"
+                f"SET {assignments} WHERE item = %s AND account_name = %s"
             )
-            values = [normalize_db_value(row.get(name), data_type) for name, data_type in update_columns]
-            if "updated_at" in {name for name, _ in update_columns}:
-                for index, (name, _) in enumerate(update_columns):
-                    if name == "updated_at":
-                        values[index] = datetime.now().isoformat(timespec="seconds")
-            cur.execute(sql, (*values, item))
+            values = [normalize_db_value(value, data_type) for name, data_type, value in update_columns]
+            cur.execute(sql, (*values, item, account_name))
             updated += max(cur.rowcount, 0)
             continue
         column_sql = ", ".join(quote_ident(name) for name, _ in insert_columns)
@@ -337,10 +379,10 @@ def load_rows(cur, table_name, columns, rows, dry_run=False):
             f"INSERT INTO {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} "
             f"({column_sql}) VALUES ({placeholders})"
         )
-        values = [normalize_db_value(row.get(name), data_type) for name, data_type in insert_columns]
+        values = [value_for_insert(row, name, data_type) for name, data_type in insert_columns]
         cur.execute(sql, values)
         inserted += 1
-    return {"inserted": inserted, "updated": updated, "dry_run": False}
+    return {"inserted": inserted, "updated": updated, "skipped_existing": skipped_existing, "dry_run": False}
 
 
 def main():

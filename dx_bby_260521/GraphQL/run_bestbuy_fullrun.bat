@@ -20,6 +20,7 @@ set "BESTBUY_DETAIL_RUN_ROOT=%BESTBUY_RUN_ROOT%\detail"
 set "BESTBUY_DETAIL_TARGET_CSV=%BESTBUY_OUTPUT_ROOT%\bestbuy_final_targets.csv"
 set "BESTBUY_FINAL_OUTPUT_CSV=%BESTBUY_OUTPUT_ROOT%\final_output.csv"
 set "BESTBUY_PRODUCT_LIST_OUTPUT=%BESTBUY_OUTPUT_ROOT%\bestbuy_product_list.csv"
+set "BESTBUY_ITEM_MST_OUTPUT_CSV=%BESTBUY_OUTPUT_ROOT%\item_mst.csv"
 set "BESTBUY_BATCH_ID=b_%RUN_TS%"
 set "BESTBUY_FETCH_MODE=zenrows"
 set "BESTBUY_GRAPHQL_FETCH_MODE=zenrows"
@@ -68,32 +69,34 @@ echo batch_id=%BESTBUY_BATCH_ID% >> "%LOG_FILE%"
 echo run_folder=%BESTBUY_RUN_DATE% >> "%LOG_FILE%"
 echo run_root=%BESTBUY_RUN_ROOT% >> "%LOG_FILE%"
 
-call :run_step 01 13 "main_list" 01
+call :run_step 01 14 "main_list" 01
 if errorlevel 1 goto :fail
-call :run_step 02 13 "main_targets" 02
+call :run_step 02 14 "main_targets" 02
 if errorlevel 1 goto :fail
-call :run_step 03 13 "bsr_list" 03
+call :run_step 03 14 "bsr_list" 03
 if errorlevel 1 goto :fail
-call :run_step 04 13 "bsr_rank" 04
+call :run_step 04 14 "bsr_rank" 04
 if errorlevel 1 goto :fail
-call :run_step 05 13 "promotion_deals" 05
+call :run_step 05 14 "promotion_deals" 05
 if errorlevel 1 goto :fail
-call :run_step 06 13 "trending_deals" 06
+call :run_step 06 14 "trending_deals" 06
 if errorlevel 1 goto :fail
-call :run_step 07 13 "final_targets" 07
+call :run_step 07 14 "final_targets" 07
 if errorlevel 1 goto :fail
-call :run_step 08 13 "detail_html" 08
+call :run_step 08 14 "detail_html" 08
 if errorlevel 1 goto :fail
-call :run_step 09 13 "review20" 09
+call :run_step 09 14 "review20" 09
 if errorlevel 1 goto :fail
-call :run_step 10 13 "availability_backfill" 10
+call :run_step 10 14 "availability_backfill" 10
 if errorlevel 1 goto :fail
-call :run_step 11 13 "status_check" 11
+call :run_step 11 14 "status_check" 11
 if errorlevel 1 goto :fail
 
-call :run_step 12 13 "db_prepare" 14
+call :run_step 12 14 "db_prepare" 14
 if errorlevel 1 goto :fail
-call :run_step 13 13 "db_load" 15
+call :run_step 13 14 "db_load" 15
+if errorlevel 1 goto :fail
+call :run_step 14 14 "item_mst_load" 16
 if errorlevel 1 goto :fail
 
 echo ==================================================

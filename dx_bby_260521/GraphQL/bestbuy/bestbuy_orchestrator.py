@@ -226,6 +226,7 @@ STEPS = [
     Step(13, "local_cleanup", "bestbuy.step12_local_cleanup"),
     Step(14, "db_prepare", "bestbuy.step13_db_prepare"),
     Step(15, "db_load", "bestbuy.step14_db_load"),
+    Step(16, "item_mst_load", "bestbuy.step15_item_mst_load"),
 ]
 
 
@@ -246,6 +247,7 @@ def apply_run_path_env(env):
         "BESTBUY_DETAIL_TARGET_CSV": output_root / "bestbuy_final_targets.csv",
         "BESTBUY_FINAL_OUTPUT_CSV": output_root / "final_output.csv",
         "BESTBUY_PRODUCT_LIST_OUTPUT": output_root / "bestbuy_product_list.csv",
+        "BESTBUY_ITEM_MST_OUTPUT_CSV": output_root / "item_mst.csv",
         "BESTBUY_AVAILABILITY_BACKFILL_FINAL_CSV": output_root / "final_output.csv",
         "BESTBUY_AVAILABILITY_BACKFILL_DETAIL_ROWS_CSV": detail_root / "parsed" / "detail_enriched_rows.csv",
         "BESTBUY_AVAILABILITY_BACKFILL_ROOT": root / "availability_backfill",
@@ -433,6 +435,8 @@ def step_complete(step):
         return False, "always ensure DB tables when selected"
     if step.name == "db_load":
         return False, "always load final outputs to DB when selected"
+    if step.name == "item_mst_load":
+        return False, "always load item master when selected"
     return False, "no completion rule"
 
 

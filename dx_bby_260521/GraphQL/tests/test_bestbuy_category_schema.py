@@ -13,6 +13,7 @@ import bestbuy.step07_final_targets as final_targets_step  # noqa: E402
 import bestbuy.step06_trending_deals as trending_step  # noqa: E402
 import bestbuy.step14_db_load as db_load_step  # noqa: E402
 import bestbuy.step08_detail_enrichment as detail_step  # noqa: E402
+import bestbuy.step15_item_mst_load as item_mst_step  # noqa: E402
 from bestbuy.step08_detail_enrichment import (  # noqa: E402
     COMPARE_RECOMMENDATIONS_V2_QUERY,
     HHP_FINAL_FIELDS,
@@ -220,6 +221,14 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn('set "BESTBUY_DB_UPDATE_AVAILABILITY_ONLY=0"', script)
         self.assertIn('if not defined BESTBUY_DB_LOAD_DRY_RUN set "BESTBUY_DB_LOAD_DRY_RUN=0"', script)
 
+    def test_fullrun_runs_item_master_after_db_load(self):
+        script = (ROOT / "run_bestbuy_fullrun.bat").read_text(encoding="utf-8")
+        orchestrator = (ROOT / "bestbuy" / "bestbuy_orchestrator.py").read_text(encoding="utf-8")
+
+        self.assertIn('set "BESTBUY_ITEM_MST_OUTPUT_CSV=%BESTBUY_OUTPUT_ROOT%\\item_mst.csv"', script)
+        self.assertIn('call :run_step 14 14 "item_mst_load" 16', script)
+        self.assertIn('Step(16, "item_mst_load", "bestbuy.step15_item_mst_load")', orchestrator)
+
     def test_ref_test10_runner_keeps_run_limited_and_dry(self):
         script = (ROOT / "bby_ref_test10_task.bat").read_text(encoding="utf-8")
 
@@ -241,6 +250,110 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
 
     def test_detail_promotion_type_can_backfill_hhp_product_list(self):
         self.assertEqual(PRODUCT_LIST_DETAIL_FIELD_SOURCES["promotion_type"], ("promotion_type",))
+
+    def test_no_longer_available_detail_price_becomes_status_text(self):
+        self.assertEqual(
+            detail_step.no_longer_available_price_fields("", "$499.99", "$70", unavailable=True),
+            ("no longer available", "", ""),
+        )
+        self.assertEqual(
+            detail_step.no_longer_available_price_fields(
+                "This item is no longer available in new condition.",
+                "$499.99",
+                "$70",
+                unavailable=True,
+            ),
+            ("no longer available", "", ""),
+        )
+        self.assertEqual(
+            detail_step.no_longer_available_price_fields("$429.99", "$499.99", "$70", unavailable=True),
+            ("$429.99", "$499.99", "$70"),
+        )
+
+    def test_item_mst_model_uses_top_pdp_model_only(self):
+        payload = {
+            "data": {
+                "productBySkuId": {
+                    "skuId": "6619254",
+                    "manufacturer": {"modelNumber": "QN65Q7FAAFXZA"},
+                    "specificationGroups": [
+                        {
+                            "specifications": [
+                                {"displayName": "Model Number", "value": "SPEC-SHOULD-NOT-BE-USED"},
+                            ]
+                        }
+                    ],
+                }
+            }
+        }
+        spec_only_payload = {
+            "data": {
+                "productBySkuId": {
+                    "skuId": "6619254",
+                    "specificationGroups": [
+                        {"specifications": [{"displayName": "Model Number", "value": "SPEC-ONLY"}]}
+                    ],
+                }
+            }
+        }
+
+        self.assertEqual(
+            item_mst_step.product_top_model_from_data(payload, "6619254"),
+            "QN65Q7FAAFXZA",
+        )
+        self.assertEqual(item_mst_step.product_top_model_from_data(spec_only_payload, "6619254"), "")
+
+    def test_tv_item_mst_rows_use_final_output_and_pdp_top_model(self):
+        original = item_mst_step.model_from_detail_top
+        item_mst_step.model_from_detail_top = lambda sku_id: {"6619254": "QN65Q7FAAFXZA"}.get(sku_id, "")
+        try:
+            rows = item_mst_step.item_mst_rows(
+                "TV",
+                [
+                    {
+                        "item": "ABC123",
+                        "product_url": "https://www.bestbuy.com/site/samsung-tv/6619254.p?skuId=6619254",
+                        "screen_size": '65"',
+                        "estimated_annual_electricity_use": "140 kilowatt hours",
+                    }
+                ],
+                timestamp="2026-05-28T00:00:00",
+            )
+        finally:
+            item_mst_step.model_from_detail_top = original
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["item"], "ABC123")
+        self.assertEqual(rows[0]["sku"], "QN65Q7FAAFXZA")
+        self.assertEqual(rows[0]["account_name"], "Bestbuy")
+        self.assertEqual(rows[0]["screen_size"], '65"')
+        self.assertEqual(rows[0]["estimated_annual_electricity_use"], "140 kilowatt hours")
+
+    def test_hhp_item_mst_rows_use_hhp_specific_fields(self):
+        original = item_mst_step.model_from_detail_top
+        item_mst_step.model_from_detail_top = lambda sku_id: {"6665489": "SM-A176UZKAXAA"}.get(sku_id, "")
+        try:
+            rows = item_mst_step.item_mst_rows(
+                "HHP",
+                [
+                    {
+                        "item": "PHONE123",
+                        "product_url": "https://www.bestbuy.com/site/galaxy-a17/6665489.p?skuId=6665489",
+                        "hhp_carrier": "Unlocked",
+                        "hhp_color": "Black",
+                        "hhp_storage": "128 gigabytes",
+                    }
+                ],
+                timestamp="2026-05-28T00:00:00",
+            )
+        finally:
+            item_mst_step.model_from_detail_top = original
+
+        self.assertEqual(rows[0]["sku"], "SM-A176UZKAXAA")
+        self.assertEqual(rows[0]["hhp_carrier"], "Unlocked")
+        self.assertEqual(rows[0]["hhp_color"], "Black")
+        self.assertEqual(rows[0]["hhp_storage"], "128 gigabytes")
+        self.assertNotIn("screen_size", rows[0])
 
     def test_tv_detail_output_uses_defined_availability_fields(self):
         step08 = (ROOT / "bestbuy" / "step08_detail_enrichment.py").read_text(encoding="utf-8")

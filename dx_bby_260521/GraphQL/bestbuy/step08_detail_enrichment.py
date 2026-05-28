@@ -593,6 +593,15 @@ def price_output_fields(price, target, selector_values):
     return normalized_price_fields(final_price, original_price, savings)
 
 
+def no_longer_available_price_fields(final_price, original_price="", savings="", unavailable=False):
+    if not unavailable:
+        return final_price, original_price, savings
+    text = compact_text(final_price)
+    if not text or "no longer" in text.lower():
+        return "no longer available", "", ""
+    return final_price, original_price, savings
+
+
 def numeric_rating(value):
     if value in ("", None):
         return None
@@ -4955,7 +4964,11 @@ def output_row(target):
     if review_count == 0 or (rating_number == 0 and review_count in (None, 0)):
         not_yet_reviewed = True
         review_count = 0
-    final_price, original_price, savings = price_output_fields(price, target, selector_values)
+    no_longer_available = detail_no_longer_available(sku)
+    final_price, original_price, savings = no_longer_available_price_fields(
+        *price_output_fields(price, target, selector_values),
+        unavailable=no_longer_available,
+    )
     pickup = best_fulfillment_availability(
         products,
         "ispuDetails",

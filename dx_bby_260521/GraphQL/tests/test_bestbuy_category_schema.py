@@ -199,7 +199,19 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn('set "BESTBUY_BSR_RANK_LIMIT=20"', script)
         self.assertIn('set "BESTBUY_FINAL_ROW_LIMIT=10"', script)
         self.assertIn('set "BESTBUY_DB_LOAD_DRY_RUN=1"', script)
+        self.assertIn('set "BESTBUY_PRESERVE_RUN_ENV=1"', script)
         self.assertIn('call "%~dp0_bby_daily_task.bat" HHP', script)
+
+    def test_daily_task_cleans_residual_test_env_by_default(self):
+        script = (ROOT / "_bby_daily_task.bat").read_text(encoding="utf-8")
+
+        self.assertIn('if not "%BESTBUY_PRESERVE_RUN_ENV%"=="1"', script)
+        self.assertIn('set "BESTBUY_FORCE_STEP_ENV=1"', script)
+        self.assertIn('set "BESTBUY_FINAL_TARGET_SIZE="', script)
+        self.assertIn('set "BESTBUY_FINAL_ROW_LIMIT="', script)
+        self.assertIn('set "BESTBUY_DETAIL_SKUS="', script)
+        self.assertIn('set "BESTBUY_DB_LOAD_DRY_RUN=0"', script)
+        self.assertIn('set "BESTBUY_DB_UPDATE_SIMILAR_ONLY=0"', script)
 
     def test_fullrun_resets_db_update_only_modes(self):
         script = (ROOT / "run_bestbuy_fullrun.bat").read_text(encoding="utf-8")
@@ -216,7 +228,16 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn('set "BESTBUY_BSR_RANK_LIMIT=20"', script)
         self.assertIn('set "BESTBUY_FINAL_ROW_LIMIT=10"', script)
         self.assertIn('set "BESTBUY_DB_LOAD_DRY_RUN=1"', script)
+        self.assertIn('set "BESTBUY_PRESERVE_RUN_ENV=1"', script)
         self.assertIn('call "%~dp0_bby_daily_task.bat" REF', script)
+
+    def test_ldy_test10_runner_preserves_test_env(self):
+        script = (ROOT / "bby_ldy_test10_task.bat").read_text(encoding="utf-8")
+
+        self.assertIn('set "BESTBUY_FORCE_STEP_ENV=0"', script)
+        self.assertIn('set "BESTBUY_DB_LOAD_DRY_RUN=1"', script)
+        self.assertIn('set "BESTBUY_PRESERVE_RUN_ENV=1"', script)
+        self.assertIn('call "%~dp0_bby_daily_task.bat" LDY', script)
 
     def test_detail_promotion_type_can_backfill_hhp_product_list(self):
         self.assertEqual(PRODUCT_LIST_DETAIL_FIELD_SOURCES["promotion_type"], ("promotion_type",))

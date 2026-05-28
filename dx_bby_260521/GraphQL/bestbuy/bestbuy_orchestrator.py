@@ -447,9 +447,23 @@ def step_by_key(value):
     raise SystemExit(f"Unknown step: {value}")
 
 
+def truthy_env(name, default="0"):
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "y"}
+
+
 def run_step(step, dry_run=False, resume=False):
     if not step.implemented:
         print(f"[skip] step {step.key} {step.name}: not implemented yet")
+        return
+    if step.name == "s3_sync":
+        if truthy_env("BESTBUY_S3_SYNC_SKIP", "0"):
+            print(f"[skip] step {step.key} {step.name}: BESTBUY_S3_SYNC_SKIP=1")
+            return
+        if not os.getenv("S3_BUCKET", "").strip():
+            print(f"[skip] step {step.key} {step.name}: S3_BUCKET is missing")
+            return
+    if step.name == "local_cleanup" and truthy_env("BESTBUY_LOCAL_CLEANUP_SKIP", "1"):
+        print(f"[skip] step {step.key} {step.name}: BESTBUY_LOCAL_CLEANUP_SKIP=1")
         return
     if step.name == "promotion_deals":
         if os.getenv("BESTBUY_CATEGORY", "").strip().upper() == "HHP":

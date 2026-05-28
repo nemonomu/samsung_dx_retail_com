@@ -252,6 +252,14 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn('set "BESTBUY_DB_UPDATE_AVAILABILITY_ONLY=0"', script)
         self.assertIn('if not defined BESTBUY_DB_LOAD_DRY_RUN set "BESTBUY_DB_LOAD_DRY_RUN=0"', script)
 
+    def test_optional_s3_and_cleanup_steps_are_skippable(self):
+        orchestrator = (ROOT / "bestbuy" / "bestbuy_orchestrator.py").read_text(encoding="utf-8")
+
+        self.assertIn('step.name == "s3_sync"', orchestrator)
+        self.assertIn("BESTBUY_S3_SYNC_SKIP", orchestrator)
+        self.assertIn("S3_BUCKET is missing", orchestrator)
+        self.assertIn("BESTBUY_LOCAL_CLEANUP_SKIP", orchestrator)
+
     def test_fullrun_runs_item_master_after_db_load(self):
         script = (ROOT / "run_bestbuy_fullrun.bat").read_text(encoding="utf-8")
         orchestrator = (ROOT / "bestbuy" / "bestbuy_orchestrator.py").read_text(encoding="utf-8")

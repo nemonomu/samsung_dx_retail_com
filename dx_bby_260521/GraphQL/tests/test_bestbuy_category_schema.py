@@ -181,6 +181,8 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn("BESTBUY_DB_PREPARE_ADD_MISSING_COLUMNS", step13)
         self.assertIn("ALTER TABLE", step13)
         self.assertIn("ADD COLUMN", step13)
+        self.assertIn("bestbuy_product_list_table(category)", step13)
+        self.assertNotIn("BESTBUY_PRODUCT_LIST_TABLES", step13)
 
     def test_tv_product_list_schema_accepts_generated_price_columns(self):
         names = column_names(TV_PRODUCT_LIST_COLUMNS)

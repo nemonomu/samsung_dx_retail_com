@@ -1,7 +1,7 @@
 import json
 import os
 
-from .step00_config import BESTBUY_OUTPUT_TABLES, BESTBUY_PRODUCT_LIST_TABLES, db_config
+from .step00_config import bestbuy_output_table, bestbuy_product_list_table, db_config
 
 
 TARGET_SCHEMA = "public"
@@ -350,7 +350,7 @@ def main():
     with conn:
         with conn.cursor() as cur:
             for category, columns in SCHEMAS.items():
-                table_name = BESTBUY_OUTPUT_TABLES[category]
+                table_name = bestbuy_output_table(category)
                 if table_exists(cur, table_name):
                     missing = add_missing_columns(cur, table_name, columns)
                     if missing and ADD_MISSING_COLUMNS:
@@ -361,9 +361,9 @@ def main():
                     continue
                 create_table(cur, table_name, columns)
                 created.append(table_name)
-            for category, table_name in BESTBUY_PRODUCT_LIST_TABLES.items():
+            for category, columns in PRODUCT_LIST_SCHEMAS.items():
+                table_name = bestbuy_product_list_table(category)
                 if table_exists(cur, table_name):
-                    columns = PRODUCT_LIST_SCHEMAS.get(category, HHP_PRODUCT_LIST_COLUMNS)
                     missing = add_missing_columns(cur, table_name, columns)
                     if missing and ADD_MISSING_COLUMNS:
                         altered.append({"table": table_name, "columns": [name for name, _ in missing]})
@@ -371,7 +371,6 @@ def main():
                         missing_not_added.append({"table": table_name, "columns": [name for name, _ in missing]})
                     skipped.append(table_name)
                     continue
-                columns = PRODUCT_LIST_SCHEMAS.get(category, HHP_PRODUCT_LIST_COLUMNS)
                 create_table(cur, table_name, columns)
                 crawl_column = "crawl_datetime" if category == "TV" else "crawl_strdatetime"
                 create_product_list_indexes(cur, table_name, crawl_column)

@@ -201,6 +201,13 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn('set "BESTBUY_DB_LOAD_DRY_RUN=1"', script)
         self.assertIn('call "%~dp0_bby_daily_task.bat" HHP', script)
 
+    def test_fullrun_resets_db_update_only_modes(self):
+        script = (ROOT / "run_bestbuy_fullrun.bat").read_text(encoding="utf-8")
+
+        self.assertIn('set "BESTBUY_DB_UPDATE_SIMILAR_ONLY=0"', script)
+        self.assertIn('set "BESTBUY_DB_UPDATE_AVAILABILITY_ONLY=0"', script)
+        self.assertIn('if not defined BESTBUY_DB_LOAD_DRY_RUN set "BESTBUY_DB_LOAD_DRY_RUN=0"', script)
+
     def test_ref_test10_runner_keeps_run_limited_and_dry(self):
         script = (ROOT / "bby_ref_test10_task.bat").read_text(encoding="utf-8")
 

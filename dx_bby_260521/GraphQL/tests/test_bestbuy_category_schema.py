@@ -29,7 +29,7 @@ from bestbuy.step08_detail_enrichment import (  # noqa: E402
     trade_in_from_html,
     trade_in_from_products,
 )
-from bestbuy.step13_db_prepare import HHP_COLUMNS, LDY_COLUMNS, REF_COLUMNS  # noqa: E402
+from bestbuy.step13_db_prepare import HHP_COLUMNS, LDY_COLUMNS, REF_COLUMNS, TV_PRODUCT_LIST_COLUMNS  # noqa: E402
 
 
 def column_names(columns):
@@ -181,6 +181,13 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn("BESTBUY_DB_PREPARE_ADD_MISSING_COLUMNS", step13)
         self.assertIn("ALTER TABLE", step13)
         self.assertIn("ADD COLUMN", step13)
+
+    def test_tv_product_list_schema_accepts_generated_price_columns(self):
+        names = column_names(TV_PRODUCT_LIST_COLUMNS)
+
+        self.assertIn("final_sku_price", names)
+        self.assertIn("savings", names)
+        self.assertIn("comparable_pricing", names)
 
     def test_hhp_test10_runner_keeps_run_limited_and_dry(self):
         script = (ROOT / "bby_hhp_test10_task.bat").read_text(encoding="utf-8")

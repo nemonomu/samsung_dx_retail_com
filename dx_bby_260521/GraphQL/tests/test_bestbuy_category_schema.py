@@ -270,6 +270,19 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             ("$429.99", "$499.99", "$70"),
         )
 
+    def test_no_longer_available_detector_ignores_generic_review_text(self):
+        self.assertTrue(
+            detail_step.is_detail_no_longer_available_text(
+                "This item is no longer available in new condition. See similar items below"
+            )
+        )
+        self.assertFalse(
+            detail_step.is_detail_no_longer_available_text(
+                "I considered a 60-inch TV but discovered that size was no longer available."
+            )
+        )
+        self.assertNotIn("no longer available", detail_step.NO_LONGER_AVAILABLE_PHRASES)
+
     def test_item_mst_model_uses_top_pdp_model_only(self):
         payload = {
             "data": {

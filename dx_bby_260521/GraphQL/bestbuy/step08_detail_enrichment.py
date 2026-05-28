@@ -4911,11 +4911,15 @@ def sample_fields():
 
 
 NO_LONGER_AVAILABLE_PHRASES = (
-    "no longer available",
+    "this item is no longer available in new condition",
     "this item is no longer available",
-    "item is no longer available",
-    "product is no longer available",
+    "see similar items below",
 )
+
+
+def is_detail_no_longer_available_text(*values):
+    haystack = compact_text(" ".join(str(value or "") for value in values)).lower()
+    return any(phrase in haystack for phrase in NO_LONGER_AVAILABLE_PHRASES)
 
 
 def detail_no_longer_available(sku):
@@ -4927,12 +4931,7 @@ def detail_no_longer_available(sku):
         text_parts.append(BeautifulSoup(html_text or "", "html.parser").get_text(" "))
     except Exception:
         pass
-    try:
-        text_parts.append(json.dumps(products_from_detail(sku), ensure_ascii=False))
-    except Exception:
-        pass
-    haystack = compact_text(" ".join(text_parts)).lower()
-    return any(phrase in haystack for phrase in NO_LONGER_AVAILABLE_PHRASES)
+    return is_detail_no_longer_available_text(*text_parts)
 
 
 def output_row(target):
@@ -4964,7 +4963,9 @@ def output_row(target):
     if review_count == 0 or (rating_number == 0 and review_count in (None, 0)):
         not_yet_reviewed = True
         review_count = 0
-    no_longer_available = detail_no_longer_available(sku)
+    no_longer_available = detail_no_longer_available(sku) or is_detail_no_longer_available_text(
+        selector_values.get("final_sku_price_no_longer_available")
+    )
     final_price, original_price, savings = no_longer_available_price_fields(
         *price_output_fields(price, target, selector_values),
         unavailable=no_longer_available,

@@ -4,6 +4,7 @@ import os
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .step00_availability_policy import inactive_availability_fields
 from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, KRW_PER_USD, bestbuy_category, old_pdp_url, rel_path
@@ -89,6 +90,46 @@ def row_is_sponsored(row):
     return truthy(row.get("is_sponsored")) or str(row.get("sku_status") or "").strip().lower() == "sponsored"
 
 
+def compact_text(value):
+    return str(value or "").strip()
+
+
+def product_item_from_url(value):
+    try:
+        parts = [part for part in urlparse(str(value or "")).path.split("/") if part]
+    except Exception:
+        return ""
+    if "product" in parts:
+        index = parts.index("product")
+        if len(parts) > index + 2:
+            return parts[index + 2].strip()
+    return ""
+
+
+def row_identity_keys(row):
+    keys = []
+    item = first_non_empty(
+        row.get("item"),
+        row.get("bsin"),
+        product_item_from_url(row.get("product_url")),
+    )
+    sku = compact_text(row.get("sku_id"))
+    if item:
+        keys.append(f"item:{str(item).strip().lower()}")
+    if sku:
+        keys.append(f"sku:{sku.lower()}")
+    return keys
+
+
+def row_seen(row, seen):
+    keys = row_identity_keys(row)
+    return bool(keys) and any(key in seen for key in keys)
+
+
+def remember_row(row, seen):
+    seen.update(row_identity_keys(row))
+
+
 def unique_main_rows(rows):
     sorted_rows = sorted(
         rows,
@@ -102,13 +143,13 @@ def unique_main_rows(rows):
     output = []
     for row in sorted_rows:
         sku = str(row.get("sku_id") or "").strip()
-        if not sku or sku in seen:
+        if not sku or row_seen(row, seen):
             continue
-        seen.add(sku)
         out = dict(row)
         out["main_rank"] = len(output) + 1
         out["target_source"] = "main"
         output.append(out)
+        remember_row(out, seen)
     return output
 
 
@@ -253,15 +294,18 @@ def source_only_row(row, source):
 
 
 def source_backfill_rows(main_rows, bsr_map, promotion_rows=None, trending_rows=None, main_attrs=None):
-    main_skus = {str(row.get("sku_id") or "").strip() for row in main_rows if row.get("sku_id")}
+    main_skus = {compact_text(row.get("sku_id")) for row in main_rows if row.get("sku_id")}
     rows = []
-    seen = set(main_skus)
+    seen = set()
+    for row in main_rows:
+        remember_row(row, seen)
+    seen.update(f"sku:{sku.lower()}" for sku in main_skus if sku)
 
     for sku, row in sorted(bsr_map.items(), key=lambda item: int_value(item[1].get("bsr_rank"))):
-        if not sku or sku in seen:
+        if not sku or row_seen(row, seen):
             continue
         rows.append(row_from_bsr_only(row))
-        seen.add(sku)
+        remember_row(rows[-1], seen)
 
     for source_rows, source in (
         (promotion_rows or [], "promotion_backfill"),
@@ -269,11 +313,11 @@ def source_backfill_rows(main_rows, bsr_map, promotion_rows=None, trending_rows=
     ):
         for row in source_rows:
             sku = str(row.get("sku_id") or "").strip()
-            if not sku or sku in seen:
+            if not sku or row_seen(row, seen):
                 continue
             attrs = (main_attrs or {}).get(sku) or {}
             rows.append(source_only_row(merge_missing_attrs(dict(row), attrs), source))
-            seen.add(sku)
+            remember_row(rows[-1], seen)
     return rows
 
 

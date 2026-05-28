@@ -305,6 +305,65 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertEqual(product_by_sku["sku-duplicate"]["sku_status"], "Sponsored")
         self.assertEqual(product_by_sku["sku-sponsored"]["sku_status"], "Sponsored")
 
+    def test_final_targets_dedupe_shared_item_across_different_skus(self):
+        rows = [
+            {
+                "sku_id": "10214293",
+                "bsin": "JJ8VPZTRG6",
+                "page": "1",
+                "visual_rank": "1",
+                "global_visual_rank": "1",
+                "container_type": "organic_product",
+                "product_name": "LG TV",
+                "product_url": "https://www.bestbuy.com/product/lg-tv/JJ8VPZTRG6/sku/10214293",
+            },
+            {
+                "sku_id": "6621824",
+                "bsin": "JJ8VPZTRG6",
+                "page": "7",
+                "visual_rank": "2",
+                "global_visual_rank": "146",
+                "container_type": "organic_product",
+                "product_name": "LG TV",
+                "product_url": "https://www.bestbuy.com/site/-/6621824.p?skuId=6621824&intl=nosplash",
+            },
+        ]
+
+        main_rows = final_targets_step.unique_main_rows(rows)
+
+        self.assertEqual(len(main_rows), 1)
+        self.assertEqual(main_rows[0]["sku_id"], "10214293")
+
+    def test_final_targets_dedupe_backfill_shared_product_item_url(self):
+        main_rows = [
+            {
+                "sku_id": "10214293",
+                "bsin": "JJ8VPZTRG6",
+                "main_rank": "1",
+                "product_name": "LG TV",
+                "product_url": "https://www.bestbuy.com/product/lg-tv/JJ8VPZTRG6/sku/10214293",
+            }
+        ]
+        trending_rows = [
+            {
+                "sku_id": "6621824",
+                "trend_rank": "2",
+                "retailer_sku_name": "LG TV",
+                "product_url": "https://www.bestbuy.com/product/lg-tv/JJ8VPZTRG6",
+            }
+        ]
+
+        selected, _ = final_targets_step.choose_final_rows(
+            main_rows,
+            [],
+            target_size=300,
+            promotion_rows=[],
+            trending_rows=trending_rows,
+            main_attrs={},
+        )
+
+        self.assertEqual(len(selected), 1)
+
     def test_hhp_promotion_listing_is_explicitly_skipped(self):
         orchestrator = (ROOT / "bestbuy" / "bestbuy_orchestrator.py").read_text(encoding="utf-8")
         final_targets = (ROOT / "bestbuy" / "step07_final_targets.py").read_text(encoding="utf-8")

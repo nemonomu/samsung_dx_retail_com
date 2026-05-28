@@ -331,13 +331,15 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertEqual(rows[0]["product_url"], "https://www.bestbuy.com/site/example-phone/7654321.p")
         self.assertEqual(rows[0]["source"], "direct_graphql_spotlight_product_connection")
 
-    def test_trending_step_is_direct_graphql_by_default(self):
+    def test_trending_step_uses_page_payload_by_default(self):
         orchestrator = (ROOT / "bestbuy" / "bestbuy_orchestrator.py").read_text(encoding="utf-8")
 
-        self.assertIn('"BESTBUY_TRENDING_FETCH_MODE": "direct_graphql"', orchestrator)
-        self.assertIn('"BESTBUY_TRENDING_ALLOW_RENDER_FALLBACK": "0"', orchestrator)
+        self.assertIn('"BESTBUY_TRENDING_FETCH_MODE": "page_payload"', orchestrator)
+        self.assertIn('"BESTBUY_TRENDING_ALLOW_RENDER_FALLBACK": "1"', orchestrator)
+        self.assertIn('"BESTBUY_TRENDING_WAIT_MS_SEQUENCE": "30000"', orchestrator)
         self.assertEqual(HHP_TRENDING_PAGE_PAYLOAD_ENV["BESTBUY_TRENDING_FETCH_MODE"], "page_payload")
         self.assertEqual(HHP_TRENDING_PAGE_PAYLOAD_ENV["BESTBUY_TRENDING_ALLOW_NETWORK_SKUS"], "0")
+        self.assertEqual(HHP_TRENDING_PAGE_PAYLOAD_ENV["BESTBUY_TRENDING_WAIT_MS_SEQUENCE"], "30000")
 
     def test_listing_step_requires_saved_graphql_payload_by_default(self):
         step01 = (ROOT / "bestbuy" / "step01_main_list.py").read_text(encoding="utf-8")
@@ -482,8 +484,8 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
                     "specificationGroups": [
                         {
                             "specifications": [
-                                {"displayName": "Washer Capacity", "value": "4.5 cubic feet"},
-                                {"displayName": "Load Type", "value": "Front Load"},
+                                {"displayName": "Capacity", "value": "4.5 cubic feet"},
+                                {"displayName": "Washer Load Type", "value": "Front Load"},
                             ]
                         }
                     ]
@@ -501,6 +503,40 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         )
         self.assertEqual(no_product_name_fallback_attrs["ldy_capacity"], "")
         self.assertEqual(no_product_name_fallback_attrs["ldy_loading_type"], "")
+
+        non_target_spec_attrs = ldy_attributes_from_product(
+            [
+                {
+                    "specificationGroups": [
+                        {
+                            "specifications": [
+                                {"displayName": "Washer Capacity", "value": "4.5 cubic feet"},
+                                {"displayName": "Load Type", "value": "Front Load"},
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "Samsung washer",
+        )
+        self.assertEqual(non_target_spec_attrs["ldy_capacity"], "")
+        self.assertEqual(non_target_spec_attrs["ldy_loading_type"], "")
+
+        spec_value_attrs = ldy_attributes_from_product(
+            [
+                {
+                    "specificationGroups": [
+                        {
+                            "specifications": [
+                                {"displayName": "Capacity", "value": "0 cubic feet"},
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "Portable washer",
+        )
+        self.assertEqual(spec_value_attrs["ldy_capacity"], "0 cubic feet")
 
     def test_ref_capacity_and_type_from_specs_only(self):
         attrs = ref_attributes_from_product(
@@ -526,7 +562,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             [],
             "LG 26 Cu. Ft. Side-by-Side Refrigerator",
         )
-        self.assertEqual(no_product_name_fallback_attrs["ref_capacity"], "")
+        self.assertEqual(no_product_name_fallback_attrs["ref_capacity"], "26 cubic feet")
         self.assertEqual(no_product_name_fallback_attrs["ref_refrigerator_type"], "")
 
         non_total_spec_attrs = ref_attributes_from_product(
@@ -544,7 +580,14 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             ],
             "KitchenAid - 36 in. Wide 26 cu. ft. Multi-Door French Door Refrigerator",
         )
-        self.assertEqual(non_total_spec_attrs["ref_capacity"], "")
+        self.assertEqual(non_total_spec_attrs["ref_capacity"], "26 cubic feet")
+
+        drawer_attrs = ref_attributes_from_product(
+            [],
+            "VEVOR - 24 inch Undercounter Refrigerator, 2 Drawer Refrigerator with Different Temperature, 4.87 Cu.ft. Capacity",
+        )
+        self.assertEqual(drawer_attrs["ref_capacity"], "4.87 cubic feet")
+        self.assertEqual(drawer_attrs["ref_refrigerator_type"], "Drawer")
 
         box_contents_attrs = ref_attributes_from_product(
             [

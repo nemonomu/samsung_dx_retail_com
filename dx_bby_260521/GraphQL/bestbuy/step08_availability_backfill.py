@@ -49,6 +49,11 @@ REQUEST_TIMEOUT = int(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_TIMEOUT", os.gete
 DRY_RUN = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_DRY_RUN", "0").lower() in {"1", "true", "yes", "y"}
 SKIP = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_SKIP", "0").lower() in {"1", "true", "yes", "y"}
 LIMIT = int(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_LIMIT", "0"))
+SELECTED_SKUS = {
+    value.strip()
+    for value in os.getenv("BESTBUY_AVAILABILITY_BACKFILL_SKUS", "").replace(";", ",").split(",")
+    if value.strip()
+}
 CANDIDATE_MODE = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_CANDIDATE_MODE", "missing_any").strip().lower()
 OVERWRITE = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_OVERWRITE", "0").lower() in {"1", "true", "yes", "y"}
 CLEAR_EXISTING_FIELDS = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_CLEAR_EXISTING_FIELDS", "0").lower() in {
@@ -147,10 +152,35 @@ def add_lookup(mapping, key, sku):
         mapping[key] = sku
 
 
+def row_page_type(row):
+    value = norm_key(row.get("page_type") or row.get("target_source"))
+    aliases = {
+        "bsr_only_backfill": "bsr",
+        "promotion_backfill": "promotion",
+        "trending_backfill": "trend",
+    }
+    return aliases.get(value, value)
+
+
+def row_specific_lookup_keys(row):
+    page_type = row_page_type(row)
+    url = canonical_url(row.get("product_url"))
+    if not page_type or not url:
+        return []
+    keys = []
+    for field in ("trend_rank", "bsr_rank", "main_rank", "promotion_position", "final_target_rank"):
+        value = norm_key(row.get(field))
+        if value:
+            keys.append(f"{page_type}|{field}|{value}|{url}")
+    return keys
+
+
 def build_sku_lookup(targets):
     lookup = {}
     for target in targets:
         sku = target.get("sku_id") or target.get("sku")
+        for key in row_specific_lookup_keys(target):
+            add_lookup(lookup, key, sku)
         add_lookup(lookup, target.get("sku_id"), sku)
         add_lookup(lookup, target.get("sku"), sku)
         add_lookup(lookup, target.get("item"), sku)
@@ -162,6 +192,10 @@ def build_sku_lookup(targets):
 
 
 def sku_for_row(row, lookup):
+    for key in row_specific_lookup_keys(row):
+        direct = norm_key(key)
+        if direct and direct in lookup:
+            return lookup[direct]
     for key in (
         row.get("sku_id"),
         row.get("sku"),
@@ -394,6 +428,8 @@ def main():
         else:
             missing_sku.append(index)
     skus = unique_ordered(row_to_sku.values())
+    if SELECTED_SKUS:
+        skus = [sku for sku in skus if sku in SELECTED_SKUS]
     if LIMIT > 0:
         skus = skus[:LIMIT]
     row_to_sku = filter_row_to_sku_for_selected_skus(row_to_sku, skus)
@@ -475,6 +511,7 @@ def main():
         "missing_sku_rows": len(missing_sku),
         "sku_count": len(skus),
         "limit": LIMIT,
+        "selected_skus": sorted(SELECTED_SKUS),
         "chunk_size": CHUNK_SIZE,
         "requested_chunk_size": REQUESTED_CHUNK_SIZE,
         "multi_sku_fulfillment_enabled": ALLOW_MULTI_SKU_FULFILLMENT,

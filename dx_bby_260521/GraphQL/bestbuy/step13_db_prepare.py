@@ -185,6 +185,9 @@ TV_PRODUCT_LIST_COLUMNS = [
     ("main_page_number", "int4 NULL"),
     ("bsr_page_number", "int4 NULL"),
     ("promotion_position", "int4 NULL"),
+    ("category_key", "varchar(20) NULL"),
+    ("final_target_rank", "int4 NULL"),
+    ("sku_id", "varchar(50) NULL"),
 ]
 
 
@@ -210,6 +213,9 @@ HHP_PRODUCT_LIST_COLUMNS = [
     ("batch_id", "varchar(50) NULL"),
     ("main_page_number", "int4 NULL"),
     ("bsr_page_number", "int4 NULL"),
+    ("category_key", "varchar(20) NULL"),
+    ("final_target_rank", "int4 NULL"),
+    ("sku_id", "varchar(50) NULL"),
 ]
 
 REF_LDY_PRODUCT_LIST_COLUMNS = [
@@ -235,6 +241,9 @@ REF_LDY_PRODUCT_LIST_COLUMNS = [
     ("batch_id", "varchar(50) NULL"),
     ("main_page_number", "int4 NULL"),
     ("bsr_page_number", "int4 NULL"),
+    ("category_key", "varchar(20) NULL"),
+    ("final_target_rank", "int4 NULL"),
+    ("sku_id", "varchar(50) NULL"),
 ]
 
 PRODUCT_LIST_SCHEMAS = {

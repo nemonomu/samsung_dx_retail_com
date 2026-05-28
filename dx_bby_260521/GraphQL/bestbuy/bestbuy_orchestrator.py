@@ -22,6 +22,7 @@ HHP_TRENDING_PAGE_PAYLOAD_ENV = {
     "BESTBUY_TRENDING_ALLOW_RENDER_FALLBACK": "1",
     "BESTBUY_TRENDING_ALLOW_NETWORK_SKUS": "0",
     "BESTBUY_TRENDING_REQUIRE_ROWS": "1",
+    "BESTBUY_TRENDING_WAIT_MS_SEQUENCE": "30000",
 }
 
 
@@ -97,9 +98,11 @@ STEPS = [
         "trending_deals",
         "bestbuy.step06_trending_deals",
         {
-            "BESTBUY_TRENDING_FETCH_MODE": "direct_graphql",
-            "BESTBUY_TRENDING_ALLOW_RENDER_FALLBACK": "0",
-            "BESTBUY_TRENDING_WAIT_MS_SEQUENCE": "8000,20000,35000",
+            "BESTBUY_TRENDING_FETCH_MODE": "page_payload",
+            "BESTBUY_TRENDING_ALLOW_RENDER_FALLBACK": "1",
+            "BESTBUY_TRENDING_ALLOW_NETWORK_SKUS": "0",
+            "BESTBUY_TRENDING_REQUIRE_ROWS": "1",
+            "BESTBUY_TRENDING_WAIT_MS_SEQUENCE": "30000",
             "ZENROWS_TIMEOUT": "240",
         },
     ),

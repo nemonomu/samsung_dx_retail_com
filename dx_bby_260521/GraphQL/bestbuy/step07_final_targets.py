@@ -396,6 +396,33 @@ def money_int(value):
         return str(value)
 
 
+def numeric_money(value):
+    if value in ("", None):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value)
+    match = re.search(r"-?\d[\d,]*(?:\.\d+)?", text)
+    if not match:
+        return None
+    try:
+        return float(match.group(0).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def normalized_product_list_prices(customer_price, regular_price, total_savings):
+    final_price = money(customer_price)
+    comparable_price = money(regular_price)
+    final_value = numeric_money(final_price)
+    comparable_value = numeric_money(comparable_price)
+    if final_value is None:
+        return final_price, "", ""
+    if comparable_value is None or comparable_value <= final_value:
+        return final_price, "", ""
+    return final_price, comparable_price, money_int(comparable_value - final_value)
+
+
 def int_or_empty(value):
     try:
         return str(int(str(value).split("|||", 1)[0].strip()))
@@ -459,9 +486,14 @@ def product_list_rows(rows, bsr_pages):
             common["crawl_datetime"] = crawl_dt
             common["promotion_position"] = int_or_empty(row.get("promotion_position", ""))
         else:
-            common["final_sku_price"] = money(row.get("customer_price"))
-            common["savings"] = money_int(row.get("total_savings"))
-            common["comparable_pricing"] = money(row.get("regular_price"))
+            final_price, comparable_price, savings = normalized_product_list_prices(
+                row.get("customer_price"),
+                row.get("regular_price"),
+                row.get("total_savings"),
+            )
+            common["final_sku_price"] = final_price
+            common["savings"] = savings
+            common["comparable_pricing"] = comparable_price
             common["crawl_strdatetime"] = crawl_dt
             if CATEGORY == "HHP":
                 common.pop("delivery_availability", None)
@@ -494,6 +526,9 @@ def product_list_fields():
             "main_page_number",
             "bsr_page_number",
             "promotion_position",
+            "category_key",
+            "final_target_rank",
+            "sku_id",
         ]
     if CATEGORY == "HHP":
         return [

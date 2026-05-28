@@ -329,6 +329,13 @@ def truthy(value):
     return value is True or str(value or "").strip().lower() in {"1", "true", "yes", "y", "sponsored"}
 
 
+def listing_sku_status(target):
+    status = compact_text(target.get("sku_status"))
+    if status:
+        return status
+    return "Sponsored" if truthy(target.get("is_sponsored")) else ""
+
+
 def clean_hhp_carrier(value):
     text = compact_text(value)
     if not text:
@@ -555,6 +562,19 @@ def numeric_money(value):
         return None
 
 
+def normalized_price_fields(final_price, original_price, savings=""):
+    final_value = numeric_money(final_price)
+    if final_value is None:
+        return final_price, "", ""
+    original_value = numeric_money(original_price)
+    if original_value is None or original_value <= final_value:
+        return final_price, "", ""
+    expected_savings = original_value - final_value
+    if expected_savings <= 0:
+        return final_price, "", ""
+    return final_price, original_price, money_int(expected_savings)
+
+
 def price_output_fields(price, target, selector_values):
     final_price = first_non_empty(
         money(price.get("displayableCustomerPrice") or price.get("customerPrice") or target.get("customer_price")),
@@ -570,17 +590,7 @@ def price_output_fields(price, target, selector_values):
         money_int(price.get("totalSavings") or target.get("total_savings")),
         selector_values.get("savings"),
     )
-
-    final_value = numeric_money(final_price)
-    original_value = numeric_money(original_price)
-    savings_value = numeric_money(savings)
-    if final_value is None:
-        return final_price, "", ""
-    if original_value is None or original_value <= final_value:
-        return final_price, "", ""
-    if savings_value is None or savings_value <= 0:
-        savings = ""
-    return final_price, original_price, savings
+    return normalized_price_fields(final_price, original_price, savings)
 
 
 def numeric_rating(value):
@@ -1623,6 +1633,9 @@ def read_json(path):
 
 PRODUCT_LIST_DETAIL_FIELD_SOURCES = {
     "retailer_sku_name": ("retailer_sku_name",),
+    "final_sku_price": ("final_sku_price",),
+    "savings": ("savings",),
+    "comparable_pricing": ("original_sku_price", "comparable_pricing"),
     "offer": ("offer", "offer_count"),
     "pick_up_availability": ("pick_up_availability",),
     "fastest_delivery": ("fastest_delivery",),
@@ -1630,7 +1643,16 @@ PRODUCT_LIST_DETAIL_FIELD_SOURCES = {
     "sku_status": ("sku_status",),
     "promotion_type": ("promotion_type",),
     "product_url": ("product_url",),
+    "calendar_week": ("calendar_week",),
+    "batch_id": ("batch_id",),
 }
+if CATEGORY == "TV":
+    PRODUCT_LIST_DETAIL_FIELD_SOURCES["crawl_datetime"] = ("crawl_datetime",)
+else:
+    PRODUCT_LIST_DETAIL_FIELD_SOURCES["crawl_strdatetime"] = ("crawl_strdatetime",)
+
+
+PRODUCT_LIST_CLEARABLE_PRICE_FIELDS = {"savings", "comparable_pricing"}
 
 
 PRESERVE_EXISTING_AVAILABILITY = os.getenv(
@@ -1649,20 +1671,46 @@ def row_sku_key(row):
     )
 
 
+def row_identity_keys(row):
+    keys = []
+    for value in (
+        row.get("sku_id"),
+        row.get("sku"),
+        sku_from_product_url(row.get("product_url")),
+        row.get("item"),
+        row.get("bsin"),
+        canonical_pdp_url(row.get("product_url")),
+    ):
+        text = compact_text(value)
+        if text and text not in keys:
+            keys.append(text)
+    return keys
+
+
+def add_availability_source(existing_by_key, source_rows):
+    for row in source_rows:
+        has_availability = any(compact_text(row.get(field)) for field in ALL_AVAILABILITY_FIELDS)
+        if not has_availability:
+            continue
+        for key in row_identity_keys(row):
+            existing_by_key.setdefault(key, row)
+
+
 def preserve_existing_availability(rows):
     if not PRESERVE_EXISTING_AVAILABILITY or not FINAL_OUTPUT_CSV.exists() or not rows:
         return 0
-    existing_rows = load_csv(FINAL_OUTPUT_CSV)
-    existing_by_sku = {}
-    for row in existing_rows:
-        sku = row_sku_key(row)
-        if sku:
-            existing_by_sku.setdefault(str(sku), row)
+    existing_by_key = {}
+    add_availability_source(existing_by_key, load_csv(FINAL_OUTPUT_CSV))
+    if PRODUCT_LIST_CSV.exists():
+        add_availability_source(existing_by_key, load_csv(PRODUCT_LIST_CSV))
 
     updated = 0
     for row in rows:
-        sku = row_sku_key(row)
-        existing = existing_by_sku.get(str(sku)) if sku else None
+        existing = None
+        for key in row_identity_keys(row):
+            existing = existing_by_key.get(key)
+            if existing:
+                break
         if not existing:
             continue
         row_changed = False
@@ -1696,6 +1744,13 @@ def update_product_list_from_detail_rows(detail_rows):
         row_changed = False
         for field, sources in PRODUCT_LIST_DETAIL_FIELD_SOURCES.items():
             value = first_non_empty(*(detail.get(source) for source in sources))
+            if field in PRODUCT_LIST_CLEARABLE_PRICE_FIELDS and compact_text(detail.get("final_sku_price")):
+                desired = value or ""
+                if compact_text(row.get(field)) != compact_text(desired):
+                    row[field] = desired
+                    row_changed = True
+                    changed_fields += 1
+                continue
             if value and compact_text(row.get(field)) != compact_text(value):
                 row[field] = value
                 row_changed = True
@@ -1703,8 +1758,14 @@ def update_product_list_from_detail_rows(detail_rows):
         if row_changed:
             updated += 1
 
-    if changed_fields:
-        write_csv(PRODUCT_LIST_CSV, product_rows, csv_fields(PRODUCT_LIST_CSV, product_rows))
+    fields = csv_fields(PRODUCT_LIST_CSV, product_rows)
+    if CATEGORY == "TV":
+        fields = [field for field in fields if field != "crawl_strdatetime"]
+        for row in product_rows:
+            row.pop("crawl_strdatetime", None)
+    current_fields = csv_fields(PRODUCT_LIST_CSV, product_rows)
+    if changed_fields or fields != current_fields:
+        write_csv(PRODUCT_LIST_CSV, product_rows, fields)
     return {"rows": len(product_rows), "updated": updated, "fields": changed_fields}
 
 
@@ -3805,6 +3866,18 @@ def compare_success(sku):
     return bool(meta.get("success"))
 
 
+def compare_success_with_zero_recommendations(sku):
+    meta = read_json(compare_paths(sku)["meta"])
+    if not meta.get("success"):
+        return False
+    try:
+        recommendation_count = int(meta.get("recommendation_count"))
+        fallback_count = int(meta.get("fallback_recommendation_count"))
+    except (TypeError, ValueError):
+        return False
+    return recommendation_count == 0 and fallback_count == 0
+
+
 def fetch_compare(client, target):
     sku = str(target.get("sku_id") or "").strip()
     pdp_url = target_url(target, sku)
@@ -4006,7 +4079,7 @@ def compare_similar_names_from_detail(sku):
     if not source_names and isinstance(compare_meta, dict):
         fallback_names = compare_meta.get("fallback_recommendation_names")
         if isinstance(fallback_names, list):
-            source_names = [clean_text(name) for name in fallback_names if clean_text(name)]
+            source_names = [compact_text(name) for name in fallback_names if compact_text(name)]
     if not source_names:
         source_names = recommendation_names_from_detail_payloads(sku)
     if not source_names:
@@ -4407,32 +4480,27 @@ def spec_value_containing(products, *needles):
     return ""
 
 
+def ref_capacity_from_name(product_name):
+    text = str(product_name or "")
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(?:cu\.?\s*ft\.?|cuft|cubic\s*feet)", text, re.I)
+    if not match:
+        return ""
+    amount = match.group(1).rstrip("0").rstrip(".")
+    return f"{amount} cubic feet"
+
+
+def ref_type_from_name(product_name):
+    text = str(product_name or "").lower()
+    if "drawer" in text:
+        return "Drawer"
+    if "undercounter" in text or "under counter" in text:
+        return "Undercounter"
+    return ""
+
+
 def ldy_attributes_from_product(products, product_name):
-    capacity = first_non_empty(
-        spec_value_by_names(
-            products,
-            [
-                "Capacity",
-                "Washer Capacity",
-                "Total Capacity",
-                "Product Capacity",
-                "Tub Capacity",
-            ],
-        ),
-        spec_value_containing(products, "capacity"),
-    )
-    loading_type = first_non_empty(
-        spec_value_by_names(
-            products,
-            [
-                "Load Type",
-                "Loading Type",
-                "Washer Load Type",
-                "Washer Loading Type",
-            ],
-        ),
-        spec_value_containing(products, "load", "type"),
-    )
+    capacity = spec_value_by_names(products, ["Capacity"])
+    loading_type = spec_value_by_names(products, ["Washer Load Type"])
     return {
         "ldy_capacity": capacity,
         "ldy_loading_type": loading_type,
@@ -4451,6 +4519,7 @@ def ref_attributes_from_product(products, product_name):
             ],
         ),
         spec_value_containing(products, "total", "capacity"),
+        ref_capacity_from_name(product_name),
     )
     refrigerator_type = first_non_empty(
         spec_value_by_names(
@@ -4465,6 +4534,7 @@ def ref_attributes_from_product(products, product_name):
         ),
         spec_value_containing(products, "refrigerator", "type"),
         spec_value_containing(products, "refrigerator", "style"),
+        ref_type_from_name(product_name),
     )
     return {
         "ref_capacity": capacity,
@@ -4586,19 +4656,25 @@ def output_review_blank_keys():
     keys = set()
     for path in (DETAIL_ROWS_CSV, FINAL_OUTPUT_CSV):
         for row in load_csv(path):
-            review_count = review_count_number(row.get("count_of_reviews"), row.get("count_of_star_ratings"))
-            star_rating = compact_text(row.get("star_rating"))
-            if not star_rating or star_rating.lower() == "not yet reviewed" or review_count in (None, 0):
-                continue
-            if compact_text(row.get("detailed_review_content")) and compact_text(row.get("recommendation_intent")):
-                continue
-            keys.update(target_identity_keys(row))
+            if review_output_needs_attention(row):
+                keys.update(target_identity_keys(row))
     return keys
 
 
 def output_review_needs_retry(target):
     blank_keys = output_review_blank_keys()
     return any(key in blank_keys for key in target_identity_keys(target))
+
+
+def review_output_needs_attention(row):
+    review_count = review_count_number(row.get("count_of_reviews"), row.get("count_of_star_ratings"))
+    star_rating = compact_text(row.get("star_rating"))
+    if not star_rating or star_rating.lower() == "not yet reviewed" or review_count in (None, 0):
+        return False
+    return not (
+        compact_text(row.get("detailed_review_content"))
+        and compact_text(row.get("recommendation_intent"))
+    )
 
 
 def review_info_from_review_response(sku):
@@ -4634,7 +4710,7 @@ def review_needs_retry(target):
         return False
     if not review20_content(sku):
         return True
-    return not review_has_recommended_percent(sku)
+    return False
 
 
 def has_external_review_text(*values):
@@ -4957,9 +5033,7 @@ def output_row(target):
         ),
         "available_quantity_for_purchase": first_non_empty(target.get("available_quantity_for_purchase"), pickup.get("quantity") if isinstance(pickup, dict) else ""),
         "inventory_status": first_non_empty(target.get("inventory_status"), inventory_status_text(pickup, shipping, delivery)),
-        "sku_status": "Sponsored"
-        if truthy(target.get("is_sponsored")) or str(target.get("sku_status") or "").strip().lower() == "sponsored"
-        else "",
+        "sku_status": listing_sku_status(target),
         "trade_in": first_non_empty(
             selector_values.get("trade_in"),
             trade_in_from_html(html_text),
@@ -5039,6 +5113,7 @@ def build_outputs(targets):
             and dmeta.get("success")
             and not compact_text(row.get("retailer_sku_name_similar"))
             and not detail_no_longer_available(sku)
+            and not compare_success_with_zero_recommendations(sku)
         ):
             failures.append(
                 {
@@ -5050,7 +5125,7 @@ def build_outputs(targets):
                     "retryable": str(int(int(dmeta.get("attempt", 0) or 0) < MAX_ATTEMPTS)),
                 }
             )
-        if review_needs_retry(target):
+        if review_output_needs_attention(row):
             failures.append(
                 {
                     "sku_id": sku,
@@ -5392,15 +5467,20 @@ def main():
     for row in enriched_rows:
         for field in fields:
             row.setdefault(field, "")
+    preserved_availability = preserve_existing_availability(enriched_rows)
     final_rows = [{field: row.get(field, "") for field in fields} for row in enriched_rows]
-    preserved_availability = preserve_existing_availability(final_rows)
+    product_list_rows = []
+    for enriched_row, final_row in zip(enriched_rows, final_rows):
+        source_row = dict(enriched_row)
+        source_row.update(final_row)
+        product_list_rows.append(source_row)
     if preserved_availability:
         print(
             format_log_line("detail:preserve_availability", rows=preserved_availability),
             flush=True,
         )
     write_csv(FINAL_OUTPUT_CSV, final_rows, fields)
-    product_list_update = update_product_list_from_detail_rows(enriched_rows)
+    product_list_update = update_product_list_from_detail_rows(product_list_rows)
     if product_list_update["fields"]:
         print(
             format_log_line(

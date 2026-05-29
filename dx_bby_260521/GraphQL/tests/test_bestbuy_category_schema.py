@@ -14,6 +14,7 @@ import bestbuy.step06_trending_deals as trending_step  # noqa: E402
 import bestbuy.step14_db_load as db_load_step  # noqa: E402
 import bestbuy.step08_detail_enrichment as detail_step  # noqa: E402
 import bestbuy.step15_item_mst_load as item_mst_step  # noqa: E402
+import bestbuy.step16_email_notify as email_notify_step  # noqa: E402
 from bestbuy.step08_detail_enrichment import (  # noqa: E402
     COMPARE_RECOMMENDATIONS_V2_QUERY,
     HHP_FINAL_FIELDS,
@@ -270,6 +271,73 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn('set "BESTBUY_ITEM_MST_OUTPUT_CSV=%BESTBUY_OUTPUT_ROOT%\\item_mst.csv"', script)
         self.assertIn('call :run_step 14 14 "item_mst_load" 16', script)
         self.assertIn('Step(16, "item_mst_load", "bestbuy.step15_item_mst_load")', orchestrator)
+
+    def test_fullrun_notifies_after_success_or_failure(self):
+        script = (ROOT / "run_bestbuy_fullrun.bat").read_text(encoding="utf-8")
+
+        self.assertIn('call :notify "success" "" ""', script)
+        self.assertIn('call :notify "failed" "%FAILED_STEP_NAME%" "%FAILED_STEP%"', script)
+        self.assertIn('set "BESTBUY_NOTIFY_FAILED_STEP_NAME=%~2"', script)
+        self.assertIn("python -m bestbuy.step16_email_notify", script)
+
+    def test_email_notification_subject_body_and_warnings(self):
+        notifier = (ROOT / "bestbuy" / "step16_email_notify.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("samsung_ds_retail_com", notifier)
+        self.assertNotIn("EMAIL_CONFIG", notifier)
+        self.assertEqual(
+            email_notify_step.build_subject("TV", []),
+            "[SEA] BBY TV crawled",
+        )
+        self.assertEqual(
+            email_notify_step.build_subject("HHP", ["main_rank 299/300"]),
+            "[SEA] [Warning] BBY HHP crawled",
+        )
+        self.assertIn(
+            "특이사항 없음",
+            email_notify_step.build_body(303, 3800, []),
+        )
+
+    def test_email_notification_detects_null_columns_and_short_counts(self):
+        rows = [
+            {
+                "retailer_sku_name": "TV",
+                "item": "SKU1",
+                "final_sku_price": "$1.00",
+                "screen_size": "",
+                "product_url": "https://example.test/1",
+            },
+            {
+                "retailer_sku_name": "TV2",
+                "item": "SKU2",
+                "final_sku_price": "",
+                "screen_size": "",
+                "product_url": "https://example.test/2",
+            },
+        ]
+        columns = ["retailer_sku_name", "item", "final_sku_price", "screen_size"]
+
+        self.assertIn(
+            "screen_size",
+            email_notify_step.all_null_column_issues(rows, columns)[0],
+        )
+        self.assertTrue(
+            any("final_sku_price 1 rows null" in issue for issue in email_notify_step.critical_null_issues(rows, columns))
+        )
+        self.assertEqual(
+            email_notify_step.db_count_issue({"final_output": {"inserted": 250, "csv_rows": 310}}, 310),
+            "DB insert rows 미달: 250/310 success",
+        )
+        listing_issues = email_notify_step.listing_count_issues(
+            "TV",
+            ROOT,
+            [{"main_rank": "299", "bsr_rank": "99"}],
+            {"trending_unique_count": 9, "promotion_unique_count": 17},
+        )
+        self.assertIn("main_rank 299/300", listing_issues)
+        self.assertIn("bsr_rank 99/100", listing_issues)
+        self.assertIn("trend listing sku 9/10", listing_issues)
+        self.assertIn("promotion listing sku 17/18", listing_issues)
 
     def test_ref_test10_runner_keeps_run_limited_and_dry(self):
         script = (ROOT / "bby_ref_test10_task.bat").read_text(encoding="utf-8")

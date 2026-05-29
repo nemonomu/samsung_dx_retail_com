@@ -56,6 +56,7 @@ set "PYTHONUNBUFFERED=1"
 set "LOG_DIR=%BESTBUY_RUN_ROOT%\logs"
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 set "LOG_FILE=%LOG_DIR%\fullrun_%RUN_TS%.log"
+set "BESTBUY_NOTIFY_LOG=%LOG_FILE%"
 
 echo ==================================================
 echo BestBuy %CATEGORY% full run started
@@ -104,6 +105,7 @@ echo BestBuy %CATEGORY% full run completed
 echo log=%LOG_FILE%
 echo ==================================================
 echo BestBuy %CATEGORY% full run completed >> "%LOG_FILE%"
+call :notify "success" "" ""
 exit /b 0
 
 :run_step
@@ -116,6 +118,8 @@ echo [%CUR%/%TOTAL%] %NAME% started
 echo [%CUR%/%TOTAL%] %NAME% started >> "%LOG_FILE%"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "& python -m bestbuy.bestbuy_orchestrator --category '%CATEGORY%' '%STEP%' 2>&1 | Tee-Object -FilePath '%LOG_FILE%' -Append"
 if errorlevel 1 (
+  set "FAILED_STEP_NAME=%NAME%"
+  set "FAILED_STEP=%STEP%"
   echo [%CUR%/%TOTAL%] %NAME% failed
   echo [%CUR%/%TOTAL%] %NAME% failed >> "%LOG_FILE%"
   exit /b 1
@@ -128,4 +132,18 @@ exit /b 0
 echo.
 echo BestBuy %CATEGORY% full run failed. See log: %LOG_FILE%
 echo BestBuy %CATEGORY% full run failed >> "%LOG_FILE%"
+call :notify "failed" "%FAILED_STEP_NAME%" "%FAILED_STEP%"
 exit /b 1
+
+:notify
+set "BESTBUY_NOTIFY_STATUS=%~1"
+set "BESTBUY_NOTIFY_FAILED_STEP_NAME=%~2"
+set "BESTBUY_NOTIFY_FAILED_STEP=%~3"
+set "BESTBUY_NOTIFY_LOG=%LOG_FILE%"
+echo.
+echo [notify] email_notify started status=%BESTBUY_NOTIFY_STATUS%
+echo [notify] email_notify started status=%BESTBUY_NOTIFY_STATUS% >> "%LOG_FILE%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& python -m bestbuy.step16_email_notify 2>&1 | Tee-Object -FilePath '%LOG_FILE%' -Append; exit 0"
+echo [notify] email_notify completed
+echo [notify] email_notify completed >> "%LOG_FILE%"
+exit /b 0

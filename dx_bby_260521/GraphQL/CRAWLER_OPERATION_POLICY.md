@@ -443,14 +443,14 @@ Final detail/review-enriched outputs load to:
 
 ```text
 public.tv_retail_com
-public.hhp_retail_com_bby_v2_test
+public.hhp_retail_com
 public.ref_retail_com_bby
 public.ldy_retail_com_bby
 ```
 
 Notes:
 
-- TV loads to the operational table; HHP is still on a test table until cutover.
+- TV and HHP load to operational tables after production cutover.
 - REF and LDY are new category tables.
 - `final_output.csv` must match target DB column names and order exactly.
 - Insert tests should omit serial `id` when the table has an auto-increment key.
@@ -460,8 +460,8 @@ Notes:
 Listing-level outputs load to:
 
 ```text
-public.bby_tv_product_list_v2_test
-public.bby_hhp_product_list_v2_test
+public.bby_tv_product_list
+public.bby_hhp_product_list
 public.bby_ref_product_list
 public.bby_ldy_product_list
 ```

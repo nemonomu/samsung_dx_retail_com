@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bestbuy.step00_config import BESTBUY_OUTPUT_TABLES  # noqa: E402
+from bestbuy.step00_config import BESTBUY_OUTPUT_TABLES, BESTBUY_PRODUCT_LIST_TABLES  # noqa: E402
 from bestbuy.step00_availability_policy import ALL_AVAILABILITY_FIELDS  # noqa: E402
 from bestbuy.bestbuy_orchestrator import CATEGORY_SEARCH_TERMS, HHP_TRENDING_PAGE_PAYLOAD_ENV  # noqa: E402
 import bestbuy.step07_final_targets as final_targets_step  # noqa: E402
@@ -39,9 +39,12 @@ def column_names(columns):
 
 class BestBuyCategorySchemaTests(unittest.TestCase):
     def test_output_table_names_match_confirmed_targets(self):
-        self.assertEqual(BESTBUY_OUTPUT_TABLES["HHP"], "hhp_retail_com_bby_v2_test")
+        self.assertEqual(BESTBUY_OUTPUT_TABLES["TV"], "tv_retail_com")
+        self.assertEqual(BESTBUY_OUTPUT_TABLES["HHP"], "hhp_retail_com")
         self.assertEqual(BESTBUY_OUTPUT_TABLES["LDY"], "ldy_retail_com")
         self.assertEqual(BESTBUY_OUTPUT_TABLES["REF"], "ref_retail_com")
+        self.assertEqual(BESTBUY_PRODUCT_LIST_TABLES["TV"], "bby_tv_product_list")
+        self.assertEqual(BESTBUY_PRODUCT_LIST_TABLES["HHP"], "bby_hhp_product_list")
 
     def test_hhp_final_output_uses_confirmed_insert_columns_only(self):
         expected = [

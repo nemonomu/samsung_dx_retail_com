@@ -120,6 +120,96 @@ def latest_manifest_cost(root):
     return sum(as_float(read_json(path).get("x_request_cost")) for path in manifests)
 
 
+STANDARD_ZENROWS_CALL_COST_USD = 0.0027996
+
+
+def derive_per_call_cost(run_root):
+    main = read_json(run_root / "main" / "manifest.json")
+    calls = as_int(main.get("actual_post_calls"))
+    cost = as_float(main.get("total_x_request_cost"))
+    if calls and cost:
+        return cost / calls
+    return STANDARD_ZENROWS_CALL_COST_USD
+
+
+def estimate_calls_from_cost(cost_usd, per_call_cost):
+    if cost_usd <= 0 or per_call_cost <= 0:
+        return 0
+    return int(round(cost_usd / per_call_cost))
+
+
+def manifest_call_counts(run_root):
+    per_call_cost = derive_per_call_cost(run_root)
+    listing_breakdown = []
+    listing_total = 0
+
+    for sub in ("main", "bsr"):
+        data = read_json(run_root / sub / "manifest.json")
+        if not data:
+            continue
+        calls = as_int(data.get("actual_post_calls"))
+        if calls:
+            listing_total += calls
+            listing_breakdown.append({"source": sub, "calls": calls})
+
+    sponsored = read_json(run_root / "main" / "manifest_main_targets.json")
+    if sponsored:
+        calls = as_int(sponsored.get("sponsored_call_count"))
+        if calls:
+            listing_total += calls
+            listing_breakdown.append({"source": "sponsored", "calls": calls})
+
+    promotion = read_json(run_root / "promotion" / "summary.json")
+    if promotion:
+        calls = as_int(promotion.get("call_count"))
+        if calls:
+            listing_total += calls
+            listing_breakdown.append({"source": "promotion", "calls": calls})
+
+    trending_calls = 0
+    for path in sorted((run_root / "trending").glob("summary*.json")):
+        data = read_json(path)
+        if not data or data.get("skipped"):
+            continue
+        attempt = as_int(data.get("attempt"))
+        if attempt:
+            trending_calls += attempt
+        elif as_float(data.get("x_request_cost")) or as_float(data.get("total_x_request_cost")):
+            trending_calls += 1
+    if trending_calls:
+        listing_total += trending_calls
+        listing_breakdown.append({"source": "trending", "calls": trending_calls})
+
+    detail_manifest = read_json(run_root / "detail" / "manifest_detail_enrichment.json")
+    detail_total = 0
+    detail_breakdown = []
+    if detail_manifest:
+        for stage in ("detail", "review", "compare"):
+            cost = as_float(detail_manifest.get(f"{stage}_cost_usd_this_run"))
+            calls = estimate_calls_from_cost(cost, per_call_cost)
+            if calls:
+                detail_total += calls
+                detail_breakdown.append({"stage": stage, "calls": calls, "cost_usd": cost})
+
+    availability_total = 0
+    for path in sorted((run_root / "availability_backfill").glob("*/manifest.json")):
+        data = read_json(path)
+        if not data:
+            continue
+        availability_total += as_int(data.get("call_count"))
+
+    total = listing_total + detail_total + availability_total
+    return {
+        "total": total,
+        "per_call_cost_usd": round(per_call_cost, 7),
+        "listing": listing_total,
+        "listing_breakdown": listing_breakdown,
+        "detail": detail_total,
+        "detail_breakdown": detail_breakdown,
+        "availability": availability_total,
+    }
+
+
 def manifest_costs(run_root):
     paths_and_keys = [
         (run_root / "main" / "manifest.json", ["total_x_request_cost"]),
@@ -306,10 +396,22 @@ def build_subject(category, issues):
     return f"[SEA] BBY {product} crawled"
 
 
-def build_body(collected_count, cost_krw, issues):
+def build_body(collected_count, cost_krw, call_counts, issues):
+    total_calls = as_int((call_counts or {}).get("total"))
+    per_call_krw = int(round(cost_krw / total_calls)) if total_calls else 0
     lines = [
         f"총 수집 {collected_count} sku",
+        "",
         f"총 호출 비용 {money_krw(cost_krw)}(환율 {KRW_PER_USD:,}원 기준)",
+        "",
+        f"총 호출 수 {total_calls:,}회",
+        f"1회당 비용 {per_call_krw:,}원",
+        "",
+        "호출 내역",
+        f"  listing - {as_int((call_counts or {}).get('listing')):,}회",
+        f"  detail/review/compare - {as_int((call_counts or {}).get('detail')):,}회",
+        f"  3종 availability - {as_int((call_counts or {}).get('availability')):,}회",
+        "",
     ]
     if issues:
         lines.append("특이사항")
@@ -344,8 +446,9 @@ def build_notification(category, run_root, status="success", failed_step="", fai
 
     cost_usd, cost_sources = manifest_costs(run_root)
     cost_krw = round(cost_usd * KRW_PER_USD)
+    call_counts = manifest_call_counts(run_root)
     subject = build_subject(category, issues)
-    body = build_body(collected_count, cost_krw, issues)
+    body = build_body(collected_count, cost_krw, call_counts, issues)
     return {
         "subject": subject,
         "body": body,
@@ -358,6 +461,7 @@ def build_notification(category, run_root, status="success", failed_step="", fai
             "final_output_rows": len(rows),
             "db_insert_columns": columns,
             "cost_sources": cost_sources,
+            "call_counts": call_counts,
         },
     }
 

@@ -293,10 +293,19 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             email_notify_step.build_subject("HHP", ["main_rank 299/300"]),
             "[SEA] [Warning] BBY HHP crawled",
         )
-        self.assertIn(
-            "특이사항 없음",
-            email_notify_step.build_body(303, 3800, []),
-        )
+        sample_call_counts = {
+            "total": 343,
+            "listing": 19,
+            "detail": 3,
+            "availability": 321,
+        }
+        body = email_notify_step.build_body(303, 3800, sample_call_counts, [])
+        self.assertIn("특이사항 없음", body)
+        self.assertIn("총 호출 수 343회", body)
+        self.assertIn("listing - 19회", body)
+        self.assertIn("detail/review/compare - 3회", body)
+        self.assertIn("3종 availability - 321회", body)
+        self.assertIn("1회당 비용 11원", body)
 
     def test_email_notification_detects_null_columns_and_short_counts(self):
         rows = [

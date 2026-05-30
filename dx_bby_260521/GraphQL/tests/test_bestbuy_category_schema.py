@@ -319,7 +319,15 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
 
         self.assertIn(
             "screen_size",
-            email_notify_step.all_null_column_issues(rows, columns)[0],
+            email_notify_step.all_null_column_issues("TV", rows, columns)[0],
+        )
+        self.assertEqual(
+            email_notify_step.all_null_column_issues(
+                "TV",
+                [{"sku_popularity": "", "item": "x"}, {"sku_popularity": "", "item": "y"}],
+                ["sku_popularity", "item"],
+            ),
+            [],
         )
         self.assertTrue(
             any("final_sku_price 1 rows null" in issue for issue in email_notify_step.critical_null_issues(rows, columns))

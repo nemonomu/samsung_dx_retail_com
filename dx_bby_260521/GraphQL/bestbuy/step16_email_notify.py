@@ -22,6 +22,28 @@ CRITICAL_COLUMN_ALIASES = {
     "final_sku_price": ["final_sku_price"],
 }
 
+EXCLUDED_NULL_COLUMNS = {
+    "TV": frozenset({
+        "sku_popularity",
+        "discount_type",
+        "shipping_info",
+        "available_quantity_for_purchase",
+        "inventory_status",
+        "retailer_membership_discounts",
+        "summarized_review_content",
+        "top_mentions",
+        "rank_1",
+        "rank_2",
+        "number_of_ppl_purchased_yesterday",
+        "number_of_ppl_added_to_carts",
+        "number_of_units_purchased_past_month",
+        "redirect",
+    }),
+    "HHP": frozenset(),
+    "REF": frozenset(),
+    "LDY": frozenset(),
+}
+
 
 def now():
     return datetime.now().isoformat(timespec="seconds")
@@ -171,13 +193,16 @@ def first_present_column(rows, columns, candidates):
     return ""
 
 
-def all_null_column_issues(rows, columns):
+def all_null_column_issues(category, rows, columns):
     if not rows or not columns:
         return []
+    excluded = EXCLUDED_NULL_COLUMNS.get(str(category or "").strip().upper(), frozenset())
     all_null = [
         column
         for column in columns
-        if column != "id" and all(blank(row.get(column)) for row in rows)
+        if column != "id"
+        and column not in excluded
+        and all(blank(row.get(column)) for row in rows)
     ]
     if not all_null:
         return []
@@ -310,7 +335,7 @@ def build_notification(category, run_root, status="success", failed_step="", fai
     issues.extend(step_failure_issues(status, failed_step, failed_step_name, log_path))
     if not rows:
         issues.append("final_output.csv rows 0 또는 파일 없음")
-    issues.extend(all_null_column_issues(rows, columns))
+    issues.extend(all_null_column_issues(category, rows, columns))
     issues.extend(critical_null_issues(rows, columns))
     count_issue = db_count_issue(db_data, len(rows))
     if count_issue:

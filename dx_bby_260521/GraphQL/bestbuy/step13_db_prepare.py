@@ -88,7 +88,7 @@ HHP_COLUMNS = [
     ("retailer_sku_name_similar", "text"),
     ("promotion_type", "text"),
     ("calendar_week", "varchar(20)"),
-    ("crawl_datetime", "varchar(50)"),
+    ("crawl_strdatetime", "varchar(50)"),
     ("batch_id", "text"),
 ]
 
@@ -120,7 +120,7 @@ REF_COLUMNS = [
     ("ref_capacity", "text"),
     ("ref_refrigerator_type", "text"),
     ("calendar_week", "varchar(20)"),
-    ("crawl_datetime", "varchar(50)"),
+    ("crawl_strdatetime", "varchar(50)"),
     ("batch_id", "text"),
 ]
 
@@ -152,7 +152,7 @@ LDY_COLUMNS = [
     ("ldy_capacity", "text"),
     ("ldy_loading_type", "text"),
     ("calendar_week", "varchar(20)"),
-    ("crawl_datetime", "varchar(50)"),
+    ("crawl_strdatetime", "varchar(50)"),
     ("batch_id", "text"),
 ]
 
@@ -212,7 +212,7 @@ HHP_PRODUCT_LIST_COLUMNS = [
     ("bsr_rank", "int4 NULL"),
     ("product_url", "text NULL"),
     ("calendar_week", "varchar(10) NULL"),
-    ("crawl_datetime", "varchar(50) NULL"),
+    ("crawl_strdatetime", "varchar(50) NULL"),
     ("batch_id", "varchar(50) NULL"),
     ("main_page_number", "int4 NULL"),
     ("bsr_page_number", "int4 NULL"),
@@ -240,7 +240,7 @@ REF_LDY_PRODUCT_LIST_COLUMNS = [
     ("bsr_rank", "int4 NULL"),
     ("product_url", "text NULL"),
     ("calendar_week", "varchar(10) NULL"),
-    ("crawl_datetime", "varchar(50) NULL"),
+    ("crawl_strdatetime", "varchar(50) NULL"),
     ("batch_id", "varchar(50) NULL"),
     ("main_page_number", "int4 NULL"),
     ("bsr_page_number", "int4 NULL"),
@@ -309,17 +309,6 @@ def add_missing_columns(cur, table_name, columns):
     return missing
 
 
-def migrate_crawl_datetime_column(cur, table_name):
-    existing = existing_column_names(cur, table_name)
-    if "crawl_strdatetime" not in existing or "crawl_datetime" in existing:
-        return []
-    cur.execute(
-        f"ALTER TABLE {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} "
-        f"RENAME COLUMN {quote_ident('crawl_strdatetime')} TO {quote_ident('crawl_datetime')}"
-    )
-    return ["renamed crawl_strdatetime to crawl_datetime"]
-
-
 def create_product_list_indexes(cur, table_name, crawl_column):
     prefix = table_name[:45]
     cur.execute(
@@ -357,16 +346,12 @@ def main():
     created = []
     skipped = []
     altered = []
-    migrated = []
     missing_not_added = []
     with conn:
         with conn.cursor() as cur:
             for category, columns in SCHEMAS.items():
                 table_name = bestbuy_output_table(category)
                 if table_exists(cur, table_name):
-                    migration = migrate_crawl_datetime_column(cur, table_name)
-                    if migration:
-                        migrated.append({"table": table_name, "actions": migration})
                     missing = add_missing_columns(cur, table_name, columns)
                     if missing and ADD_MISSING_COLUMNS:
                         altered.append({"table": table_name, "columns": [name for name, _ in missing]})
@@ -379,9 +364,6 @@ def main():
             for category, columns in PRODUCT_LIST_SCHEMAS.items():
                 table_name = bestbuy_product_list_table(category)
                 if table_exists(cur, table_name):
-                    migration = migrate_crawl_datetime_column(cur, table_name)
-                    if migration:
-                        migrated.append({"table": table_name, "actions": migration})
                     missing = add_missing_columns(cur, table_name, columns)
                     if missing and ADD_MISSING_COLUMNS:
                         altered.append({"table": table_name, "columns": [name for name, _ in missing]})
@@ -390,7 +372,8 @@ def main():
                     skipped.append(table_name)
                     continue
                 create_table(cur, table_name, columns)
-                create_product_list_indexes(cur, table_name, "crawl_datetime")
+                crawl_column = "crawl_datetime" if category == "TV" else "crawl_strdatetime"
+                create_product_list_indexes(cur, table_name, crawl_column)
                 created.append(table_name)
     conn.close()
     print(
@@ -398,7 +381,6 @@ def main():
             "created": created,
             "skipped_existing": skipped,
             "altered_existing": altered,
-            "migrated_existing": migrated,
             "missing_not_added": missing_not_added,
             "add_missing_columns": ADD_MISSING_COLUMNS,
         }

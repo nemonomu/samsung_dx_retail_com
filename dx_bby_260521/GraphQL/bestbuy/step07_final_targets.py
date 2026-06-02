@@ -537,11 +537,13 @@ def product_list_rows(rows, bsr_pages):
         common["final_sku_price"] = final_price
         common["savings"] = savings
         common["comparable_pricing"] = comparable_price
-        common["crawl_datetime"] = crawl_dt
         if CATEGORY == "TV":
+            common["crawl_datetime"] = crawl_dt
             common["promotion_position"] = int_or_empty(row.get("promotion_position", ""))
-        if CATEGORY == "HHP":
-            common.pop("delivery_availability", None)
+        else:
+            common["crawl_strdatetime"] = crawl_dt
+            if CATEGORY == "HHP":
+                common.pop("delivery_availability", None)
         for field in inactive_availability_fields(CATEGORY):
             if field in common:
                 common[field] = ""
@@ -596,7 +598,7 @@ def product_list_fields():
             "bsr_rank",
             "product_url",
             "calendar_week",
-            "crawl_datetime",
+            "crawl_strdatetime",
             "batch_id",
             "main_page_number",
             "bsr_page_number",
@@ -619,7 +621,7 @@ def product_list_fields():
         "bsr_rank",
         "product_url",
         "calendar_week",
-        "crawl_datetime",
+        "crawl_strdatetime",
         "batch_id",
         "main_page_number",
         "bsr_page_number",

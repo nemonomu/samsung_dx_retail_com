@@ -235,6 +235,17 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn('set "BESTBUY_RUN_ROOT="', script)
         self.assertIn('call "%~dp0_bby_daily_task.bat" %CATEGORY%', script)
 
+    def test_ref_ldy_tv_hhp_daily_task_continues_after_category_failure(self):
+        script = (ROOT / "bby_ref_ldy_tv_hhp_daily_task.bat").read_text(encoding="utf-8")
+
+        self.assertIn('set "CHAIN_ORDER=REF LDY TV HHP"', script)
+        self.assertIn("call :run_category REF", script)
+        self.assertIn("call :record_category REF", script)
+        self.assertIn("call :run_category HHP", script)
+        self.assertIn("call :record_category HHP", script)
+        self.assertIn("completed with failures", script)
+        self.assertNotIn("if errorlevel 1 goto :fail", script)
+
     def test_tv_and_hhp_daily_wrappers_force_production_env(self):
         tv_script = (ROOT / "bby_tv_daily_task.bat").read_text(encoding="utf-8")
         hhp_script = (ROOT / "bby_hhp_daily_task.bat").read_text(encoding="utf-8")

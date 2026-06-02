@@ -6,6 +6,8 @@ cd /d "%~dp0"
 set "CHAIN_NAME=REF_LDY_TV_HHP"
 set "CHAIN_ORDER=REF LDY TV HHP"
 set "CHAIN_LOG_DIR=%~dp0bestbuy\data\task_logs"
+set "CHAIN_FAILURE_COUNT=0"
+set "CHAIN_FAILURES="
 if not exist "%CHAIN_LOG_DIR%" mkdir "%CHAIN_LOG_DIR%"
 
 for /f %%i in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "CHAIN_TS=%%i"
@@ -26,19 +28,21 @@ echo chain_log=%CHAIN_LOG% >> "%CHAIN_LOG%"
 echo ================================================== >> "%CHAIN_LOG%"
 
 call :run_category REF
-if errorlevel 1 goto :fail
+call :record_category REF
 
 call :run_category LDY
-if errorlevel 1 goto :fail
+call :record_category LDY
 
 call :run_category TV
-if errorlevel 1 goto :fail
+call :record_category TV
 
 call :run_category HHP
-if errorlevel 1 goto :fail
+call :record_category HHP
 
 for /f %%i in ('powershell -NoProfile -Command "[int][double]::Parse((Get-Date -UFormat %%s))"') do set "CHAIN_END_EPOCH=%%i"
 set /a CHAIN_ELAPSED_SEC=CHAIN_END_EPOCH-CHAIN_START_EPOCH
+
+if not "%CHAIN_FAILURE_COUNT%"=="0" goto :done_with_failures
 
 echo ==================================================
 echo BestBuy REF+LDY+TV+HHP daily task completed
@@ -53,6 +57,7 @@ exit /b 0
 
 :run_category
 set "CATEGORY=%~1"
+set "CATEGORY_EXIT=0"
 echo.
 echo ==================================================
 echo BestBuy %CATEGORY% daily task queued
@@ -75,6 +80,18 @@ set "CATEGORY_EXIT=!ERRORLEVEL!"
 echo BestBuy %CATEGORY% daily task exit_code=!CATEGORY_EXIT!
 echo BestBuy %CATEGORY% daily task exit_code=!CATEGORY_EXIT! >> "%CHAIN_LOG%"
 exit /b !CATEGORY_EXIT!
+
+:record_category
+set "REC_CATEGORY=%~1"
+if not "!CATEGORY_EXIT!"=="0" (
+  set /a CHAIN_FAILURE_COUNT+=1
+  if "!CHAIN_FAILURES!"=="" (
+    set "CHAIN_FAILURES=%REC_CATEGORY%(!CATEGORY_EXIT!)"
+  ) else (
+    set "CHAIN_FAILURES=!CHAIN_FAILURES!, %REC_CATEGORY%(!CATEGORY_EXIT!)"
+  )
+)
+exit /b 0
 
 :clear_operational_env
 set "BESTBUY_PRESERVE_RUN_ENV="
@@ -99,23 +116,20 @@ set "BESTBUY_PRODUCT_LIST_OUTPUT="
 set "BESTBUY_ITEM_MST_OUTPUT_CSV="
 exit /b 0
 
-:fail
-for /f %%i in ('powershell -NoProfile -Command "[int][double]::Parse((Get-Date -UFormat %%s))"') do set "CHAIN_END_EPOCH=%%i"
-set /a CHAIN_ELAPSED_SEC=CHAIN_END_EPOCH-CHAIN_START_EPOCH
-
+:done_with_failures
 echo.
 echo ==================================================
-echo BestBuy REF+LDY+TV+HHP daily task failed
-echo failed_category=%CATEGORY%
-echo exit_code=%CATEGORY_EXIT%
+echo BestBuy REF+LDY+TV+HHP daily task completed with failures
+echo failed_count=%CHAIN_FAILURE_COUNT%
+echo failures=%CHAIN_FAILURES%
 echo elapsed_sec=%CHAIN_ELAPSED_SEC%
 echo chain_log=%CHAIN_LOG%
 echo ==================================================
 echo. >> "%CHAIN_LOG%"
 echo ================================================== >> "%CHAIN_LOG%"
-echo BestBuy REF+LDY+TV+HHP daily task failed >> "%CHAIN_LOG%"
-echo failed_category=%CATEGORY% >> "%CHAIN_LOG%"
-echo exit_code=%CATEGORY_EXIT% >> "%CHAIN_LOG%"
+echo BestBuy REF+LDY+TV+HHP daily task completed with failures >> "%CHAIN_LOG%"
+echo failed_count=%CHAIN_FAILURE_COUNT% >> "%CHAIN_LOG%"
+echo failures=%CHAIN_FAILURES% >> "%CHAIN_LOG%"
 echo elapsed_sec=%CHAIN_ELAPSED_SEC% >> "%CHAIN_LOG%"
 echo ================================================== >> "%CHAIN_LOG%"
-exit /b %CATEGORY_EXIT%
+exit /b 1

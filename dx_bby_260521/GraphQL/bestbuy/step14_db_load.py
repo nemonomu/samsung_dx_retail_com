@@ -81,7 +81,20 @@ def table_columns(cur, table_name):
     return [(row[0], row[1]) for row in cur.fetchall()]
 
 
-def normalize_value(value, data_type):
+def _format_star_rating(value):
+    """0.0/1.0/2.0/3.0/4.0/5.0 -> '0'/'1'/.../'5'. 4.5 stays '4.5'."""
+    if value in ("", None):
+        return value
+    try:
+        f = float(str(value).strip())
+    except (TypeError, ValueError):
+        return value
+    return str(int(f)) if f.is_integer() else str(value).strip()
+
+
+def normalize_value(value, data_type, column_name=""):
+    if column_name == "star_rating":
+        value = _format_star_rating(value)
     if value in ("", None):
         return None
     data_type = str(data_type or "").lower()
@@ -122,7 +135,7 @@ def insert_rows(cur, table_name, columns, rows):
     placeholders = ", ".join(["%s"] * len(insert_columns))
     sql = f"INSERT INTO {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} ({column_sql}) VALUES ({placeholders})"
     values = [
-        tuple(normalize_value(row.get(name), data_type) for name, data_type in insert_columns)
+        tuple(normalize_value(row.get(name), data_type, name) for name, data_type in insert_columns)
         for row in rows
     ]
     cur.executemany(sql, values)

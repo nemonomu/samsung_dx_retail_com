@@ -5385,6 +5385,11 @@ def main():
     detail_cost = 0.0
     review_cost = 0.0
     compare_cost = 0.0
+    # Actual ZenRows POST counts this run (not cost-derived estimates).
+    # In batch mode one POST bundles detail+review+compare, so it counts once as detail_calls.
+    detail_calls = 0
+    review_calls = 0
+    compare_calls = 0
     if REBUILD_ONLY:
         print(format_log_line("detail:rebuild", output_targets=len(output_targets)), flush=True)
     elif use_detail_sku_batch:
@@ -5392,10 +5397,15 @@ def main():
             chunk = targets[offset : offset + DETAIL_SKU_BATCH_SIZE]
             batch_metas = fetch_detail_sku_batch(client, chunk)
             batch_cost = 0.0
+            chunk_fetched = False
             for meta in batch_metas.values():
                 if meta.get("fetched_this_run"):
+                    chunk_fetched = True
                     batch_cost = max(batch_cost, float(meta.get("batch_x_request_cost") or 0))
             detail_cost += batch_cost
+            if chunk_fetched:
+                # One batch POST returns detail+review+compare together for the whole chunk.
+                detail_calls += 1
             for local_index, target in enumerate(chunk, 1):
                 index = offset + local_index
                 sku = str(target.get("sku_id") or "").strip()
@@ -5425,10 +5435,13 @@ def main():
             for future in as_completed(futures):
                 index, sku, dmeta, rmeta, cmeta, fetched_detail, fetched_review, fetched_compare = future.result()
                 if fetched_detail:
+                    detail_calls += 1
                     detail_cost += float(dmeta.get("x_request_cost_total", dmeta.get("x_request_cost") or 0) or 0)
                 if fetched_review:
+                    review_calls += 1
                     review_cost += float(rmeta.get("x_request_cost_total", rmeta.get("x_request_cost") or 0) or 0)
                 if fetched_compare:
+                    compare_calls += 1
                     compare_cost += float(cmeta.get("x_request_cost_total", cmeta.get("x_request_cost") or 0) or 0)
                 print(
                     process_log_line(
@@ -5448,10 +5461,13 @@ def main():
         for index, target in enumerate(targets, 1):
             index, sku, dmeta, rmeta, cmeta, fetched_detail, fetched_review, fetched_compare = process_target(index, target)
             if fetched_detail:
+                detail_calls += 1
                 detail_cost += float(dmeta.get("x_request_cost_total", dmeta.get("x_request_cost") or 0) or 0)
             if fetched_review:
+                review_calls += 1
                 review_cost += float(rmeta.get("x_request_cost_total", rmeta.get("x_request_cost") or 0) or 0)
             if fetched_compare:
+                compare_calls += 1
                 compare_cost += float(cmeta.get("x_request_cost_total", cmeta.get("x_request_cost") or 0) or 0)
             print(
                 process_log_line(
@@ -5575,6 +5591,10 @@ def main():
         "compare_cost_usd_this_run": compare_cost,
         "total_cost_usd_this_run": detail_cost + review_cost + compare_cost,
         "total_cost_krw_1550_this_run": round((detail_cost + review_cost + compare_cost) * KRW_PER_USD, 2),
+        "detail_calls_this_run": detail_calls,
+        "review_calls_this_run": review_calls,
+        "compare_calls_this_run": compare_calls,
+        "total_calls_this_run": detail_calls + review_calls + compare_calls,
         "detail_rows_csv": rel_path(DETAIL_ROWS_CSV),
         "failures_csv": rel_path(FAILURES_CSV),
         "detail_benchmarks_csv": rel_path(DETAIL_BENCHMARKS_CSV),
@@ -5584,6 +5604,19 @@ def main():
         "product_list_rows_updated": product_list_update["updated"],
         "product_list_fields_updated": product_list_update["fields"],
     }
+    # detail/review are fetched in separate step08 invocations (step08=detail, step09=review)
+    # that write the SAME manifest. Merge per-stage call+cost so the later (review) run does
+    # not wipe the earlier (detail batch) numbers. run_root is per-date, so no stale carryover.
+    runs_by_stage = dict(read_json(MANIFEST_PATH).get("runs_by_stage") or {})
+    runs_by_stage[STAGE] = {
+        "detail_calls": detail_calls,
+        "review_calls": review_calls,
+        "compare_calls": compare_calls,
+        "detail_cost_usd": detail_cost,
+        "review_cost_usd": review_cost,
+        "compare_cost_usd": compare_cost,
+    }
+    manifest["runs_by_stage"] = runs_by_stage
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     print(
         format_log_line(

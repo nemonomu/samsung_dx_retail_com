@@ -305,7 +305,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn("listing - 19회", body)
         self.assertIn("detail/review/compare - 3회", body)
         self.assertIn("3종 availability - 321회", body)
-        self.assertIn("1회당 비용 11원", body)
+        self.assertIn("평균 호출 비용 11원", body)
 
     def test_email_notification_detects_null_columns_and_short_counts(self):
         rows = [

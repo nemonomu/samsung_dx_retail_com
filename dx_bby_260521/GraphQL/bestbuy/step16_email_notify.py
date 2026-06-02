@@ -523,7 +523,7 @@ def build_body(collected_count, cost_krw, call_counts, issues):
         f"총 호출 비용 {money_krw(cost_krw)}(환율 {KRW_PER_USD:,}원 기준)",
         "",
         f"총 호출 수 {total_calls:,}회",
-        f"1회당 비용 {per_call_krw:,}원",
+        f"평균 호출 비용 {per_call_krw:,}원",
         "",
         "호출 내역",
         f"  listing - {as_int((call_counts or {}).get('listing')):,}회",

@@ -268,6 +268,14 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn("Get-CimInstance Win32_Process", script)
         self.assertIn("Get-WmiObject Win32_Process", script)
 
+    def test_daily_lock_uses_parent_pid_to_clear_stale_locks_when_process_inspection_fails(self):
+        script = (ROOT / "bestbuy" / "step00_daily_lock.py").read_text(encoding="utf-8")
+
+        self.assertIn('"parent_pid": os.getppid()', script)
+        self.assertIn("def lock_owner_active", script)
+        self.assertIn("lock owner process ended; treating lock as stale", script)
+        self.assertIn("lock owner process is still active; keeping", script)
+
     def test_fullrun_resets_db_update_only_modes(self):
         script = (ROOT / "run_bestbuy_fullrun.bat").read_text(encoding="utf-8")
 

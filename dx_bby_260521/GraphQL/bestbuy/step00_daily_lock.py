@@ -95,6 +95,68 @@ def any_python_process():
     return "python.exe" in text
 
 
+def process_exists(pid):
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+    if pid <= 0:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                f"Get-Process -Id {pid} -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Id",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip() == str(pid)
+    except Exception:
+        pass
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        parts = [part.strip().strip('"') for part in line.split(",")]
+        if len(parts) > 1 and parts[1] == str(pid):
+            return True
+    return False
+
+
+def read_lock_payload(lock_path):
+    try:
+        return json.loads(Path(lock_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def lock_owner_active(lock_path):
+    payload = read_lock_payload(lock_path)
+    parent_pid = payload.get("parent_pid")
+    if parent_pid:
+        return process_exists(parent_pid)
+    return None
+
+
 def lock_age_hours(lock_path):
     try:
         modified = datetime.fromtimestamp(Path(lock_path).stat().st_mtime)
@@ -110,17 +172,31 @@ def acquire(args):
     if lock_path.exists():
         active = active_bestbuy_processes(args.category, args.root)
         if active is None:
-            if any_python_process():
+            owner_active = lock_owner_active(lock_path)
+            if owner_active is True:
+                append_log(
+                    args.log,
+                    f"Cannot inspect process command lines and lock owner process is still active; keeping lock_file={lock_path}",
+                )
+                return 2
+            if owner_active is False:
+                append_log(
+                    args.log,
+                    f"Cannot inspect process command lines but lock owner process ended; treating lock as stale lock_file={lock_path}",
+                )
+                active = []
+            elif any_python_process():
                 append_log(
                     args.log,
                     f"Cannot inspect process command lines and python.exe is running; keeping lock_file={lock_path}",
                 )
                 return 2
-            append_log(
-                args.log,
-                f"Cannot inspect process command lines but no python.exe is running; treating lock as stale lock_file={lock_path}",
-            )
-            active = []
+            else:
+                append_log(
+                    args.log,
+                    f"Cannot inspect process command lines but no python.exe is running; treating lock as stale lock_file={lock_path}",
+                )
+                active = []
         if active:
             pids = ",".join(str(proc.get("ProcessId", "")) for proc in active if proc.get("ProcessId"))
             append_log(
@@ -143,6 +219,7 @@ def acquire(args):
         "category": args.category,
         "created_at": now_text(),
         "pid": os.getpid(),
+        "parent_pid": os.getppid(),
         "root": str(args.root or ""),
     }
     try:

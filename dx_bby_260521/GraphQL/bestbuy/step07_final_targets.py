@@ -529,21 +529,19 @@ def product_list_rows(rows, bsr_pages):
             "category_key": row.get("category_key", CATEGORY),
             "final_target_rank": row.get("final_target_rank", ""),
         }
+        final_price, comparable_price, savings = normalized_product_list_prices(
+            row.get("customer_price"),
+            row.get("regular_price"),
+            row.get("total_savings"),
+        )
+        common["final_sku_price"] = final_price
+        common["savings"] = savings
+        common["comparable_pricing"] = comparable_price
+        common["crawl_datetime"] = crawl_dt
         if CATEGORY == "TV":
-            common["crawl_datetime"] = crawl_dt
             common["promotion_position"] = int_or_empty(row.get("promotion_position", ""))
-        else:
-            final_price, comparable_price, savings = normalized_product_list_prices(
-                row.get("customer_price"),
-                row.get("regular_price"),
-                row.get("total_savings"),
-            )
-            common["final_sku_price"] = final_price
-            common["savings"] = savings
-            common["comparable_pricing"] = comparable_price
-            common["crawl_strdatetime"] = crawl_dt
-            if CATEGORY == "HHP":
-                common.pop("delivery_availability", None)
+        if CATEGORY == "HHP":
+            common.pop("delivery_availability", None)
         for field in inactive_availability_fields(CATEGORY):
             if field in common:
                 common[field] = ""
@@ -557,6 +555,9 @@ def product_list_fields():
             "account_name",
             "page_type",
             "retailer_sku_name",
+            "final_sku_price",
+            "savings",
+            "comparable_pricing",
             "offer",
             "pick_up_availability",
             "fastest_delivery",
@@ -595,7 +596,7 @@ def product_list_fields():
             "bsr_rank",
             "product_url",
             "calendar_week",
-            "crawl_strdatetime",
+            "crawl_datetime",
             "batch_id",
             "main_page_number",
             "bsr_page_number",
@@ -618,7 +619,7 @@ def product_list_fields():
         "bsr_rank",
         "product_url",
         "calendar_week",
-        "crawl_strdatetime",
+        "crawl_datetime",
         "batch_id",
         "main_page_number",
         "bsr_page_number",

@@ -190,7 +190,7 @@ HHP_FINAL_FIELDS = [
     "retailer_sku_name_similar",
     "promotion_type",
     "calendar_week",
-    "crawl_strdatetime",
+    "crawl_datetime",
     "batch_id",
 ]
 
@@ -221,7 +221,7 @@ LDY_FINAL_FIELDS = [
     "ldy_capacity",
     "ldy_loading_type",
     "calendar_week",
-    "crawl_strdatetime",
+    "crawl_datetime",
     "batch_id",
 ]
 
@@ -252,7 +252,7 @@ REF_FINAL_FIELDS = [
     "ref_capacity",
     "ref_refrigerator_type",
     "calendar_week",
-    "crawl_strdatetime",
+    "crawl_datetime",
     "batch_id",
 ]
 
@@ -1652,10 +1652,7 @@ PRODUCT_LIST_DETAIL_FIELD_SOURCES = {
     "calendar_week": ("calendar_week",),
     "batch_id": ("batch_id",),
 }
-if CATEGORY == "TV":
-    PRODUCT_LIST_DETAIL_FIELD_SOURCES["crawl_datetime"] = ("crawl_datetime",)
-else:
-    PRODUCT_LIST_DETAIL_FIELD_SOURCES["crawl_strdatetime"] = ("crawl_strdatetime",)
+PRODUCT_LIST_DETAIL_FIELD_SOURCES["crawl_datetime"] = ("crawl_datetime",)
 
 
 PRODUCT_LIST_CLEARABLE_PRICE_FIELDS = {"savings", "comparable_pricing"}
@@ -1765,10 +1762,9 @@ def update_product_list_from_detail_rows(detail_rows):
             updated += 1
 
     fields = csv_fields(PRODUCT_LIST_CSV, product_rows)
-    if CATEGORY == "TV":
-        fields = [field for field in fields if field != "crawl_strdatetime"]
-        for row in product_rows:
-            row.pop("crawl_strdatetime", None)
+    fields = [field for field in fields if field != "crawl_strdatetime"]
+    for row in product_rows:
+        row.pop("crawl_strdatetime", None)
     current_fields = csv_fields(PRODUCT_LIST_CSV, product_rows)
     if changed_fields or fields != current_fields:
         write_csv(PRODUCT_LIST_CSV, product_rows, fields)
@@ -5110,7 +5106,6 @@ def output_row(target):
         "promotion_type": first_non_empty(hhp_promotion_type(products, html_text), target.get("promotion_type", "")),
         "calendar_week": f"w{crawl_dt.isocalendar().week}",
         "crawl_datetime": crawl_dt.strftime("%Y-%m-%d %H:%M:%S"),
-        "crawl_strdatetime": crawl_dt.strftime("%Y-%m-%d %H:%M:%S"),
         "model_year": model_year,
         "batch_id": RUN_BATCH_ID,
         "country": "SEA",

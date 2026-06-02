@@ -79,7 +79,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             "retailer_sku_name_similar",
             "promotion_type",
             "calendar_week",
-            "crawl_strdatetime",
+            "crawl_datetime",
             "batch_id",
         ]
 
@@ -125,7 +125,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             "ldy_capacity",
             "ldy_loading_type",
             "calendar_week",
-            "crawl_strdatetime",
+            "crawl_datetime",
             "batch_id",
         ]
 
@@ -159,7 +159,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             "ref_capacity",
             "ref_refrigerator_type",
             "calendar_week",
-            "crawl_strdatetime",
+            "crawl_datetime",
             "batch_id",
         ]
 

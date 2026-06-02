@@ -222,6 +222,13 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn('set "BESTBUY_RUN_ROOT="', script)
         self.assertIn('set "BESTBUY_ITEM_MST_OUTPUT_CSV="', script)
 
+    def test_daily_task_sends_preflight_failure_email_for_lock_errors(self):
+        script = (ROOT / "_bby_daily_task.bat").read_text(encoding="utf-8")
+
+        self.assertIn('call :notify_preflight "daily_lock failed" "%LOCK_STATUS%"', script)
+        self.assertIn('set "BESTBUY_NOTIFY_PREFLIGHT_ISSUE=%~1 exit_code=%~2"', script)
+        self.assertIn("python -m bestbuy.step16_email_notify", script)
+
     def test_tv_hhp_daily_task_runs_only_tv_then_hhp_with_clean_env(self):
         script = (ROOT / "bby_tv_hhp_daily_task.bat").read_text(encoding="utf-8")
 
@@ -318,6 +325,17 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn("detail/review/compare - 3회", body)
         self.assertIn("3종 availability - 321회", body)
         self.assertIn("평균 호출 비용 11원", body)
+
+    def test_email_preflight_notification_uses_zero_counts_and_warning(self):
+        notification = email_notify_step.build_preflight_notification("REF", "daily_lock failed exit_code=2")
+
+        self.assertEqual(notification["subject"], "[SEA] [Warning] BBY REF crawled")
+        self.assertEqual(notification["metrics"]["collected_count"], 0)
+        self.assertEqual(notification["metrics"]["call_counts"]["total"], 0)
+        self.assertIn("daily_lock failed exit_code=2", notification["issues"][0])
+        self.assertIn("listing - 0", notification["body"])
+        self.assertIn("detail/review/compare - 0", notification["body"])
+        self.assertIn("availability - 0", notification["body"])
 
     def test_email_notification_detects_null_columns_and_short_counts(self):
         rows = [

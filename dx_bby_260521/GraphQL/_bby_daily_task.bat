@@ -40,8 +40,14 @@ for /f %%i in ('powershell -NoProfile -Command "[int][double]::Parse((Get-Date -
 
 python -m bestbuy.step00_daily_lock acquire --lock "%LOCK_FILE%" --category "%CATEGORY%" --log "%TASK_LOG%" --root "%~dp0"
 set "LOCK_STATUS=%ERRORLEVEL%"
-if "%LOCK_STATUS%"=="2" exit /b 2
-if not "%LOCK_STATUS%"=="0" exit /b %LOCK_STATUS%
+if "%LOCK_STATUS%"=="2" (
+  call :notify_preflight "daily_lock failed" "%LOCK_STATUS%"
+  exit /b 2
+)
+if not "%LOCK_STATUS%"=="0" (
+  call :notify_preflight "daily_lock failed" "%LOCK_STATUS%"
+  exit /b %LOCK_STATUS%
+)
 
 echo ================================================== >> "%TASK_LOG%"
 echo BestBuy %CATEGORY% daily task started >> "%TASK_LOG%"
@@ -76,3 +82,18 @@ echo task_log=%TASK_LOG%
 echo ==================================================
 
 exit /b %EXIT_CODE%
+
+:notify_preflight
+set "BESTBUY_CATEGORY=%CATEGORY%"
+set "BESTBUY_NOTIFY_STATUS=failed"
+set "BESTBUY_NOTIFY_PREFLIGHT_ISSUE=%~1 exit_code=%~2"
+set "BESTBUY_NOTIFY_LOG=%TASK_LOG%"
+set "BESTBUY_RUN_ROOT=%~dp0bestbuy\data\%CATEGORY%\preflight_%TASK_TS%"
+set "BESTBUY_OUTPUT_ROOT=%BESTBUY_RUN_ROOT%\output"
+set "BESTBUY_FINAL_OUTPUT_CSV=%BESTBUY_OUTPUT_ROOT%\final_output.csv"
+echo [notify] preflight email_notify started status=%BESTBUY_NOTIFY_STATUS% issue=%BESTBUY_NOTIFY_PREFLIGHT_ISSUE%
+echo [notify] preflight email_notify started status=%BESTBUY_NOTIFY_STATUS% issue=%BESTBUY_NOTIFY_PREFLIGHT_ISSUE% >> "%TASK_LOG%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& python -m bestbuy.step16_email_notify 2>&1 | Tee-Object -FilePath '%TASK_LOG%' -Append; exit 0"
+echo [notify] preflight email_notify completed
+echo [notify] preflight email_notify completed >> "%TASK_LOG%"
+exit /b 0

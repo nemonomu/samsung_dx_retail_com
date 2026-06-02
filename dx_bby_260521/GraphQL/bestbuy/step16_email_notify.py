@@ -481,8 +481,10 @@ def listing_count_issues(category, run_root, rows, target_manifest):
 
 
 def failure_detail_from_log(path, max_lines=8):
+    if not str(path or "").strip():
+        return ""
     path = Path(path or "")
-    if not path.exists():
+    if not path.exists() or not path.is_file():
         return ""
     lines = [line.strip() for line in path.read_text(encoding="utf-8", errors="ignore").splitlines() if line.strip()]
     interesting = [
@@ -543,6 +545,52 @@ def build_body(collected_count, cost_krw, call_counts, issues):
     else:
         lines.append("특이사항 없음")
     return "\n".join(lines)
+
+
+def build_preflight_notification(category, issue, log_path=""):
+    product = str(category or CATEGORY).strip().upper()
+    detail = failure_detail_from_log(log_path)
+    issue_text = str(issue or "pre-run failure").strip()
+    if detail:
+        issue_text = f"{issue_text}: {detail}"
+    subject = f"[SEA] [Warning] BBY {product} crawled"
+    body = "\n".join([
+        "총 수집 0 sku",
+        "",
+        f"총 호출 비용 {money_krw(0)}(환율 {KRW_PER_USD:,}원 기준)",
+        "",
+        "총 호출 수 0회",
+        "평균 호출 비용 0원",
+        "",
+        "호출 내역",
+        "  listing - 0회",
+        "  detail/review/compare - 0회(1콜에 d/r/c 묶음)",
+        "  3종 availability - 0회",
+        "",
+        "특이사항",
+        f"- {issue_text}",
+    ])
+    return {
+        "subject": subject,
+        "body": body,
+        "issues": [issue_text],
+        "metrics": {
+            "collected_count": 0,
+            "cost_usd": 0,
+            "cost_krw": 0,
+            "krw_per_usd": KRW_PER_USD,
+            "final_output_rows": 0,
+            "db_insert_columns": [],
+            "cost_sources": [],
+            "call_counts": {
+                "listing": 0,
+                "detail": 0,
+                "availability": 0,
+                "total": 0,
+                "detail_breakdown": [],
+            },
+        },
+    }
 
 
 def build_notification(category, run_root, status="success", failed_step="", failed_step_name="", log_path=""):
@@ -648,14 +696,19 @@ def main():
     category = CATEGORY
     run_root = RUN_ROOT
     status = os.getenv("BESTBUY_NOTIFY_STATUS", "success").strip().lower() or "success"
-    notification = build_notification(
-        category,
-        run_root,
-        status=status,
-        failed_step=os.getenv("BESTBUY_NOTIFY_FAILED_STEP", ""),
-        failed_step_name=os.getenv("BESTBUY_NOTIFY_FAILED_STEP_NAME", ""),
-        log_path=os.getenv("BESTBUY_NOTIFY_LOG", ""),
-    )
+    log_path = os.getenv("BESTBUY_NOTIFY_LOG", "")
+    preflight_issue = os.getenv("BESTBUY_NOTIFY_PREFLIGHT_ISSUE", "").strip()
+    if preflight_issue:
+        notification = build_preflight_notification(category, preflight_issue, log_path=log_path)
+    else:
+        notification = build_notification(
+            category,
+            run_root,
+            status=status,
+            failed_step=os.getenv("BESTBUY_NOTIFY_FAILED_STEP", ""),
+            failed_step_name=os.getenv("BESTBUY_NOTIFY_FAILED_STEP_NAME", ""),
+            log_path=log_path,
+        )
     config = email_config()
     enabled = truthy(os.getenv("BESTBUY_EMAIL_NOTIFY", "1"), default=True)
     dry_run = truthy(os.getenv("BESTBUY_EMAIL_DRY_RUN", "0"))

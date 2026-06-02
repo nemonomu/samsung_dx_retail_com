@@ -311,26 +311,13 @@ def add_missing_columns(cur, table_name, columns):
 
 def migrate_crawl_datetime_column(cur, table_name):
     existing = existing_column_names(cur, table_name)
-    if "crawl_strdatetime" not in existing:
+    if "crawl_strdatetime" not in existing or "crawl_datetime" in existing:
         return []
-    actions = []
-    if "crawl_datetime" not in existing:
-        cur.execute(
-            f"ALTER TABLE {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} "
-            f"RENAME COLUMN {quote_ident('crawl_strdatetime')} TO {quote_ident('crawl_datetime')}"
-        )
-        actions.append("renamed crawl_strdatetime to crawl_datetime")
-        return actions
-
     cur.execute(
-        f"UPDATE {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} "
-        f"SET {quote_ident('crawl_datetime')} = {quote_ident('crawl_strdatetime')} "
-        f"WHERE NULLIF(BTRIM({quote_ident('crawl_datetime')}::text), '') IS NULL "
-        f"AND NULLIF(BTRIM({quote_ident('crawl_strdatetime')}::text), '') IS NOT NULL"
+        f"ALTER TABLE {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} "
+        f"RENAME COLUMN {quote_ident('crawl_strdatetime')} TO {quote_ident('crawl_datetime')}"
     )
-    if cur.rowcount:
-        actions.append(f"backfilled crawl_datetime from crawl_strdatetime rows={cur.rowcount}")
-    return actions
+    return ["renamed crawl_strdatetime to crawl_datetime"]
 
 
 def create_product_list_indexes(cur, table_name, crawl_column):

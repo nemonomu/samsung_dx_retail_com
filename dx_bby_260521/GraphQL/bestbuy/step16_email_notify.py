@@ -138,6 +138,65 @@ def estimate_calls_from_cost(cost_usd, per_call_cost):
     return int(round(cost_usd / per_call_cost))
 
 
+DETAIL_STAGE_DIRS = {
+    "detail": "detail_html",
+    "review": "review20",
+    "compare": "compare",
+}
+
+
+def detail_meta_paths(run_root, folder):
+    raw_root = run_root / "detail" / "raw" / folder
+    if not raw_root.exists():
+        return []
+    return [
+        path
+        for path in raw_root.rglob("*_meta.json")
+        if not path.name.endswith("_fulfillment_meta.json")
+    ]
+
+
+def raw_stage_call_summary(run_root, folder, per_call_cost):
+    batch_calls = 0
+    batch_cost = 0.0
+    distributed_cost = 0.0
+    positive_cost_meta_count = 0
+    for path in detail_meta_paths(run_root, folder):
+        meta = read_json(path)
+        if not meta or meta.get("success") is not True or meta.get("transport") == "none":
+            continue
+        if meta.get("fetched_this_run") is False:
+            continue
+        per_meta_cost = as_float(meta.get("x_request_cost_total") or meta.get("x_request_cost"))
+        distributed_cost += per_meta_cost
+        if per_meta_cost:
+            positive_cost_meta_count += 1
+        one_batch_cost = as_float(meta.get("batch_x_request_cost"))
+        if one_batch_cost and as_int(meta.get("sku_batch_index")) == 1:
+            batch_calls += 1
+            batch_cost += one_batch_cost
+    if batch_calls:
+        return {"calls": batch_calls, "cost_usd": round(batch_cost, 7), "source": "raw_batch_meta"}
+    if distributed_cost:
+        return {
+            "calls": estimate_calls_from_cost(distributed_cost, per_call_cost),
+            "cost_usd": round(distributed_cost, 7),
+            "source": "raw_meta_cost",
+        }
+    return {
+        "calls": positive_cost_meta_count,
+        "cost_usd": 0.0,
+        "source": "raw_meta_count",
+    }
+
+
+def raw_detail_call_summary(run_root, per_call_cost):
+    summary = {}
+    for stage, folder in DETAIL_STAGE_DIRS.items():
+        summary[stage] = raw_stage_call_summary(run_root, folder, per_call_cost)
+    return summary
+
+
 def manifest_call_counts(run_root):
     per_call_cost = derive_per_call_cost(run_root)
     listing_breakdown = []
@@ -183,13 +242,41 @@ def manifest_call_counts(run_root):
     detail_manifest = read_json(run_root / "detail" / "manifest_detail_enrichment.json")
     detail_total = 0
     detail_breakdown = []
-    if detail_manifest:
+    runs_by_stage = detail_manifest.get("runs_by_stage") if detail_manifest else None
+    if isinstance(runs_by_stage, dict) and runs_by_stage:
+        # Actual ZenRows POST counts, summed across stage runs (step08 detail batch + step09 review).
+        # One batch POST bundles detail+review+compare and is counted once as detail_calls.
+        stage_calls = {"detail": 0, "review": 0, "compare": 0}
+        for entry in runs_by_stage.values():
+            for stage in stage_calls:
+                stage_calls[stage] += as_int((entry or {}).get(f"{stage}_calls"))
+        for stage in ("detail", "review", "compare"):
+            calls = stage_calls[stage]
+            if calls:
+                detail_total += calls
+                detail_breakdown.append({"stage": stage, "calls": calls})
+    if detail_total == 0 and detail_manifest:
+        # Back-compat: older manifests have no per-stage call counts, estimate from cost.
         for stage in ("detail", "review", "compare"):
             cost = as_float(detail_manifest.get(f"{stage}_cost_usd_this_run"))
             calls = estimate_calls_from_cost(cost, per_call_cost)
             if calls:
                 detail_total += calls
                 detail_breakdown.append({"stage": stage, "calls": calls, "cost_usd": cost})
+    if detail_total == 0:
+        raw_summary = raw_detail_call_summary(run_root, per_call_cost)
+        for stage in ("detail", "review", "compare"):
+            calls = as_int(raw_summary.get(stage, {}).get("calls"))
+            if calls:
+                detail_total += calls
+                detail_breakdown.append(
+                    {
+                        "stage": stage,
+                        "calls": calls,
+                        "cost_usd": raw_summary[stage].get("cost_usd", 0),
+                        "source": raw_summary[stage].get("source", ""),
+                    }
+                )
 
     availability_total = 0
     for path in sorted((run_root / "availability_backfill").glob("*/manifest.json")):
@@ -216,7 +303,6 @@ def manifest_costs(run_root):
         (run_root / "bsr" / "manifest.json", ["total_x_request_cost"]),
         (run_root / "main" / "manifest_main_targets.json", ["sponsored_cost_usd"]),
         (run_root / "promotion" / "summary.json", ["total_x_request_cost"]),
-        (run_root / "detail" / "manifest_detail_enrichment.json", ["total_cost_usd_this_run"]),
     ]
     total = 0.0
     sources = []
@@ -230,6 +316,34 @@ def manifest_costs(run_root):
                 total += cost
                 sources.append({"path": rel_path(path), "key": key, "cost_usd": cost})
                 break
+
+    # detail/review are written across separate step08 runs into one manifest; the later
+    # (review) run overwrites total_cost_usd_this_run. Sum per-stage cost to avoid undercount.
+    detail_path = run_root / "detail" / "manifest_detail_enrichment.json"
+    detail_data = read_json(detail_path)
+    detail_runs = detail_data.get("runs_by_stage") if detail_data else None
+    detail_cost_added = False
+    if isinstance(detail_runs, dict) and detail_runs:
+        detail_cost = 0.0
+        for entry in detail_runs.values():
+            for key in ("detail_cost_usd", "review_cost_usd", "compare_cost_usd"):
+                detail_cost += as_float((entry or {}).get(key))
+        if detail_cost:
+            total += detail_cost
+            detail_cost_added = True
+            sources.append({"path": rel_path(detail_path), "key": "runs_by_stage", "cost_usd": round(detail_cost, 7)})
+    elif detail_data:
+        cost = as_float(detail_data.get("total_cost_usd_this_run"))
+        if cost:
+            total += cost
+            detail_cost_added = True
+            sources.append({"path": rel_path(detail_path), "key": "total_cost_usd_this_run", "cost_usd": cost})
+    if not detail_cost_added:
+        raw_summary = raw_detail_call_summary(run_root, derive_per_call_cost(run_root))
+        raw_cost = round(sum(as_float(item.get("cost_usd")) for item in raw_summary.values()), 7)
+        if raw_cost:
+            total += raw_cost
+            sources.append({"path": rel_path(run_root / "detail" / "raw"), "key": "raw_meta_cost", "cost_usd": raw_cost})
 
     for path in sorted((run_root / "trending").glob("summary*.json")):
         data = read_json(path)
@@ -399,6 +513,10 @@ def build_subject(category, issues):
 def build_body(collected_count, cost_krw, call_counts, issues):
     total_calls = as_int((call_counts or {}).get("total"))
     per_call_krw = int(round(cost_krw / total_calls)) if total_calls else 0
+    detail_by_stage = {
+        item.get("stage"): as_int(item.get("calls"))
+        for item in (call_counts or {}).get("detail_breakdown") or []
+    }
     lines = [
         f"총 수집 {collected_count} sku",
         "",
@@ -409,10 +527,16 @@ def build_body(collected_count, cost_krw, call_counts, issues):
         "",
         "호출 내역",
         f"  listing - {as_int((call_counts or {}).get('listing')):,}회",
-        f"  detail/review/compare - {as_int((call_counts or {}).get('detail')):,}회",
+        f"  detail/review/compare - {as_int((call_counts or {}).get('detail')):,}회 (1콜에 d/r/c 묶음)",
+    ]
+    if detail_by_stage.get("review"):
+        lines.append(f"    └ 리뷰 별도 재수집 - {detail_by_stage['review']:,}회")
+    if detail_by_stage.get("compare"):
+        lines.append(f"    └ compare 별도 호출 - {detail_by_stage['compare']:,}회")
+    lines.extend([
         f"  3종 availability - {as_int((call_counts or {}).get('availability')):,}회",
         "",
-    ]
+    ])
     if issues:
         lines.append("특이사항")
         lines.extend(f"- {issue}" for issue in issues)

@@ -356,6 +356,48 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn("trend listing sku 9/10", listing_issues)
         self.assertIn("promotion listing sku 17/18", listing_issues)
 
+    def test_email_notification_recovers_detail_batch_calls_from_raw_meta(self):
+        run_root = Path("unit_run_root")
+        fake_paths = [Path(f"sku{index}_meta.json") for index in range(1, 6)]
+        fake_metas = {
+            path: {
+                "success": True,
+                "transport": "zenrows",
+                "stage": "detail",
+                "fetched_this_run": True,
+                "detail_mode": "direct_graphql_sku_batch",
+                "sku_batch_index": index,
+                "x_request_cost_total": 0.00055992,
+                "batch_x_request_cost": 0.0027996,
+            }
+            for index, path in enumerate(fake_paths, 1)
+        }
+        original_read_json = email_notify_step.read_json
+        original_detail_meta_paths = email_notify_step.detail_meta_paths
+
+        def fake_read_json(path):
+            text = str(path).replace("\\", "/")
+            if text.endswith("main/manifest.json"):
+                return {"actual_post_calls": 1, "total_x_request_cost": 0.0027996}
+            return fake_metas.get(Path(path), {})
+
+        def fake_detail_meta_paths(_run_root, folder):
+            return fake_paths if folder == "detail_html" else []
+
+        email_notify_step.read_json = fake_read_json
+        email_notify_step.detail_meta_paths = fake_detail_meta_paths
+        try:
+            call_counts = email_notify_step.manifest_call_counts(run_root)
+            detail_cost, sources = email_notify_step.manifest_costs(run_root)
+        finally:
+            email_notify_step.read_json = original_read_json
+            email_notify_step.detail_meta_paths = original_detail_meta_paths
+
+        self.assertEqual(call_counts["detail"], 1)
+        self.assertEqual(call_counts["detail_breakdown"][0]["source"], "raw_batch_meta")
+        self.assertAlmostEqual(detail_cost, 0.0055992)
+        self.assertTrue(any(source["key"] == "raw_meta_cost" for source in sources))
+
     def test_ref_test10_runner_keeps_run_limited_and_dry(self):
         script = (ROOT / "bby_ref_test10_task.bat").read_text(encoding="utf-8")
 

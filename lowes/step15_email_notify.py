@@ -441,7 +441,7 @@ def main():
         },
     }
     write_manifest(manifest)
-    print(json.dumps(manifest, indent=2, ensure_ascii=False))
+    print(json.dumps(manifest, indent=2, ensure_ascii=True))
 
 
 if __name__ == "__main__":

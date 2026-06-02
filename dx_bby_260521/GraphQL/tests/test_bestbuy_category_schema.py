@@ -186,6 +186,8 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn("BESTBUY_DB_PREPARE_ADD_MISSING_COLUMNS", step13)
         self.assertIn("ALTER TABLE", step13)
         self.assertIn("ADD COLUMN", step13)
+        self.assertIn("RENAME COLUMN", step13)
+        self.assertIn("migrate_crawl_datetime_column", step13)
         self.assertIn("bestbuy_product_list_table(category)", step13)
         self.assertNotIn("BESTBUY_PRODUCT_LIST_TABLES", step13)
 

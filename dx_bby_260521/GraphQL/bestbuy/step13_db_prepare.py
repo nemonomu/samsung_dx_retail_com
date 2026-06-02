@@ -309,6 +309,30 @@ def add_missing_columns(cur, table_name, columns):
     return missing
 
 
+def migrate_crawl_datetime_column(cur, table_name):
+    existing = existing_column_names(cur, table_name)
+    if "crawl_strdatetime" not in existing:
+        return []
+    actions = []
+    if "crawl_datetime" not in existing:
+        cur.execute(
+            f"ALTER TABLE {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} "
+            f"RENAME COLUMN {quote_ident('crawl_strdatetime')} TO {quote_ident('crawl_datetime')}"
+        )
+        actions.append("renamed crawl_strdatetime to crawl_datetime")
+        return actions
+
+    cur.execute(
+        f"UPDATE {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} "
+        f"SET {quote_ident('crawl_datetime')} = {quote_ident('crawl_strdatetime')} "
+        f"WHERE NULLIF(BTRIM({quote_ident('crawl_datetime')}::text), '') IS NULL "
+        f"AND NULLIF(BTRIM({quote_ident('crawl_strdatetime')}::text), '') IS NOT NULL"
+    )
+    if cur.rowcount:
+        actions.append(f"backfilled crawl_datetime from crawl_strdatetime rows={cur.rowcount}")
+    return actions
+
+
 def create_product_list_indexes(cur, table_name, crawl_column):
     prefix = table_name[:45]
     cur.execute(
@@ -346,12 +370,16 @@ def main():
     created = []
     skipped = []
     altered = []
+    migrated = []
     missing_not_added = []
     with conn:
         with conn.cursor() as cur:
             for category, columns in SCHEMAS.items():
                 table_name = bestbuy_output_table(category)
                 if table_exists(cur, table_name):
+                    migration = migrate_crawl_datetime_column(cur, table_name)
+                    if migration:
+                        migrated.append({"table": table_name, "actions": migration})
                     missing = add_missing_columns(cur, table_name, columns)
                     if missing and ADD_MISSING_COLUMNS:
                         altered.append({"table": table_name, "columns": [name for name, _ in missing]})
@@ -364,6 +392,9 @@ def main():
             for category, columns in PRODUCT_LIST_SCHEMAS.items():
                 table_name = bestbuy_product_list_table(category)
                 if table_exists(cur, table_name):
+                    migration = migrate_crawl_datetime_column(cur, table_name)
+                    if migration:
+                        migrated.append({"table": table_name, "actions": migration})
                     missing = add_missing_columns(cur, table_name, columns)
                     if missing and ADD_MISSING_COLUMNS:
                         altered.append({"table": table_name, "columns": [name for name, _ in missing]})
@@ -380,6 +411,7 @@ def main():
             "created": created,
             "skipped_existing": skipped,
             "altered_existing": altered,
+            "migrated_existing": migrated,
             "missing_not_added": missing_not_added,
             "add_missing_columns": ADD_MISSING_COLUMNS,
         }

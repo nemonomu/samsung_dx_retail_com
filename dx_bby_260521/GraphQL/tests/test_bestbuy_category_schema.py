@@ -215,6 +215,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn('set "BESTBUY_FINAL_TARGET_SIZE="', script)
         self.assertIn('set "BESTBUY_FINAL_ROW_LIMIT="', script)
         self.assertIn('set "BESTBUY_DETAIL_SKUS="', script)
+        self.assertIn('set "BESTBUY_DB_PREPARE_ADD_MISSING_COLUMNS=1"', script)
         self.assertIn('set "BESTBUY_DB_LOAD_DRY_RUN=0"', script)
         self.assertIn('set "BESTBUY_DB_UPDATE_SIMILAR_ONLY=0"', script)
         self.assertIn('set "BESTBUY_FORCE_RUN_PATH_ENV="', script)

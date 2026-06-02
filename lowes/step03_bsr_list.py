@@ -43,6 +43,8 @@ BSR_FALLBACK_ZENROWS = os.getenv("LOWES_BSR_FALLBACK_ZENROWS", "1").strip().lowe
 UC_HEADLESS = os.getenv("LOWES_UC_HEADLESS", "0").strip().lower() in {"1", "true", "yes"}
 UC_WAIT_SECONDS = float(os.getenv("LOWES_BSR_UC_WAIT_SECONDS", "5"))
 UC_PAGE_LOAD_TIMEOUT = int(os.getenv("LOWES_BSR_UC_PAGE_LOAD_TIMEOUT", "60"))
+BSR_RETRIES = max(0, int(os.getenv("LOWES_BSR_RETRIES", "2")))
+BSR_RETRY_SLEEP_SECONDS = max(0.0, float(os.getenv("LOWES_BSR_RETRY_SLEEP_SECONDS", "2")))
 
 
 def now():
@@ -333,7 +335,7 @@ def parse_bsr(page_html):
 BSR_OFFSETS = [int(s.strip()) for s in os.getenv("LOWES_BSR_OFFSETS", "0,24,48,72,96").split(",") if s.strip()]
 
 
-def fetch_bsr_zenrows_url(url, offset):
+def fetch_bsr_zenrows_url(url, offset, attempt=1):
     """ZenRows fetch at a specific paginated URL. Returns response or raises."""
     api_key = os.getenv("ZENROWS_API_KEY")
     if not api_key:
@@ -344,20 +346,49 @@ def fetch_bsr_zenrows_url(url, offset):
     print(f"[Lowes BSR] {PRODUCT_GROUP} offset={offset} GET {url}")
     started_at = now()
     start = time.time()
-    response = client.get(url, params=params, timeout=TIMEOUT)
+    try:
+        response = client.get(url, params=params, timeout=TIMEOUT)
+    except RequestException as exc:
+        elapsed = time.time() - start
+        unit_dir = OUT_DIR / f"offset_{offset:03d}_attempt_{attempt:02d}_fail"
+        unit_dir.mkdir(parents=True, exist_ok=True)
+        (unit_dir / "body.html").write_text(redact_sensitive(str(exc)), encoding="utf-8", errors="replace")
+        (unit_dir / "meta.json").write_text(
+            json.dumps(
+                {
+                    "url": url,
+                    "offset": offset,
+                    "attempt": attempt,
+                    "status_code": None,
+                    "success": False,
+                    "elapsed_seconds": round(elapsed, 3),
+                    "x_request_cost": "",
+                    "bytes": 0,
+                    "error": redact_sensitive(str(exc)),
+                    "started_at": started_at,
+                    "finished_at": now(),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        raise
     elapsed = time.time() - start
     print(f"  status={response.status_code} elapsed={elapsed:.1f}s bytes={len(response.text)}")
-    status_name = f"offset_{offset:03d}_{'success' if response.status_code == 200 else 'fail'}"
+    status_name = f"offset_{offset:03d}_attempt_{attempt:02d}_{'success' if response.status_code == 200 else 'fail'}"
     unit_dir = OUT_DIR / status_name
     unit_dir.mkdir(parents=True, exist_ok=True)
     (unit_dir / "body.html").write_text(redact_sensitive(response.text or ""), encoding="utf-8", errors="replace")
     (unit_dir / "meta.json").write_text(
         json.dumps(
             {
-                "url": url, "offset": offset,
-                "status_code": response.status_code, "elapsed_seconds": round(elapsed, 3),
+                "url": url, "offset": offset, "attempt": attempt,
+                "status_code": response.status_code,
+                "success": response.status_code == 200,
+                "elapsed_seconds": round(elapsed, 3),
                 "x_request_cost": response.headers.get("x-request-cost", ""),
-                "bytes": len(response.text), "started_at": started_at, "finished_at": now(),
+                "bytes": len(response.text), "error": "" if response.status_code == 200 else response.text[:500],
+                "started_at": started_at, "finished_at": now(),
             },
             indent=2,
         ),
@@ -399,41 +430,108 @@ def parse_bsr_at_offset(page_html, offset):
     return rows, "html_card"
 
 
-def _fetch_offset(offset):
-    """Wrapper for parallel execution. Returns (offset, status, response_text_or_error)."""
+def _fetch_offset(offset, attempt=1):
+    """Wrapper for parallel execution. Returns parsed rows for one offset attempt."""
     url = BSR_URL + (f"?offset={offset}" if offset > 0 else "")
     try:
-        response = fetch_bsr_zenrows_url(url, offset)
-        return offset, response.status_code, response.text if response.status_code == 200 else response.text[:500]
+        response = fetch_bsr_zenrows_url(url, offset, attempt=attempt)
     except RequestException as exc:
-        return offset, "ERR", str(exc)
+        return {
+            "offset": offset,
+            "attempt": attempt,
+            "status": "ERR",
+            "rows": [],
+            "parsed": 0,
+            "source": "",
+            "error": str(exc),
+        }
+    if response.status_code != 200:
+        return {
+            "offset": offset,
+            "attempt": attempt,
+            "status": response.status_code,
+            "rows": [],
+            "parsed": 0,
+            "source": "",
+            "error": response.text[:500],
+        }
+    rows, source = parse_bsr_at_offset(response.text, offset)
+    return {
+        "offset": offset,
+        "attempt": attempt,
+        "status": 200,
+        "rows": rows,
+        "parsed": len(rows),
+        "source": source,
+        "error": "",
+    }
+
+
+def fetch_offsets(offsets, attempt, workers):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = {ex.submit(_fetch_offset, offset, attempt): offset for offset in offsets}
+        for fut in as_completed(futures):
+            result = fut.result()
+            results[result["offset"]] = result
+    return results
+
+
+def result_needs_retry(result):
+    if not result:
+        return True
+    return result.get("status") != 200 or int(result.get("parsed") or 0) <= 0
+
+
+def summarize_attempt(result):
+    return {
+        "attempt": result.get("attempt", ""),
+        "status": result.get("status", ""),
+        "parsed": int(result.get("parsed") or 0),
+        "source": result.get("source", ""),
+        "error": str(result.get("error", ""))[:200],
+    }
 
 
 def main():
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     workers = max(1, int(os.getenv("LOWES_BSR_WORKERS", "3")))
 
     all_rows = []
     seen = set()
     per_page = []
-    results = {}
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        futures = {ex.submit(_fetch_offset, offset): offset for offset in BSR_OFFSETS}
-        for fut in as_completed(futures):
-            offset, status, text = fut.result()
-            results[offset] = (status, text)
+    attempt_history = {}
+    results = fetch_offsets(BSR_OFFSETS, attempt=1, workers=workers)
+    for offset, result in results.items():
+        attempt_history[offset] = [summarize_attempt(result)]
+
+    for attempt in range(2, BSR_RETRIES + 2):
+        failed_offsets = [offset for offset in BSR_OFFSETS if result_needs_retry(results.get(offset))]
+        if not failed_offsets:
+            break
+        print(f"[Lowes BSR] retry attempt={attempt} failed_offsets={failed_offsets}")
+        if BSR_RETRY_SLEEP_SECONDS:
+            time.sleep(BSR_RETRY_SLEEP_SECONDS)
+        retry_results = fetch_offsets(failed_offsets, attempt=attempt, workers=min(workers, len(failed_offsets)))
+        for offset, result in retry_results.items():
+            attempt_history.setdefault(offset, []).append(summarize_attempt(result))
+            results[offset] = result
 
     # Process in offset order so bsr_rank ordering is stable
     for offset in BSR_OFFSETS:
-        status, text = results.get(offset, ("ERR", ""))
+        result = results.get(offset) or {"status": "ERR", "rows": [], "parsed": 0, "source": "", "error": "missing result"}
+        status = result.get("status")
+        rows = result.get("rows") or []
+        attempts = attempt_history.get(offset, [])
         if status == "ERR":
-            print(f"  offset={offset} EXC: {text[:120]}")
-            per_page.append({"offset": offset, "status": "ERR", "parsed": 0, "kept": 0, "error": text[:200]})
+            error = str(result.get("error", ""))
+            print(f"  offset={offset} EXC: {error[:120]}")
+            per_page.append({"offset": offset, "status": "ERR", "parsed": 0, "kept": 0, "error": error[:200], "attempts": attempts})
             continue
         if status != 200:
-            per_page.append({"offset": offset, "status": status, "parsed": 0, "kept": 0})
+            per_page.append({"offset": offset, "status": status, "parsed": 0, "kept": 0, "error": str(result.get("error", ""))[:200], "attempts": attempts})
             continue
-        rows, source = parse_bsr_at_offset(text, offset)
         kept = 0
         for row in rows:
             sku = (row.get("omni_item_id") or "").strip()
@@ -441,15 +539,26 @@ def main():
                 seen.add(sku)
                 all_rows.append(row)
                 kept += 1
-        per_page.append({"offset": offset, "status": 200, "parsed": len(rows), "kept": kept, "source": source})
+        per_page.append({
+            "offset": offset,
+            "status": 200,
+            "parsed": len(rows),
+            "kept": kept,
+            "source": result.get("source", ""),
+            "attempt": result.get("attempt", ""),
+            "attempts": attempts,
+        })
 
     write_csv(all_rows)
+    failed_offsets = [entry["offset"] for entry in per_page if entry.get("status") != 200 or int(entry.get("parsed") or 0) <= 0]
     manifest = {
         "run_type": "step03_bsr_list",
         "run_root": str(RUN_ROOT),
         "product_group": PRODUCT_GROUP,
         "bsr_url": BSR_URL,
         "offsets": BSR_OFFSETS,
+        "retries": BSR_RETRIES,
+        "failed_offsets": failed_offsets,
         "per_page": per_page,
         "total_rows_kept": len(all_rows),
         "output_csv": str(CSV_PATH),

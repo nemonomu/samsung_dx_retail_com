@@ -238,18 +238,37 @@ def all_null_column_issues(rows):
     return [f"전체 null 컬럼: {', '.join(all_null)}"]
 
 
+def rank_values(rows, column):
+    return sorted({as_int(r.get(column)) for r in rows if as_int(r.get(column)) > 0})
+
+
+def compact_ranges(values):
+    values = list(values or [])
+    if not values:
+        return ""
+    ranges = []
+    start = previous = values[0]
+    for value in values[1:]:
+        if value == previous + 1:
+            previous = value
+            continue
+        ranges.append(f"{start}" if start == previous else f"{start}-{previous}")
+        start = previous = value
+    ranges.append(f"{start}" if start == previous else f"{start}-{previous}")
+    return ", ".join(ranges)
+
+
 def listing_count_issues(run_root, rows):
     issues = []
-    main_ranks = [as_int(r.get("main_rank")) for r in rows if as_int(r.get("main_rank")) > 0]
-    if main_ranks:
-        max_main = max(main_ranks)
-        if max_main < 300:
-            issues.append(f"main_rank {max_main}/300")
-    bsr_ranks = [as_int(r.get("bsr_rank")) for r in rows if as_int(r.get("bsr_rank")) > 0]
-    if bsr_ranks:
-        max_bsr = max(bsr_ranks)
-        if max_bsr < 100:
-            issues.append(f"bsr_rank {max_bsr}/100")
+    main_ranks = rank_values(rows, "main_rank")
+    if main_ranks and len(main_ranks) < 300:
+        issues.append(f"main_rank {len(main_ranks)}/300")
+    bsr_ranks = rank_values(rows, "bsr_rank")
+    if bsr_ranks and len(bsr_ranks) < 100:
+        missing = [rank for rank in range(1, 101) if rank not in set(bsr_ranks)]
+        missing_text = compact_ranges(missing)
+        suffix = f" missing {missing_text}" if missing_text else ""
+        issues.append(f"bsr_rank {len(bsr_ranks)}/100{suffix}")
     return issues
 
 

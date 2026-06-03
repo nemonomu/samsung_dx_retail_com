@@ -199,6 +199,7 @@ LDY_FINAL_FIELDS = [
     "country",
     "product",
     "item",
+    "sku",
     "account_name",
     "page_type",
     "count_of_reviews",
@@ -230,6 +231,7 @@ REF_FINAL_FIELDS = [
     "country",
     "product",
     "item",
+    "sku",
     "account_name",
     "page_type",
     "count_of_reviews",
@@ -4065,6 +4067,21 @@ def products_from_detail(sku):
     return products
 
 
+def product_model_number(products):
+    for product in products if isinstance(products, list) else [products]:
+        if not isinstance(product, dict):
+            continue
+        manufacturer = product.get("manufacturer") or {}
+        if isinstance(manufacturer, dict):
+            model = compact_text(manufacturer.get("modelNumber"))
+            if model:
+                return model
+        model = compact_text(product.get("modelNumber"))
+        if model:
+            return model
+    return ""
+
+
 def get_it_fast_values_from_detail(sku):
     values = {
         "pick_up_availability": "",
@@ -5024,6 +5041,7 @@ def output_row(target):
         "id": "",
         "product": (target.get("category_key") or CATEGORY).upper(),
         "item": bsin,
+        "sku": product_model_number(products) if CATEGORY in {"REF", "LDY"} else "",
         "sku_id": sku,
         "account_name": "Bestbuy",
         "page_type": page_type_from_target(target),

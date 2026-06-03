@@ -439,6 +439,41 @@ def parse_productdetail(sku, body):
     return out
 
 
+def numeric_or_none(value):
+    if value in (None, ''):
+        return None
+    try:
+        return float(str(value).replace(',', '').strip())
+    except Exception:
+        return None
+
+
+def format_recommendation_intent(stats):
+    if not isinstance(stats, dict):
+        return ''
+
+    explicit_pct = numeric_or_none(stats.get('recommendationPercentage'))
+    if explicit_pct is not None:
+        return f'{round(explicit_pct)}% Recommend this product'
+
+    rec = numeric_or_none(stats.get('totalRecommendedCount'))
+    if rec is None:
+        rec = numeric_or_none(stats.get('recommendedCount'))
+    nrec = numeric_or_none(stats.get('notRecommendedCount')) or 0
+    total_reviews = numeric_or_none(stats.get('totalReviewCount')) or 0
+
+    if rec is None:
+        return ''
+
+    denominator = rec + nrec
+    if denominator > 0:
+        pct = round(rec / denominator * 100)
+        return f'{pct}% Recommend this product'
+    if rec == 0 and total_reviews > 0:
+        return '0% Recommend this product'
+    return ''
+
+
 def parse_reviews(sku, body_p1, body_p2):
     out = {}
     review_texts = []
@@ -452,11 +487,7 @@ def parse_reviews(sku, body_p1, body_p2):
     if isinstance(p1_obj, dict):
         review_summary = p1_obj.get('reviewSummary', '') or ''
         stats = p1_obj.get('reviewStatistics', {}) or {}
-        rec = stats.get('totalRecommendedCount') or 0
-        nrec = stats.get('notRecommendedCount') or 0
-        if rec + nrec > 0:
-            pct = round(rec / (rec + nrec) * 100)
-            rec_intent = f'{pct}% Recommend this product'
+        rec_intent = format_recommendation_intent(stats)
         # detail-side fallback for star_rating / review counts (NULL vs 0 분간용)
         out['_pdp_average_rating'] = stats.get('averageOverallRating', '')
         out['_pdp_total_reviews'] = stats.get('totalReviewCount', '')

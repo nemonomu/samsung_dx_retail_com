@@ -48,6 +48,9 @@ SEED_WAIT = float(os.getenv('LOWES_UC_SEED_WAIT_SECONDS', '3'))
 PAGE_LOAD_TIMEOUT = int(os.getenv('LOWES_DETAIL_UC_PAGE_LOAD_TIMEOUT', '75'))
 SCRIPT_TIMEOUT = int(os.getenv('LOWES_DETAIL_UC_SCRIPT_TIMEOUT', '30'))
 SLEEP_BETWEEN = float(os.getenv('LOWES_DETAIL_UC_INTER_SLEEP', '0.2'))
+REVIEW_TEXT_TARGET = max(0, int(os.getenv('LOWES_REVIEW_TEXT_TARGET', '20')))
+REVIEW_PAGE_SIZE = max(1, int(os.getenv('LOWES_REVIEW_PAGE_SIZE', '10')))
+REVIEW_MAX_OFFSET = max(0, int(os.getenv('LOWES_REVIEW_MAX_OFFSET', '100')))
 
 STORE = os.getenv('LOWES_API_STORE_ID', '289').lstrip('0') or '289'
 STORE_FMT = STORE.zfill(4) if len(STORE) <= 4 else STORE
@@ -201,13 +204,70 @@ def run_xhr_post(driver, path, body):
         return {'status': 'err', 'error': f'{type(exc).__name__}: {exc}'}
 
 
+def review_path(sku, offset):
+    suffix = '' if offset == 0 else f'&offset={offset}'
+    return f'/rnr/r/get-by-product/{sku}?sortBy=newestFirst{suffix}'
+
+
+def review_text_count_from_body(body):
+    try:
+        obj = json.loads(body) if body else {}
+    except Exception:
+        return 0
+    return sum(1 for r in (obj.get('results') or []) if (r.get('reviewText') or '').strip())
+
+
+def review_total_results_from_body(body):
+    try:
+        obj = json.loads(body) if body else {}
+    except Exception:
+        return None
+    value = obj.get('totalResults')
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_reviews_until_target(driver, sku):
+    responses = {}
+    collected_texts = 0
+    total_results = None
+    offset = 0
+    page_index = 1
+
+    while True:
+        label = f'reviews_p{page_index}'
+        response = run_xhr_get(driver, review_path(sku, offset))
+        responses[label] = response
+        if response.get('status') != 200:
+            break
+
+        body = response.get('body', '') or ''
+        collected_texts += review_text_count_from_body(body)
+        if total_results is None:
+            total_results = review_total_results_from_body(body)
+
+        next_offset = offset + REVIEW_PAGE_SIZE
+        if REVIEW_TEXT_TARGET and collected_texts >= REVIEW_TEXT_TARGET:
+            break
+        if total_results is not None and next_offset >= total_results:
+            break
+        if next_offset > REVIEW_MAX_OFFSET:
+            break
+
+        offset = next_offset
+        page_index += 1
+
+    return responses
+
+
 def fetch_sku(driver, sku, category_id, parent_category, store=None):
     """Run 4 XHRs for a SKU. `store` overrides STORE_FMT for productdetail URL + compare body."""
     store = store or STORE_FMT
     out = {}
     out['productdetail'] = run_xhr_get(driver, f'/wpd/{sku}/productdetail/{store}/Guest/{ZIP}?nearByStore={NEARBY_STORE}&zipState={STATE}')
-    out['reviews_p1'] = run_xhr_get(driver, f'/rnr/r/get-by-product/{sku}?sortBy=newestFirst')
-    out['reviews_p2'] = run_xhr_get(driver, f'/rnr/r/get-by-product/{sku}?sortBy=newestFirst&offset=10')
+    out.update(fetch_reviews_until_target(driver, sku))
     body = {
         "anchors": [{
             "omniItemId": sku, "attrId": sku,
@@ -474,14 +534,14 @@ def format_recommendation_intent(stats):
     return ''
 
 
-def parse_reviews(sku, body_p1, body_p2):
+def parse_reviews(sku, *review_bodies):
     out = {}
     review_texts = []
     review_summary = ''
     rec_intent = ''
     p1_obj = None
     try:
-        p1_obj = json.loads(body_p1) if body_p1 else None
+        p1_obj = json.loads(review_bodies[0]) if review_bodies and review_bodies[0] else None
     except Exception:
         p1_obj = None
     if isinstance(p1_obj, dict):
@@ -495,12 +555,14 @@ def parse_reviews(sku, body_p1, body_p2):
             t = (r.get('reviewText') or '').strip()
             if t:
                 review_texts.append(t)
-    try:
-        p2_obj = json.loads(body_p2) if body_p2 else None
-    except Exception:
-        p2_obj = None
-    if isinstance(p2_obj, dict):
-        for r in (p2_obj.get('results') or []):
+    for body in review_bodies[1:]:
+        try:
+            obj = json.loads(body) if body else None
+        except Exception:
+            obj = None
+        if not isinstance(obj, dict):
+            continue
+        for r in (obj.get('results') or []):
             t = (r.get('reviewText') or '').strip()
             if t:
                 review_texts.append(t)
@@ -561,16 +623,28 @@ def has_body(r):
     return isinstance(r, dict) and r.get('status') == 200 and bool(r.get('body'))
 
 
+def review_response_labels(responses):
+    return sorted(
+        [key for key in responses if key.startswith('reviews_p')],
+        key=lambda key: int(key.replace('reviews_p', '') or '0'),
+    )
+
+
+def reviews_success(responses):
+    labels = review_response_labels(responses)
+    return bool(labels) and all((responses.get(label) or {}).get('status') == 200 for label in labels)
+
+
 def build_row(src, sku, responses, serving_store=None):
     row = dict(src)
     row['omni_item_id'] = sku
     if has_body(responses.get('productdetail')):
         row.update(parse_productdetail(sku, responses['productdetail']['body']))
-    row.update(parse_reviews(
-        sku,
-        responses.get('reviews_p1', {}).get('body', '') if has_body(responses.get('reviews_p1')) else '',
-        responses.get('reviews_p2', {}).get('body', '') if has_body(responses.get('reviews_p2')) else '',
-    ))
+    review_bodies = [
+        responses.get(label, {}).get('body', '') if has_body(responses.get(label)) else ''
+        for label in review_response_labels(responses)
+    ]
+    row.update(parse_reviews(sku, *review_bodies))
     if has_body(responses.get('compare')):
         row.update(parse_compare(sku, responses['compare']['body']))
     else:
@@ -633,8 +707,7 @@ def main():
             statuses = {k: v.get('status') for k, v in responses.items()}
             success = (
                 statuses.get('productdetail') == 200
-                and statuses.get('reviews_p1') == 200
-                and statuses.get('reviews_p2') == 200
+                and reviews_success(responses)
                 and statuses.get('compare') in OK_STATUSES
             )
             save_raw_artifacts(i, sku, responses, success)
@@ -667,8 +740,7 @@ def main():
                 statuses = {k: v.get('status') for k, v in responses.items()}
                 success = (
                     statuses.get('productdetail') == 200
-                    and statuses.get('reviews_p1') == 200
-                    and statuses.get('reviews_p2') == 200
+                    and reviews_success(responses)
                     and statuses.get('compare') in OK_STATUSES
                 )
                 # save under alt_ prefix so primary fail marker is preserved

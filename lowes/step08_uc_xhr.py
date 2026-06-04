@@ -48,9 +48,10 @@ SEED_WAIT = float(os.getenv('LOWES_UC_SEED_WAIT_SECONDS', '3'))
 PAGE_LOAD_TIMEOUT = int(os.getenv('LOWES_DETAIL_UC_PAGE_LOAD_TIMEOUT', '75'))
 SCRIPT_TIMEOUT = int(os.getenv('LOWES_DETAIL_UC_SCRIPT_TIMEOUT', '30'))
 SLEEP_BETWEEN = float(os.getenv('LOWES_DETAIL_UC_INTER_SLEEP', '0.2'))
-REVIEW_TEXT_TARGET = max(0, int(os.getenv('LOWES_REVIEW_TEXT_TARGET', '20')))
+REVIEW_TARGET = max(0, int(os.getenv('LOWES_REVIEW_TARGET', os.getenv('LOWES_REVIEW_TEXT_TARGET', '20'))))
 REVIEW_PAGE_SIZE = max(1, int(os.getenv('LOWES_REVIEW_PAGE_SIZE', '10')))
 REVIEW_MAX_OFFSET = max(0, int(os.getenv('LOWES_REVIEW_MAX_OFFSET', '100')))
+REVIEW_EMPTY_TEXT = os.getenv('LOWES_REVIEW_EMPTY_TEXT', 'No review text provided')
 
 STORE = os.getenv('LOWES_API_STORE_ID', '289').lstrip('0') or '289'
 STORE_FMT = STORE.zfill(4) if len(STORE) <= 4 else STORE
@@ -209,12 +210,12 @@ def review_path(sku, offset):
     return f'/rnr/r/get-by-product/{sku}?sortBy=newestFirst{suffix}'
 
 
-def review_text_count_from_body(body):
+def review_result_count_from_body(body):
     try:
         obj = json.loads(body) if body else {}
     except Exception:
         return 0
-    return sum(1 for r in (obj.get('results') or []) if (r.get('reviewText') or '').strip())
+    return len(obj.get('results') or [])
 
 
 def review_total_results_from_body(body):
@@ -231,7 +232,7 @@ def review_total_results_from_body(body):
 
 def fetch_reviews_until_target(driver, sku):
     responses = {}
-    collected_texts = 0
+    collected_reviews = 0
     total_results = None
     offset = 0
     page_index = 1
@@ -244,12 +245,12 @@ def fetch_reviews_until_target(driver, sku):
             break
 
         body = response.get('body', '') or ''
-        collected_texts += review_text_count_from_body(body)
+        collected_reviews += review_result_count_from_body(body)
         if total_results is None:
             total_results = review_total_results_from_body(body)
 
         next_offset = offset + REVIEW_PAGE_SIZE
-        if REVIEW_TEXT_TARGET and collected_texts >= REVIEW_TEXT_TARGET:
+        if REVIEW_TARGET and collected_reviews >= REVIEW_TARGET:
             break
         if total_results is not None and next_offset >= total_results:
             break
@@ -553,8 +554,7 @@ def parse_reviews(sku, *review_bodies):
         out['_pdp_total_reviews'] = stats.get('totalReviewCount', '')
         for r in (p1_obj.get('results') or []):
             t = (r.get('reviewText') or '').strip()
-            if t:
-                review_texts.append(t)
+            review_texts.append(t or REVIEW_EMPTY_TEXT)
     for body in review_bodies[1:]:
         try:
             obj = json.loads(body) if body else None
@@ -564,8 +564,7 @@ def parse_reviews(sku, *review_bodies):
             continue
         for r in (obj.get('results') or []):
             t = (r.get('reviewText') or '').strip()
-            if t:
-                review_texts.append(t)
+            review_texts.append(t or REVIEW_EMPTY_TEXT)
 
     out['recommendation_intent'] = rec_intent
     out['summarized_review_content'] = review_summary

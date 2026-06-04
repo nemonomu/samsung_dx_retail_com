@@ -333,6 +333,9 @@ def parse_bsr(page_html):
 
 
 BSR_OFFSETS = [int(s.strip()) for s in os.getenv("LOWES_BSR_OFFSETS", "0,24,48,72,96").split(",") if s.strip()]
+BSR_PAGE_SIZE = max(1, int(os.getenv("LOWES_BSR_PAGE_SIZE", "24")))
+BSR_TARGET_UNIQUE = max(0, int(os.getenv("LOWES_BSR_TARGET_UNIQUE", "100")))
+BSR_MAX_OFFSET = max(max(BSR_OFFSETS or [0]), int(os.getenv("LOWES_BSR_MAX_OFFSET", "240")))
 
 
 def fetch_bsr_zenrows_url(url, offset, attempt=1):
@@ -495,6 +498,44 @@ def summarize_attempt(result):
     }
 
 
+def keep_unique_rows(rows, seen):
+    kept_rows = []
+    duplicates = []
+    for row in rows:
+        sku = (row.get("omni_item_id") or "").strip()
+        if not sku:
+            continue
+        if sku in seen:
+            duplicates.append(
+                {
+                    "bsr_rank": row.get("bsr_rank", ""),
+                    "omni_item_id": sku,
+                    "model_id": row.get("model_id", ""),
+                    "product_url": row.get("product_url", ""),
+                }
+            )
+            continue
+        seen.add(sku)
+        kept_rows.append(row)
+    return kept_rows, duplicates
+
+
+def append_result_rows(result, seen, all_rows):
+    kept_rows, duplicates = keep_unique_rows(result.get("rows") or [], seen)
+    all_rows.extend(kept_rows)
+    return kept_rows, duplicates
+
+
+def reassign_unique_bsr_ranks(rows):
+    ranked_rows = []
+    for idx, row in enumerate(rows[:BSR_TARGET_UNIQUE or None], 1):
+        out = dict(row)
+        out.setdefault("original_bsr_rank", out.get("bsr_rank", ""))
+        out["bsr_rank"] = idx
+        ranked_rows.append(out)
+    return ranked_rows
+
+
 def main():
     workers = max(1, int(os.getenv("LOWES_BSR_WORKERS", "3")))
 
@@ -518,8 +559,11 @@ def main():
             attempt_history.setdefault(offset, []).append(summarize_attempt(result))
             results[offset] = result
 
-    # Process in offset order so bsr_rank ordering is stable
+    processed_offsets = set()
+
+    # Process in offset order so bsr_rank ordering is stable before final re-ranking.
     for offset in BSR_OFFSETS:
+        processed_offsets.add(offset)
         result = results.get(offset) or {"status": "ERR", "rows": [], "parsed": 0, "source": "", "error": "missing result"}
         status = result.get("status")
         rows = result.get("rows") or []
@@ -532,23 +576,62 @@ def main():
         if status != 200:
             per_page.append({"offset": offset, "status": status, "parsed": 0, "kept": 0, "error": str(result.get("error", ""))[:200], "attempts": attempts})
             continue
-        kept = 0
-        for row in rows:
-            sku = (row.get("omni_item_id") or "").strip()
-            if sku and sku not in seen:
-                seen.add(sku)
-                all_rows.append(row)
-                kept += 1
+        kept_rows, duplicates = append_result_rows(result, seen, all_rows)
         per_page.append({
             "offset": offset,
             "status": 200,
             "parsed": len(rows),
-            "kept": kept,
+            "kept": len(kept_rows),
+            "duplicates": duplicates,
             "source": result.get("source", ""),
             "attempt": result.get("attempt", ""),
             "attempts": attempts,
         })
 
+    supplemental_offsets = []
+    next_offset = (max(processed_offsets) + BSR_PAGE_SIZE) if processed_offsets else 0
+    while BSR_TARGET_UNIQUE and len(all_rows) < BSR_TARGET_UNIQUE and next_offset <= BSR_MAX_OFFSET:
+        if next_offset in processed_offsets:
+            next_offset += BSR_PAGE_SIZE
+            continue
+        processed_offsets.add(next_offset)
+        supplemental_offsets.append(next_offset)
+        result = _fetch_offset(next_offset, attempt=1)
+        attempts = [summarize_attempt(result)]
+        if result_needs_retry(result):
+            for attempt in range(2, BSR_RETRIES + 2):
+                print(f"[Lowes BSR] supplemental retry attempt={attempt} offset={next_offset}")
+                if BSR_RETRY_SLEEP_SECONDS:
+                    time.sleep(BSR_RETRY_SLEEP_SECONDS)
+                result = _fetch_offset(next_offset, attempt=attempt)
+                attempts.append(summarize_attempt(result))
+                if not result_needs_retry(result):
+                    break
+        status = result.get("status")
+        rows = result.get("rows") or []
+        if status == "ERR":
+            per_page.append({"offset": next_offset, "status": "ERR", "parsed": 0, "kept": 0, "error": str(result.get("error", ""))[:200], "attempts": attempts})
+            break
+        if status != 200:
+            per_page.append({"offset": next_offset, "status": status, "parsed": 0, "kept": 0, "error": str(result.get("error", ""))[:200], "attempts": attempts})
+            break
+        kept_rows, duplicates = append_result_rows(result, seen, all_rows)
+        per_page.append({
+            "offset": next_offset,
+            "status": 200,
+            "parsed": len(rows),
+            "kept": len(kept_rows),
+            "duplicates": duplicates,
+            "source": result.get("source", ""),
+            "attempt": result.get("attempt", ""),
+            "attempts": attempts,
+            "supplemental": True,
+        })
+        if len(rows) <= 0:
+            break
+        next_offset += BSR_PAGE_SIZE
+
+    all_rows = reassign_unique_bsr_ranks(all_rows)
     write_csv(all_rows)
     failed_offsets = [entry["offset"] for entry in per_page if entry.get("status") != 200 or int(entry.get("parsed") or 0) <= 0]
     manifest = {
@@ -556,7 +639,12 @@ def main():
         "run_root": str(RUN_ROOT),
         "product_group": PRODUCT_GROUP,
         "bsr_url": BSR_URL,
-        "offsets": BSR_OFFSETS,
+        "offsets": sorted(processed_offsets),
+        "initial_offsets": BSR_OFFSETS,
+        "supplemental_offsets": supplemental_offsets,
+        "target_unique_rows": BSR_TARGET_UNIQUE,
+        "max_offset": BSR_MAX_OFFSET,
+        "rank_mode": "dedupe_then_reassign_1_to_n",
         "retries": BSR_RETRIES,
         "failed_offsets": failed_offsets,
         "per_page": per_page,
@@ -567,7 +655,7 @@ def main():
     (RUN_ROOT / "manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
     )
-    print(f"\nTotal unique BSR rows: {len(all_rows)} across {len(BSR_OFFSETS)} pages")
+    print(f"\nTotal unique BSR rows: {len(all_rows)} across {len(processed_offsets)} pages")
     print(f"csv={CSV_PATH}")
 
 

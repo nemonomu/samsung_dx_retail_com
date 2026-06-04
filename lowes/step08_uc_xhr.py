@@ -631,7 +631,12 @@ def review_response_labels(responses):
 
 def reviews_success(responses):
     labels = review_response_labels(responses)
-    return bool(labels) and all((responses.get(label) or {}).get('status') == 200 for label in labels)
+    if not labels:
+        return False
+    # Keep the original baseline strictness for the first two review pages.
+    # Supplemental pages are best-effort so a late pagination hiccup does not drop the SKU.
+    required_labels = labels[:2]
+    return all((responses.get(label) or {}).get('status') == 200 for label in required_labels)
 
 
 def build_row(src, sku, responses, serving_store=None):

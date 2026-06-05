@@ -103,6 +103,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             "country",
             "product",
             "item",
+            "sku",
             "account_name",
             "page_type",
             "count_of_reviews",
@@ -137,6 +138,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             "country",
             "product",
             "item",
+            "sku",
             "account_name",
             "page_type",
             "count_of_reviews",
@@ -252,6 +254,29 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn("call :record_category HHP", script)
         self.assertIn("completed with failures", script)
         self.assertNotIn("if errorlevel 1 goto :fail", script)
+
+    def test_sos_refill_preserves_operational_call_units(self):
+        script = (ROOT / "bestbuy" / "sos_refill.py").read_text(encoding="utf-8")
+        bat = (ROOT / "bby_sos_refill.bat").read_text(encoding="utf-8")
+
+        self.assertIn('"BESTBUY_LISTING_MAX_ATTEMPTS": "3"', script)
+        self.assertIn('"BESTBUY_DETAIL_SKU_BATCH_SIZE": "5"', script)
+        self.assertIn('"BESTBUY_AVAILABILITY_BACKFILL_CHUNK_SIZE": "1"', script)
+        self.assertIn('candidate_mode = "all_rows" if refresh_all_availability else "blank_all"', script)
+        self.assertIn('"BESTBUY_AVAILABILITY_BACKFILL_CLEAR_EXISTING_FIELDS": "0"', script)
+        self.assertIn('"BESTBUY_DB_UPDATE_SIMILAR_ONLY": "0"', script)
+        self.assertIn("SOS safety check blocked DB load", script)
+        self.assertIn("detail_refill_skus", script)
+        self.assertIn("[sos:scope] detail_skus=", script)
+        self.assertIn("merge_existing_nonblank_values", script)
+        self.assertIn("TIMESTAMP_FIELDS", script)
+        self.assertIn("duplicate_numeric_values(final_rows, field)", script)
+        self.assertIn('"main_rank": 300', script)
+        self.assertIn('"bsr_rank": 100', script)
+        self.assertIn("missing_numeric_rank_values(final_rows, field, expected_max)", script)
+        self.assertIn("apply_cached_availability_values(run_root, log_handle)", script)
+        self.assertIn("parse_fulfillment_response", script)
+        self.assertIn("python -m bestbuy.sos_refill", bat)
 
     def test_tv_and_hhp_daily_wrappers_force_production_env(self):
         tv_script = (ROOT / "bby_tv_daily_task.bat").read_text(encoding="utf-8")
@@ -751,6 +776,41 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
 
         self.assertEqual(len(selected), 1)
 
+    def test_final_targets_merge_bsr_rank_by_shared_bsin_when_sku_differs(self):
+        main_rows = [
+            {
+                "sku_id": "11961800",
+                "bsin": "J3P3229L6X",
+                "main_rank": "13",
+                "page": "1",
+                "product_name": "Bosch refrigerator",
+                "product_url": "https://www.bestbuy.com/product/bosch/J3P3229L6X/sku/11961800",
+            }
+        ]
+        bsr_rows = [
+            {
+                "sku_id": "6590343",
+                "bsin": "J3P3229L6X",
+                "bsr_rank": "64",
+                "source_page": "1",
+                "product_name": "Bosch refrigerator",
+                "product_url": "https://www.bestbuy.com/product/bosch/J3P3229L6X/sku/6590343",
+            }
+        ]
+
+        bsr = final_targets_step.build_bsr_map(bsr_rows)
+        enriched = final_targets_step.enrich_rows(main_rows, bsr, {}, {}, {})
+
+        self.assertEqual(enriched[0]["sku_id"], "11961800")
+        self.assertEqual(enriched[0]["bsr_rank"], "64")
+
+        product_rows = final_targets_step.product_list_rows(
+            enriched,
+            final_targets_step.bsr_page_map(bsr_rows),
+        )
+        self.assertEqual(product_rows[0]["bsr_rank"], "64")
+        self.assertEqual(product_rows[0]["bsr_page_number"], "1")
+
     def test_product_list_price_normalization_handles_money_text(self):
         self.assertEqual(
             final_targets_step.normalized_product_list_prices("999.99", "1,199.99", ""),
@@ -1015,6 +1075,40 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertEqual(non_target_spec_attrs["ldy_capacity"], "")
         self.assertEqual(non_target_spec_attrs["ldy_loading_type"], "")
 
+        capacity_section_attrs = ldy_attributes_from_product(
+            [
+                {
+                    "specificationGroups": [
+                        {
+                            "name": "Capacity",
+                            "specifications": [
+                                {"displayName": "Washer Capacity", "value": "5.3 cubic feet"},
+                            ],
+                        }
+                    ]
+                }
+            ],
+            "Samsung washer",
+        )
+        self.assertEqual(capacity_section_attrs["ldy_capacity"], "5.3 cubic feet")
+
+        washer_dryer_capacity_attrs = ldy_attributes_from_product(
+            [
+                {
+                    "specificationGroups": [
+                        {
+                            "name": "Capacity",
+                            "specifications": [
+                                {"displayName": "Washer Dryer Capacity", "value": "2.8 cubic feet"},
+                            ],
+                        }
+                    ]
+                }
+            ],
+            "LG washer dryer combo",
+        )
+        self.assertEqual(washer_dryer_capacity_attrs["ldy_capacity"], "2.8 cubic feet")
+
         spec_value_attrs = ldy_attributes_from_product(
             [
                 {
@@ -1074,6 +1168,41 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             "KitchenAid - 36 in. Wide 26 cu. ft. Multi-Door French Door Refrigerator",
         )
         self.assertEqual(non_total_spec_attrs["ref_capacity"], "26 cubic feet")
+
+        refrigerator_capacity_attrs = ref_attributes_from_product(
+            [
+                {
+                    "specificationGroups": [
+                        {
+                            "name": "Capacity",
+                            "specifications": [
+                                {"displayName": "Refrigerator Capacity", "value": "2.3 cubic feet"},
+                                {"displayName": "Freezer Capacity", "value": "1 cubic feet"},
+                            ],
+                        }
+                    ]
+                }
+            ],
+            "Compact refrigerator",
+        )
+        self.assertEqual(refrigerator_capacity_attrs["ref_capacity"], "2.3 cubic feet")
+
+        freezer_only_attrs = ref_attributes_from_product(
+            [
+                {
+                    "specificationGroups": [
+                        {
+                            "name": "Capacity",
+                            "specifications": [
+                                {"displayName": "Freezer Capacity", "value": "1 cubic feet"},
+                            ],
+                        }
+                    ]
+                }
+            ],
+            "Compact refrigerator",
+        )
+        self.assertEqual(freezer_only_attrs["ref_capacity"], "")
 
         drawer_attrs = ref_attributes_from_product(
             [],

@@ -44,6 +44,12 @@ USE_DB_SELECTORS = os.getenv("BESTBUY_DETAIL_USE_DB_SELECTORS", "1").lower() in 
 LIMIT = int(os.getenv("BESTBUY_DETAIL_LIMIT", "0"))
 MAX_ATTEMPTS = int(os.getenv("BESTBUY_DETAIL_MAX_ATTEMPTS", "3"))
 AUTO_RETRY = os.getenv("BESTBUY_DETAIL_AUTO_RETRY", "1").lower() in {"1", "true", "yes", "y"}
+DETAIL_RETRY_SLEEP_SECONDS = float(os.getenv("BESTBUY_DETAIL_RETRY_SLEEP_SECONDS", "2"))
+DETAIL_RETRY_STATUS_CODES = {
+    int(value)
+    for value in re.split(r"[,\s]+", os.getenv("BESTBUY_DETAIL_RETRY_STATUS_CODES", "408,409,422,425,429,500,502,503,504"))
+    if value.strip().isdigit()
+}
 RETRY_ONLY = os.getenv("BESTBUY_DETAIL_RETRY_ONLY", "0").lower() in {"1", "true", "yes", "y"}
 RETRY_MISSING_SIMILAR = os.getenv("BESTBUY_DETAIL_RETRY_MISSING_SIMILAR", "0").lower() in {"1", "true", "yes", "y"}
 REBUILD_ONLY = os.getenv("BESTBUY_DETAIL_REBUILD_ONLY", "0").lower() in {"1", "true", "yes", "y"}
@@ -3051,6 +3057,39 @@ def detail_batch_request_entries(targets):
     return request_payload, entries
 
 
+def detail_status_code_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def detail_batch_success_count(response_json, entries, status_code):
+    if detail_status_code_int(status_code) != 200:
+        return 0
+    count = 0
+    for entry in entries:
+        indices = entry.get("indices") or {}
+        sku = str(entry.get("sku") or "")
+        detail_response_json = graphql_batch_response_item(response_json, indices.get("detail", -1))
+        product = (
+            ((detail_response_json.get("data") or {}).get("productBySkuId") or {})
+            if isinstance(detail_response_json, dict)
+            else {}
+        )
+        if isinstance(product, dict) and str(product.get("skuId") or "") == sku:
+            count += 1
+    return count
+
+
+def retryable_detail_batch_result(status_code, response_json, entries, error=""):
+    if detail_batch_success_count(response_json, entries, status_code) > 0:
+        return False
+    if status_code == "ERR" or error:
+        return True
+    return detail_status_code_int(status_code) in DETAIL_RETRY_STATUS_CODES
+
+
 def detail_payloads(sku):
     paths = detail_paths(sku)
     if paths.get("apollo") and paths["apollo"].exists():
@@ -3488,36 +3527,65 @@ def fetch_detail_sku_batch(client, targets):
     for transport in fetch_transports():
         if transport == "zenrows" and not client:
             continue
-        start = time.perf_counter()
         response = None
         response_json = {}
         text = ""
         headers = {}
         error = ""
-        try:
-            response = client.post(
-                "https://www.bestbuy.com/gateway/graphql",
-                params=graphql_params(),
-                headers={
-                    "accept": "application/json, text/plain, */*",
-                    "content-type": "application/json",
-                    "origin": "https://www.bestbuy.com",
-                    "referer": entries[0]["pdp_url"],
-                },
-                data=json.dumps(request_payload),
-                timeout=REQUEST_TIMEOUT,
-            )
-            text = response.text
-            headers = dict(response.headers)
+        batch_started = time.perf_counter()
+        batch_attempts = 0
+        total_batch_cost = 0.0
+        attempt_status_codes = []
+        attempt_costs = []
+        attempt_errors = []
+        for batch_attempt in range(1, MAX_ATTEMPTS + 1):
+            batch_attempts = batch_attempt
+            start = time.perf_counter()
+            response = None
+            response_json = {}
+            text = ""
+            headers = {}
+            error = ""
             try:
-                response_json = response.json()
-            except ValueError:
-                response_json = {}
-        except RequestException as exc:
-            error = str(exc)
+                response = client.post(
+                    "https://www.bestbuy.com/gateway/graphql",
+                    params=graphql_params(),
+                    headers={
+                        "accept": "application/json, text/plain, */*",
+                        "content-type": "application/json",
+                        "origin": "https://www.bestbuy.com",
+                        "referer": entries[0]["pdp_url"],
+                    },
+                    data=json.dumps(request_payload),
+                    timeout=REQUEST_TIMEOUT,
+                )
+                text = response.text
+                headers = dict(response.headers)
+                try:
+                    response_json = response.json()
+                except ValueError:
+                    response_json = {}
+            except RequestException as exc:
+                error = str(exc)
 
-        elapsed = round(time.perf_counter() - start, 3)
-        batch_cost = request_cost(response.headers) if response is not None else 0
+            attempt_cost = request_cost(response.headers) if response is not None else 0
+            total_batch_cost += attempt_cost
+            status_code = response.status_code if response is not None else "ERR"
+            attempt_status_codes.append(str(status_code))
+            attempt_costs.append(str(attempt_cost))
+            if error:
+                attempt_errors.append(error)
+            if (
+                not AUTO_RETRY
+                or batch_attempt >= MAX_ATTEMPTS
+                or not retryable_detail_batch_result(status_code, response_json, entries, error)
+            ):
+                break
+            if DETAIL_RETRY_SLEEP_SECONDS > 0:
+                time.sleep(DETAIL_RETRY_SLEEP_SECONDS)
+
+        elapsed = round(time.perf_counter() - batch_started, 3)
+        batch_cost = total_batch_cost
         split_cost = batch_cost / len(entries) if entries else 0
         status_code = response.status_code if response is not None else "ERR"
         response_count = len(response_json) if isinstance(response_json, list) else (1 if isinstance(response_json, dict) else 0)
@@ -3531,6 +3599,7 @@ def fetch_detail_sku_batch(client, targets):
                 "attempt": 1,
                 "started_at": now(),
             }
+            attempt_value = min(MAX_ATTEMPTS, int(meta.get("attempt") or 1) + max(0, batch_attempts - 1))
             indices = entry["indices"]
             detail_response_json = graphql_batch_response_item(response_json, indices.get("detail", -1))
             review_response_json = graphql_batch_response_item(response_json, indices.get("review", -1))
@@ -3666,7 +3735,7 @@ def fetch_detail_sku_batch(client, targets):
                         "sku_id": sku,
                         "stage": "review20",
                         "url": entry["pdp_url"],
-                        "attempt": meta.get("attempt", 1),
+                        "attempt": attempt_value,
                         "started_at": meta.get("started_at"),
                         "success": review_ok,
                         "status_code": status_code,
@@ -3716,7 +3785,7 @@ def fetch_detail_sku_batch(client, targets):
                             "sku_id": sku,
                             "stage": "compare",
                             "url": entry["pdp_url"],
-                            "attempt": meta.get("attempt", 1),
+                            "attempt": attempt_value,
                             "started_at": meta.get("started_at"),
                             "success": compare_ok,
                             "status_code": status_code,
@@ -3740,6 +3809,7 @@ def fetch_detail_sku_batch(client, targets):
             meta.update(
                 {
                     "success": success,
+                    "attempt": attempt_value,
                     "status_code": status_code,
                     "transport": transport,
                     "fetch_mode": FETCH_MODE,
@@ -3753,6 +3823,10 @@ def fetch_detail_sku_batch(client, targets):
                     "x_request_cost": split_cost,
                     "x_request_cost_total": split_cost,
                     "batch_x_request_cost": batch_cost,
+                    "run_attempts": batch_attempts,
+                    "attempt_status_codes": ",".join(attempt_status_codes),
+                    "attempt_costs": ",".join(attempt_costs),
+                    "attempt_errors": " | ".join(attempt_errors[-3:]),
                     "bytes": artifact_meta["full_bytes"],
                     "stored_bytes": artifact_meta["stored_bytes"],
                     "html_mode": artifact_meta["html_mode"],
@@ -4503,6 +4577,23 @@ def spec_value_by_names(products, display_names):
     return ""
 
 
+def spec_value_by_group_and_names(products, group_names, display_names):
+    wanted_groups = {str(name or "").strip().lower() for name in group_names if str(name or "").strip()}
+    wanted_names = {str(name or "").strip().lower() for name in display_names if str(name or "").strip()}
+    if not wanted_groups or not wanted_names:
+        return ""
+    for product in reversed(products):
+        for group in product.get("specificationGroups") or []:
+            group_name = str(group.get("name") or "").strip().lower()
+            if group_name not in wanted_groups:
+                continue
+            for spec in group.get("specifications") or []:
+                name = str(spec.get("displayName") or "").strip().lower()
+                if name in wanted_names:
+                    return spec.get("value", "")
+    return ""
+
+
 def spec_value_containing(products, *needles):
     needles = [str(value or "").strip().lower() for value in needles if str(value or "").strip()]
     if not needles:
@@ -4535,7 +4626,19 @@ def ref_type_from_name(product_name):
 
 
 def ldy_attributes_from_product(products, product_name):
-    capacity = spec_value_by_names(products, ["Capacity"])
+    capacity = first_non_empty(
+        spec_value_by_names(products, ["Capacity"]),
+        spec_value_by_group_and_names(
+            products,
+            ["Capacity"],
+            [
+                "Washer Capacity",
+                "Washer Capacity (cu. ft.)",
+                "Washer Dryer Capacity",
+                "Washer Dryer Capacity (cu. ft.)",
+            ],
+        ),
+    )
     loading_type = spec_value_by_names(products, ["Washer Load Type"])
     return {
         "ldy_capacity": capacity,
@@ -4552,6 +4655,7 @@ def ref_attributes_from_product(products, product_name):
                 "Total Capacity (cu. ft.)",
                 "Total Interior Capacity",
                 "Total Volume",
+                "Refrigerator Capacity",
             ],
         ),
         spec_value_containing(products, "total", "capacity"),

@@ -207,13 +207,46 @@ def build_bsr_map(rows):
     return result
 
 
+def build_bsr_identity_map(rows):
+    result = {}
+    sorted_rows = sorted(rows, key=lambda row: int_value(row.get("bsr_rank")))
+    for row in sorted_rows:
+        if BSR_RANK_LIMIT > 0 and int_value(row.get("bsr_rank")) > BSR_RANK_LIMIT:
+            continue
+        for key in row_identity_keys(row):
+            result.setdefault(key, dict(row))
+    return result
+
+
+def lookup_bsr_row(row, bsr, bsr_identity):
+    sku = str(row.get("sku_id") or "").strip()
+    if sku and sku in bsr:
+        return bsr[sku]
+    for key in row_identity_keys(row):
+        if key in bsr_identity:
+            return bsr_identity[key]
+    return {}
+
+
 def bsr_page_map(rows):
     result = {}
     for row in rows:
         sku = str(row.get("sku_id") or "").strip()
         if sku and sku not in result:
             result[sku] = row.get("source_page", "")
+        for key in row_identity_keys(row):
+            result.setdefault(key, row.get("source_page", ""))
     return result
+
+
+def lookup_bsr_page(row, bsr_pages):
+    sku = str(row.get("sku_id") or "").strip()
+    if sku and bsr_pages.get(sku):
+        return bsr_pages.get(sku, "")
+    for key in row_identity_keys(row):
+        if bsr_pages.get(key):
+            return bsr_pages.get(key, "")
+    return ""
 
 
 def promotion_map(rows):
@@ -351,14 +384,16 @@ def row_from_bsr_only(row):
 
 def enrich_rows(rows, bsr, promotions, trends, main_attrs):
     output = []
+    bsr_identity = build_bsr_identity_map(bsr.values())
     for index, row in enumerate(rows, 1):
         sku = str(row.get("sku_id") or "").strip()
         out = dict(row)
+        bsr_attrs = lookup_bsr_row(out, bsr, bsr_identity)
         out["category_key"] = first_non_empty(out.get("category_key"), CATEGORY)
         out["final_target_rank"] = index
         out["sku_id"] = sku
         out["detail_url"] = old_pdp_url(sku) if sku else ""
-        out["bsr_rank"] = (bsr.get(sku) or {}).get("bsr_rank", "")
+        out["bsr_rank"] = bsr_attrs.get("bsr_rank", "")
         out["promotion_type"] = (promotions.get(sku) or {}).get("promotion_type", "")
         out["promotion_position"] = (promotions.get(sku) or {}).get("promotion_position", "")
         out["trend_rank"] = (trends.get(sku) or {}).get("trend_rank", "")
@@ -368,7 +403,6 @@ def enrich_rows(rows, bsr, promotions, trends, main_attrs):
         if row_is_sponsored(attrs) or row_is_sponsored(out):
             out["is_sponsored"] = "True"
             out["sku_status"] = "Sponsored"
-        bsr_attrs = bsr.get(sku) or {}
         for key, value in bsr_attrs.items():
             if key in {"is_sponsored", "sku_status"}:
                 continue
@@ -524,7 +558,7 @@ def product_list_rows(rows, bsr_pages):
             "calendar_week": calendar_week(),
             "batch_id": batch_id,
             "main_page_number": row.get("page", "") if row.get("main_rank") else "",
-            "bsr_page_number": bsr_pages.get(sku, ""),
+            "bsr_page_number": lookup_bsr_page(row, bsr_pages),
             "sku_id": sku,
             "category_key": row.get("category_key", CATEGORY),
             "final_target_rank": row.get("final_target_rank", ""),

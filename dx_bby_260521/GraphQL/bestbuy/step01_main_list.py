@@ -36,6 +36,13 @@ INCLUDE_SPONSORED_CAROUSEL = os.getenv("BESTBUY_INCLUDE_SPONSORED_CAROUSEL", "0"
 }
 REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "120"))
 FETCH_MODE = os.getenv("BESTBUY_FETCH_MODE", os.getenv("BESTBUY_GRAPHQL_FETCH_MODE", "zenrows")).strip().lower()
+LISTING_MAX_ATTEMPTS = max(1, int(os.getenv("BESTBUY_LISTING_MAX_ATTEMPTS", "3")))
+LISTING_RETRY_SLEEP_SECONDS = float(os.getenv("BESTBUY_LISTING_RETRY_SLEEP_SECONDS", "2"))
+LISTING_RETRY_STATUS_CODES = {
+    int(value)
+    for value in re.split(r"[,\s]+", os.getenv("BESTBUY_LISTING_RETRY_STATUS_CODES", "408,409,422,425,429,500,502,503,504"))
+    if value.strip().isdigit()
+}
 RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
 RUN_ID = os.getenv("BESTBUY_MAIN_RUN_ID", "main")
 RUN_ROOT = Path(os.getenv("BESTBUY_RUN_ROOT", DEFAULT_BESTBUY_RUN_ROOT)) / RUN_ID
@@ -619,9 +626,37 @@ def page_summary(page, rows, meta, response_json):
         ),
         "graphql_error_preview": json.dumps(errors[:2], ensure_ascii=False)[:500] if errors else "",
         "response_path": meta["response_json_path"] or meta["response_path"],
+        "attempt_count": meta.get("attempt_count", 1),
+        "attempt_status_codes": meta.get("attempt_status_codes", str(meta.get("status_code", ""))),
+        "attempt_costs": meta.get("attempt_costs", str(meta.get("x_request_cost", ""))),
+        "attempt_errors": meta.get("attempt_errors", ""),
     }
     summary.update(fulfillment_counts)
     return summary
+
+
+def status_code_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def retryable_listing_result(rows, meta, response_json):
+    if rows:
+        return False
+    status_code = meta.get("status_code")
+    if status_code == "ERR":
+        return True
+    try:
+        status_code = int(status_code)
+    except (TypeError, ValueError):
+        return False
+    if status_code in LISTING_RETRY_STATUS_CODES:
+        return True
+    if status_code == 200 and not response_json:
+        return True
+    return False
 
 
 def main():
@@ -661,32 +696,64 @@ def main():
             rows = []
             meta = {}
             source = "network"
-            for transport in fetch_transports():
-                if transport == "zenrows" and not client:
-                    continue
-                try:
-                    response, started_at, finished_at, elapsed, transport = post_graphql(client, payload, page, transport)
-                    response_json, meta = save_page_artifacts(page, payload, response, started_at, finished_at, elapsed, transport)
-                    rows = parse_page_rows(page, response_json) if response.status_code == 200 else []
-                except RequestException as exc:
-                    meta = {
-                        "page": page,
-                        "url": build_search_url(page),
-                        "started_at": now(),
-                        "finished_at": now(),
-                        "elapsed_seconds": 0,
-                        "transport": transport,
-                        "fetch_mode": FETCH_MODE,
-                        "status_code": "ERR",
-                        "x_request_cost": "",
-                        "bytes": 0,
-                        "parse_error": "",
-                        "error": str(exc),
-                        "response_json_path": "",
-                        "response_path": "",
-                    }
-                if rows:
+            attempt_status_codes = []
+            attempt_costs = []
+            attempt_errors = []
+            for attempt in range(1, LISTING_MAX_ATTEMPTS + 1):
+                for transport in fetch_transports():
+                    if transport == "zenrows" and not client:
+                        continue
+                    try:
+                        response, started_at, finished_at, elapsed, transport = post_graphql(
+                            client,
+                            payload,
+                            page,
+                            transport,
+                        )
+                        response_json, meta = save_page_artifacts(
+                            page,
+                            payload,
+                            response,
+                            started_at,
+                            finished_at,
+                            elapsed,
+                            transport,
+                        )
+                        rows = parse_page_rows(page, response_json) if response.status_code == 200 else []
+                    except RequestException as exc:
+                        response_json = {}
+                        rows = []
+                        meta = {
+                            "page": page,
+                            "url": build_search_url(page),
+                            "started_at": now(),
+                            "finished_at": now(),
+                            "elapsed_seconds": 0,
+                            "transport": transport,
+                            "fetch_mode": FETCH_MODE,
+                            "status_code": "ERR",
+                            "x_request_cost": "",
+                            "bytes": 0,
+                            "parse_error": "",
+                            "error": str(exc),
+                            "response_json_path": "",
+                            "response_path": "",
+                        }
+                    attempt_status_codes.append(str(meta.get("status_code", "")))
+                    attempt_costs.append(str(meta.get("x_request_cost", "")))
+                    if meta.get("error"):
+                        attempt_errors.append(str(meta.get("error")))
+                    if rows or not retryable_listing_result(rows, meta, response_json):
+                        break
+                if rows or not retryable_listing_result(rows, meta, response_json):
                     break
+                if attempt < LISTING_MAX_ATTEMPTS and LISTING_RETRY_SLEEP_SECONDS > 0:
+                    time.sleep(LISTING_RETRY_SLEEP_SECONDS)
+            meta["attempt_count"] = len(attempt_status_codes)
+            meta["attempt_status_codes"] = ",".join(attempt_status_codes)
+            meta["attempt_costs"] = ",".join(attempt_costs)
+            if attempt_errors:
+                meta["attempt_errors"] = " | ".join(attempt_errors[-3:])
             source = "network"
         all_rows.extend(rows)
         summary = page_summary(page, rows, meta, response_json)
@@ -726,10 +793,12 @@ def main():
     run_elapsed = round(time.perf_counter() - run_start, 3)
     total_cost = 0.0
     for summary in page_benchmarks:
-        try:
-            total_cost += float(summary.get("x_request_cost") or 0)
-        except ValueError:
-            pass
+        costs = str(summary.get("attempt_costs") or summary.get("x_request_cost") or "").split(",")
+        for cost in costs:
+            try:
+                total_cost += float(cost or 0)
+            except ValueError:
+                pass
     manifest = {
         "run_type": "step01_main_list",
         "run_root": rel_path(RUN_ROOT),
@@ -749,7 +818,17 @@ def main():
         "source_template": operation.get("source_path", ""),
         "source_template_type": operation.get("source_type", ""),
         "expected_post_calls": SEARCH_PAGES,
-        "actual_post_calls": len(page_benchmarks),
+        "actual_post_calls": sum(int(summary.get("attempt_count") or 1) for summary in page_benchmarks),
+        "page_count": len(page_benchmarks),
+        "retry_attempt_count": sum(max(0, int(summary.get("attempt_count") or 1) - 1) for summary in page_benchmarks),
+        "failed_pages": [
+            int(summary.get("page"))
+            for summary in page_benchmarks
+            if status_code_int(summary.get("status_code")) != 200
+            or int(summary.get("total_occurrence_count") or 0) == 0
+        ],
+        "listing_max_attempts": LISTING_MAX_ATTEMPTS,
+        "listing_retry_status_codes": sorted(LISTING_RETRY_STATUS_CODES),
         "total_x_request_cost": round(total_cost, 7),
         "main_occurrences": len(all_rows),
         "unique_skus": len({row.get("sku_id") for row in all_rows if row.get("sku_id")}),

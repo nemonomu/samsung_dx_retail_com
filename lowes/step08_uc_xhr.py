@@ -459,9 +459,17 @@ def parse_productdetail(sku, body):
     capacity_refrigerator = ''
     load_type = ''
     washer_capacity = ''
+    washer_dryer_capacity = ''
     for s in specs:
         key = (s.get('key') or '').strip()
         val = s.get('value', '')
+        key_norm = ' '.join(
+            key.lower()
+            .replace('/', ' ')
+            .replace('&', ' and ')
+            .replace('-', ' ')
+            .split()
+        )
         if key == 'Appliance Type':
             appliance_type = val
         elif key.startswith('Overall Capacity'):
@@ -472,11 +480,17 @@ def parse_productdetail(sku, body):
             load_type = val
         elif key.startswith('Washer Capacity'):
             washer_capacity = val
+        elif (
+            key_norm.startswith('washer dryer capacity')
+            or key_norm.startswith('washer and dryer capacity')
+        ):
+            washer_dryer_capacity = val
 
     product_kind = (lowes_product_type() or 'ref').upper()
     if product_kind == 'LDY':
+        ldy_capacity = washer_capacity or washer_dryer_capacity
         out['ldy_loading_type'] = load_type or appliance_type
-        out['ldy_capacity'] = f'{washer_capacity} Cu.Feet' if washer_capacity else ''
+        out['ldy_capacity'] = f'{ldy_capacity} Cu.Feet' if ldy_capacity else ''
     else:
         ref_type = appliance_type or _category_fallback_ref_type(product.get('categories', {}))
         out['ref_refrigerator_type'] = ref_type

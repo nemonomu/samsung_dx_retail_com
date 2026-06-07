@@ -2,10 +2,9 @@
 Detail/Review enrichment via UC + 4 XHR per SKU (Plan D).
 
 One UC browser session navigates to lowes.com (seed Akamai cookies),
-then iterates final_targets SKUs doing 4 same-origin XHRs each:
+then iterates final_targets SKUs doing same-origin XHRs:
   - GET  /wpd/{sku}/productdetail/{store}/Guest    (covers fields 41,42,46-50)
-  - GET  /rnr/r/get-by-product/{sku}?sortBy=newestFirst         (covers 51,52, 53 first 10)
-  - GET  /rnr/r/get-by-product/{sku}?sortBy=newestFirst&offset=10 (covers 53 next 10)
+  - GET  /rnr/r/get-by-product/{sku}?sortBy=newestFirst&offset=N (covers 51,52, 53 reviews)
   - POST /pythia-recs-svc/v2/compare                            (covers 54)
 
 Zero ZenRows cost. Spec 41~54 fully covered (43/44/45 saved as raw labels).
@@ -218,6 +217,40 @@ def review_result_count_from_body(body):
     return len(obj.get('results') or [])
 
 
+def review_has_media(review):
+    if not isinstance(review, dict):
+        return False
+    has_media = review.get('hasMediaContent')
+    if isinstance(has_media, str):
+        if has_media.strip().lower() in {'1', 'true', 'yes', 'y'}:
+            return True
+    elif has_media is True:
+        return True
+    for key in ('photos', 'photoUrls', 'videos'):
+        if review.get(key):
+            return True
+    return False
+
+
+def review_output_text(review):
+    if not isinstance(review, dict):
+        return ''
+    text = (review.get('reviewText') or '').strip()
+    if text:
+        return text
+    if review_has_media(review):
+        return REVIEW_EMPTY_TEXT
+    return ''
+
+
+def review_output_count_from_body(body):
+    try:
+        obj = json.loads(body) if body else {}
+    except Exception:
+        return 0
+    return sum(1 for review in (obj.get('results') or []) if review_output_text(review))
+
+
 def review_total_results_from_body(body):
     try:
         obj = json.loads(body) if body else {}
@@ -245,7 +278,7 @@ def fetch_reviews_until_target(driver, sku):
             break
 
         body = response.get('body', '') or ''
-        collected_reviews += review_result_count_from_body(body)
+        collected_reviews += review_output_count_from_body(body)
         if total_results is None:
             total_results = review_total_results_from_body(body)
 
@@ -567,8 +600,9 @@ def parse_reviews(sku, *review_bodies):
         out['_pdp_average_rating'] = stats.get('averageOverallRating', '')
         out['_pdp_total_reviews'] = stats.get('totalReviewCount', '')
         for r in (p1_obj.get('results') or []):
-            t = (r.get('reviewText') or '').strip()
-            review_texts.append(t or REVIEW_EMPTY_TEXT)
+            t = review_output_text(r)
+            if t:
+                review_texts.append(t)
     for body in review_bodies[1:]:
         try:
             obj = json.loads(body) if body else None
@@ -577,8 +611,13 @@ def parse_reviews(sku, *review_bodies):
         if not isinstance(obj, dict):
             continue
         for r in (obj.get('results') or []):
-            t = (r.get('reviewText') or '').strip()
-            review_texts.append(t or REVIEW_EMPTY_TEXT)
+            t = review_output_text(r)
+            if t:
+                review_texts.append(t)
+                if REVIEW_TARGET and len(review_texts) >= REVIEW_TARGET:
+                    break
+        if REVIEW_TARGET and len(review_texts) >= REVIEW_TARGET:
+            break
 
     out['recommendation_intent'] = rec_intent
     out['summarized_review_content'] = review_summary

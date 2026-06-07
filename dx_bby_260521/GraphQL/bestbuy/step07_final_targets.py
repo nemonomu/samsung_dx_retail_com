@@ -501,7 +501,7 @@ def normalized_product_list_prices(customer_price, regular_price, total_savings)
         return final_price, "", ""
     if comparable_value is None or comparable_value <= final_value:
         return final_price, "", ""
-    return final_price, comparable_price, money_int(comparable_value - final_value)
+    return final_price, comparable_price, money(comparable_value - final_value)
 
 
 def int_or_empty(value):

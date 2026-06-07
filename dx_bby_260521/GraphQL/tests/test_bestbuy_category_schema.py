@@ -814,11 +814,21 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
     def test_product_list_price_normalization_handles_money_text(self):
         self.assertEqual(
             final_targets_step.normalized_product_list_prices("999.99", "1,199.99", ""),
-            ("$999.99", "$1,199.99", "$200"),
+            ("$999.99", "$1,199.99", "$200.00"),
+        )
+        self.assertEqual(
+            final_targets_step.normalized_product_list_prices("$149.99", "$229.98", "$80"),
+            ("$149.99", "$229.98", "$79.99"),
         )
         self.assertEqual(
             final_targets_step.normalized_product_list_prices("$999.99", "$999.99", "$0"),
             ("$999.99", "", ""),
+        )
+
+    def test_detail_price_normalization_keeps_exact_savings_cents(self):
+        self.assertEqual(
+            detail_step.normalized_price_fields("$149.99", "$229.98", "$80"),
+            ("$149.99", "$229.98", "$79.99"),
         )
 
     def test_hhp_promotion_listing_is_explicitly_skipped(self):

@@ -202,6 +202,29 @@ def money_text(value, drop_cents_for_whole=False):
     return str(value)
 
 
+def numeric_money(value):
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    match = re.search(r"-?\d[\d,]*(?:\.\d+)?", text)
+    if not match:
+        return None
+    try:
+        return float(match.group(0).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def savings_money_text(customer_price, regular_price, total_savings=""):
+    final_value = numeric_money(customer_price)
+    original_value = numeric_money(regular_price)
+    if final_value is not None and original_value is not None and original_value > final_value:
+        return money_text(original_value - final_value)
+    return money_text(total_savings)
+
+
 def _date_to_listing_text(prefix, value):
     if not value:
         return ""
@@ -493,7 +516,7 @@ def parse_product(product, occurrence):
         "total_savings": total_savings,
         "final_sku_price": money_text(customer_price),
         "original_sku_price": money_text(regular_price),
-        "savings": money_text(total_savings, drop_cents_for_whole=True),
+        "savings": savings_money_text(customer_price, regular_price, total_savings),
         "total_savings_percent": price_value(price, "totalSavingsPercent"),
         "restricted_price_message": price.get("restrictedPriceDisplayMessage", "") if isinstance(price, dict) else "",
         "deal_expiration": price.get("dealExpirationTimeStamp", "") if isinstance(price, dict) else "",

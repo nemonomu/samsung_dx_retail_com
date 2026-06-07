@@ -9,7 +9,14 @@ from requests import RequestException
 
 from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, old_pdp_url, rel_path
 from .step00_parse_pdp import absolute_bestbuy_url, nested_get
-from .step00_parse_search import listing_availability_values, listing_offer_count, merge_dict, money_text, price_value
+from .step00_parse_search import (
+    listing_availability_values,
+    listing_offer_count,
+    merge_dict,
+    money_text,
+    price_value,
+    savings_money_text,
+)
 from .step00_sponsored_graphql import build_sponsored_payload, post_graphql, sponsored_product_map
 
 RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
@@ -177,7 +184,11 @@ def enrich_sponsored_row(row, product):
     row["total_savings_percent"] = row.get("total_savings_percent") or price_value(price, "totalSavingsPercent")
     row["final_sku_price"] = row.get("final_sku_price") or money_text(row.get("customer_price"))
     row["original_sku_price"] = row.get("original_sku_price") or money_text(row.get("regular_price"))
-    row["savings"] = row.get("savings") or money_text(row.get("total_savings"), drop_cents_for_whole=True)
+    row["savings"] = savings_money_text(
+        row.get("customer_price"),
+        row.get("regular_price"),
+        row.get("total_savings"),
+    ) or row.get("savings")
     row["offer"] = row.get("offer") or listing_offer_count(product)
     row["offer_count"] = row.get("offer_count") or row.get("offer", "")
 
@@ -219,7 +230,11 @@ def normalize_existing_listing_row(row):
     row["count_of_star_ratings"] = row.get("count_of_star_ratings") or row.get("review_count", "")
     row["final_sku_price"] = row.get("final_sku_price") or money_text(row.get("customer_price"))
     row["original_sku_price"] = row.get("original_sku_price") or money_text(row.get("regular_price"))
-    row["savings"] = row.get("savings") or money_text(row.get("total_savings"), drop_cents_for_whole=True)
+    row["savings"] = savings_money_text(
+        row.get("customer_price"),
+        row.get("regular_price"),
+        row.get("total_savings"),
+    ) or row.get("savings")
     if sku and not row.get("product_url"):
         row["product_url"] = old_pdp_url(sku)
     apply_listing_availability(row, raw_product)

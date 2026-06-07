@@ -580,7 +580,7 @@ def normalized_price_fields(final_price, original_price, savings=""):
     expected_savings = original_value - final_value
     if expected_savings <= 0:
         return final_price, "", ""
-    return final_price, original_price, money_int(expected_savings)
+    return final_price, original_price, money(expected_savings)
 
 
 def price_output_fields(price, target, selector_values):
@@ -595,7 +595,7 @@ def price_output_fields(price, target, selector_values):
         selector_values.get("original_sku_price"),
     )
     savings = first_non_empty(
-        money_int(price.get("totalSavings") or target.get("total_savings")),
+        money(price.get("totalSavings") or target.get("total_savings")),
         selector_values.get("savings"),
     )
     return normalized_price_fields(final_price, original_price, savings)

@@ -24,6 +24,7 @@ from .step00_parse_search import (
     money_text,
     pickup_availability_text,
     price_value,
+    savings_money_text,
 )
 
 RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
@@ -109,7 +110,7 @@ def extract_rows_from_response(response_json, placement):
                 "total_savings": total_savings,
                 "final_sku_price": money_text(customer_price),
                 "original_sku_price": money_text(regular_price),
-                "savings": money_text(total_savings, drop_cents_for_whole=True),
+                "savings": savings_money_text(customer_price, regular_price, total_savings),
                 "offer": offer_count,
                 "offer_count": offer_count,
                 "pick_up_availability": pickup_availability_text(pickup),

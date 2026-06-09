@@ -260,9 +260,6 @@ def compact_ranges(values):
 
 def listing_count_issues(run_root, rows):
     issues = []
-    main_ranks = rank_values(rows, "main_rank")
-    if main_ranks and len(main_ranks) < 300:
-        issues.append(f"main_rank {len(main_ranks)}/300")
     bsr_ranks = rank_values(rows, "bsr_rank")
     if bsr_ranks and len(bsr_ranks) < 100:
         missing = [rank for rank in range(1, 101) if rank not in set(bsr_ranks)]

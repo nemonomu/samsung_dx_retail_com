@@ -29,7 +29,7 @@ load_env(PROJECT_ROOT / ".env")
 
 SEARCH_TERM = os.getenv("LOWES_SEARCH_TERM", "refrigerator")
 PAGE_SIZE = int(os.getenv("LOWES_PAGE_SIZE", "24"))
-PAGES = int(os.getenv("LOWES_PAGES", "13"))
+PAGES = int(os.getenv("LOWES_PAGES", "14"))
 PAGE_LIST = os.getenv("LOWES_PAGE_LIST", "").strip()
 MAX_WORKERS = int(os.getenv("LOWES_PAGE_WORKERS", "4"))
 REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "300"))

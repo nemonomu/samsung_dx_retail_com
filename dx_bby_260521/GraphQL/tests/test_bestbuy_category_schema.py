@@ -184,6 +184,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
 
     def test_db_row_upsert_filters_by_sku_and_requires_filter_by_default(self):
         old_skus = db_load_step.ROW_UPSERT_SKUS
+        old_items = db_load_step.ROW_UPSERT_ITEMS
         old_allow_all = db_load_step.ROW_UPSERT_ALLOW_ALL
         old_nonblank = db_load_step.ROW_UPSERT_NONBLANK_ONLY
         try:
@@ -209,6 +210,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
                 ("product_url", "text"),
             ]
             db_load_step.ROW_UPSERT_SKUS = set()
+            db_load_step.ROW_UPSERT_ITEMS = set()
             db_load_step.ROW_UPSERT_ALLOW_ALL = False
             result = db_load_step.row_upsert_rows(None, "bby_ref_product_list", columns, rows, dry_run=True)
             self.assertEqual(result["candidate_rows"], 0)
@@ -218,8 +220,20 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             result = db_load_step.row_upsert_rows(None, "bby_ref_product_list", columns, rows, dry_run=True)
             self.assertEqual(result["candidate_rows"], 1)
             self.assertEqual(result["updated"], 1)
+
+            db_load_step.ROW_UPSERT_SKUS = set()
+            db_load_step.ROW_UPSERT_ITEMS = {"j2fpjk9xtp"}
+            result = db_load_step.row_upsert_rows(
+                None,
+                "ref_retail_com",
+                [("id", "serial"), ("batch_id", "text"), ("item", "text"), ("sku", "text")],
+                [{"batch_id": "b_test", "item": "J2FPJK9XTP", "sku": "NS-RBM18SS0"}],
+                dry_run=True,
+            )
+            self.assertEqual(result["candidate_rows"], 1)
         finally:
             db_load_step.ROW_UPSERT_SKUS = old_skus
+            db_load_step.ROW_UPSERT_ITEMS = old_items
             db_load_step.ROW_UPSERT_ALLOW_ALL = old_allow_all
             db_load_step.ROW_UPSERT_NONBLANK_ONLY = old_nonblank
 
@@ -252,10 +266,12 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
                 return self._fetchone
 
         old_skus = db_load_step.ROW_UPSERT_SKUS
+        old_items = db_load_step.ROW_UPSERT_ITEMS
         old_allow_all = db_load_step.ROW_UPSERT_ALLOW_ALL
         old_nonblank = db_load_step.ROW_UPSERT_NONBLANK_ONLY
         try:
             db_load_step.ROW_UPSERT_SKUS = {"111"}
+            db_load_step.ROW_UPSERT_ITEMS = set()
             db_load_step.ROW_UPSERT_ALLOW_ALL = False
             db_load_step.ROW_UPSERT_NONBLANK_ONLY = True
             cur = FakeCursor()
@@ -270,6 +286,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             self.assertEqual(cur.insert_calls, 0)
         finally:
             db_load_step.ROW_UPSERT_SKUS = old_skus
+            db_load_step.ROW_UPSERT_ITEMS = old_items
             db_load_step.ROW_UPSERT_ALLOW_ALL = old_allow_all
             db_load_step.ROW_UPSERT_NONBLANK_ONLY = old_nonblank
 

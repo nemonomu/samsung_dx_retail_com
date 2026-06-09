@@ -3871,11 +3871,23 @@ def target_needs_detail_batch_refill(target):
         return False
     if not detail_success(sku):
         return True
-    if review20_required_for_target(target, sku) and review_needs_retry(target):
+    if review20_required_for_target(target, sku) and review_meta_needs_detail_batch_refill(target, sku):
         return True
     if FETCH_COMPARE and not compare_success(sku) and not compare_success_with_zero_recommendations(sku):
         return True
     return False
+
+
+def review_meta_needs_detail_batch_refill(target, sku):
+    review_info = (first_value(products_from_detail(sku), "reviewInfo") or {})
+    if is_external_review_source(target, review_info):
+        return False
+    expected_count = expected_review_count(target, sku)
+    if expected_count in (None, 0):
+        return False
+    if not review_success(sku):
+        return True
+    return not bool(review20_content(sku))
 
 
 def detail_batch_chunks(targets, size):

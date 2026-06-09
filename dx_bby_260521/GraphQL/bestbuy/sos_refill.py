@@ -447,6 +447,7 @@ def base_env(category, run_root, batch_id, preserve_table_env=False):
             "BESTBUY_DB_ROW_UPSERT_NONBLANK_ONLY": "1",
             "BESTBUY_DB_ROW_UPSERT_ALLOW_ALL": "0",
             "BESTBUY_DB_ROW_UPSERT_SKUS": "",
+            "BESTBUY_DB_ROW_UPSERT_ITEMS": "",
             "BESTBUY_DB_LOAD_DRY_RUN": "0",
             "BESTBUY_DB_PREPARE_ADD_MISSING_COLUMNS": "1",
             "BESTBUY_S3_SYNC_SKIP": "1",
@@ -747,8 +748,16 @@ def main():
             for step in selected_steps(args.refresh_join_sources, args.no_db_load):
                 if step.name == "detail_html":
                     scoped_skus = detail_refill_skus(existing_rows, run_root)
+                    target_rows_for_scope = read_csv_rows(run_root / "output" / "bestbuy_final_targets.csv")
+                    scoped_sku_set = set(scoped_skus)
+                    scoped_items = [
+                        compact(row.get("item") or row.get("bsin"))
+                        for row in target_rows_for_scope
+                        if compact(row.get("sku_id")) in scoped_sku_set and compact(row.get("item") or row.get("bsin"))
+                    ]
                     base["BESTBUY_DETAIL_SKUS"] = ",".join(scoped_skus)
                     base["BESTBUY_DB_ROW_UPSERT_SKUS"] = ",".join(scoped_skus)
+                    base["BESTBUY_DB_ROW_UPSERT_ITEMS"] = ",".join(dict.fromkeys(scoped_items))
                     scope_message = f"[sos:scope] detail_skus={len(scoped_skus)}"
                     print(scope_message)
                     log_handle.write(scope_message + "\n")

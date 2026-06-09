@@ -46,6 +46,11 @@ ROW_UPSERT_SKUS = {
     for item in re.split(r"[\s,;]+", os.getenv("BESTBUY_DB_ROW_UPSERT_SKUS", ""))
     if item.strip()
 }
+ROW_UPSERT_ITEMS = {
+    item.strip().lower()
+    for item in re.split(r"[\s,;]+", os.getenv("BESTBUY_DB_ROW_UPSERT_ITEMS", ""))
+    if item.strip()
+}
 
 
 def now():
@@ -210,9 +215,13 @@ def validate_insert_columns(table_name, columns, rows):
 
 
 def row_upsert_candidates(rows):
-    if not ROW_UPSERT_SKUS:
+    if not ROW_UPSERT_SKUS and not ROW_UPSERT_ITEMS:
         return rows if ROW_UPSERT_ALLOW_ALL else []
-    return [row for row in rows if row_sku_id(row) in ROW_UPSERT_SKUS]
+    return [
+        row
+        for row in rows
+        if row_sku_id(row) in ROW_UPSERT_SKUS or row_item(row).lower() in ROW_UPSERT_ITEMS
+    ]
 
 
 def row_match_clause(row, available_columns):
@@ -245,6 +254,7 @@ def row_upsert_rows(cur, table_name, columns, rows, dry_run=False):
             "missing_table_columns": [],
             "mode": "row_upsert_only",
             "row_upsert_sku_filter_count": len(ROW_UPSERT_SKUS),
+            "row_upsert_item_filter_count": len(ROW_UPSERT_ITEMS),
             "row_upsert_allow_all": ROW_UPSERT_ALLOW_ALL,
         }
     missing = validate_insert_columns(table_name, columns, candidates)
@@ -325,6 +335,7 @@ def row_upsert_rows(cur, table_name, columns, rows, dry_run=False):
         "match_keys": ["batch_id", "item|sku_id|product_url"],
         "row_upsert_nonblank_only": ROW_UPSERT_NONBLANK_ONLY,
         "row_upsert_sku_filter_count": len(ROW_UPSERT_SKUS),
+        "row_upsert_item_filter_count": len(ROW_UPSERT_ITEMS),
         "row_upsert_allow_all": ROW_UPSERT_ALLOW_ALL,
     }
 
@@ -529,6 +540,7 @@ def main():
         "row_upsert_only": ROW_UPSERT_ONLY,
         "row_upsert_nonblank_only": ROW_UPSERT_NONBLANK_ONLY,
         "row_upsert_sku_filter_count": len(ROW_UPSERT_SKUS),
+        "row_upsert_item_filter_count": len(ROW_UPSERT_ITEMS),
         "update_batch_id": UPDATE_BATCH_ID,
         "run_root": rel_path(RUN_ROOT),
         "final_output": final_result,

@@ -114,6 +114,11 @@ DETAIL_PRINT_MANIFEST_JSON = os.getenv("BESTBUY_DETAIL_PRINT_MANIFEST_JSON", "0"
 }
 DETAIL_LOG_FAILURE_LIMIT = int(os.getenv("BESTBUY_DETAIL_LOG_FAILURE_LIMIT", "3"))
 DETAIL_SKU_BATCH_SIZE = max(1, int(os.getenv("BESTBUY_DETAIL_SKU_BATCH_SIZE", "1")))
+DETAIL_SKU_BATCH_REFILL = os.getenv("BESTBUY_DETAIL_SKU_BATCH_REFILL", "1").lower() in {"1", "true", "yes", "y"}
+DETAIL_SKU_BATCH_REFILL_SINGLE_FALLBACK = os.getenv(
+    "BESTBUY_DETAIL_SKU_BATCH_REFILL_SINGLE_FALLBACK",
+    "1",
+).lower() in {"1", "true", "yes", "y"}
 
 RAW_DETAIL_DIR = DETAIL_ROOT / "raw" / "detail_html"
 RAW_REVIEW_DIR = DETAIL_ROOT / "raw" / "review20"
@@ -3494,9 +3499,10 @@ def fetch_detail(client, target):
     return meta
 
 
-def fetch_detail_sku_batch(client, targets):
+def fetch_detail_sku_batch(client, targets, force_retry=False, max_batch_attempts=None, retry_label=""):
     if not targets:
         return {}
+    run_attempt_limit = max(1, int(max_batch_attempts or MAX_ATTEMPTS))
     prepared_targets = []
     metas = {}
     for target in targets:
@@ -3505,14 +3511,14 @@ def fetch_detail_sku_batch(client, targets):
             continue
         pdp_url = target_url(target, sku)
         current_paths = detail_paths(sku)
-        if not FORCE_REFRESH and detail_success(sku):
+        if not force_retry and not FORCE_REFRESH and detail_success(sku):
             meta = read_json(current_paths["meta"])
             annotate_detail_final_compare(meta, sku)
             metas[sku] = meta
             continue
         attempt = next_attempt(current_paths["meta"], pdp_url)
         meta = {"sku_id": sku, "stage": "detail", "url": pdp_url, "attempt": attempt, "started_at": now()}
-        if attempt_cap_blocks_retry(attempt):
+        if not force_retry and attempt_cap_blocks_retry(attempt):
             paths = detail_paths_for_status(sku, target, False)
             meta.update({"success": False, "error": "max_attempts_exceeded", "finished_at": now()})
             paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -3538,7 +3544,7 @@ def fetch_detail_sku_batch(client, targets):
         attempt_status_codes = []
         attempt_costs = []
         attempt_errors = []
-        for batch_attempt in range(1, MAX_ATTEMPTS + 1):
+        for batch_attempt in range(1, run_attempt_limit + 1):
             batch_attempts = batch_attempt
             start = time.perf_counter()
             response = None
@@ -3577,7 +3583,7 @@ def fetch_detail_sku_batch(client, targets):
                 attempt_errors.append(error)
             if (
                 not AUTO_RETRY
-                or batch_attempt >= MAX_ATTEMPTS
+                or batch_attempt >= run_attempt_limit
                 or not retryable_detail_batch_result(status_code, response_json, entries, error)
             ):
                 break
@@ -3599,7 +3605,8 @@ def fetch_detail_sku_batch(client, targets):
                 "attempt": 1,
                 "started_at": now(),
             }
-            attempt_value = min(MAX_ATTEMPTS, int(meta.get("attempt") or 1) + max(0, batch_attempts - 1))
+            attempt_cap = MAX_ATTEMPTS if not force_retry else max(MAX_ATTEMPTS, int(meta.get("attempt") or 1))
+            attempt_value = min(attempt_cap, int(meta.get("attempt") or 1) + max(0, batch_attempts - 1))
             indices = entry["indices"]
             detail_response_json = graphql_batch_response_item(response_json, indices.get("detail", -1))
             review_response_json = graphql_batch_response_item(response_json, indices.get("review", -1))
@@ -3817,6 +3824,7 @@ def fetch_detail_sku_batch(client, targets):
                     "fetched_this_run": True,
                     "sku_batch_size": len(entries),
                     "sku_batch_index": batch_index,
+                    "sku_batch_retry_label": retry_label,
                     "sku_batch_operation_count": len(request_payload),
                     "batched_operations": ",".join(operation_names),
                     "elapsed_seconds": elapsed,
@@ -3855,6 +3863,25 @@ def fetch_detail_sku_batch(client, targets):
         if any(meta.get("success") for meta in metas.values()):
             break
     return metas
+
+
+def target_needs_detail_batch_refill(target):
+    sku = str(target.get("sku_id") or "").strip()
+    if not sku:
+        return False
+    if not detail_success(sku):
+        return True
+    if review20_required_for_target(target, sku) and review_needs_retry(target):
+        return True
+    if FETCH_COMPARE and not compare_success(sku) and not compare_success_with_zero_recommendations(sku):
+        return True
+    return False
+
+
+def detail_batch_chunks(targets, size):
+    size = max(1, int(size or 1))
+    for offset in range(0, len(targets), size):
+        yield offset, targets[offset : offset + size]
 
 
 def fetch_review20(client, target):
@@ -5507,27 +5534,34 @@ def main():
     detail_cost = 0.0
     review_cost = 0.0
     compare_cost = 0.0
+    detail_refill_cost = 0.0
+    detail_refill_calls = 0
+    detail_refill_target_count = 0
     # Actual ZenRows POST counts this run (not cost-derived estimates).
     # In batch mode one POST bundles detail+review+compare, so it counts once as detail_calls.
     detail_calls = 0
     review_calls = 0
     compare_calls = 0
+
+    def add_batch_accounting(batch_metas):
+        batch_cost = 0.0
+        chunk_fetched = False
+        for meta in batch_metas.values():
+            if meta.get("fetched_this_run"):
+                chunk_fetched = True
+                batch_cost = max(batch_cost, float(meta.get("batch_x_request_cost") or 0))
+        return batch_cost, int(chunk_fetched)
+
     if REBUILD_ONLY:
         print(format_log_line("detail:rebuild", output_targets=len(output_targets)), flush=True)
     elif use_detail_sku_batch:
-        for offset in range(0, len(targets), DETAIL_SKU_BATCH_SIZE):
-            chunk = targets[offset : offset + DETAIL_SKU_BATCH_SIZE]
+        for offset, chunk in detail_batch_chunks(targets, DETAIL_SKU_BATCH_SIZE):
             batch_metas = fetch_detail_sku_batch(client, chunk)
-            batch_cost = 0.0
-            chunk_fetched = False
-            for meta in batch_metas.values():
-                if meta.get("fetched_this_run"):
-                    chunk_fetched = True
-                    batch_cost = max(batch_cost, float(meta.get("batch_x_request_cost") or 0))
+            batch_cost, batch_calls = add_batch_accounting(batch_metas)
             detail_cost += batch_cost
-            if chunk_fetched:
+            if batch_calls:
                 # One batch POST returns detail+review+compare together for the whole chunk.
-                detail_calls += 1
+                detail_calls += batch_calls
             for local_index, target in enumerate(chunk, 1):
                 index = offset + local_index
                 sku = str(target.get("sku_id") or "").strip()
@@ -5548,6 +5582,69 @@ def main():
                         fetched_detail,
                         fetched_detail,
                         fetched_detail and FETCH_COMPARE,
+                    ),
+                    flush=True,
+                )
+        if DETAIL_SKU_BATCH_REFILL:
+            refill_targets = [target for target in targets if target_needs_detail_batch_refill(target)]
+            detail_refill_target_count = len(refill_targets)
+            refill_sizes = [DETAIL_SKU_BATCH_SIZE]
+            if DETAIL_SKU_BATCH_REFILL_SINGLE_FALLBACK and DETAIL_SKU_BATCH_SIZE > 1:
+                refill_sizes.append(1)
+            for refill_index, refill_size in enumerate(refill_sizes, 1):
+                if not refill_targets:
+                    break
+                print(
+                    format_log_line(
+                        "detail:refill",
+                        pass_no=refill_index,
+                        chunk_size=refill_size,
+                        targets=len(refill_targets),
+                    ),
+                    flush=True,
+                )
+                for offset, chunk in detail_batch_chunks(refill_targets, refill_size):
+                    batch_metas = fetch_detail_sku_batch(
+                        client,
+                        chunk,
+                        force_retry=True,
+                        max_batch_attempts=1,
+                        retry_label=f"refill_{refill_size}",
+                    )
+                    batch_cost, batch_calls = add_batch_accounting(batch_metas)
+                    detail_cost += batch_cost
+                    detail_refill_cost += batch_cost
+                    detail_calls += batch_calls
+                    detail_refill_calls += batch_calls
+                    for local_index, target in enumerate(chunk, 1):
+                        index = offset + local_index
+                        sku = str(target.get("sku_id") or "").strip()
+                        dmeta = batch_metas.get(sku) or read_json(detail_paths(sku)["meta"])
+                        rmeta = read_json(review_paths(sku)["meta"])
+                        cmeta = read_json(compare_paths(sku)["meta"])
+                        print(
+                            process_log_line(
+                                index,
+                                len(refill_targets),
+                                sku,
+                                dmeta,
+                                rmeta,
+                                cmeta,
+                                bool(dmeta.get("fetched_this_run")),
+                                bool(dmeta.get("fetched_this_run")),
+                                bool(dmeta.get("fetched_this_run")) and FETCH_COMPARE,
+                            ),
+                            flush=True,
+                        )
+                refill_targets = [target for target in refill_targets if target_needs_detail_batch_refill(target)]
+            if detail_refill_target_count:
+                print(
+                    format_log_line(
+                        "detail:refill_done",
+                        initial_targets=detail_refill_target_count,
+                        remaining=len(refill_targets),
+                        calls=detail_refill_calls,
+                        cost_usd=round(detail_refill_cost, 7),
                     ),
                     flush=True,
                 )
@@ -5711,6 +5808,10 @@ def main():
         "detail_cost_usd_this_run": detail_cost,
         "review_cost_usd_this_run": review_cost,
         "compare_cost_usd_this_run": compare_cost,
+        "detail_refill_enabled": DETAIL_SKU_BATCH_REFILL,
+        "detail_refill_target_count": detail_refill_target_count,
+        "detail_refill_calls_this_run": detail_refill_calls,
+        "detail_refill_cost_usd_this_run": detail_refill_cost,
         "total_cost_usd_this_run": detail_cost + review_cost + compare_cost,
         "total_cost_krw_1550_this_run": round((detail_cost + review_cost + compare_cost) * KRW_PER_USD, 2),
         "detail_calls_this_run": detail_calls,

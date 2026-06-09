@@ -33,6 +33,19 @@ UPDATE_AVAILABILITY_ONLY = os.getenv("BESTBUY_DB_UPDATE_AVAILABILITY_ONLY", "0")
     "y",
 }
 UPDATE_BATCH_ID = os.getenv("BESTBUY_DB_UPDATE_BATCH_ID", "").strip()
+ROW_UPSERT_ONLY = os.getenv("BESTBUY_DB_ROW_UPSERT_ONLY", "0").lower() in {"1", "true", "yes", "y"}
+ROW_UPSERT_NONBLANK_ONLY = os.getenv("BESTBUY_DB_ROW_UPSERT_NONBLANK_ONLY", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
+ROW_UPSERT_ALLOW_ALL = os.getenv("BESTBUY_DB_ROW_UPSERT_ALLOW_ALL", "0").lower() in {"1", "true", "yes", "y"}
+ROW_UPSERT_SKUS = {
+    item.strip()
+    for item in re.split(r"[\s,;]+", os.getenv("BESTBUY_DB_ROW_UPSERT_SKUS", ""))
+    if item.strip()
+}
 
 
 def now():
@@ -64,8 +77,20 @@ def item_from_product_url(value):
     return item if item and item.lower() not in {"product", "site"} else ""
 
 
+def sku_id_from_product_url(value):
+    text = compact_text(value)
+    if not text:
+        return ""
+    match = re.search(r"(?:[?&]skuId=|/sku/|/site/-/)(\d+)", text, flags=re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
 def row_item(row):
     return compact_text(row.get("item") or item_from_product_url(row.get("product_url")))
+
+
+def row_sku_id(row):
+    return compact_text(row.get("sku_id") or sku_id_from_product_url(row.get("product_url")))
 
 
 def table_columns(cur, table_name):
@@ -184,12 +209,135 @@ def validate_insert_columns(table_name, columns, rows):
     return missing
 
 
+def row_upsert_candidates(rows):
+    if not ROW_UPSERT_SKUS:
+        return rows if ROW_UPSERT_ALLOW_ALL else []
+    return [row for row in rows if row_sku_id(row) in ROW_UPSERT_SKUS]
+
+
+def row_match_clause(row, available_columns):
+    batch_id = compact_text(row.get("batch_id"))
+    if not batch_id or "batch_id" not in available_columns:
+        return None
+    item = row_item(row)
+    if item and "item" in available_columns:
+        return [("batch_id", batch_id), ("item", item)]
+    sku_id = row_sku_id(row)
+    if sku_id and "sku_id" in available_columns:
+        return [("batch_id", batch_id), ("sku_id", sku_id)]
+    product_url = compact_text(row.get("product_url"))
+    if product_url and "product_url" in available_columns:
+        return [("batch_id", batch_id), ("product_url", product_url)]
+    return None
+
+
+def row_upsert_rows(cur, table_name, columns, rows, dry_run=False):
+    source_rows = read_csv(rows) if isinstance(rows, (str, Path)) else rows
+    candidates = row_upsert_candidates(source_rows)
+    if not candidates:
+        return {
+            "inserted": 0,
+            "updated": 0,
+            "candidate_rows": 0,
+            "skipped_no_match_key": 0,
+            "skipped_blank_update": 0,
+            "columns": [],
+            "missing_table_columns": [],
+            "mode": "row_upsert_only",
+            "row_upsert_sku_filter_count": len(ROW_UPSERT_SKUS),
+            "row_upsert_allow_all": ROW_UPSERT_ALLOW_ALL,
+        }
+    missing = validate_insert_columns(table_name, columns, candidates)
+    insert_columns = [(name, data_type) for name, data_type in columns if name != "id"]
+    csv_fields = set(candidates[0].keys())
+    insert_columns = [(name, data_type) for name, data_type in insert_columns if name in csv_fields]
+    available = {name for name, _ in columns}
+    inserted = 0
+    updated = 0
+    skipped_no_match = 0
+    skipped_blank_update = 0
+    touched_columns = set()
+
+    for row in candidates:
+        match = row_match_clause(row, available)
+        if not match:
+            skipped_no_match += 1
+            continue
+        match_columns = {name for name, _ in match}
+        update_columns = []
+        update_values = []
+        for name, data_type in insert_columns:
+            if name in match_columns:
+                continue
+            value = row.get(name)
+            if ROW_UPSERT_NONBLANK_ONLY and value in ("", None):
+                continue
+            update_columns.append((name, data_type))
+            update_values.append(normalize_value(value, data_type, name))
+        if dry_run:
+            if update_columns:
+                updated += 1
+                touched_columns.update(name for name, _ in update_columns)
+            else:
+                skipped_blank_update += 1
+            continue
+
+        where_sql = " AND ".join(f"{quote_ident(name)} = %s" for name, _ in match)
+        where_values = [value for _, value in match]
+        if update_columns:
+            set_sql = ", ".join(f"{quote_ident(name)} = %s" for name, _ in update_columns)
+            sql = (
+                f"UPDATE {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} "
+                f"SET {set_sql} WHERE {where_sql}"
+            )
+            cur.execute(sql, (*update_values, *where_values))
+            if cur.rowcount:
+                updated += cur.rowcount
+                touched_columns.update(name for name, _ in update_columns)
+                continue
+        else:
+            cur.execute(
+                f"SELECT 1 FROM {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} WHERE {where_sql} LIMIT 1",
+                where_values,
+            )
+            if cur.fetchone():
+                skipped_blank_update += 1
+                continue
+            skipped_blank_update += 1
+
+        column_sql = ", ".join(quote_ident(name) for name, _ in insert_columns)
+        placeholders = ", ".join(["%s"] * len(insert_columns))
+        sql = f"INSERT INTO {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} ({column_sql}) VALUES ({placeholders})"
+        values = tuple(normalize_value(row.get(name), data_type, name) for name, data_type in insert_columns)
+        cur.execute(sql, values)
+        inserted += 1
+        touched_columns.update(name for name, _ in insert_columns)
+
+    return {
+        "inserted": inserted,
+        "updated": updated,
+        "candidate_rows": len(candidates),
+        "skipped_no_match_key": skipped_no_match,
+        "skipped_blank_update": skipped_blank_update,
+        "columns": sorted(touched_columns),
+        "missing_table_columns": missing,
+        "mode": "row_upsert_only",
+        "match_keys": ["batch_id", "item|sku_id|product_url"],
+        "row_upsert_nonblank_only": ROW_UPSERT_NONBLANK_ONLY,
+        "row_upsert_sku_filter_count": len(ROW_UPSERT_SKUS),
+        "row_upsert_allow_all": ROW_UPSERT_ALLOW_ALL,
+    }
+
+
 def load_one(cur, csv_path, table_name, dry_run=False):
     rows = read_csv(csv_path)
     columns = table_columns(cur, table_name) if cur else fallback_csv_columns(rows)
     if not columns:
         raise RuntimeError(f"DB table not found or has no columns: {TARGET_SCHEMA}.{table_name}")
-    result = plan_rows(columns, rows, table_name) if dry_run else insert_rows(cur, table_name, columns, rows)
+    if ROW_UPSERT_ONLY:
+        result = row_upsert_rows(cur, table_name, columns, rows, dry_run)
+    else:
+        result = plan_rows(columns, rows, table_name) if dry_run else insert_rows(cur, table_name, columns, rows)
     result.update(
         {
             "csv": rel_path(csv_path),
@@ -378,6 +526,9 @@ def main():
         "dry_run": DRY_RUN,
         "update_similar_only": UPDATE_SIMILAR_ONLY,
         "update_availability_only": UPDATE_AVAILABILITY_ONLY,
+        "row_upsert_only": ROW_UPSERT_ONLY,
+        "row_upsert_nonblank_only": ROW_UPSERT_NONBLANK_ONLY,
+        "row_upsert_sku_filter_count": len(ROW_UPSERT_SKUS),
         "update_batch_id": UPDATE_BATCH_ID,
         "run_root": rel_path(RUN_ROOT),
         "final_output": final_result,

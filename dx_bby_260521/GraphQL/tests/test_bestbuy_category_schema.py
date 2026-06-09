@@ -182,6 +182,97 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertEqual(result["missing_table_columns"], [])
         self.assertEqual(result["columns"], ["batch_id", "hhp_storage"])
 
+    def test_db_row_upsert_filters_by_sku_and_requires_filter_by_default(self):
+        old_skus = db_load_step.ROW_UPSERT_SKUS
+        old_allow_all = db_load_step.ROW_UPSERT_ALLOW_ALL
+        old_nonblank = db_load_step.ROW_UPSERT_NONBLANK_ONLY
+        try:
+            rows = [
+                {
+                    "batch_id": "b_test",
+                    "sku_id": "111",
+                    "retailer_sku_name": "keep",
+                    "product_url": "https://www.bestbuy.com/product/a/A/sku/111",
+                },
+                {
+                    "batch_id": "b_test",
+                    "sku_id": "222",
+                    "retailer_sku_name": "retry",
+                    "product_url": "https://www.bestbuy.com/product/b/B/sku/222",
+                },
+            ]
+            columns = [
+                ("id", "serial"),
+                ("batch_id", "text"),
+                ("sku_id", "text"),
+                ("retailer_sku_name", "text"),
+                ("product_url", "text"),
+            ]
+            db_load_step.ROW_UPSERT_SKUS = set()
+            db_load_step.ROW_UPSERT_ALLOW_ALL = False
+            result = db_load_step.row_upsert_rows(None, "bby_ref_product_list", columns, rows, dry_run=True)
+            self.assertEqual(result["candidate_rows"], 0)
+
+            db_load_step.ROW_UPSERT_SKUS = {"222"}
+            db_load_step.ROW_UPSERT_NONBLANK_ONLY = True
+            result = db_load_step.row_upsert_rows(None, "bby_ref_product_list", columns, rows, dry_run=True)
+            self.assertEqual(result["candidate_rows"], 1)
+            self.assertEqual(result["updated"], 1)
+        finally:
+            db_load_step.ROW_UPSERT_SKUS = old_skus
+            db_load_step.ROW_UPSERT_ALLOW_ALL = old_allow_all
+            db_load_step.ROW_UPSERT_NONBLANK_ONLY = old_nonblank
+
+    def test_db_load_extracts_sku_id_from_bestbuy_urls(self):
+        self.assertEqual(
+            db_load_step.sku_id_from_product_url("https://www.bestbuy.com/product/x/ABC/sku/6467055"),
+            "6467055",
+        )
+        self.assertEqual(
+            db_load_step.sku_id_from_product_url("https://www.bestbuy.com/site/-/6671361.p?skuId=6671361&intl=nosplash"),
+            "6671361",
+        )
+
+    def test_db_row_upsert_blank_existing_row_does_not_insert_duplicate(self):
+        class FakeCursor:
+            def __init__(self):
+                self.rowcount = 0
+                self.insert_calls = 0
+
+            def execute(self, sql, params=()):
+                if sql.strip().upper().startswith("SELECT"):
+                    self._fetchone = (1,)
+                    self.rowcount = 1
+                    return
+                if sql.strip().upper().startswith("INSERT"):
+                    self.insert_calls += 1
+                    self.rowcount = 1
+
+            def fetchone(self):
+                return self._fetchone
+
+        old_skus = db_load_step.ROW_UPSERT_SKUS
+        old_allow_all = db_load_step.ROW_UPSERT_ALLOW_ALL
+        old_nonblank = db_load_step.ROW_UPSERT_NONBLANK_ONLY
+        try:
+            db_load_step.ROW_UPSERT_SKUS = {"111"}
+            db_load_step.ROW_UPSERT_ALLOW_ALL = False
+            db_load_step.ROW_UPSERT_NONBLANK_ONLY = True
+            cur = FakeCursor()
+            result = db_load_step.row_upsert_rows(
+                cur,
+                "bby_ref_product_list",
+                [("id", "serial"), ("batch_id", "text"), ("sku_id", "text"), ("retailer_sku_name", "text")],
+                [{"batch_id": "b_test", "sku_id": "111", "retailer_sku_name": ""}],
+            )
+            self.assertEqual(result["inserted"], 0)
+            self.assertEqual(result["skipped_blank_update"], 1)
+            self.assertEqual(cur.insert_calls, 0)
+        finally:
+            db_load_step.ROW_UPSERT_SKUS = old_skus
+            db_load_step.ROW_UPSERT_ALLOW_ALL = old_allow_all
+            db_load_step.ROW_UPSERT_NONBLANK_ONLY = old_nonblank
+
     def test_db_prepare_adds_missing_columns_for_existing_tables(self):
         step13 = (ROOT / "bestbuy" / "step13_db_prepare.py").read_text(encoding="utf-8")
 

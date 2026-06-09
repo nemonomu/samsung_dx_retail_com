@@ -443,6 +443,10 @@ def base_env(category, run_root, batch_id, preserve_table_env=False):
             "BESTBUY_FETCH_SPONSORED_ENRICHMENT": "0",
             "BESTBUY_DB_UPDATE_SIMILAR_ONLY": "0",
             "BESTBUY_DB_UPDATE_AVAILABILITY_ONLY": "0",
+            "BESTBUY_DB_ROW_UPSERT_ONLY": "1",
+            "BESTBUY_DB_ROW_UPSERT_NONBLANK_ONLY": "1",
+            "BESTBUY_DB_ROW_UPSERT_ALLOW_ALL": "0",
+            "BESTBUY_DB_ROW_UPSERT_SKUS": "",
             "BESTBUY_DB_LOAD_DRY_RUN": "0",
             "BESTBUY_DB_PREPARE_ADD_MISSING_COLUMNS": "1",
             "BESTBUY_S3_SYNC_SKIP": "1",
@@ -744,6 +748,7 @@ def main():
                 if step.name == "detail_html":
                     scoped_skus = detail_refill_skus(existing_rows, run_root)
                     base["BESTBUY_DETAIL_SKUS"] = ",".join(scoped_skus)
+                    base["BESTBUY_DB_ROW_UPSERT_SKUS"] = ",".join(scoped_skus)
                     scope_message = f"[sos:scope] detail_skus={len(scoped_skus)}"
                     print(scope_message)
                     log_handle.write(scope_message + "\n")

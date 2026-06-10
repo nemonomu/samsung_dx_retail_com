@@ -18,7 +18,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from .step00_erd_schema import erd_field_order
+from .step00_erd_schema import erd_field_order, output_page_type
 from .step00_config import (
     DEFAULT_LOWES_RUN_ROOT,
     lowes_product_type,
@@ -97,7 +97,7 @@ def finalize_row(row, batch_id, crawl_dt):
     o["calendar_week"] = row.get("calendar_week", "") or calendar_week_now()
     o["crawl_strdatetime"] = row.get("crawl_strdatetime", "") or row.get("crawl_datetime", "") or crawl_dt
     o["batch_id"] = row.get("batch_id", "") or batch_id
-    o["page_type"] = row.get("page_type", "")
+    o["page_type"] = output_page_type(row)
     o["product_url"] = row.get("product_url", "")
     o["main_rank"] = row.get("main_rank", "")
     o["bsr_rank"] = row.get("bsr_rank", "")

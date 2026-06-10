@@ -21,6 +21,7 @@ from .step00_config import (
     lowes_run_date,
     rel_path,
 )
+from .step00_erd_schema import output_page_type
 
 
 RUN_DATE = lowes_run_date()
@@ -117,7 +118,7 @@ def map_row(row):
     out["batch_id"] = row.get("batch_id", "")
     out["calendar_week"] = row.get("calendar_week") or calendar_week_now()
     out["crawl_strdatetime"] = row.get("crawl_strdatetime") or row.get("crawl_datetime", "")
-    out["page_type"] = row.get("page_type", "")
+    out["page_type"] = output_page_type(row)
     out["main_rank"] = as_int(row.get("main_rank"))
     out["bsr_rank"] = as_int(row.get("bsr_rank"))
     out["product_url"] = row.get("product_url", "")

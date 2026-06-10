@@ -169,17 +169,28 @@ def units_purchased_text(row):
 
 
 def output_page_type(row):
-    explicit = first_value(row, "page_type")
+    explicit = normalize_page_type(first_value(row, "page_type"))
     if explicit:
         return explicit
-    selection_source = str(first_value(row, "selection_source") or "").strip().lower()
-    if selection_source in {"bsr", "best_selling", "best-selling"}:
+    selection_source = normalize_page_type(first_value(row, "selection_source"))
+    if selection_source == "bsr":
         return "bsr"
-    if selection_source in {"main", "search"}:
+    if selection_source == "main":
         return "main"
     if first_value(row, "main_rank"):
         return "main"
     if first_value(row, "bsr_rank"):
+        return "bsr"
+    return "main"
+
+
+def normalize_page_type(value):
+    text = compact_text(value).lower()
+    if text in {"", "none", "null", "nan"}:
+        return ""
+    if text in {"main", "search"}:
+        return "main"
+    if text in {"bsr", "best_selling", "best-selling", "best selling"}:
         return "bsr"
     return ""
 

@@ -545,10 +545,12 @@ def hhp_attributes_from_product(product, product_name, sku=""):
 def money(value):
     if value in ("", None):
         return ""
+    text = str(value).strip()
     try:
-        return f"${float(value):,.2f}"
+        result = f"${float(text.replace('$', '').replace(',', '')):,.2f}"
+        return result[:-3] if result.endswith(".00") else result
     except (TypeError, ValueError):
-        return str(value)
+        return text
 
 
 def money_int(value):
@@ -579,9 +581,11 @@ def normalized_price_fields(final_price, original_price, savings=""):
     final_value = numeric_money(final_price)
     if final_value is None:
         return final_price, "", ""
+    final_price = money(final_value)
     original_value = numeric_money(original_price)
     if original_value is None or original_value <= final_value:
         return final_price, "", ""
+    original_price = money(original_value)
     expected_savings = original_value - final_value
     if expected_savings <= 0:
         return final_price, "", ""

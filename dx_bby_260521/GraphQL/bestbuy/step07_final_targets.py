@@ -462,7 +462,8 @@ def money(value):
         return ""
     text = str(value).strip()
     try:
-        return f"${float(text.replace('$', '').replace(',', '')):,.2f}"
+        result = f"${float(text.replace('$', '').replace(',', '')):,.2f}"
+        return result[:-3] if result.endswith(".00") else result
     except (TypeError, ValueError):
         return text
 

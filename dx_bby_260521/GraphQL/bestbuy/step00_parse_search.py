@@ -182,23 +182,22 @@ def price_value(price, *keys):
     return ""
 
 
-def money_text(value, drop_cents_for_whole=False):
+def money_text(value, drop_cents_for_whole=True):
     if value in (None, ""):
         return ""
     if isinstance(value, str):
         text = value.strip()
         if not text:
             return ""
-        if text.startswith("$"):
-            return text
         try:
-            value = float(text.replace(",", ""))
+            value = float(text.replace("$", "").replace(",", ""))
         except ValueError:
             return text
     if isinstance(value, (int, float)):
-        if drop_cents_for_whole and float(value).is_integer():
-            return f"${int(value):,}"
-        return f"${float(value):,.2f}"
+        text = f"${float(value):,.2f}"
+        if drop_cents_for_whole and text.endswith(".00"):
+            return text[:-3]
+        return text
     return str(value)
 
 

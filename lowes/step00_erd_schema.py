@@ -202,7 +202,7 @@ def apply_erd_columns(row, product_type=None):
     out.setdefault("product", product)
     out.setdefault("account_name", "Lowes")
     out.setdefault("crawl_strdatetime", first_value(out, "crawl_strdatetime", "crawl_datetime") or DEFAULT_CRAWL_DATETIME)
-    out.setdefault("page_type", output_page_type(out))
+    out["page_type"] = output_page_type(out)
     out.setdefault("item", first_value(out, "item", "omni_item_id", "item_number"))
 
     mappings = {

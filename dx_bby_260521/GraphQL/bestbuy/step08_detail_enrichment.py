@@ -4703,6 +4703,7 @@ def ref_attributes_from_product(products, product_name):
         ),
         spec_value_containing(products, "total", "capacity"),
         ref_capacity_from_name(product_name),
+        spec_value_by_names(products, ["Capacity"]),
     )
     refrigerator_type = first_non_empty(
         spec_value_by_names(

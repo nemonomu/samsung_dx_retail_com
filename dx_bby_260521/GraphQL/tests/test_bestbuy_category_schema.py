@@ -1327,6 +1327,23 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         )
         self.assertEqual(refrigerator_capacity_attrs["ref_capacity"], "2.3 cubic feet")
 
+        key_specs_capacity_attrs = ref_attributes_from_product(
+            [
+                {
+                    "specificationGroups": [
+                        {
+                            "name": "Key Specs",
+                            "specifications": [
+                                {"displayName": "Capacity", "value": "53 quarts"},
+                            ],
+                        }
+                    ]
+                }
+            ],
+            "Compact refrigerator",
+        )
+        self.assertEqual(key_specs_capacity_attrs["ref_capacity"], "53 quarts")
+
         freezer_only_attrs = ref_attributes_from_product(
             [
                 {

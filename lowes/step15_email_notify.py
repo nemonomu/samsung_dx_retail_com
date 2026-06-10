@@ -59,7 +59,7 @@ CRITICAL_COLUMN_ALIASES = {
 
 COLLECTED_COUNT_WARNING_MIN = {
     "REF": 300,
-    "LDY": 290,
+    "LDY": 250,
 }
 
 
@@ -274,6 +274,13 @@ def listing_count_issues(run_root, rows):
     return issues
 
 
+def rank_collection_counts(rows):
+    return {
+        "main_rank": len(rank_values(rows, "main_rank")),
+        "bsr_rank": len(rank_values(rows, "bsr_rank")),
+    }
+
+
 def detail_failure_issue(detail):
     failures = detail.get("failure", 0)
     targets = detail.get("targets", 0)
@@ -309,7 +316,7 @@ def build_subject(product_type, issues):
     return f"[SEA] Lowes {product_type} crawled"
 
 
-def build_body(collected_count, cost_krw, listing_breakdown, detail, db, issues):
+def build_body(collected_count, cost_krw, listing_breakdown, detail, db, issues, rank_counts=None):
     listing_calls = sum(b.get("calls", 0) for b in listing_breakdown)
     detail_calls = 0  # UC = no ZenRows calls
     total_calls = listing_calls + detail_calls
@@ -327,6 +334,11 @@ def build_body(collected_count, cost_krw, listing_breakdown, detail, db, issues)
         lines.append(f"  {b['source']} - {b['calls']:,}회 (${b['cost_usd']:.4f})")
     lines.append(f"  detail/review/compare - UC ($0)")
     lines.append("")
+    if rank_counts is not None:
+        lines.append("랭크 수집 현황")
+        lines.append(f"  main_rank - {as_int(rank_counts.get('main_rank')):,}/300")
+        lines.append(f"  bsr_rank - {as_int(rank_counts.get('bsr_rank')):,}/100")
+        lines.append("")
     lines.append(f"detail UC: success {detail.get('success')}/{detail.get('targets')}  ({detail.get('elapsed_seconds'):.0f}s)")
     lines.append(f"DB: {db.get('table')} inserted={db.get('inserted')}")
     lines.append("")
@@ -358,9 +370,10 @@ def build_notification(product_type, run_root, status="success", failed_step="",
 
     cost_usd, listing_breakdown = listing_costs(run_root)
     cost_krw = round(cost_usd * KRW_PER_USD)
+    rank_counts = rank_collection_counts(rows)
 
     subject = build_subject(product_type, issues)
-    body = build_body(collected_count, cost_krw, listing_breakdown, detail, db, issues)
+    body = build_body(collected_count, cost_krw, listing_breakdown, detail, db, issues, rank_counts=rank_counts)
     return {
         "subject": subject,
         "body": body,
@@ -374,6 +387,7 @@ def build_notification(product_type, run_root, status="success", failed_step="",
             "listing_breakdown": listing_breakdown,
             "detail": detail,
             "db": db,
+            "rank_counts": rank_counts,
         },
     }
 

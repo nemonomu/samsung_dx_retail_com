@@ -46,7 +46,7 @@ EXCLUDED_NULL_COLUMNS = {
 
 COLLECTED_COUNT_WARNING_MIN = {
     "REF": 300,
-    "LDY": 260,
+    "LDY": 250,
 }
 
 
@@ -462,6 +462,13 @@ def max_rank(rows, column):
     return max((numeric_rank(row.get(column)) for row in rows), default=0)
 
 
+def rank_collection_counts(rows):
+    return {
+        "main_rank": len({numeric_rank(row.get("main_rank")) for row in rows if numeric_rank(row.get("main_rank")) > 0}),
+        "bsr_rank": len({numeric_rank(row.get("bsr_rank")) for row in rows if numeric_rank(row.get("bsr_rank")) > 0}),
+    }
+
+
 def listing_count_issues(category, run_root, rows, target_manifest):
     issues = []
     bsr_rank = max_rank(rows, "bsr_rank")
@@ -520,7 +527,7 @@ def build_subject(category, issues):
     return f"[SEA] BBY {product} crawled"
 
 
-def build_body(collected_count, cost_krw, call_counts, issues):
+def build_body(collected_count, cost_krw, call_counts, issues, rank_counts=None):
     total_calls = as_int((call_counts or {}).get("total"))
     per_call_krw = int(round(cost_krw / total_calls)) if total_calls else 0
     detail_by_stage = {
@@ -547,6 +554,13 @@ def build_body(collected_count, cost_krw, call_counts, issues):
         f"  3종 availability - {as_int((call_counts or {}).get('availability')):,}회",
         "",
     ])
+    if rank_counts is not None:
+        lines.extend([
+            "랭크 수집 현황",
+            f"  main_rank - {as_int(rank_counts.get('main_rank')):,}/300",
+            f"  bsr_rank - {as_int(rank_counts.get('bsr_rank')):,}/100",
+            "",
+        ])
     if issues:
         lines.append("특이사항")
         lines.extend(f"- {issue}" for issue in issues)
@@ -628,8 +642,9 @@ def build_notification(category, run_root, status="success", failed_step="", fai
     cost_usd, cost_sources = manifest_costs(run_root)
     cost_krw = round(cost_usd * KRW_PER_USD)
     call_counts = manifest_call_counts(run_root)
+    rank_counts = rank_collection_counts(rows)
     subject = build_subject(category, issues)
-    body = build_body(collected_count, cost_krw, call_counts, issues)
+    body = build_body(collected_count, cost_krw, call_counts, issues, rank_counts=rank_counts)
     return {
         "subject": subject,
         "body": body,
@@ -643,6 +658,7 @@ def build_notification(category, run_root, status="success", failed_step="", fai
             "db_insert_columns": columns,
             "cost_sources": cost_sources,
             "call_counts": call_counts,
+            "rank_counts": rank_counts,
         },
     }
 

@@ -459,13 +459,21 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             "detail": 3,
             "availability": 321,
         }
-        body = email_notify_step.build_body(303, 3800, sample_call_counts, [])
+        body = email_notify_step.build_body(
+            303,
+            3800,
+            sample_call_counts,
+            [],
+            rank_counts={"main_rank": 300, "bsr_rank": 100},
+        )
         self.assertIn("특이사항 없음", body)
         self.assertIn("총 호출 수 343회", body)
         self.assertIn("listing - 19회", body)
         self.assertIn("detail/review/compare - 3회", body)
         self.assertIn("3종 availability - 321회", body)
         self.assertIn("평균 호출 비용 11원", body)
+        self.assertIn("main_rank - 300/300", body)
+        self.assertIn("bsr_rank - 100/100", body)
 
     def test_email_preflight_notification_uses_zero_counts_and_warning(self):
         notification = email_notify_step.build_preflight_notification("REF", "daily_lock failed exit_code=2")
@@ -517,7 +525,8 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             "DB insert rows 미달: 250/310 success",
         )
         self.assertEqual(email_notify_step.collected_count_issues("REF", 299), ["collected_count 299/300"])
-        self.assertEqual(email_notify_step.collected_count_issues("LDY", 259), ["collected_count 259/260"])
+        self.assertEqual(email_notify_step.collected_count_issues("LDY", 249), ["collected_count 249/250"])
+        self.assertEqual(email_notify_step.collected_count_issues("LDY", 250), [])
         self.assertEqual(email_notify_step.collected_count_issues("TV", 245), [])
         self.assertEqual(email_notify_step.collected_count_issues("HHP", 245), [])
 

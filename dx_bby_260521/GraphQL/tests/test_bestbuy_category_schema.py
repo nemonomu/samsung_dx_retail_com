@@ -450,7 +450,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             "[SEA] BBY TV crawled",
         )
         self.assertEqual(
-            email_notify_step.build_subject("HHP", ["main_rank 299/300"]),
+            email_notify_step.build_subject("HHP", ["bsr_rank 99/100"]),
             "[SEA] [Warning] BBY HHP crawled",
         )
         sample_call_counts = {
@@ -516,13 +516,18 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             email_notify_step.db_count_issue({"final_output": {"inserted": 250, "csv_rows": 310}}, 310),
             "DB insert rows 미달: 250/310 success",
         )
+        self.assertEqual(email_notify_step.collected_count_issues("REF", 299), ["collected_count 299/300"])
+        self.assertEqual(email_notify_step.collected_count_issues("LDY", 259), ["collected_count 259/260"])
+        self.assertEqual(email_notify_step.collected_count_issues("TV", 245), [])
+        self.assertEqual(email_notify_step.collected_count_issues("HHP", 245), [])
+
         listing_issues = email_notify_step.listing_count_issues(
             "TV",
             ROOT,
             [{"main_rank": "299", "bsr_rank": "99"}],
             {"trending_unique_count": 9, "promotion_unique_count": 17},
         )
-        self.assertIn("main_rank 299/300", listing_issues)
+        self.assertNotIn("main_rank 299/300", listing_issues)
         self.assertIn("bsr_rank 99/100", listing_issues)
         self.assertIn("trend listing sku 9/10", listing_issues)
         self.assertIn("promotion listing sku 17/18", listing_issues)

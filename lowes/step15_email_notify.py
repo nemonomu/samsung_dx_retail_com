@@ -57,6 +57,11 @@ CRITICAL_COLUMN_ALIASES = {
     "product_url": ["product_url"],
 }
 
+COLLECTED_COUNT_WARNING_MIN = {
+    "REF": 300,
+    "LDY": 290,
+}
+
 
 def now():
     return datetime.now().isoformat(timespec="seconds")
@@ -291,6 +296,12 @@ def step_failure_issues(status, failed_step, failed_step_name):
     label = " ".join(part for part in [f"step{failed_step}" if failed_step else "", failed_step_name] if part) or "step failure"
     return [f"{label} failed"]
 
+def collected_count_issues(product_type, collected_count):
+    minimum = COLLECTED_COUNT_WARNING_MIN.get(str(product_type or "").strip().upper())
+    if minimum and as_int(collected_count) < minimum:
+        return [f"collected_count {as_int(collected_count)}/{minimum}"]
+    return []
+
 
 def build_subject(product_type, issues):
     if issues:
@@ -343,6 +354,7 @@ def build_notification(product_type, run_root, status="success", failed_step="",
     issues.extend(listing_count_issues(run_root, rows))
     issues.extend(detail_failure_issue(detail))
     issues.extend(db_count_issue(db, len(rows)))
+    issues.extend(collected_count_issues(product_type, collected_count))
 
     cost_usd, listing_breakdown = listing_costs(run_root)
     cost_krw = round(cost_usd * KRW_PER_USD)

@@ -44,6 +44,11 @@ EXCLUDED_NULL_COLUMNS = {
     "LDY": frozenset(),
 }
 
+COLLECTED_COUNT_WARNING_MIN = {
+    "REF": 300,
+    "LDY": 260,
+}
+
 
 def now():
     return datetime.now().isoformat(timespec="seconds")
@@ -446,6 +451,12 @@ def db_count_issue(db_data, row_count):
         return f"DB insert rows 미달: {inserted}/{expected} success"
     return ""
 
+def collected_count_issues(category, collected_count):
+    minimum = COLLECTED_COUNT_WARNING_MIN.get(str(category or "").strip().upper())
+    if minimum and as_int(collected_count) < minimum:
+        return [f"collected_count {as_int(collected_count)}/{minimum}"]
+    return []
+
 
 def max_rank(rows, column):
     return max((numeric_rank(row.get(column)) for row in rows), default=0)
@@ -453,9 +464,6 @@ def max_rank(rows, column):
 
 def listing_count_issues(category, run_root, rows, target_manifest):
     issues = []
-    main_rank = max_rank(rows, "main_rank")
-    if main_rank and main_rank < 300:
-        issues.append(f"main_rank {main_rank}/300")
     bsr_rank = max_rank(rows, "bsr_rank")
     if bsr_rank and bsr_rank < 100:
         issues.append(f"bsr_rank {bsr_rank}/100")
@@ -614,6 +622,7 @@ def build_notification(category, run_root, status="success", failed_step="", fai
     count_issue = db_count_issue(db_data, len(rows))
     if count_issue:
         issues.append(count_issue)
+    issues.extend(collected_count_issues(category, collected_count))
     issues.extend(listing_count_issues(category, run_root, rows, target_manifest))
 
     cost_usd, cost_sources = manifest_costs(run_root)

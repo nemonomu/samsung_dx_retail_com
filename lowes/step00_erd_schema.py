@@ -85,6 +85,18 @@ def compact_text(value):
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+PURCHASED_UNITS_RE = re.compile(
+    r"\b\d[\d,]*(?:\.\d+)?\s*[kKmM]?\+?\s+(?:bought|purchased|sold)\b(?:\s+last\s+week)?",
+    re.I,
+)
+
+
+def purchased_units_phrase(value):
+    text = compact_text(value)
+    match = PURCHASED_UNITS_RE.search(text)
+    return match.group(0) if match else ""
+
+
 def first_value(row, *names):
     for name in names:
         value = row.get(name)
@@ -150,9 +162,9 @@ def sku_status(row):
 def units_purchased_text(row):
     explicit = first_value(row, "number_of_units_purchased_past_week")
     if explicit:
-        return explicit
+        return purchased_units_phrase(explicit)
     haystack = " ".join(compact_text(value) for value in row.values() if value not in ("", None))
-    match = re.search(r"(\d[\d,]*)\s+(?:bought|purchased|sold)", haystack, re.I)
+    match = PURCHASED_UNITS_RE.search(haystack)
     return match.group(0) if match else ""
 
 

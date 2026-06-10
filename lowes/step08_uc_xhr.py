@@ -12,6 +12,7 @@ Zero ZenRows cost. Spec 41~54 fully covered (43/44/45 saved as raw labels).
 import csv
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -51,6 +52,10 @@ REVIEW_TARGET = max(0, int(os.getenv('LOWES_REVIEW_TARGET', os.getenv('LOWES_REV
 REVIEW_PAGE_SIZE = max(1, int(os.getenv('LOWES_REVIEW_PAGE_SIZE', '10')))
 REVIEW_MAX_OFFSET = max(0, int(os.getenv('LOWES_REVIEW_MAX_OFFSET', '100')))
 REVIEW_EMPTY_TEXT = os.getenv('LOWES_REVIEW_EMPTY_TEXT', 'No review text provided')
+PURCHASED_UNITS_RE = re.compile(
+    r"\b\d[\d,]*(?:\.\d+)?\s*[kKmM]?\+?\s+(?:bought|purchased|sold)\b(?:\s+last\s+week)?",
+    re.I,
+)
 
 STORE = os.getenv('LOWES_API_STORE_ID', '289').lstrip('0') or '289'
 STORE_FMT = STORE.zfill(4) if len(STORE) <= 4 else STORE
@@ -103,6 +108,12 @@ def now_iso():
 
 def truthy(v):
     return v not in ('', None, '0', 'False', False, 0)
+
+
+def purchased_units_phrase(value):
+    text = re.sub(r'\s+', ' ', str(value or '')).strip()
+    match = PURCHASED_UNITS_RE.search(text)
+    return match.group(0) if match else ''
 
 
 def read_input_rows():
@@ -457,7 +468,7 @@ def parse_productdetail(sku, body):
     out['detail_product_description'] = product.get('description', '')
 
     spm = node.get('socialProofingMessages', {}) or {}
-    out['number_of_units_purchased_past_week'] = spm.get('socialProofingMessage', '')
+    out['number_of_units_purchased_past_week'] = purchased_units_phrase(spm.get('socialProofingMessage', ''))
 
     inv = (node.get('itemInventory', {}) or {}).get('analyticsData', {}) or {}
     pickup = inv.get('pickup', {}) or {}

@@ -21,7 +21,7 @@ from .step00_config import (
     lowes_run_date,
     rel_path,
 )
-from .step00_erd_schema import output_page_type
+from .step00_erd_schema import output_page_type, retailer_sku_name_text
 
 
 RUN_DATE = lowes_run_date()
@@ -124,7 +124,7 @@ def map_row(row):
     out["product_url"] = row.get("product_url", "")
     out["item"] = row.get("item") or row.get("omni_item_id", "") or row.get("item_number", "")
     out["sku"] = row.get("sku", "")
-    out["retailer_sku_name"] = row.get("retailer_sku_name", "")
+    out["retailer_sku_name"] = retailer_sku_name_text(row)
     out["final_sku_price"] = row.get("final_sku_price", "")
     out["original_sku_price"] = row.get("original_sku_price", "")
     out["savings"] = row.get("savings", "")

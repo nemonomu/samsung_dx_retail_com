@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .step00_config import DEFAULT_LOWES_RUN_ROOT
+from .step00_erd_schema import retailer_sku_name_text
 
 
 RUN_DATE = os.getenv("LOWES_RUN_DATE", datetime.now().strftime("%Y%m%d"))
@@ -92,7 +93,7 @@ def select_targets(rows):
         out["page_type"] = "main"
         out["selection_source"] = "main"
         # spec columns mapping
-        out["retailer_sku_name"] = row.get("description", "") or row.get("retailer_sku_name", "")
+        out["retailer_sku_name"] = retailer_sku_name_text(row)
         out["final_sku_price"] = money(row.get("selling_price", ""))
         out["original_sku_price"] = money(row.get("was_price", ""))
         out["savings"] = money(row.get("total_saving", ""))

@@ -18,7 +18,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from .step00_erd_schema import erd_field_order, output_page_type
+from .step00_erd_schema import erd_field_order, output_page_type, retailer_sku_name_text
 from .step00_config import (
     DEFAULT_LOWES_RUN_ROOT,
     lowes_product_type,
@@ -102,7 +102,7 @@ def finalize_row(row, batch_id, crawl_dt):
     o["main_rank"] = row.get("main_rank", "")
     o["bsr_rank"] = row.get("bsr_rank", "")
 
-    o["retailer_sku_name"] = row.get("retailer_sku_name", "") or row.get("description", "")
+    o["retailer_sku_name"] = retailer_sku_name_text(row)
 
     # price fallback: listing → detail (mfePrice)
     listing_selling = row.get("selling_price", "") or row.get("final_sku_price", "")

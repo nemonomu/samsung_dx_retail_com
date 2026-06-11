@@ -85,6 +85,28 @@ def compact_text(value):
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+def retailer_sku_name_text(row):
+    brand = first_value(row, "brand", "detail_product_brand", "product.brand")
+    name = first_value(
+        row,
+        "retailer_sku_name",
+        "description",
+        "detail_title",
+        "missing_price_detail_title",
+        "product.description",
+    )
+    brand = compact_text(brand)
+    name = compact_text(name)
+    if not brand or not name:
+        return name or brand
+
+    brand_key = normalize_key(brand)
+    name_key = normalize_key(name)
+    if name_key == brand_key or name_key.startswith(f"{brand_key}_"):
+        return name
+    return f"{brand} {name}"
+
+
 PURCHASED_UNITS_RE = re.compile(
     r"\b\d[\d,]*(?:\.\d+)?\s*[kKmM]?\+?\s+(?:bought|purchased|sold)\b(?:\s+last\s+week)?",
     re.I,
@@ -206,14 +228,7 @@ def apply_erd_columns(row, product_type=None):
     out.setdefault("item", first_value(out, "item", "omni_item_id", "item_number"))
 
     mappings = {
-        "retailer_sku_name": first_value(
-            out,
-            "retailer_sku_name",
-            "description",
-            "detail_title",
-            "missing_price_detail_title",
-            "product.description",
-        ),
+        "retailer_sku_name": retailer_sku_name_text(out),
         "final_sku_price": first_value(
             out,
             "final_sku_price",

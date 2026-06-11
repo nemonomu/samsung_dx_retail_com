@@ -21,6 +21,7 @@ from pathlib import Path
 import undetected_chromedriver as uc
 
 from .step00_config import DEFAULT_LOWES_RUN_ROOT, load_env, redact_sensitive, lowes_product_type
+from .step00_erd_schema import retailer_sku_name_text
 from .step00_uc import launch_chrome
 
 
@@ -653,7 +654,7 @@ def parse_compare(sku, body):
     for p in products or []:
         if str(p.get('omniItemId')) == str(sku):
             continue
-        d = (p.get('description') or '').strip()
+        d = retailer_sku_name_text(p)
         if d:
             descs.append(d)
     out['retailer_sku_name_similar'] = ' ||| '.join(descs)

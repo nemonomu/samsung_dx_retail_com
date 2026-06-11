@@ -481,7 +481,7 @@ def step_env(step, category, base, refresh_all_availability=False):
             {
                 "BESTBUY_DETAIL_RETRY_ONLY": "0",
                 "BESTBUY_DETAIL_REBUILD_ONLY": "0",
-                "BESTBUY_DETAIL_MAX_ATTEMPTS": "3",
+                "BESTBUY_DETAIL_MAX_ATTEMPTS": "5",
                 "BESTBUY_DETAIL_SKU_BATCH_SIZE": "5",
                 "BESTBUY_DETAIL_WORKERS": "3",
                 "BESTBUY_DETAIL_RETRY_STATUS_CODES": "408,409,422,425,429,500,502,503,504",
@@ -495,7 +495,7 @@ def step_env(step, category, base, refresh_all_availability=False):
             {
                 "BESTBUY_DETAIL_RETRY_ONLY": "1",
                 "BESTBUY_DETAIL_REBUILD_ONLY": "0",
-                "BESTBUY_DETAIL_MAX_ATTEMPTS": "3",
+                "BESTBUY_DETAIL_MAX_ATTEMPTS": "5",
                 "BESTBUY_DETAIL_WORKERS": "3",
                 "BESTBUY_DETAIL_RETRY_STATUS_CODES": "408,409,422,425,429,500,502,503,504",
                 "BESTBUY_DETAIL_RETRY_SLEEP_SECONDS": "2",

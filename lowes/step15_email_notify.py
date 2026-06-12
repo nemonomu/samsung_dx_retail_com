@@ -216,7 +216,7 @@ def critical_null_issues(rows):
         if not bad:
             continue
         examples = []
-        for r in bad[:3]:
+        for r in bad:
             url = str(r.get("product_url") or "").strip()
             item = str(r.get("item") or r.get("omni_item_id") or "").strip()
             if url:

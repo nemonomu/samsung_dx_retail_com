@@ -429,7 +429,7 @@ def critical_null_issues(rows, columns):
         if not bad_rows:
             continue
         examples = []
-        for row in bad_rows[:3]:
+        for row in bad_rows:
             url = row_url(row)
             item = str(row.get("item") or row.get("sku_id") or "").strip()
             if url:

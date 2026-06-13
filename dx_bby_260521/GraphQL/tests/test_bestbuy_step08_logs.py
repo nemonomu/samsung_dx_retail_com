@@ -70,6 +70,27 @@ class Step08LogTests(unittest.TestCase):
         self.assertNotIn("ProductFulfillmentInput", payload["query"])
         self.assertNotIn("fulfillmentOptions", payload["query"])
 
+    def test_review_attention_detects_partial_review_texts(self):
+        row = {
+            "star_rating": "4.8",
+            "count_of_reviews": "22",
+            "detailed_review_content": " ||| ".join(f"review{i} - good" for i in range(1, 17)),
+            "recommendation_intent": "95% would recommend to a friend",
+        }
+
+        self.assertTrue(step08.review_output_needs_attention(row))
+        self.assertEqual(step08.review_output_attention_reason(row), "review20_partial_16_of_20")
+
+    def test_review_attention_accepts_expected_review_texts(self):
+        row = {
+            "star_rating": "4.8",
+            "count_of_reviews": "2",
+            "detailed_review_content": "review1 - good ||| review2 - also good",
+            "recommendation_intent": "100% would recommend to a friend",
+        }
+
+        self.assertFalse(step08.review_output_needs_attention(row))
+
     def test_get_it_fast_payload_is_same_batch_operation(self):
         payload = step08.get_it_fast_payload("6623791")
 

@@ -392,6 +392,34 @@ def row_url(row):
     return str(row.get("product_url") or row.get("url") or "").strip()
 
 
+def review_text_count(value):
+    return len(re.findall(r"(?i)(?:^|\s)review\d+\s*-", str(value or "")))
+
+
+def review_completeness_issues(rows):
+    bad = []
+    for row in rows:
+        expected = min(as_int(row.get("count_of_reviews")), 20)
+        if expected <= 0:
+            continue
+        actual = review_text_count(row.get("detailed_review_content") or row.get("detailed_review_contents"))
+        if actual < expected:
+            bad.append((row, actual, expected))
+    if not bad:
+        return []
+    examples = []
+    for row, actual, expected in bad:
+        url = row_url(row)
+        item = str(row.get("item") or row.get("sku_id") or "").strip()
+        label = f"{item} {actual}/{expected}".strip()
+        if url:
+            examples.append(f"{label} {url}".strip())
+        else:
+            examples.append(label)
+    suffix = f", product_url: {' | '.join(examples)}" if examples else ""
+    return [f"detailed_review_content {len(bad)} rows partial{suffix}"]
+
+
 def first_present_column(rows, columns, candidates):
     available = set(columns)
     if rows:
@@ -633,6 +661,7 @@ def build_notification(category, run_root, status="success", failed_step="", fai
         issues.append("final_output.csv rows 0 또는 파일 없음")
     issues.extend(all_null_column_issues(category, rows, columns))
     issues.extend(critical_null_issues(rows, columns))
+    issues.extend(review_completeness_issues(rows))
     count_issue = db_count_issue(db_data, len(rows))
     if count_issue:
         issues.append(count_issue)

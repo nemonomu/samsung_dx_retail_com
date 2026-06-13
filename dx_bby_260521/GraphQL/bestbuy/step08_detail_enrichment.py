@@ -43,6 +43,7 @@ SELECTOR_TABLE = os.getenv("BESTBUY_SELECTOR_TABLE", "dx_xpath_selectors")
 USE_DB_SELECTORS = os.getenv("BESTBUY_DETAIL_USE_DB_SELECTORS", "1").lower() in {"1", "true", "yes", "y"}
 LIMIT = int(os.getenv("BESTBUY_DETAIL_LIMIT", "0"))
 MAX_ATTEMPTS = int(os.getenv("BESTBUY_DETAIL_MAX_ATTEMPTS", "5"))
+MAX_REVIEW_TEXTS = max(1, int(os.getenv("BESTBUY_REVIEW_TEXT_LIMIT", "20")))
 AUTO_RETRY = os.getenv("BESTBUY_DETAIL_AUTO_RETRY", "1").lower() in {"1", "true", "yes", "y"}
 DETAIL_RETRY_SLEEP_SECONDS = float(os.getenv("BESTBUY_DETAIL_RETRY_SLEEP_SECONDS", "2"))
 DETAIL_RETRY_STATUS_CODES = {
@@ -2463,12 +2464,32 @@ def review_result_count(path):
     return review_result_count_from_json(data)
 
 
+def review_results_from_json(data):
+    product = ((data.get("data") or {}).get("productBySkuId") or {}) if isinstance(data, dict) else {}
+    reviews = (product.get("reviews") or {}).get("results") if isinstance(product, dict) else None
+    return reviews if isinstance(reviews, list) else None
+
+
 def review_result_count_from_json(data):
-    product = ((data.get("data") or {}).get("productBySkuId") or {})
-    reviews = (product.get("reviews") or {}).get("results")
+    reviews = review_results_from_json(data)
     if isinstance(reviews, list):
         return len(reviews)
     return None
+
+
+def review_text_count_from_reviews(reviews):
+    if not isinstance(reviews, list):
+        return None
+    return sum(1 for review in reviews[:MAX_REVIEW_TEXTS] if compact_text((review or {}).get("text")))
+
+
+def review_text_count_from_json(data):
+    reviews = review_results_from_json(data)
+    return review_text_count_from_reviews(reviews)
+
+
+def review_text_count_from_content(value):
+    return len(re.findall(r"(?i)(?:^|\s)review\d+\s*-", str(value or "")))
 
 
 def attempts(meta_path):
@@ -3337,7 +3358,18 @@ def fetch_detail(client, target):
                         encoding="utf-8",
                     )
                 review_count = review_result_count_from_json(review_response_json)
-                review_ok = success and review_count is not None
+                review_text_count = review_text_count_from_json(review_response_json)
+                expected_text_count = expected_review_text_count(target, sku)
+                review_ok = (
+                    success
+                    and review_count is not None
+                    and review_text_count_is_sufficient(review_text_count, expected_text_count)
+                )
+                review_error = ""
+                if review_count is None:
+                    review_error = "review20_missing"
+                elif not review_ok:
+                    review_error = f"review20_partial_{review_text_count or 0}_of_{expected_text_count}"
                 review_paths_current = review_paths_for_status(sku, target, review_ok)
                 write_review_response_artifacts(review_paths_current, review_payload, review_response_json, text, dict(response.headers))
                 review_meta = {
@@ -3355,8 +3387,10 @@ def fetch_detail(client, target):
                     "x_request_cost": 0,
                     "bytes": len(text or ""),
                     "review_count_returned": review_count if review_count is not None else 0,
+                    "review_text_count_returned": review_text_count if review_text_count is not None else 0,
+                    "review_text_count_expected": expected_text_count if expected_text_count is not None else "",
                     "finished_at": now(),
-                    "error": "" if review_ok else "review20_missing",
+                    "error": "" if review_ok else review_error,
                 }
                 review_paths_current["meta"].write_text(json.dumps(review_meta, indent=2, ensure_ascii=False), encoding="utf-8")
                 if compare_payload:
@@ -3737,7 +3771,18 @@ def fetch_detail_sku_batch(client, targets, force_retry=False, max_batch_attempt
                     encoding="utf-8",
                 )
             review_count = review_result_count_from_json(review_response_json)
-            review_ok = success and review_count is not None
+            review_text_count = review_text_count_from_json(review_response_json)
+            expected_text_count = expected_review_text_count(target, sku)
+            review_ok = (
+                success
+                and review_count is not None
+                and review_text_count_is_sufficient(review_text_count, expected_text_count)
+            )
+            review_error = ""
+            if review_count is None:
+                review_error = "review20_missing"
+            elif not review_ok:
+                review_error = f"review20_partial_{review_text_count or 0}_of_{expected_text_count}"
             review_paths_current = review_paths_for_status(sku, target, review_ok)
             write_review_response_artifacts(review_paths_current, entry_payloads[1], review_response_json, text, headers)
             review_paths_current["meta"].write_text(
@@ -3757,8 +3802,10 @@ def fetch_detail_sku_batch(client, targets, force_retry=False, max_batch_attempt
                         "x_request_cost": 0,
                         "bytes": len(text or ""),
                         "review_count_returned": review_count if review_count is not None else 0,
+                        "review_text_count_returned": review_text_count if review_text_count is not None else 0,
+                        "review_text_count_expected": expected_text_count if expected_text_count is not None else "",
                         "finished_at": now(),
-                        "error": "" if review_ok else "review20_missing",
+                        "error": "" if review_ok else review_error,
                     },
                     indent=2,
                     ensure_ascii=False,
@@ -3891,7 +3938,8 @@ def review_meta_needs_detail_batch_refill(target, sku):
         return False
     if not review_success(sku):
         return True
-    return not bool(review20_content(sku))
+    expected_text_count = min(expected_count, MAX_REVIEW_TEXTS)
+    return not review_text_count_is_sufficient(review20_text_count(sku), expected_text_count)
 
 
 def detail_batch_chunks(targets, size):
@@ -3958,17 +4006,25 @@ def fetch_review20(client, target):
             continue
         text = response.text
         review_count = 0
+        review_text_count = 0
+        expected_text_count = expected_review_text_count(target, sku)
         error = ""
         response_json = {}
         try:
             response_json = response.json()
             count = review_result_count_from_json(response_json)
             review_count = count if count is not None else 0
+            text_count = review_text_count_from_json(response_json)
+            review_text_count = text_count if text_count is not None else 0
             if response_json.get("errors"):
                 error = json.dumps(response_json.get("errors"), ensure_ascii=False, separators=(",", ":"))
         except ValueError as exc:
             error = str(exc)
-        success = response.status_code == 200 and review_result_count_from_json(response_json) is not None
+        has_review_list = review_result_count_from_json(response_json) is not None
+        enough_review_text = review_text_count_is_sufficient(review_text_count, expected_text_count)
+        success = response.status_code == 200 and has_review_list and enough_review_text
+        if has_review_list and not enough_review_text:
+            error = f"review20_partial_{review_text_count}_of_{expected_text_count}"
         paths = review_paths_for_status(sku, target, success)
         if response_json:
             paths["response_json"].write_text(
@@ -3989,6 +4045,8 @@ def fetch_review20(client, target):
                 "x_request_cost": request_cost(response.headers),
                 "bytes": len(text or ""),
                 "review_count_returned": review_count,
+                "review_text_count_returned": review_text_count,
+                "review_text_count_expected": expected_text_count if expected_text_count is not None else "",
                 "finished_at": now(),
                 "error": error if not success else "",
             }
@@ -4835,6 +4893,26 @@ def expected_review_count(target, sku=None):
     return max(counts) if counts else None
 
 
+def expected_review_text_count(target, sku=None):
+    count = expected_review_count(target, sku)
+    if count is None:
+        return None
+    return min(max(0, count), MAX_REVIEW_TEXTS)
+
+
+def review20_text_count(sku):
+    json_count = review_text_count_from_json(read_json(review_paths(sku)["response_json"]))
+    if json_count is not None:
+        return json_count
+    return review_text_count_from_content(review20_content(sku))
+
+
+def review_text_count_is_sufficient(actual_count, expected_count):
+    if expected_count in (None, 0):
+        return True
+    return actual_count is not None and actual_count >= expected_count
+
+
 @lru_cache(maxsize=1)
 def output_review_blank_keys():
     keys = set()
@@ -4851,14 +4929,21 @@ def output_review_needs_retry(target):
 
 
 def review_output_needs_attention(row):
+    return bool(review_output_attention_reason(row))
+
+
+def review_output_attention_reason(row):
     review_count = review_count_number(row.get("count_of_reviews"), row.get("count_of_star_ratings"))
     star_rating = compact_text(row.get("star_rating"))
     if not star_rating or star_rating.lower() == "not yet reviewed" or review_count in (None, 0):
-        return False
-    return not (
-        compact_text(row.get("detailed_review_content"))
-        and compact_text(row.get("recommendation_intent"))
-    )
+        return ""
+    expected_count = min(review_count, MAX_REVIEW_TEXTS)
+    actual_count = review_text_count_from_content(row.get("detailed_review_content"))
+    if actual_count < expected_count:
+        return f"review20_partial_{actual_count}_of_{expected_count}"
+    if not compact_text(row.get("recommendation_intent")):
+        return "missing_recommendation_intent"
+    return ""
 
 
 def review_info_from_review_response(sku):
@@ -4892,7 +4977,8 @@ def review_needs_retry(target):
         return expected_count is None or expected_count > 0
     if expected_count in (None, 0):
         return False
-    if not review20_content(sku):
+    expected_text_count = min(expected_count, MAX_REVIEW_TEXTS)
+    if not review_text_count_is_sufficient(review20_text_count(sku), expected_text_count):
         return True
     return False
 
@@ -4939,7 +5025,7 @@ def review20_required_for_target(target, sku=None):
             if is_external_review_source(target, review_info):
                 return False
             count = review_count_number(review_info.get("reviewCount"))
-    return count is None or count > 5
+    return count is None or count > 0
 
 
 def recommendation_intent_value(review_count, *values):
@@ -5329,14 +5415,15 @@ def build_outputs(targets):
                     "retryable": str(int(int(dmeta.get("attempt", 0) or 0) < MAX_ATTEMPTS)),
                 }
             )
-        if review_output_needs_attention(row):
+        review_attention_error = review_output_attention_reason(row)
+        if review_attention_error:
             failures.append(
                 {
                     "sku_id": sku,
                     "stage": "review20",
                     "attempt": rmeta.get("attempt", 0),
                     "status_code": rmeta.get("status_code", ""),
-                    "error": rmeta.get("error", "missing_review20"),
+                    "error": rmeta.get("error") or review_attention_error,
                     "retryable": str(int(int(rmeta.get("attempt", 0) or 0) < MAX_ATTEMPTS)),
                 }
             )
@@ -5625,7 +5712,7 @@ def main():
                         client,
                         chunk,
                         force_retry=True,
-                        max_batch_attempts=1,
+                        max_batch_attempts=MAX_ATTEMPTS,
                         retry_label=f"refill_{refill_size}",
                     )
                     batch_cost, batch_calls = add_batch_accounting(batch_metas)

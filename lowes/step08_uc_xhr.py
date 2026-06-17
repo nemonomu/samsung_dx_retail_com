@@ -502,6 +502,7 @@ def parse_productdetail(sku, body):
     appliance_type = ''
     capacity_overall = ''
     capacity_refrigerator = ''
+    capacity_freezer = ''
     load_type = ''
     washer_capacity = ''
     washer_dryer_capacity = ''
@@ -521,6 +522,8 @@ def parse_productdetail(sku, body):
             capacity_overall = val
         elif key.startswith('Refrigerator Capacity'):
             capacity_refrigerator = val
+        elif key.startswith('Freezer Capacity'):
+            capacity_freezer = val
         elif key == 'Washer Load Type':
             load_type = val
         elif key.startswith('Washer Capacity'):
@@ -539,7 +542,7 @@ def parse_productdetail(sku, body):
     else:
         ref_type = appliance_type or _category_fallback_ref_type(product.get('categories', {}))
         out['ref_refrigerator_type'] = ref_type
-        ref_cap = capacity_overall or capacity_refrigerator
+        ref_cap = capacity_overall or capacity_refrigerator or capacity_freezer
         out['ref_capacity'] = f'{ref_cap} Cu.Feet' if ref_cap else ''
 
     ratings = (obj.get('ratings', {}) or {}).get(sku) or {}

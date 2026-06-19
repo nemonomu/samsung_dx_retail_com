@@ -32,6 +32,12 @@ UPDATE_AVAILABILITY_ONLY = os.getenv("BESTBUY_DB_UPDATE_AVAILABILITY_ONLY", "0")
     "yes",
     "y",
 }
+UPDATE_PROMOTION_ONLY = os.getenv("BESTBUY_DB_UPDATE_PROMOTION_ONLY", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
 UPDATE_BATCH_ID = os.getenv("BESTBUY_DB_UPDATE_BATCH_ID", "").strip()
 ROW_UPSERT_ONLY = os.getenv("BESTBUY_DB_ROW_UPSERT_ONLY", "0").lower() in {"1", "true", "yes", "y"}
 ROW_UPSERT_NONBLANK_ONLY = os.getenv("BESTBUY_DB_ROW_UPSERT_NONBLANK_ONLY", "1").lower() in {
@@ -416,6 +422,81 @@ def update_similar_only(cur, csv_path, table_name, dry_run=False):
     }
 
 
+def promotion_update_candidates(rows, batch_id=""):
+    candidates = []
+    for row in rows:
+        item = row_item(row)
+        row_batch_id = str(row.get("batch_id") or "").strip()
+        if not row_batch_id or not item:
+            continue
+        if batch_id and row_batch_id != batch_id:
+            continue
+        if str(row.get("target_source") or "").strip() == "promotion_backfill":
+            continue
+        promotion_type = str(row.get("promotion_type") or "").strip()
+        promotion_position = str(row.get("promotion_position") or "").strip()
+        if not promotion_type and not promotion_position:
+            continue
+        normalized = dict(row)
+        normalized["item"] = item
+        candidates.append(normalized)
+    return candidates
+
+
+def update_promotion_only(cur, csv_path, table_name, dry_run=False, batch_id=UPDATE_BATCH_ID):
+    source_rows = read_csv(csv_path)
+    rows = promotion_update_candidates(source_rows, batch_id)
+    if not rows:
+        return {
+            "csv": rel_path(csv_path),
+            "table": f"{TARGET_SCHEMA}.{table_name}",
+            "csv_rows": len(source_rows),
+            "candidate_rows": 0,
+            "updated": 0,
+            "dry_run": dry_run,
+            "mode": "update_promotion_only",
+            "batch_id_filter": batch_id,
+        }
+    columns = table_columns(cur, table_name) if cur else fallback_csv_columns(rows)
+    required = {"batch_id", "item", "promotion_type", "promotion_position"}
+    available = {name for name, _ in columns}
+    missing = sorted(required - available)
+    if missing:
+        raise RuntimeError(f"DB table is missing columns for promotion update: {missing}")
+    if dry_run:
+        updated = 0
+    else:
+        sql = (
+            f"UPDATE {quote_ident(TARGET_SCHEMA)}.{quote_ident(table_name)} "
+            f"SET promotion_type = %s, promotion_position = %s "
+            f"WHERE batch_id = %s AND item = %s"
+        )
+        updated = 0
+        for row in rows:
+            cur.execute(
+                sql,
+                (
+                    row.get("promotion_type") or None,
+                    normalize_value(row.get("promotion_position"), "integer", "promotion_position"),
+                    str(row.get("batch_id") or "").strip(),
+                    str(row.get("item") or "").strip(),
+                ),
+            )
+            updated += max(cur.rowcount, 0)
+    return {
+        "csv": rel_path(csv_path),
+        "table": f"{TARGET_SCHEMA}.{table_name}",
+        "csv_rows": len(source_rows),
+        "candidate_rows": len(rows),
+        "updated": updated,
+        "dry_run": dry_run,
+        "mode": "update_promotion_only",
+        "batch_id_filter": batch_id,
+        "match_keys": ["batch_id", "item"],
+        "updated_columns": ["promotion_type", "promotion_position"],
+    }
+
+
 def availability_update_candidates(rows, batch_id=""):
     candidates = []
     for row in rows:
@@ -511,6 +592,9 @@ def main():
                 if UPDATE_AVAILABILITY_ONLY:
                     final_result = update_availability_only(cur, FINAL_OUTPUT_CSV, final_table, DRY_RUN)
                     product_list_result = {"skipped": True, "reason": "update_availability_only"}
+                elif UPDATE_PROMOTION_ONLY:
+                    final_result = update_promotion_only(cur, FINAL_OUTPUT_CSV, final_table, DRY_RUN)
+                    product_list_result = {"skipped": True, "reason": "update_promotion_only"}
                 elif UPDATE_SIMILAR_ONLY:
                     final_result = update_similar_only(cur, FINAL_OUTPUT_CSV, final_table, DRY_RUN)
                     product_list_result = {"skipped": True, "reason": "update_similar_only"}
@@ -522,6 +606,9 @@ def main():
         if UPDATE_AVAILABILITY_ONLY:
             final_result = update_availability_only(None, FINAL_OUTPUT_CSV, final_table, DRY_RUN)
             product_list_result = {"skipped": True, "reason": "update_availability_only"}
+        elif UPDATE_PROMOTION_ONLY:
+            final_result = update_promotion_only(None, FINAL_OUTPUT_CSV, final_table, DRY_RUN)
+            product_list_result = {"skipped": True, "reason": "update_promotion_only"}
         elif UPDATE_SIMILAR_ONLY:
             final_result = update_similar_only(None, FINAL_OUTPUT_CSV, final_table, DRY_RUN)
             product_list_result = {"skipped": True, "reason": "update_similar_only"}
@@ -537,6 +624,7 @@ def main():
         "dry_run": DRY_RUN,
         "update_similar_only": UPDATE_SIMILAR_ONLY,
         "update_availability_only": UPDATE_AVAILABILITY_ONLY,
+        "update_promotion_only": UPDATE_PROMOTION_ONLY,
         "row_upsert_only": ROW_UPSERT_ONLY,
         "row_upsert_nonblank_only": ROW_UPSERT_NONBLANK_ONLY,
         "row_upsert_sku_filter_count": len(ROW_UPSERT_SKUS),

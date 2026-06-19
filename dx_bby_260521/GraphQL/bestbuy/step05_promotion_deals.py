@@ -30,6 +30,18 @@ from .step00_parse_search import (
 RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
 RUN_ROOT = Path(os.getenv("BESTBUY_PROMOTION_RUN_ROOT", DEFAULT_BESTBUY_RUN_ROOT / "promotion"))
 REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "180"))
+PROMOTION_MAX_ATTEMPTS = max(1, int(os.getenv("BESTBUY_PROMOTION_MAX_ATTEMPTS", "5")))
+PROMOTION_EXPECTED_MIN_ROWS = max(0, int(os.getenv("BESTBUY_PROMOTION_EXPECTED_MIN_ROWS", "18")))
+PROMOTION_RETRY_SLEEP_SECONDS = float(os.getenv("BESTBUY_PROMOTION_RETRY_SLEEP_SECONDS", "2"))
+PROMOTION_RETRY_STATUS_CODES = {
+    int(value)
+    for value in os.getenv(
+        "BESTBUY_PROMOTION_RETRY_STATUS_CODES", "408,409,422,425,429,500,502,503,504"
+    )
+    .replace(",", " ")
+    .split()
+    if value.strip().isdigit()
+}
 ENDPOINT = os.getenv("BESTBUY_GRAPHQL_ENDPOINT", "https://www.bestbuy.com/gateway/graphql")
 PLACEMENT = os.getenv("BESTBUY_PROMOTION_PLACEMENT", "all")
 REFERER = os.getenv("BESTBUY_PROMOTION_REFERER", load_initial_urls().get("promotion_tv_home_theater", ""))
@@ -151,7 +163,33 @@ def placement_artifact_paths(placement, status=None):
     }
 
 
-def run_one(client, html_text, placement):
+def attempt_status(status, attempt):
+    return f"{status}_attempt_{attempt:02d}"
+
+
+def cost_float(value):
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def retryable_summary(summary):
+    try:
+        status_code = int(summary.get("status_code") or 0)
+    except (TypeError, ValueError):
+        status_code = 0
+    if status_code in PROMOTION_RETRY_STATUS_CODES:
+        return True
+    return status_code == 200 and int(summary.get("row_count") or 0) == 0
+
+
+def sleep_before_retry(attempt):
+    if attempt < PROMOTION_MAX_ATTEMPTS and PROMOTION_RETRY_SLEEP_SECONDS > 0:
+        time.sleep(PROMOTION_RETRY_SLEEP_SECONDS)
+
+
+def run_one(client, html_text, placement, attempt=1):
     payload = find_started_operation_for_placement(html_text, placement)
 
     start = time.perf_counter()
@@ -175,7 +213,7 @@ def run_one(client, html_text, placement):
     elapsed = round(time.perf_counter() - start, 3)
     text = response.text
     status = "success" if response.status_code == 200 else "fail"
-    paths = placement_artifact_paths(placement, status)
+    paths = placement_artifact_paths(placement, attempt_status(status, attempt))
     paths["request"].write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     paths["response"].write_text(text, encoding="utf-8", errors="replace")
     paths["headers"].write_text(json.dumps(dict(response.headers), indent=2, ensure_ascii=False), encoding="utf-8")
@@ -196,6 +234,7 @@ def run_one(client, html_text, placement):
             "started_at": now(),
             "placement": placement,
             "promotion_type": promotion_type_for_placement(placement),
+            "attempt": attempt,
             "status_code": response.status_code,
             "elapsed_seconds": elapsed,
             "x_request_cost": response.headers.get("x-request-cost", ""),
@@ -209,7 +248,7 @@ def run_one(client, html_text, placement):
     }
 
 
-def run_batch(client, html_text, placements):
+def run_batch(client, html_text, placements, attempt=1):
     payloads = [find_started_operation_for_placement(html_text, placement) for placement in placements]
 
     start = time.perf_counter()
@@ -233,7 +272,7 @@ def run_batch(client, html_text, placements):
     elapsed = round(time.perf_counter() - start, 3)
     text = response.text
     status = "success" if response.status_code == 200 else "fail"
-    paths = placement_artifact_paths("all_batch", status)
+    paths = placement_artifact_paths("all_batch", attempt_status(status, attempt))
     paths["request"].write_text(json.dumps(payloads, indent=2, ensure_ascii=False), encoding="utf-8")
     paths["response"].write_text(text, encoding="utf-8", errors="replace")
     paths["headers"].write_text(json.dumps(dict(response.headers), indent=2, ensure_ascii=False), encoding="utf-8")
@@ -260,6 +299,7 @@ def run_batch(client, html_text, placements):
                 "started_at": now(),
                 "placement": placement,
                 "promotion_type": promotion_type_for_placement(placement),
+                "attempt": attempt,
                 "status_code": response.status_code,
                 "elapsed_seconds": elapsed,
                 "x_request_cost": response.headers.get("x-request-cost", ""),
@@ -273,6 +313,91 @@ def run_batch(client, html_text, placements):
         )
 
     return {"summaries": summaries, "rows": all_rows}
+
+
+def batch_attempt_summary(result, attempt):
+    summaries = result.get("summaries") or []
+    first = summaries[0] if summaries else {}
+    return {
+        "mode": "batch",
+        "attempt": attempt,
+        "placements": [summary.get("placement") for summary in summaries],
+        "status_code": first.get("status_code", ""),
+        "x_request_cost": first.get("x_request_cost", ""),
+        "bytes": first.get("bytes", ""),
+        "row_count": len(result.get("rows") or []),
+        "artifact_folder": first.get("artifact_folder", ""),
+        "retryable": any(retryable_summary(summary) for summary in summaries),
+    }
+
+
+def single_attempt_summary(result, attempt):
+    summary = result.get("summary") or {}
+    return {
+        "mode": "single",
+        "attempt": attempt,
+        "placement": summary.get("placement", ""),
+        "status_code": summary.get("status_code", ""),
+        "x_request_cost": summary.get("x_request_cost", ""),
+        "bytes": summary.get("bytes", ""),
+        "row_count": len(result.get("rows") or []),
+        "artifact_folder": summary.get("artifact_folder", ""),
+        "retryable": retryable_summary(summary),
+    }
+
+
+def dedupe_promotion_rows(rows):
+    seen = set()
+    deduped = []
+    for row in rows:
+        key = (row.get("promotion_placement") or "", row.get("sku_id") or "")
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped
+
+
+def run_batch_with_retries(client, html_text, placements):
+    attempts = []
+    last_result = {"summaries": [], "rows": []}
+    for attempt in range(1, PROMOTION_MAX_ATTEMPTS + 1):
+        last_result = run_batch(client, html_text, placements, attempt=attempt)
+        attempt_info = batch_attempt_summary(last_result, attempt)
+        attempts.append(attempt_info)
+        if last_result.get("rows"):
+            break
+        if not attempt_info["retryable"]:
+            break
+        sleep_before_retry(attempt)
+    return {
+        "summaries": last_result.get("summaries") or [],
+        "rows": last_result.get("rows") or [],
+        "attempts": attempts,
+        "call_count": len(attempts),
+        "total_x_request_cost": sum(cost_float(attempt.get("x_request_cost")) for attempt in attempts),
+    }
+
+
+def run_one_with_retries(client, html_text, placement):
+    attempts = []
+    last_result = {"summary": {}, "rows": []}
+    for attempt in range(1, PROMOTION_MAX_ATTEMPTS + 1):
+        last_result = run_one(client, html_text, placement, attempt=attempt)
+        attempt_info = single_attempt_summary(last_result, attempt)
+        attempts.append(attempt_info)
+        if last_result.get("rows"):
+            break
+        if not attempt_info["retryable"]:
+            break
+        sleep_before_retry(attempt)
+    return {
+        "summary": last_result.get("summary") or {},
+        "rows": last_result.get("rows") or [],
+        "attempts": attempts,
+        "call_count": len(attempts),
+        "total_x_request_cost": sum(cost_float(attempt.get("x_request_cost")) for attempt in attempts),
+    }
 
 
 def write_rows(path, rows):
@@ -348,16 +473,38 @@ def main():
     html_text = QUERY_TEMPLATE_HTML.read_text(encoding="utf-8", errors="ignore")
     client = ZenRowsClient(api_key)
 
+    fallback_to_single = False
+    attempts = []
+    total_x_request_cost = 0.0
     if PLACEMENT.lower() == "all":
-        result = run_batch(client, html_text, placements)
+        result = run_batch_with_retries(client, html_text, placements)
         all_rows = result["rows"]
-        summaries = result["summaries"]
-        call_count = 1
+        attempts.extend(result["attempts"])
+        total_x_request_cost += result["total_x_request_cost"]
+        latest_by_placement = {summary.get("placement"): summary for summary in result["summaries"]}
+        collected_placements = {row.get("promotion_placement") for row in all_rows if row.get("promotion_placement")}
+        if PROMOTION_EXPECTED_MIN_ROWS and len(all_rows) < PROMOTION_EXPECTED_MIN_ROWS:
+            missing_placements = placements
+        else:
+            missing_placements = [placement for placement in placements if placement not in collected_placements]
+        if missing_placements:
+            fallback_to_single = True
+            for placement in missing_placements:
+                single_result = run_one_with_retries(client, html_text, placement)
+                all_rows.extend(single_result["rows"])
+                all_rows = dedupe_promotion_rows(all_rows)
+                attempts.extend(single_result["attempts"])
+                total_x_request_cost += single_result["total_x_request_cost"]
+                latest_by_placement[placement] = single_result["summary"]
+        summaries = [latest_by_placement.get(placement, {}) for placement in placements]
+        call_count = len(attempts)
     else:
-        result = run_one(client, html_text, placements[0])
+        result = run_one_with_retries(client, html_text, placements[0])
         all_rows = result["rows"]
         summaries = [result["summary"]]
-        call_count = 1
+        attempts.extend(result["attempts"])
+        total_x_request_cost += result["total_x_request_cost"]
+        call_count = len(attempts)
 
     slug = "all" if PLACEMENT.lower() == "all" else PLACEMENT
     out_csv = RUN_ROOT / "parsed" / f"{slug}_promotion_products.csv"
@@ -368,11 +515,11 @@ def main():
         "excluded_placements": excluded_placements,
         "call_count": call_count,
         "row_count": len(all_rows),
-        "total_x_request_cost": (
-            float(summaries[0]["x_request_cost"] or 0)
-            if PLACEMENT.lower() == "all" and summaries
-            else sum(float(s["x_request_cost"] or 0) for s in summaries)
-        ),
+        "total_x_request_cost": round(total_x_request_cost, 7),
+        "max_attempts": PROMOTION_MAX_ATTEMPTS,
+        "expected_min_rows": PROMOTION_EXPECTED_MIN_ROWS if PLACEMENT.lower() == "all" else 0,
+        "fallback_to_single": fallback_to_single,
+        "attempts": attempts,
         "summaries": summaries,
         "csv": rel_path(out_csv),
     }

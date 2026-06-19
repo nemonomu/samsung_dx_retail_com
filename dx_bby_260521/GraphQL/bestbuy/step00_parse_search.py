@@ -443,6 +443,18 @@ def listing_offer_count(product):
     gift_skus = price.get("giftSkus")
     if isinstance(gift_skus, list) and gift_skus:
         return len(gift_skus)
+    offers = product.get("offers") if isinstance(product.get("offers"), dict) else {}
+    sku_offers = offers.get("offers") if isinstance(offers, dict) else []
+    if isinstance(sku_offers, list):
+        hot_offer_count = sum(
+            1
+            for offer in sku_offers
+            if isinstance(offer, dict)
+            and offer.get("hotOffer") is True
+            and str(offer.get("offerType") or "").strip().lower() != "financing"
+        )
+        if hot_offer_count:
+            return hot_offer_count
     return ""
 
 

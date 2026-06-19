@@ -1,4 +1,6 @@
+import csv
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -11,6 +13,7 @@ from bestbuy.step00_availability_policy import ALL_AVAILABILITY_FIELDS  # noqa: 
 from bestbuy.bestbuy_orchestrator import CATEGORY_SEARCH_TERMS, HHP_TRENDING_PAGE_PAYLOAD_ENV  # noqa: E402
 import bestbuy.step07_final_targets as final_targets_step  # noqa: E402
 import bestbuy.step06_trending_deals as trending_step  # noqa: E402
+import bestbuy.step05_promotion_deals as promotion_step  # noqa: E402
 import bestbuy.step14_db_load as db_load_step  # noqa: E402
 import bestbuy.step08_detail_enrichment as detail_step  # noqa: E402
 import bestbuy.step15_item_mst_load as item_mst_step  # noqa: E402
@@ -39,6 +42,36 @@ def column_names(columns):
 
 
 class BestBuyCategorySchemaTests(unittest.TestCase):
+    def test_detail_offer_count_uses_hot_non_financing_fallback(self):
+        products = [
+            {
+                "price": {"giftSkus": None},
+                "offers": {
+                    "offers": [
+                        {"offerId": "664995", "offerType": "PWP Global", "hotOffer": True},
+                        {"offerId": "893729", "offerType": "PWP Global", "hotOffer": False},
+                        {"offerId": "799849", "offerType": "Financing", "hotOffer": False},
+                    ]
+                },
+            }
+        ]
+
+        self.assertEqual(detail_step.offer_count(products), "1")
+
+    def test_detail_offer_count_keeps_gift_skus_priority(self):
+        products = [
+            {
+                "price": {"giftSkus": [{"skuId": "1"}, {"skuId": "2"}]},
+                "offers": {
+                    "offers": [
+                        {"offerId": "664995", "offerType": "PWP Global", "hotOffer": True},
+                    ]
+                },
+            }
+        ]
+
+        self.assertEqual(detail_step.offer_count(products), "2")
+
     def test_output_table_names_match_confirmed_targets(self):
         self.assertEqual(BESTBUY_OUTPUT_TABLES["TV"], "tv_retail_com")
         self.assertEqual(BESTBUY_OUTPUT_TABLES["HHP"], "hhp_retail_com")
@@ -236,6 +269,48 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             db_load_step.ROW_UPSERT_ITEMS = old_items
             db_load_step.ROW_UPSERT_ALLOW_ALL = old_allow_all
             db_load_step.ROW_UPSERT_NONBLANK_ONLY = old_nonblank
+
+    def test_db_promotion_update_only_filters_current_batch_and_blank_rows(self):
+        rows = [
+            {"batch_id": "b_keep", "item": "A", "promotion_type": "Promo", "promotion_position": "1"},
+            {"batch_id": "b_keep", "item": "B", "promotion_type": "", "promotion_position": ""},
+            {"batch_id": "b_other", "item": "C", "promotion_type": "Other", "promotion_position": "2"},
+            {
+                "batch_id": "b_keep",
+                "item": "D",
+                "target_source": "promotion_backfill",
+                "promotion_type": "New Promo Only",
+                "promotion_position": "3",
+            },
+        ]
+
+        candidates = db_load_step.promotion_update_candidates(rows, batch_id="b_keep")
+
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["item"], "A")
+
+    def test_db_promotion_update_only_dry_run_touches_only_promotion_columns(self):
+        rows = [
+            {
+                "batch_id": "b_keep",
+                "item": "A",
+                "promotion_type": "Promo",
+                "promotion_position": "1",
+                "retailer_sku_name": "must not update",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "final_output.csv"
+            with csv_path.open("w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+                writer.writeheader()
+                writer.writerows(rows)
+
+            result = db_load_step.update_promotion_only(None, csv_path, "tv_retail_com", dry_run=True, batch_id="b_keep")
+
+        self.assertEqual(result["mode"], "update_promotion_only")
+        self.assertEqual(result["candidate_rows"], 1)
+        self.assertEqual(result["updated_columns"], ["promotion_type", "promotion_position"])
 
     def test_db_load_extracts_sku_id_from_bestbuy_urls(self):
         self.assertEqual(
@@ -959,6 +1034,24 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertEqual(
             detail_step.normalized_price_fields("$300.00", "$600.00", "$300.00"),
             ("$300", "$600", "$300"),
+        )
+
+    def test_promotion_retry_helpers_cover_resp001_and_empty_200(self):
+        self.assertEqual(promotion_step.PROMOTION_MAX_ATTEMPTS, 5)
+        self.assertEqual(promotion_step.PROMOTION_EXPECTED_MIN_ROWS, 18)
+        self.assertTrue(promotion_step.retryable_summary({"status_code": 422, "row_count": 0}))
+        self.assertTrue(promotion_step.retryable_summary({"status_code": 200, "row_count": 0}))
+        self.assertFalse(promotion_step.retryable_summary({"status_code": 404, "row_count": 0}))
+
+    def test_promotion_dedupe_keeps_unique_placement_sku_pairs(self):
+        rows = [
+            {"promotion_placement": "p1", "sku_id": "1", "promotion_position": 1},
+            {"promotion_placement": "p1", "sku_id": "1", "promotion_position": 1},
+            {"promotion_placement": "p2", "sku_id": "1", "promotion_position": 1},
+        ]
+        self.assertEqual(
+            promotion_step.dedupe_promotion_rows(rows),
+            [rows[0], rows[2]],
         )
 
     def test_hhp_promotion_listing_is_explicitly_skipped(self):

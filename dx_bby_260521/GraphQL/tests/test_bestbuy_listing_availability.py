@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bestbuy.step00_parse_search import listing_availability_values, parse_product  # noqa: E402
+from bestbuy.step00_parse_search import listing_availability_values, listing_offer_count, parse_product  # noqa: E402
 from bestbuy.step02_main_targets import normalize_existing_listing_row  # noqa: E402
 
 
@@ -77,6 +77,33 @@ class ListingAvailabilityTests(unittest.TestCase):
         self.assertEqual(row["fastest_delivery"], "Get it by Wed, May 27 \u2022 FREE")
         self.assertEqual(row["delivery_availability"], "Delivery as soon as Thu, May 28")
         self.assertEqual(row["offer_count"], 2)
+
+
+    def test_listing_offer_count_uses_hot_non_financing_fallback(self):
+        product = {
+            "price": {"giftSkus": None},
+            "offers": {
+                "offers": [
+                    {"offerId": "664995", "offerType": "PWP Global", "hotOffer": True},
+                    {"offerId": "893729", "offerType": "PWP Global", "hotOffer": False},
+                    {"offerId": "799849", "offerType": "Financing", "hotOffer": False},
+                ]
+            },
+        }
+
+        self.assertEqual(listing_offer_count(product), 1)
+
+    def test_listing_offer_count_keeps_gift_skus_priority(self):
+        product = {
+            "price": {"giftSkus": [{"skuId": "1"}, {"skuId": "2"}]},
+            "offers": {
+                "offers": [
+                    {"offerId": "664995", "offerType": "PWP Global", "hotOffer": True},
+                ]
+            },
+        }
+
+        self.assertEqual(listing_offer_count(product), 2)
 
     def test_main_target_normalization_falls_back_to_sku_pdp_url(self):
         row = normalize_existing_listing_row({"sku_id": "6623791"})

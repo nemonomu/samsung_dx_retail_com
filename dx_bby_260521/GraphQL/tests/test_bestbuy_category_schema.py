@@ -367,7 +367,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         script = (ROOT / "bestbuy" / "sos_refill.py").read_text(encoding="utf-8")
         bat = (ROOT / "bby_sos_refill.bat").read_text(encoding="utf-8")
 
-        self.assertIn('"BESTBUY_LISTING_MAX_ATTEMPTS": "3"', script)
+        self.assertIn('"BESTBUY_LISTING_MAX_ATTEMPTS": "5"', script)
         self.assertIn('"BESTBUY_DETAIL_SKU_BATCH_SIZE": "5"', script)
         self.assertIn('"BESTBUY_AVAILABILITY_BACKFILL_CHUNK_SIZE": "1"', script)
         self.assertIn('candidate_mode = "all_rows" if refresh_all_availability else "blank_all"', script)

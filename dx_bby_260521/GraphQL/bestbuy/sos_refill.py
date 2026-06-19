@@ -471,7 +471,7 @@ def step_env(step, category, base, refresh_all_availability=False):
     if step.name in {"main_list", "bsr_list"}:
         env.update(
             {
-                "BESTBUY_LISTING_MAX_ATTEMPTS": "3",
+                "BESTBUY_LISTING_MAX_ATTEMPTS": "5",
                 "BESTBUY_LISTING_RETRY_SLEEP_SECONDS": "2",
                 "BESTBUY_LISTING_RETRY_STATUS_CODES": "408,409,422,425,429,500,502,503,504",
             }

@@ -471,9 +471,16 @@ def step_env(step, category, base, refresh_all_availability=False):
     if step.name in {"main_list", "bsr_list"}:
         env.update(
             {
-                "BESTBUY_LISTING_MAX_ATTEMPTS": "5",
+                "BESTBUY_SANITIZE_PRODUCT_LIST_QUERY": "1",
+                "BESTBUY_STRIP_PRODUCT_LIST_FULFILLMENT": "1",
+                "BESTBUY_GRAPHQL_MODE_AUTO": "0",
+                "BESTBUY_LISTING_SESSION_ENABLED": "1",
+                "BESTBUY_LISTING_SESSION_BOOTSTRAP": "1",
+                "BESTBUY_LISTING_SESSION_MAX_AGE_SECONDS": "480",
+                "BESTBUY_LISTING_MAX_ATTEMPTS": "4",
                 "BESTBUY_LISTING_RETRY_SLEEP_SECONDS": "2",
-                "BESTBUY_LISTING_RETRY_STATUS_CODES": "408,409,422,425,429,500,502,503,504",
+                "BESTBUY_LISTING_RETRY_MAX_SLEEP_SECONDS": "8",
+                "BESTBUY_LISTING_RETRY_STATUS_CODES": "408,425,429,500,502,503,504",
             }
         )
     if step.name == "detail_html":

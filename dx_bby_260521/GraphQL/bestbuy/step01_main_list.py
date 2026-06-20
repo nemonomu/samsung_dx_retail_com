@@ -2,6 +2,7 @@ import csv
 import json
 import os
 import re
+import secrets
 import time
 from datetime import datetime
 from pathlib import Path
@@ -36,12 +37,47 @@ INCLUDE_SPONSORED_CAROUSEL = os.getenv("BESTBUY_INCLUDE_SPONSORED_CAROUSEL", "0"
 }
 REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "120"))
 FETCH_MODE = os.getenv("BESTBUY_FETCH_MODE", os.getenv("BESTBUY_GRAPHQL_FETCH_MODE", "zenrows")).strip().lower()
-LISTING_MAX_ATTEMPTS = max(1, int(os.getenv("BESTBUY_LISTING_MAX_ATTEMPTS", "5")))
+LISTING_MAX_ATTEMPTS = max(1, int(os.getenv("BESTBUY_LISTING_MAX_ATTEMPTS", "4")))
 LISTING_RETRY_SLEEP_SECONDS = float(os.getenv("BESTBUY_LISTING_RETRY_SLEEP_SECONDS", "2"))
+LISTING_RETRY_MAX_SLEEP_SECONDS = max(
+    LISTING_RETRY_SLEEP_SECONDS,
+    float(os.getenv("BESTBUY_LISTING_RETRY_MAX_SLEEP_SECONDS", "8")),
+)
 LISTING_RETRY_STATUS_CODES = {
     int(value)
-    for value in re.split(r"[,\s]+", os.getenv("BESTBUY_LISTING_RETRY_STATUS_CODES", "408,409,422,425,429,500,502,503,504"))
+    for value in re.split(
+        r"[,\s]+",
+        os.getenv("BESTBUY_LISTING_RETRY_STATUS_CODES", "408,425,429,500,502,503,504"),
+    )
     if value.strip().isdigit()
+}
+SANITIZE_PRODUCT_LIST_QUERY = os.getenv("BESTBUY_SANITIZE_PRODUCT_LIST_QUERY", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
+STRIP_PRODUCT_LIST_FULFILLMENT = os.getenv("BESTBUY_STRIP_PRODUCT_LIST_FULFILLMENT", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
+LISTING_SESSION_ENABLED = os.getenv("BESTBUY_LISTING_SESSION_ENABLED", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
+LISTING_SESSION_MAX_AGE_SECONDS = max(
+    60,
+    int(os.getenv("BESTBUY_LISTING_SESSION_MAX_AGE_SECONDS", "480")),
+)
+LISTING_SESSION_BOOTSTRAP = os.getenv("BESTBUY_LISTING_SESSION_BOOTSTRAP", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
 }
 RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
 RUN_ID = os.getenv("BESTBUY_MAIN_RUN_ID", "main")
@@ -162,11 +198,10 @@ def prepare_product_list_payload(operation, page):
     apply_bestbuy_location(variables)
 
     query = operation["query"]
-    if os.getenv("BESTBUY_SANITIZE_PRODUCT_LIST_QUERY", "0").lower() in {"1", "true", "yes"}:
+    if SANITIZE_PRODUCT_LIST_QUERY or STRIP_PRODUCT_LIST_FULFILLMENT:
         query = sanitize_product_list_query(
             query,
-            strip_fulfillment=os.getenv("BESTBUY_STRIP_PRODUCT_LIST_FULFILLMENT", "0").lower()
-            in {"1", "true", "yes"},
+            strip_fulfillment=STRIP_PRODUCT_LIST_FULFILLMENT,
         )
 
     return {
@@ -176,16 +211,96 @@ def prepare_product_list_payload(operation, page):
     }
 
 
-def zenrows_params():
+def new_listing_session_id():
+    return secrets.randbelow(99999) + 1
+
+
+def parse_zr_cookies(value):
+    cookies = {}
+    for part in str(value or "").split(";"):
+        name, separator, cookie_value = part.strip().partition("=")
+        if separator and name:
+            cookies[name] = cookie_value
+    return cookies
+
+
+def redacted_response_headers(headers):
+    redacted = dict(headers or {})
+    for name in list(redacted):
+        if name.lower() in {"zr-cookies", "zr-set-cookie", "set-cookie"}:
+            redacted[name] = "[REDACTED]"
+    return redacted
+
+
+def zenrows_error_code(response_json):
+    if not isinstance(response_json, dict):
+        return ""
+    return str(response_json.get("code") or "").strip().upper()
+
+
+class ListingSessionState:
+    def __init__(self):
+        self.generation = 0
+        self.session_id = None
+        self.cookies = {}
+        self.started_monotonic = 0.0
+        self.bootstrapped = False
+        self.last_reset_reason = ""
+        self.reset("initial")
+
+    def reset(self, reason):
+        self.generation += 1
+        self.session_id = new_listing_session_id() if LISTING_SESSION_ENABLED else None
+        self.cookies = {}
+        self.started_monotonic = time.monotonic()
+        self.bootstrapped = False
+        self.last_reset_reason = reason
+
+    def expired(self):
+        if not LISTING_SESSION_ENABLED:
+            return False
+        return time.monotonic() - self.started_monotonic >= LISTING_SESSION_MAX_AGE_SECONDS
+
+    def update_from_headers(self, headers):
+        received = parse_zr_cookies((headers or {}).get("Zr-Cookies", ""))
+        for name, value in received.items():
+            if value:
+                self.cookies[name] = value
+            else:
+                self.cookies.pop(name, None)
+        return len(received)
+
+    def cookie_header(self):
+        return "; ".join(f"{name}={value}" for name, value in self.cookies.items())
+
+    def metadata(self):
+        return {
+            "listing_session_enabled": LISTING_SESSION_ENABLED,
+            "listing_session_id": self.session_id or "",
+            "listing_session_generation": self.generation,
+            "listing_session_cookie_count": len(self.cookies),
+            "listing_session_cookie_names": sorted(self.cookies),
+            "listing_session_reset_reason": self.last_reset_reason,
+        }
+
+
+def zenrows_mode_auto():
+    return os.getenv("BESTBUY_GRAPHQL_MODE_AUTO", "0").lower() in {"1", "true", "yes", "y"}
+
+
+def zenrows_params(session_id=None):
     params = {"custom_headers": "true"}
-    if os.getenv("BESTBUY_GRAPHQL_PREMIUM_PROXY", "1").lower() in {"1", "true", "yes"}:
-        params["premium_proxy"] = "true"
-        params["proxy_country"] = "us"
-    if os.getenv("BESTBUY_GRAPHQL_JS_RENDER", "1").lower() in {"1", "true", "yes"}:
-        params["js_render"] = "true"
-    if os.getenv("BESTBUY_GRAPHQL_MODE_AUTO", "0").lower() in {"1", "true", "yes"}:
+    if zenrows_mode_auto():
         params["mode"] = "auto"
         params["proxy_country"] = "us"
+    else:
+        if os.getenv("BESTBUY_GRAPHQL_PREMIUM_PROXY", "1").lower() in {"1", "true", "yes"}:
+            params["premium_proxy"] = "true"
+            params["proxy_country"] = "us"
+        if os.getenv("BESTBUY_GRAPHQL_JS_RENDER", "1").lower() in {"1", "true", "yes"}:
+            params["js_render"] = "true"
+    if LISTING_SESSION_ENABLED and session_id:
+        params["session_id"] = str(session_id)
     return params
 
 
@@ -195,22 +310,76 @@ def fetch_transports():
     raise RuntimeError("Best Buy listing collection is ZenRows GraphQL only. Set BESTBUY_FETCH_MODE=zenrows.")
 
 
-def post_graphql(client, payload, page, transport):
+def listing_headers(page, session_state, graphql=True):
     headers = {
-        "accept": "application/json, text/plain, */*",
-        "content-type": "application/json",
-        "origin": BESTBUY_BASE_URL,
-        "referer": build_search_url(page),
+        "referer": build_search_url(page) if graphql else f"{BESTBUY_BASE_URL}/",
     }
+    if graphql:
+        headers.update(
+            {
+                "accept": "application/json, text/plain, */*",
+                "content-type": "application/json",
+                "origin": BESTBUY_BASE_URL,
+            }
+        )
+    else:
+        headers["accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    cookie_header = session_state.cookie_header()
+    if cookie_header:
+        headers["cookie"] = cookie_header
+    return headers
+
+
+def bootstrap_listing_session(client, session_state, page=1):
+    start = time.perf_counter()
+    started_at = now()
+    try:
+        response = client.get(
+            build_search_url(page),
+            params=zenrows_params(session_state.session_id),
+            headers=listing_headers(page, session_state, graphql=False),
+            timeout=REQUEST_TIMEOUT,
+        )
+        received_cookie_count = session_state.update_from_headers(response.headers)
+        summary = {
+            "started_at": started_at,
+            "finished_at": now(),
+            "elapsed_seconds": round(time.perf_counter() - start, 3),
+            "status_code": response.status_code,
+            "x_request_cost": response.headers.get("x-request-cost", ""),
+            "x_request_id": response.headers.get("x-request-id", ""),
+            "zr_gateway_status": response.headers.get("zr-gatewaystatus", ""),
+            "received_cookie_count": received_cookie_count,
+            **session_state.metadata(),
+        }
+    except RequestException as exc:
+        summary = {
+            "started_at": started_at,
+            "finished_at": now(),
+            "elapsed_seconds": round(time.perf_counter() - start, 3),
+            "status_code": "ERR",
+            "x_request_cost": "",
+            "x_request_id": "",
+            "zr_gateway_status": "",
+            "received_cookie_count": 0,
+            "error": str(exc),
+            **session_state.metadata(),
+        }
+    session_state.bootstrapped = True
+    return summary
+
+
+def post_graphql(client, payload, page, transport, session_state):
     start = time.perf_counter()
     started_at = now()
     response = client.post(
         GRAPHQL_ENDPOINT,
-        params=zenrows_params(),
-        headers=headers,
+        params=zenrows_params(session_state.session_id),
+        headers=listing_headers(page, session_state, graphql=True),
         data=json.dumps(payload),
         timeout=REQUEST_TIMEOUT,
     )
+    session_state.update_from_headers(response.headers)
     elapsed = time.perf_counter() - start
     return response, started_at, now(), round(elapsed, 3), transport
 
@@ -275,7 +444,16 @@ def load_cached_page(page):
     return response_json, meta, rows
 
 
-def save_page_artifacts(page, payload, response, started_at, finished_at, elapsed, transport):
+def save_page_artifacts(
+    page,
+    payload,
+    response,
+    started_at,
+    finished_at,
+    elapsed,
+    transport,
+    session_state=None,
+):
     status = "success" if response.status_code == 200 else "fail"
     paths = page_artifact_paths(page, status)
     request_path = paths["request"]
@@ -286,7 +464,10 @@ def save_page_artifacts(page, payload, response, started_at, finished_at, elapse
 
     request_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     response_path.write_text(response.text, encoding="utf-8", errors="replace")
-    headers_path.write_text(json.dumps(dict(response.headers), indent=2, ensure_ascii=False), encoding="utf-8")
+    headers_path.write_text(
+        json.dumps(redacted_response_headers(response.headers), indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
     response_json = {}
     parse_error = ""
@@ -309,14 +490,19 @@ def save_page_artifacts(page, payload, response, started_at, finished_at, elapse
         "x_request_cost": response.headers.get("x-request-cost", ""),
         "bytes": len(response.text or ""),
         "parse_error": parse_error,
+        "zenrows_error_code": zenrows_error_code(response_json),
+        "x_request_id": response.headers.get("x-request-id", ""),
+        "zr_gateway_status": response.headers.get("zr-gatewaystatus", ""),
         "request_path": rel_path(request_path),
         "response_path": rel_path(response_path),
         "response_json_path": rel_path(json_path) if response_json else "",
         "headers_path": rel_path(headers_path),
-        "sanitize_product_list_query": os.getenv("BESTBUY_SANITIZE_PRODUCT_LIST_QUERY", "0"),
-        "strip_product_list_fulfillment": os.getenv("BESTBUY_STRIP_PRODUCT_LIST_FULFILLMENT", "0"),
+        "sanitize_product_list_query": int(SANITIZE_PRODUCT_LIST_QUERY),
+        "strip_product_list_fulfillment": int(STRIP_PRODUCT_LIST_FULFILLMENT),
         "query_has_fulfillment_options": "fulfillmentOptions" in (payload.get("query") or ""),
     }
+    if session_state is not None:
+        meta.update(session_state.metadata())
     meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
     return response_json, meta
 
@@ -629,6 +815,8 @@ def page_summary(page, rows, meta, response_json):
         "attempt_count": meta.get("attempt_count", 1),
         "attempt_status_codes": meta.get("attempt_status_codes", str(meta.get("status_code", ""))),
         "attempt_costs": meta.get("attempt_costs", str(meta.get("x_request_cost", ""))),
+        "attempt_retry_reasons": meta.get("attempt_retry_reasons", ""),
+        "attempt_retry_delays": meta.get("attempt_retry_delays", ""),
         "attempt_errors": meta.get("attempt_errors", ""),
     }
     summary.update(fulfillment_counts)
@@ -642,21 +830,40 @@ def status_code_int(value):
         return 0
 
 
-def retryable_listing_result(rows, meta, response_json):
+def listing_retry_reason(rows, meta, response_json):
     if rows:
-        return False
+        return ""
     status_code = meta.get("status_code")
     if status_code == "ERR":
-        return True
+        return "request_exception"
     try:
         status_code = int(status_code)
     except (TypeError, ValueError):
-        return False
+        return ""
+    error_code = str(meta.get("zenrows_error_code") or zenrows_error_code(response_json)).upper()
+    if status_code == 422 and error_code == "RESP001":
+        return "resp001"
     if status_code in LISTING_RETRY_STATUS_CODES:
-        return True
+        return f"http_{status_code}"
     if status_code == 200 and not response_json:
-        return True
-    return False
+        return "empty_response"
+    return ""
+
+
+def listing_retry_delay(attempt):
+    if LISTING_RETRY_SLEEP_SECONDS <= 0:
+        return 0.0
+    return min(
+        LISTING_RETRY_SLEEP_SECONDS * (2 ** max(0, attempt - 1)),
+        LISTING_RETRY_MAX_SLEEP_SECONDS,
+    )
+
+
+def ensure_listing_session(client, session_state, page, bootstrap_attempts):
+    if session_state.expired():
+        session_state.reset("max_age")
+    if LISTING_SESSION_BOOTSTRAP and not session_state.bootstrapped:
+        bootstrap_attempts.append(bootstrap_listing_session(client, session_state, page))
 
 
 def main():
@@ -670,10 +877,12 @@ def main():
 
     operation = load_product_list_operation("PlpView_ProductList_Init")
     client = ZenRowsClient(api_key) if api_key else None
+    listing_session = ListingSessionState()
 
     all_rows = []
     page_benchmarks = []
     raw_search = []
+    bootstrap_attempts = []
     realtime_benchmarks_path = RUN_ROOT / "benchmarks" / "page_benchmarks.csv"
     if realtime_benchmarks_path.exists():
         realtime_benchmarks_path.unlink()
@@ -699,7 +908,10 @@ def main():
             attempt_status_codes = []
             attempt_costs = []
             attempt_errors = []
+            attempt_retry_reasons = []
+            attempt_retry_delays = []
             for attempt in range(1, LISTING_MAX_ATTEMPTS + 1):
+                ensure_listing_session(client, listing_session, page, bootstrap_attempts)
                 for transport in fetch_transports():
                     if transport == "zenrows" and not client:
                         continue
@@ -709,6 +921,7 @@ def main():
                             payload,
                             page,
                             transport,
+                            listing_session,
                         )
                         response_json, meta = save_page_artifacts(
                             page,
@@ -718,6 +931,7 @@ def main():
                             finished_at,
                             elapsed,
                             transport,
+                            listing_session,
                         )
                         rows = parse_page_rows(page, response_json) if response.status_code == 200 else []
                     except RequestException as exc:
@@ -738,20 +952,36 @@ def main():
                             "error": str(exc),
                             "response_json_path": "",
                             "response_path": "",
+                            **listing_session.metadata(),
                         }
                     attempt_status_codes.append(str(meta.get("status_code", "")))
                     attempt_costs.append(str(meta.get("x_request_cost", "")))
                     if meta.get("error"):
                         attempt_errors.append(str(meta.get("error")))
-                    if rows or not retryable_listing_result(rows, meta, response_json):
+                    retry_reason = listing_retry_reason(rows, meta, response_json)
+                    if rows or not retry_reason:
                         break
-                if rows or not retryable_listing_result(rows, meta, response_json):
+                retry_reason = listing_retry_reason(rows, meta, response_json)
+                if rows or not retry_reason:
                     break
-                if attempt < LISTING_MAX_ATTEMPTS and LISTING_RETRY_SLEEP_SECONDS > 0:
-                    time.sleep(LISTING_RETRY_SLEEP_SECONDS)
+                if attempt >= LISTING_MAX_ATTEMPTS:
+                    break
+                retry_delay = listing_retry_delay(attempt)
+                attempt_retry_reasons.append(retry_reason)
+                attempt_retry_delays.append(retry_delay)
+                print(
+                    f"page={page:03d} attempt={attempt} retry_reason={retry_reason} "
+                    f"retry_delay={retry_delay:g}s"
+                )
+                if retry_delay > 0:
+                    time.sleep(retry_delay)
+                if retry_reason == "resp001":
+                    listing_session.reset("resp001")
             meta["attempt_count"] = len(attempt_status_codes)
             meta["attempt_status_codes"] = ",".join(attempt_status_codes)
             meta["attempt_costs"] = ",".join(attempt_costs)
+            meta["attempt_retry_reasons"] = ",".join(attempt_retry_reasons)
+            meta["attempt_retry_delays"] = ",".join(f"{delay:g}" for delay in attempt_retry_delays)
             if attempt_errors:
                 meta["attempt_errors"] = " | ".join(attempt_errors[-3:])
             source = "network"
@@ -792,6 +1022,11 @@ def main():
 
     run_elapsed = round(time.perf_counter() - run_start, 3)
     total_cost = 0.0
+    for bootstrap in bootstrap_attempts:
+        try:
+            total_cost += float(bootstrap.get("x_request_cost") or 0)
+        except ValueError:
+            pass
     for summary in page_benchmarks:
         costs = str(summary.get("attempt_costs") or summary.get("x_request_cost") or "").split(",")
         for cost in costs:
@@ -799,6 +1034,9 @@ def main():
                 total_cost += float(cost or 0)
             except ValueError:
                 pass
+    graphql_post_calls = sum(int(summary.get("attempt_count") or 1) for summary in page_benchmarks)
+    bootstrap_call_count = len(bootstrap_attempts)
+    total_request_calls = graphql_post_calls + bootstrap_call_count
     manifest = {
         "run_type": "step01_main_list",
         "run_root": rel_path(RUN_ROOT),
@@ -818,7 +1056,11 @@ def main():
         "source_template": operation.get("source_path", ""),
         "source_template_type": operation.get("source_type", ""),
         "expected_post_calls": SEARCH_PAGES,
-        "actual_post_calls": sum(int(summary.get("attempt_count") or 1) for summary in page_benchmarks),
+        "actual_post_calls": total_request_calls,
+        "total_request_calls": total_request_calls,
+        "graphql_post_calls": graphql_post_calls,
+        "bootstrap_call_count": bootstrap_call_count,
+        "bootstrap_attempts": bootstrap_attempts,
         "page_count": len(page_benchmarks),
         "retry_attempt_count": sum(max(0, int(summary.get("attempt_count") or 1) - 1) for summary in page_benchmarks),
         "failed_pages": [
@@ -829,6 +1071,17 @@ def main():
         ],
         "listing_max_attempts": LISTING_MAX_ATTEMPTS,
         "listing_retry_status_codes": sorted(LISTING_RETRY_STATUS_CODES),
+        "listing_retry_sleep_seconds": LISTING_RETRY_SLEEP_SECONDS,
+        "listing_retry_max_sleep_seconds": LISTING_RETRY_MAX_SLEEP_SECONDS,
+        "listing_zenrows_mode": "auto" if zenrows_mode_auto() else "manual",
+        "listing_session_enabled": LISTING_SESSION_ENABLED,
+        "listing_session_bootstrap": LISTING_SESSION_BOOTSTRAP,
+        "listing_session_max_age_seconds": LISTING_SESSION_MAX_AGE_SECONDS,
+        "listing_session_count": (
+            listing_session.generation
+            if LISTING_SESSION_ENABLED and total_request_calls
+            else 0
+        ),
         "total_x_request_cost": round(total_cost, 7),
         "main_occurrences": len(all_rows),
         "unique_skus": len({row.get("sku_id") for row in all_rows if row.get("sku_id")}),
@@ -846,7 +1099,7 @@ def main():
     print("=" * 80)
     print(f"benchmark_end={manifest['run_finished_at']}")
     print(
-        f"elapsed={run_elapsed}s calls={manifest['actual_post_calls']} "
+        f"elapsed={run_elapsed}s calls={manifest['total_request_calls']} "
         f"cost={manifest['total_x_request_cost']} rows={manifest['main_occurrences']} "
         f"unique_skus={manifest['unique_skus']}"
     )

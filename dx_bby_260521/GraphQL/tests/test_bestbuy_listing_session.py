@@ -81,7 +81,7 @@ class FakeClient:
 
 
 class BestBuyListingSessionTests(unittest.TestCase):
-    def test_listing_payload_strips_fulfillment(self):
+    def test_listing_payload_keeps_fulfillment_by_default(self):
         operation = {
             "operationName": "PlpView_ProductList_Init",
             "variables": {},
@@ -90,11 +90,27 @@ class BestBuyListingSessionTests(unittest.TestCase):
 
         payload = listing_step.prepare_product_list_payload(operation, 1)
 
+        self.assertIn("fulfillmentOptions", payload["query"])
+        self.assertIn("skuId", payload["query"])
+        self.assertIn("name", payload["query"])
+
+    def test_listing_payload_can_strip_fulfillment_when_explicitly_enabled(self):
+        operation = {
+            "operationName": "PlpView_ProductList_Init",
+            "variables": {},
+            "query": "query Q { product { skuId fulfillmentOptions { shippingDetails } name } }",
+        }
+
+        with patch.object(listing_step, "SANITIZE_PRODUCT_LIST_QUERY", True), patch.object(
+            listing_step, "STRIP_PRODUCT_LIST_FULFILLMENT", True
+        ):
+            payload = listing_step.prepare_product_list_payload(operation, 1)
+
         self.assertNotIn("fulfillmentOptions", payload["query"])
         self.assertIn("skuId", payload["query"])
         self.assertIn("name", payload["query"])
 
-    def test_session_keeps_cookie_values_in_memory_and_builds_cookie_header(self):
+    def test_default_listing_mode_is_stateless_and_does_not_reuse_cookies(self):
         state = listing_step.ListingSessionState()
 
         received = state.update_from_headers(
@@ -103,41 +119,59 @@ class BestBuyListingSessionTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(received, 3)
-        self.assertEqual(state.cookies["SID"], "session-a")
-        self.assertIn("SID=session-a", state.cookie_header())
-        self.assertIn("_abck=akamai-a", state.cookie_header())
+        self.assertEqual(received, 0)
+        self.assertIsNone(state.session_id)
+        self.assertEqual(state.cookies, {})
+        self.assertEqual(state.cookie_header(), "")
+        self.assertNotIn("session_id", listing_step.zenrows_params(state.session_id))
 
-    def test_bootstrap_uses_session_id_and_captures_response_cookies(self):
-        state = listing_step.ListingSessionState()
-        client = FakeClient(
-            FakeResponse(
-                headers={
-                    "Zr-Cookies": "SID=session-a; _abck=akamai-a",
-                    "X-Request-Cost": "0.001",
-                    "X-Request-Id": "request-a",
-                    "Zr-Gatewaystatus": "200",
+    def test_optional_session_keeps_cookie_values_in_memory_and_builds_cookie_header(self):
+        with patch.object(listing_step, "LISTING_SESSION_ENABLED", True):
+            state = listing_step.ListingSessionState()
+
+            received = state.update_from_headers(
+                {
+                    "Zr-Cookies": "SID=session-a; _abck=akamai-a; bm_sz=bot-a",
                 }
             )
-        )
 
-        summary = listing_step.bootstrap_listing_session(client, state, page=1)
+            self.assertEqual(received, 3)
+            self.assertEqual(state.cookies["SID"], "session-a")
+            self.assertIn("SID=session-a", state.cookie_header())
+            self.assertIn("_abck=akamai-a", state.cookie_header())
 
-        self.assertEqual(client.calls[0]["params"]["session_id"], str(state.session_id))
-        self.assertEqual(client.calls[0]["headers"]["referer"], "https://www.bestbuy.com/")
-        self.assertEqual(state.cookies["SID"], "session-a")
-        self.assertEqual(summary["received_cookie_count"], 2)
-        self.assertTrue(state.bootstrapped)
+    def test_bootstrap_uses_session_id_and_captures_response_cookies(self):
+        with patch.object(listing_step, "LISTING_SESSION_ENABLED", True):
+            state = listing_step.ListingSessionState()
+            client = FakeClient(
+                FakeResponse(
+                    headers={
+                        "Zr-Cookies": "SID=session-a; _abck=akamai-a",
+                        "X-Request-Cost": "0.001",
+                        "X-Request-Id": "request-a",
+                        "Zr-Gatewaystatus": "200",
+                    }
+                )
+            )
+
+            summary = listing_step.bootstrap_listing_session(client, state, page=1)
+
+            self.assertEqual(client.calls[0]["params"]["session_id"], str(state.session_id))
+            self.assertEqual(client.calls[0]["headers"]["referer"], "https://www.bestbuy.com/")
+            self.assertEqual(state.cookies["SID"], "session-a")
+            self.assertEqual(summary["received_cookie_count"], 2)
+            self.assertTrue(state.bootstrapped)
 
     def test_graphql_headers_reuse_bootstrap_cookies(self):
-        state = listing_step.ListingSessionState()
-        state.update_from_headers({"Zr-Cookies": "SID=session-a; _abck=akamai-a"})
+        with patch.object(listing_step, "LISTING_SESSION_ENABLED", True):
+            state = listing_step.ListingSessionState()
+            state.update_from_headers({"Zr-Cookies": "SID=session-a; _abck=akamai-a"})
 
-        headers = listing_step.listing_headers(2, state, graphql=True)
+            headers = listing_step.listing_headers(2, state, graphql=True)
 
-        self.assertIn("SID=session-a", headers["cookie"])
-        self.assertEqual(headers["content-type"], "application/json")
-        self.assertTrue(headers["referer"].startswith("https://www.bestbuy.com/"))
+            self.assertIn("SID=session-a", headers["cookie"])
+            self.assertEqual(headers["content-type"], "application/json")
+            self.assertTrue(headers["referer"].startswith("https://www.bestbuy.com/"))
 
     def test_cookie_headers_are_redacted_before_artifact_logging(self):
         headers = listing_step.redacted_response_headers(
@@ -181,71 +215,75 @@ class BestBuyListingSessionTests(unittest.TestCase):
         )
 
     def test_session_reset_discards_old_cookies(self):
-        state = listing_step.ListingSessionState()
-        old_generation = state.generation
-        state.update_from_headers({"Zr-Cookies": "SID=session-a; _abck=akamai-a"})
+        with patch.object(listing_step, "LISTING_SESSION_ENABLED", True):
+            state = listing_step.ListingSessionState()
+            old_generation = state.generation
+            state.update_from_headers({"Zr-Cookies": "SID=session-a; _abck=akamai-a"})
 
-        state.reset("resp001")
+            state.reset("resp001")
 
-        self.assertEqual(state.generation, old_generation + 1)
-        self.assertIsNotNone(state.session_id)
-        self.assertEqual(state.cookies, {})
-        self.assertFalse(state.bootstrapped)
-        self.assertEqual(state.last_reset_reason, "resp001")
+            self.assertEqual(state.generation, old_generation + 1)
+            self.assertIsNotNone(state.session_id)
+            self.assertEqual(state.cookies, {})
+            self.assertFalse(state.bootstrapped)
+            self.assertEqual(state.last_reset_reason, "resp001")
 
     def test_manual_mode_keeps_explicit_protection_and_session_parameters(self):
-        state = listing_step.ListingSessionState()
-        with patch.dict(
-            listing_step.os.environ,
-            {
-                "BESTBUY_GRAPHQL_MODE_AUTO": "0",
-                "BESTBUY_GRAPHQL_PREMIUM_PROXY": "1",
-                "BESTBUY_GRAPHQL_JS_RENDER": "1",
-            },
-        ):
-            params = listing_step.zenrows_params(state.session_id)
+        with patch.object(listing_step, "LISTING_SESSION_ENABLED", True):
+            state = listing_step.ListingSessionState()
+            with patch.dict(
+                listing_step.os.environ,
+                {
+                    "BESTBUY_GRAPHQL_MODE_AUTO": "0",
+                    "BESTBUY_GRAPHQL_PREMIUM_PROXY": "1",
+                    "BESTBUY_GRAPHQL_JS_RENDER": "1",
+                },
+            ):
+                params = listing_step.zenrows_params(state.session_id)
 
-        self.assertNotIn("mode", params)
-        self.assertEqual(params["premium_proxy"], "true")
-        self.assertEqual(params["js_render"], "true")
-        self.assertEqual(params["proxy_country"], "us")
-        self.assertEqual(params["session_id"], str(state.session_id))
+            self.assertNotIn("mode", params)
+            self.assertEqual(params["premium_proxy"], "true")
+            self.assertEqual(params["js_render"], "true")
+            self.assertEqual(params["proxy_country"], "us")
+            self.assertEqual(params["session_id"], str(state.session_id))
 
     def test_manual_graphql_post_reuses_cookie_and_refreshes_cookie_jar(self):
-        state = listing_step.ListingSessionState()
-        state.update_from_headers({"Zr-Cookies": "SID=session-a; _abck=akamai-a"})
-        client = FakeClient(
-            FakeResponse(
-                headers={
-                    "Zr-Cookies": "SID=session-a; _abck=akamai-b",
-                }
+        with patch.object(listing_step, "LISTING_SESSION_ENABLED", True):
+            state = listing_step.ListingSessionState()
+            state.update_from_headers({"Zr-Cookies": "SID=session-a; _abck=akamai-a"})
+            client = FakeClient(
+                FakeResponse(
+                    headers={
+                        "Zr-Cookies": "SID=session-a; _abck=akamai-b",
+                    }
+                )
             )
-        )
-        payload = {"operationName": "Q", "variables": {}, "query": "query Q { ok }"}
+            payload = {"operationName": "Q", "variables": {}, "query": "query Q { ok }"}
 
-        listing_step.post_graphql(client, payload, 1, "zenrows", state)
+            listing_step.post_graphql(client, payload, 1, "zenrows", state)
 
-        self.assertIn("SID=session-a", client.calls[0]["headers"]["cookie"])
-        self.assertEqual(client.calls[0]["params"]["session_id"], str(state.session_id))
-        self.assertEqual(state.cookies["_abck"], "akamai-b")
+            self.assertIn("SID=session-a", client.calls[0]["headers"]["cookie"])
+            self.assertEqual(client.calls[0]["params"]["session_id"], str(state.session_id))
+            self.assertEqual(state.cookies["_abck"], "akamai-b")
 
     def test_auto_mode_does_not_send_conflicting_manual_parameters(self):
-        state = listing_step.ListingSessionState()
-        with patch.dict(
-            listing_step.os.environ,
-            {
-                "BESTBUY_GRAPHQL_MODE_AUTO": "1",
-                "BESTBUY_GRAPHQL_PREMIUM_PROXY": "1",
-                "BESTBUY_GRAPHQL_JS_RENDER": "1",
-            },
-        ):
-            params = listing_step.zenrows_params(state.session_id)
+        with patch.object(listing_step, "LISTING_SESSION_ENABLED", True):
+            state = listing_step.ListingSessionState()
+            with patch.dict(
+                listing_step.os.environ,
+                {
+                    "BESTBUY_GRAPHQL_MODE_AUTO": "1",
+                    "BESTBUY_GRAPHQL_PREMIUM_PROXY": "1",
+                    "BESTBUY_GRAPHQL_JS_RENDER": "1",
+                },
+            ):
+                params = listing_step.zenrows_params(state.session_id)
 
-        self.assertEqual(params["mode"], "auto")
-        self.assertEqual(params["proxy_country"], "us")
-        self.assertEqual(params["session_id"], str(state.session_id))
-        self.assertNotIn("premium_proxy", params)
-        self.assertNotIn("js_render", params)
+            self.assertEqual(params["mode"], "auto")
+            self.assertEqual(params["proxy_country"], "us")
+            self.assertEqual(params["session_id"], str(state.session_id))
+            self.assertNotIn("premium_proxy", params)
+            self.assertNotIn("js_render", params)
 
 
 if __name__ == "__main__":

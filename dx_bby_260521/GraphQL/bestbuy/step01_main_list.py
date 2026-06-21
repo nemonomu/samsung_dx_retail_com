@@ -37,7 +37,7 @@ INCLUDE_SPONSORED_CAROUSEL = os.getenv("BESTBUY_INCLUDE_SPONSORED_CAROUSEL", "0"
 }
 REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "120"))
 FETCH_MODE = os.getenv("BESTBUY_FETCH_MODE", os.getenv("BESTBUY_GRAPHQL_FETCH_MODE", "zenrows")).strip().lower()
-LISTING_MAX_ATTEMPTS = max(1, int(os.getenv("BESTBUY_LISTING_MAX_ATTEMPTS", "4")))
+LISTING_MAX_ATTEMPTS = max(1, int(os.getenv("BESTBUY_LISTING_MAX_ATTEMPTS", "5")))
 LISTING_RETRY_SLEEP_SECONDS = float(os.getenv("BESTBUY_LISTING_RETRY_SLEEP_SECONDS", "2"))
 LISTING_RETRY_MAX_SLEEP_SECONDS = max(
     LISTING_RETRY_SLEEP_SECONDS,
@@ -51,19 +51,19 @@ LISTING_RETRY_STATUS_CODES = {
     )
     if value.strip().isdigit()
 }
-SANITIZE_PRODUCT_LIST_QUERY = os.getenv("BESTBUY_SANITIZE_PRODUCT_LIST_QUERY", "1").lower() in {
+SANITIZE_PRODUCT_LIST_QUERY = os.getenv("BESTBUY_SANITIZE_PRODUCT_LIST_QUERY", "0").lower() in {
     "1",
     "true",
     "yes",
     "y",
 }
-STRIP_PRODUCT_LIST_FULFILLMENT = os.getenv("BESTBUY_STRIP_PRODUCT_LIST_FULFILLMENT", "1").lower() in {
+STRIP_PRODUCT_LIST_FULFILLMENT = os.getenv("BESTBUY_STRIP_PRODUCT_LIST_FULFILLMENT", "0").lower() in {
     "1",
     "true",
     "yes",
     "y",
 }
-LISTING_SESSION_ENABLED = os.getenv("BESTBUY_LISTING_SESSION_ENABLED", "1").lower() in {
+LISTING_SESSION_ENABLED = os.getenv("BESTBUY_LISTING_SESSION_ENABLED", "0").lower() in {
     "1",
     "true",
     "yes",
@@ -73,7 +73,7 @@ LISTING_SESSION_MAX_AGE_SECONDS = max(
     60,
     int(os.getenv("BESTBUY_LISTING_SESSION_MAX_AGE_SECONDS", "480")),
 )
-LISTING_SESSION_BOOTSTRAP = os.getenv("BESTBUY_LISTING_SESSION_BOOTSTRAP", "1").lower() in {
+LISTING_SESSION_BOOTSTRAP = os.getenv("BESTBUY_LISTING_SESSION_BOOTSTRAP", "0").lower() in {
     "1",
     "true",
     "yes",
@@ -262,6 +262,8 @@ class ListingSessionState:
         return time.monotonic() - self.started_monotonic >= LISTING_SESSION_MAX_AGE_SECONDS
 
     def update_from_headers(self, headers):
+        if not LISTING_SESSION_ENABLED:
+            return 0
         received = parse_zr_cookies((headers or {}).get("Zr-Cookies", ""))
         for name, value in received.items():
             if value:
@@ -271,6 +273,8 @@ class ListingSessionState:
         return len(received)
 
     def cookie_header(self):
+        if not LISTING_SESSION_ENABLED:
+            return ""
         return "; ".join(f"{name}={value}" for name, value in self.cookies.items())
 
     def metadata(self):
@@ -860,6 +864,8 @@ def listing_retry_delay(attempt):
 
 
 def ensure_listing_session(client, session_state, page, bootstrap_attempts):
+    if not LISTING_SESSION_ENABLED:
+        return
     if session_state.expired():
         session_state.reset("max_age")
     if LISTING_SESSION_BOOTSTRAP and not session_state.bootstrapped:
@@ -915,6 +921,12 @@ def main():
                 for transport in fetch_transports():
                     if transport == "zenrows" and not client:
                         continue
+                    print(
+                        f"page={page:03d} attempt={attempt} transport={transport} request_start "
+                        f"mode={'auto' if zenrows_mode_auto() else 'manual'} "
+                        f"session={'on' if LISTING_SESSION_ENABLED else 'off'}",
+                        flush=True,
+                    )
                     try:
                         response, started_at, finished_at, elapsed, transport = post_graphql(
                             client,
@@ -954,6 +966,12 @@ def main():
                             "response_path": "",
                             **listing_session.metadata(),
                         }
+                    print(
+                        f"page={page:03d} attempt={attempt} status={meta.get('status_code')} "
+                        f"zenrows_code={meta.get('zenrows_error_code', '')} "
+                        f"elapsed={meta.get('elapsed_seconds')}s cost={meta.get('x_request_cost', '')}",
+                        flush=True,
+                    )
                     attempt_status_codes.append(str(meta.get("status_code", "")))
                     attempt_costs.append(str(meta.get("x_request_cost", "")))
                     if meta.get("error"):
@@ -971,11 +989,12 @@ def main():
                 attempt_retry_delays.append(retry_delay)
                 print(
                     f"page={page:03d} attempt={attempt} retry_reason={retry_reason} "
-                    f"retry_delay={retry_delay:g}s"
+                    f"retry_delay={retry_delay:g}s",
+                    flush=True,
                 )
                 if retry_delay > 0:
                     time.sleep(retry_delay)
-                if retry_reason == "resp001":
+                if retry_reason == "resp001" and LISTING_SESSION_ENABLED:
                     listing_session.reset("resp001")
             meta["attempt_count"] = len(attempt_status_codes)
             meta["attempt_status_codes"] = ",".join(attempt_status_codes)
@@ -1004,7 +1023,8 @@ def main():
             f"ingrid={summary['sponsored_ingrid_count']} carousel={summary['sponsored_carousel_count']} "
             f"rows={summary['total_occurrence_count']} "
             f"response_fulfillment={summary['response_fulfillment_product_count']}/{summary['response_product_count']} "
-            f"rows_any_availability={summary['rows_with_any_availability']}"
+            f"rows_any_availability={summary['rows_with_any_availability']}",
+            flush=True,
         )
 
     parsed_dir = RUN_ROOT / "parsed"

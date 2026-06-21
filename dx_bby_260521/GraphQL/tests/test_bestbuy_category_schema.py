@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 from bestbuy.step00_config import BESTBUY_OUTPUT_TABLES, BESTBUY_PRODUCT_LIST_TABLES  # noqa: E402
 from bestbuy.step00_availability_policy import ALL_AVAILABILITY_FIELDS  # noqa: E402
 from bestbuy.bestbuy_orchestrator import CATEGORY_SEARCH_TERMS, HHP_TRENDING_PAGE_PAYLOAD_ENV  # noqa: E402
+import bestbuy.bestbuy_orchestrator as orchestrator_step  # noqa: E402
 import bestbuy.step07_final_targets as final_targets_step  # noqa: E402
 import bestbuy.step06_trending_deals as trending_step  # noqa: E402
 import bestbuy.step05_promotion_deals as promotion_step  # noqa: E402
@@ -657,6 +658,116 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertEqual(call_counts["detail_breakdown"][0]["source"], "raw_batch_meta")
         self.assertAlmostEqual(detail_cost, 0.0055992)
         self.assertTrue(any(source["key"] == "raw_meta_cost" for source in sources))
+
+    def test_email_notification_counts_dom_listing_calls(self):
+        run_root = Path("unit_run_root")
+        original_read_json = email_notify_step.read_json
+
+        def fake_read_json(path):
+            text = str(path).replace("\\", "/")
+            if text.endswith("main/manifest.json"):
+                return {"listing_request_calls": 16, "total_x_request_cost": 0.0399987}
+            if text.endswith("bsr/manifest.json"):
+                return {"listing_request_calls": 6, "total_x_request_cost": 0.0149995}
+            return {}
+
+        email_notify_step.read_json = fake_read_json
+        try:
+            call_counts = email_notify_step.manifest_call_counts(run_root)
+        finally:
+            email_notify_step.read_json = original_read_json
+
+        self.assertEqual(call_counts["listing"], 22)
+        self.assertEqual(call_counts["listing_breakdown"], [{"source": "main", "calls": 16}, {"source": "bsr", "calls": 6}])
+        self.assertAlmostEqual(call_counts["per_call_cost_usd"], round(0.0399987 / 16, 7))
+
+    def test_email_notification_counts_trending_and_availability_total_costs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            (run_root / "main").mkdir(parents=True)
+            (run_root / "bsr").mkdir(parents=True)
+            (run_root / "trending").mkdir(parents=True)
+            (run_root / "availability_backfill" / "availability_3type").mkdir(parents=True)
+            (run_root / "main" / "manifest.json").write_text(
+                '{"listing_request_calls": 16, "total_x_request_cost": 0.04}',
+                encoding="utf-8",
+            )
+            (run_root / "bsr" / "manifest.json").write_text(
+                '{"listing_request_calls": 6, "total_x_request_cost": 0.015}',
+                encoding="utf-8",
+            )
+            (run_root / "trending" / "summary_live_fetch.json").write_text(
+                '{"call_count": 3, "total_x_request_cost": 0.021}',
+                encoding="utf-8",
+            )
+            (run_root / "availability_backfill" / "availability_3type" / "manifest.json").write_text(
+                '{"call_count": 10, "total_x_request_cost": 0.0249992}',
+                encoding="utf-8",
+            )
+
+            call_counts = email_notify_step.manifest_call_counts(run_root)
+            total_cost, sources = email_notify_step.manifest_costs(run_root)
+
+        self.assertEqual(call_counts["listing"], 25)
+        self.assertIn({"source": "trending", "calls": 3}, call_counts["listing_breakdown"])
+        self.assertEqual(call_counts["availability"], 10)
+        self.assertAlmostEqual(total_cost, 0.1009992)
+        self.assertTrue(any(source["key"] == "total_x_request_cost" for source in sources))
+
+    def test_trending_live_summary_rewrites_cumulative_attempt_cost(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_root = Path(tmp)
+            original_run_root = trending_step.RUN_ROOT
+            try:
+                trending_step.RUN_ROOT = run_root
+                trending_step.rewrite_live_fetch_summary(
+                    [
+                        {"attempt": 1, "x_request_cost": "0.006999", "status_code": 200},
+                        {"attempt": 2, "x_request_cost": "0.006999", "status_code": 200},
+                    ],
+                    10,
+                    ["15000", "30000"],
+                )
+            finally:
+                trending_step.RUN_ROOT = original_run_root
+
+            summary = email_notify_step.read_json(run_root / "summary_live_fetch.json")
+
+        self.assertEqual(summary["call_count"], 2)
+        self.assertEqual(summary["row_count"], 10)
+        self.assertEqual(summary["attempted_waits"], ["15000", "30000"])
+        self.assertAlmostEqual(summary["total_x_request_cost"], 0.013998)
+
+    def test_orchestrator_bsr_dom_defaults_collect_enough_candidates(self):
+        bsr_step = next(step for step in orchestrator_step.STEPS if step.name == "bsr_list")
+
+        self.assertEqual(bsr_step.env["BESTBUY_MAIN_PAGES"], "6")
+        self.assertEqual(bsr_step.env["BESTBUY_MAIN_ORGANIC_OFFSET"], "18")
+
+    def test_orchestrator_listing_complete_accepts_dom_request_calls(self):
+        step = orchestrator_step.Step(
+            1,
+            "main_list",
+            "bestbuy.step01_main_list",
+            {"BESTBUY_MAIN_PAGES": "16", "BESTBUY_MAIN_RUN_ID": "main"},
+        )
+        original_read_json = orchestrator_step.read_json
+        original_csv_count = orchestrator_step.csv_count
+        original_run_root = orchestrator_step.run_root
+
+        try:
+            orchestrator_step.read_json = lambda _path: {"listing_request_calls": 16, "actual_post_calls": 0}
+            orchestrator_step.csv_count = lambda _path: 384
+            orchestrator_step.run_root = lambda _env=None: Path("unit_run_root")
+
+            complete, reason = orchestrator_step.main_list_complete(step)
+        finally:
+            orchestrator_step.read_json = original_read_json
+            orchestrator_step.csv_count = original_csv_count
+            orchestrator_step.run_root = original_run_root
+
+        self.assertTrue(complete)
+        self.assertEqual(reason, "calls 16/16")
 
     def test_ref_test10_runner_keeps_run_limited_and_dry(self):
         script = (ROOT / "bby_ref_test10_task.bat").read_text(encoding="utf-8")

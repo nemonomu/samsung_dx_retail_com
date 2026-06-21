@@ -122,7 +122,12 @@ def unique_csv_count(path, key):
 
 def latest_manifest_cost(root):
     manifests = sorted(Path(root).glob("*/manifest.json"), key=lambda item: item.stat().st_mtime)
-    return sum(as_float(read_json(path).get("x_request_cost")) for path in manifests)
+    total = 0.0
+    for path in manifests:
+        data = read_json(path)
+        key = "total_x_request_cost" if data.get("total_x_request_cost") not in ("", None) else "x_request_cost"
+        total += as_float(data.get(key))
+    return total
 
 
 STANDARD_ZENROWS_CALL_COST_USD = 0.0027996
@@ -130,7 +135,11 @@ STANDARD_ZENROWS_CALL_COST_USD = 0.0027996
 
 def derive_per_call_cost(run_root):
     main = read_json(run_root / "main" / "manifest.json")
-    calls = as_int(main.get("actual_post_calls"))
+    calls = as_int(
+        main.get("listing_request_calls")
+        or main.get("total_request_calls")
+        or main.get("actual_post_calls")
+    )
     cost = as_float(main.get("total_x_request_cost"))
     if calls and cost:
         return cost / calls
@@ -211,7 +220,11 @@ def manifest_call_counts(run_root):
         data = read_json(run_root / sub / "manifest.json")
         if not data:
             continue
-        calls = as_int(data.get("actual_post_calls"))
+        calls = as_int(
+            data.get("listing_request_calls")
+            or data.get("total_request_calls")
+            or data.get("actual_post_calls")
+        )
         if calls:
             listing_total += calls
             listing_breakdown.append({"source": sub, "calls": calls})
@@ -235,11 +248,15 @@ def manifest_call_counts(run_root):
         data = read_json(path)
         if not data or data.get("skipped"):
             continue
-        attempt = as_int(data.get("attempt"))
-        if attempt:
-            trending_calls += attempt
-        elif as_float(data.get("x_request_cost")) or as_float(data.get("total_x_request_cost")):
-            trending_calls += 1
+        calls = as_int(data.get("call_count"))
+        if calls:
+            trending_calls += calls
+        else:
+            attempt = as_int(data.get("attempt"))
+            if attempt:
+                trending_calls += attempt
+            elif as_float(data.get("x_request_cost")) or as_float(data.get("total_x_request_cost")):
+                trending_calls += 1
     if trending_calls:
         listing_total += trending_calls
         listing_breakdown.append({"source": "trending", "calls": trending_calls})

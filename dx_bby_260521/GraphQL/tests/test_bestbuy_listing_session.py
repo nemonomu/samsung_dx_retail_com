@@ -1,4 +1,6 @@
+import json
 import sys
+import tempfile
 import types
 import unittest
 from unittest.mock import patch
@@ -81,6 +83,56 @@ class FakeClient:
 
 
 class BestBuyListingSessionTests(unittest.TestCase):
+    def test_default_listing_collection_mode_is_dom(self):
+        self.assertEqual(listing_step.LISTING_COLLECTION_MODE, "dom")
+
+    def test_dom_manifest_transport_does_not_require_graphql_fetch_mode(self):
+        with patch.object(listing_step, "LISTING_COLLECTION_MODE", "dom"):
+            self.assertEqual(listing_step.manifest_fetch_transports(), ["zenrows_html_dom"])
+
+    def test_dom_listing_collection_uses_get_not_graphql_post(self):
+        html = """
+        <html><body>
+          <ul class="product-grid-view-container">
+            <li class="product-list-item" data-product-id="123">
+              <div class="skeleton-product-grid-view"></div>
+            </li>
+          </ul>
+          <script>
+          (window[Symbol.for("ApolloSSRDataTransport")] ??= []).push({"events":[
+            {"type":"data","result":{"data":{"productBySkuId":{
+              "__typename":"Product",
+              "skuId":"123",
+              "bsin":"JDOM123"
+            }}}}
+          ]})
+          </script>
+        </body></html>
+        """
+        client = FakeClient(FakeResponse(200, {"X-Request-Cost": "0.001"}, html))
+
+        with (
+            tempfile.TemporaryDirectory() as tmpdir,
+            patch.object(listing_step, "RUN_ROOT", Path(tmpdir)),
+            patch.object(listing_step, "LISTING_COLLECTION_MODE", "dom"),
+            patch.object(listing_step, "LISTING_HTML_FALLBACK_MIN_ROWS", 1),
+            patch.object(listing_step, "LISTING_MAX_ATTEMPTS", 1),
+        ):
+            listing_step.make_dirs()
+            _response_json, meta, rows = listing_step.collect_listing_page(
+                1,
+                {"source_type": "dom_html"},
+                client,
+                listing_step.ListingSessionState(),
+                [],
+            )
+
+        self.assertEqual(meta["transport"], "zenrows_html_dom")
+        self.assertEqual([call for call in client.calls if "data" in call], [])
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(client.calls[0]["url"], listing_step.build_search_url(1))
+        self.assertEqual([row["sku_id"] for row in rows], ["123"])
+
     def test_listing_payload_keeps_fulfillment_by_default(self):
         operation = {
             "operationName": "PlpView_ProductList_Init",
@@ -244,6 +296,7 @@ class BestBuyListingSessionTests(unittest.TestCase):
             self.assertNotIn("mode", params)
             self.assertEqual(params["premium_proxy"], "true")
             self.assertEqual(params["js_render"], "true")
+            self.assertEqual(params["wait"], str(listing_step.LISTING_WAIT_MS))
             self.assertEqual(params["proxy_country"], "us")
             self.assertEqual(params["session_id"], str(state.session_id))
 
@@ -281,9 +334,268 @@ class BestBuyListingSessionTests(unittest.TestCase):
 
             self.assertEqual(params["mode"], "auto")
             self.assertEqual(params["proxy_country"], "us")
+            self.assertEqual(params["wait"], str(listing_step.LISTING_WAIT_MS))
             self.assertEqual(params["session_id"], str(state.session_id))
             self.assertNotIn("premium_proxy", params)
             self.assertNotIn("js_render", params)
+            self.assertNotIn("js_instructions", params)
+
+    def test_listing_country_click_instruction_is_sent_for_manual_render(self):
+        with patch.object(listing_step, "LISTING_COUNTRY_CLICK_ENABLED", True), patch.object(
+            listing_step,
+            "LISTING_COUNTRY_CLICK_SELECTOR",
+            ".us-link",
+        ):
+            params = listing_step.zenrows_params()
+
+        self.assertEqual(params["js_render"], "true")
+        self.assertEqual(json.loads(params["js_instructions"]), [{"click": ".us-link"}])
+
+    def test_bestbuy_nosplash_url_adds_intl_without_dropping_query(self):
+        url = "https://www.bestbuy.com/site/searchpage.jsp?id=pcat17071&st=tv&cp=3"
+
+        result = listing_step.bestbuy_nosplash_url(url)
+
+        self.assertIn("id=pcat17071", result)
+        self.assertIn("st=tv", result)
+        self.assertIn("cp=3", result)
+        self.assertIn("intl=nosplash", result)
+
+    def test_listing_recovery_profiles_follow_official_zenrows_options(self):
+        with patch.object(listing_step, "LISTING_RECOVERY_PROFILE_NAMES", ["wait", "session_wait", "auto"]):
+            profiles = listing_step.listing_recovery_profiles()
+
+        self.assertEqual([profile["name"] for profile in profiles], ["wait", "session_wait", "auto"])
+        wait_params = listing_step.zenrows_params(request_profile=profiles[0])
+        session_wait_params = listing_step.zenrows_params(request_profile=profiles[1])
+        auto_params = listing_step.zenrows_params(request_profile=profiles[2])
+
+        self.assertEqual(wait_params["wait"], str(listing_step.LISTING_RECOVERY_WAIT_MS))
+        self.assertEqual(wait_params["js_render"], "true")
+        self.assertIn("session_id", session_wait_params)
+        self.assertEqual(session_wait_params["wait"], str(listing_step.LISTING_RECOVERY_WAIT_MS))
+        self.assertEqual(session_wait_params["js_render"], "true")
+        self.assertEqual(auto_params["mode"], "auto")
+        self.assertEqual(auto_params["proxy_country"], "us")
+
+    def test_html_dom_parser_only_reads_scoped_product_list_cards(self):
+        html = """
+        <html><body>
+          <div data-product-id="999">
+            <a href="/product/not-a-plp-card/J999/sku/999">Wrong placement</a>
+            <h3 class="product-title">Wrong - Should Not Parse</h3>
+          </div>
+          <ul class="product-grid-view-container">
+            <li class="product-list-item" data-product-id="111">
+              <a class="product-list-item-link" href="/product/samsung-tv/JVALID111">
+                <h3 class="product-title" title="Samsung - Valid TV">
+                  <span class="first-title">Samsung</span>
+                </h3>
+              </a>
+              <p class="visually-hidden">Rating 4.7 out of 5 stars with 1,234 reviews</p>
+              <div data-testid="price-block-customer-price">$399.99</div>
+              <div data-testid="price-block-regular-price">$499.99</div>
+              <div data-testid="price-block-total-savings-text">Save $100</div>
+            </li>
+            <li class="product-list-item" data-product-id="222">
+              <a class="product-list-item-link" href="/product/mismatch/JMISMATCH/sku/999">
+                <h3 class="product-title" title="Mismatch - Should Not Parse"></h3>
+              </a>
+            </li>
+          </ul>
+          <div class="sponsored-content product-list-sponsored-wrapper-grid-view">
+            <div class="product-list-item" data-product-id="333">
+              <span class="sponsored">Sponsored</span>
+              <a class="product-list-item-link" href="/product/lg-tv/JVALID333/sku/333">
+                <h3 class="product-title" title="LG - Sponsored TV">
+                  <span class="first-title">LG</span>
+                </h3>
+              </a>
+              <div data-testid="price-block-customer-price">$299</div>
+            </div>
+          </div>
+        </body></html>
+        """
+
+        rows = listing_step.parse_html_dom_rows(1, html, "raw/html_dom_fallback/page_001.html")
+
+        self.assertEqual([row["sku_id"] for row in rows], ["111", "333"])
+        self.assertEqual(rows[0]["container_type"], "organic_product")
+        self.assertEqual(rows[0]["organic_rank"], 1)
+        self.assertEqual(rows[0]["global_organic_rank"], 1)
+        self.assertEqual(rows[0]["rating"], "4.7")
+        self.assertEqual(rows[0]["review_count"], "1234")
+        self.assertEqual(rows[0]["customer_price"], "$399.99")
+        self.assertEqual(rows[0]["regular_price"], "$499.99")
+        self.assertEqual(rows[0]["total_savings"], "$100")
+        self.assertEqual(rows[1]["container_type"], "sponsored_ingrid")
+        self.assertEqual(rows[1]["organic_rank"], "")
+        self.assertEqual(rows[1]["sponsored_rank"], 1)
+
+    def test_html_dom_parser_joins_apollo_data_only_for_scoped_cards(self):
+        html = """
+        <html><body>
+          <ul class="product-grid-view-container">
+            <li class="product-list-item" data-product-id="444">
+              <div class="skeleton-product-grid-view"></div>
+            </li>
+          </ul>
+          <script>
+          (window[Symbol.for("ApolloSSRDataTransport")] ??= []).push({"events":[
+            {"type":"data","result":{"data":{"productBySkuId":{
+              "__typename":"Product",
+              "skuId":"444",
+              "bsin":"JVALID444",
+              "brand":"Sony",
+              "name":{"short":"Sony - Scoped Product"},
+              "url":{"pdp":"https://www.bestbuy.com/product/sony-scoped-product/JVALID444"},
+              "primaryImage":{"piscesHref":"https://pisces.bbystatic.com/image.jpg"},
+              "reviewInfo":{"averageRating":4.5,"reviewCount":12},
+              "price":{"displayableCustomerPrice":599.99,"displayableRegularPrice":699.99,"totalSavings":100}
+            }}}},
+            {"type":"data","result":{"data":{"productBySkuId":{
+              "__typename":"Product",
+              "skuId":"555",
+              "bsin":"JWRONG555",
+              "name":{"short":"Wrong Unscoped Product"},
+              "url":{"pdp":"https://www.bestbuy.com/product/wrong/JWRONG555"}
+            }}}}
+          ]})
+          </script>
+        </body></html>
+        """
+
+        rows = listing_step.parse_html_dom_rows(1, html, "raw/html_dom_fallback/page_001.html")
+
+        self.assertEqual([row["sku_id"] for row in rows], ["444"])
+        self.assertEqual(rows[0]["product_name"], "Sony - Scoped Product")
+        self.assertEqual(rows[0]["product_url"], "https://www.bestbuy.com/product/sony-scoped-product/JVALID444/sku/444")
+        self.assertEqual(rows[0]["customer_price"], 599.99)
+
+    def test_html_dom_parser_adds_sku_fallback_url_for_skeleton_cards(self):
+        html = """
+        <html><body>
+          <ul class="product-grid-view-container">
+            <li class="product-list-item" data-product-id="666">
+              <div class="skeleton-product-grid-view"></div>
+            </li>
+          </ul>
+          <script>
+          (window[Symbol.for("ApolloSSRDataTransport")] ??= []).push({"events":[
+            {"type":"data","result":{"data":{"productBySkuId":{
+              "__typename":"Product",
+              "skuId":"666",
+              "bsin":"JSKELETON666"
+            }}}}
+          ]})
+          </script>
+        </body></html>
+        """
+
+        rows = listing_step.parse_html_dom_rows(1, html, "raw/html_dom_fallback/page_001.html")
+
+        self.assertEqual([row["sku_id"] for row in rows], ["666"])
+        self.assertEqual(rows[0]["product_url"], "https://www.bestbuy.com/site/-/666.p?skuId=666&intl=nosplash")
+
+    def test_html_dom_fallback_params_include_optional_scroll_instructions(self):
+        with (
+            patch.object(listing_step, "LISTING_HTML_FALLBACK_SCROLL_ENABLED", True),
+            patch.object(listing_step, "LISTING_HTML_FALLBACK_SCROLL_STEPS", 2),
+            patch.object(listing_step, "LISTING_HTML_FALLBACK_SCROLL_Y", 1500),
+            patch.object(listing_step, "LISTING_HTML_FALLBACK_SCROLL_WAIT_MS", 900),
+            patch.object(listing_step, "LISTING_HTML_FALLBACK_SCROLL_FINAL_WAIT_MS", 1100),
+            patch.object(listing_step, "LISTING_HTML_FALLBACK_SCROLL_RESET_TOP", True),
+        ):
+            params = listing_step.html_dom_fallback_params()
+
+        instructions = json.loads(params["js_instructions"])
+        self.assertEqual(
+            instructions,
+            [
+                {"wait": 900},
+                {"scroll_y": 1500},
+                {"wait": 900},
+                {"scroll_y": 1500},
+                {"wait": 900},
+                {"wait": 1100},
+                {"evaluate": "window.scrollTo(0, 0);"},
+                {"wait": 900},
+            ],
+        )
+
+    def test_html_dom_fallback_params_can_disable_scroll_instructions(self):
+        with patch.object(listing_step, "LISTING_HTML_FALLBACK_SCROLL_ENABLED", False):
+            params = listing_step.html_dom_fallback_params()
+
+        self.assertNotIn("js_instructions", params)
+
+    def test_delayed_retry_preserves_prior_attempt_costs(self):
+        previous = {
+            "attempt_count": 2,
+            "attempt_status_codes": "422,422",
+            "attempt_costs": "0,0",
+            "attempt_retry_reasons": "resp001,resp001",
+            "attempt_retry_delays": "2,4",
+            "attempt_profiles": "base,base",
+            "attempt_errors": "RESP001",
+            "recovery_attempt_count": 1,
+        }
+        current = {
+            "attempt_count": 1,
+            "attempt_status_codes": "200",
+            "attempt_costs": "0.0027996",
+            "attempt_retry_reasons": "",
+            "attempt_retry_delays": "",
+            "attempt_profiles": "dom",
+            "attempt_errors": "",
+            "recovery_attempt_count": 0,
+            "status_code": 200,
+            "total_occurrence_count": 24,
+        }
+
+        merged = listing_step.merge_listing_attempt_history(previous, current)
+
+        self.assertEqual(merged["status_code"], 200)
+        self.assertEqual(merged["total_occurrence_count"], 24)
+        self.assertEqual(merged["attempt_count"], 3)
+        self.assertEqual(merged["attempt_status_codes"], "422,422,200")
+        self.assertEqual(merged["attempt_costs"], "0,0,0.0027996")
+        self.assertEqual(merged["recovery_attempt_count"], 1)
+
+    def test_html_dom_parser_keeps_organic_and_sponsored_occurrences_for_same_sku(self):
+        html = """
+        <html><body>
+          <ul class="product-grid-view-container">
+            <li class="product-list-item" data-product-id="777">
+              <a class="product-list-item-link" href="/product/roku-tv/JVALID777/sku/777">
+                <h3 class="product-title" title="Roku - Organic TV"></h3>
+              </a>
+            </li>
+          </ul>
+          <div class="sponsored-content product-list-sponsored-wrapper-grid-view">
+            <div class="product-list-item" data-product-id="777">
+              <div class="sponsored">Sponsored</div>
+              <a class="product-list-item-link" href="/product/roku-tv/JVALID777/sku/777">
+                <h3 class="product-title" title="Roku - Sponsored TV"></h3>
+              </a>
+            </div>
+          </div>
+        </body></html>
+        """
+
+        rows = listing_step.parse_html_dom_rows(1, html, "raw/html_dom_fallback/page_001.html")
+
+        self.assertEqual([row["sku_id"] for row in rows], ["777", "777"])
+        self.assertEqual([row["container_type"] for row in rows], ["organic_product", "sponsored_ingrid"])
+        self.assertEqual(rows[0]["organic_rank"], 1)
+        self.assertEqual(rows[1]["organic_rank"], "")
+        self.assertEqual(rows[1]["sku_status"], "Sponsored")
+
+    def test_status_200_with_zero_rows_is_retryable(self):
+        self.assertEqual(
+            listing_step.listing_retry_reason([], {"status_code": 200}, {"data": {"products": []}}),
+            "empty_rows",
+        )
 
 
 if __name__ == "__main__":

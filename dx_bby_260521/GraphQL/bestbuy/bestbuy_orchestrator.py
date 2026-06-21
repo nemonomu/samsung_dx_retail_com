@@ -82,9 +82,9 @@ STEPS = [
         "bsr_list",
         "bestbuy.step03_bsr_list",
         {
-            "BESTBUY_MAIN_PAGES": "2",
+            "BESTBUY_MAIN_PAGES": "6",
             "BESTBUY_MAIN_RUN_ID": "bsr",
-            "BESTBUY_MAIN_ORGANIC_OFFSET": "72",
+            "BESTBUY_MAIN_ORGANIC_OFFSET": "18",
             "BESTBUY_SEARCH_SORT": "Best-Selling",
             "BESTBUY_GRAPHQL_PREMIUM_PROXY": "1",
             "BESTBUY_GRAPHQL_JS_RENDER": "1",
@@ -334,12 +334,18 @@ def main_list_complete(step):
     root = run_root(step.env) / step.env.get("BESTBUY_MAIN_RUN_ID", "main")
     manifest = read_json(root / "manifest.json")
     expected = expected_pages(step)
-    if not manifest or int(manifest.get("actual_post_calls") or 0) < expected:
-        return False, f"calls {manifest.get('actual_post_calls', 0)}/{expected}"
+    calls = int(
+        manifest.get("listing_request_calls")
+        or manifest.get("total_request_calls")
+        or manifest.get("actual_post_calls")
+        or 0
+    ) if manifest else 0
+    if not manifest or calls < expected:
+        return False, f"calls {calls}/{expected}"
     csv_path = root / "parsed" / "main_occurrences.csv"
     if csv_count(csv_path) <= 0:
         return False, "missing main_occurrences.csv"
-    return True, f"calls {manifest.get('actual_post_calls')}/{expected}"
+    return True, f"calls {calls}/{expected}"
 
 
 def main_targets_complete(step):

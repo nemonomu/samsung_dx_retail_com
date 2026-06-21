@@ -68,6 +68,13 @@ def now():
     return datetime.now().isoformat(timespec="seconds")
 
 
+def cost_float(value):
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def decode_capture_text(text):
     decoded = unquote(str(text or "").replace("^%^", "%"))
     decoded = decoded.replace("^\\^\"", '"').replace("^\"", '"').replace("^", "")
@@ -614,7 +621,25 @@ def live_html(wait_ms=None, attempt=1):
     )
     if response.status_code != 200:
         raise RuntimeError(f"Trending live fetch failed: status={response.status_code}")
-    return html_text, json_data
+    return html_text, json_data, summary
+
+
+def rewrite_live_fetch_summary(attempt_summaries, row_count, attempted_waits):
+    if not attempt_summaries:
+        return
+    final_summary = dict(attempt_summaries[-1])
+    final_summary["call_count"] = len(attempt_summaries)
+    final_summary["total_x_request_cost"] = round(
+        sum(cost_float(summary.get("x_request_cost")) for summary in attempt_summaries),
+        7,
+    )
+    final_summary["attempts"] = attempt_summaries
+    final_summary["attempted_waits"] = attempted_waits
+    final_summary["row_count"] = row_count
+    (RUN_ROOT / "summary_live_fetch.json").write_text(
+        json.dumps(final_summary, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 def main():
@@ -624,6 +649,7 @@ def main():
         return
     rows = []
     attempted_waits = []
+    live_attempt_summaries = []
     if use_direct_graphql():
         payload = load_graphql_payload()
         response_json = direct_graphql(payload)
@@ -636,7 +662,8 @@ def main():
     elif LIVE_FETCH and use_render_fallback():
         for attempt, wait_ms in enumerate(trending_wait_sequence(), 1):
             attempted_waits.append(wait_ms)
-            html_text, json_data = live_html(wait_ms=wait_ms, attempt=attempt)
+            html_text, json_data, summary = live_html(wait_ms=wait_ms, attempt=attempt)
+            live_attempt_summaries.append(summary)
             rows = parse_trending_products_from_capture(html_text, json_data, LIMIT)
             if rows:
                 break
@@ -667,6 +694,7 @@ def main():
             + "; retry with a larger BESTBUY_TRENDING_WAIT_MS_SEQUENCE"
         )
     write_rows(OUTPUT_CSV, rows)
+    rewrite_live_fetch_summary(live_attempt_summaries, len(rows), attempted_waits)
     print(f"wrote {len(rows)} rows -> {OUTPUT_CSV}")
     for row in rows:
         print(f"{row['trend_rank']}. {row['sku_id']} {row['retailer_sku_name']}")

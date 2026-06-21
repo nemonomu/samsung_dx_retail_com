@@ -473,6 +473,7 @@ def step_env(step, category, base, refresh_all_availability=False):
             {
                 "BESTBUY_SANITIZE_PRODUCT_LIST_QUERY": "0",
                 "BESTBUY_STRIP_PRODUCT_LIST_FULFILLMENT": "0",
+                "BESTBUY_LISTING_COLLECTION_MODE": "dom",
                 "BESTBUY_GRAPHQL_MODE_AUTO": "0",
                 "BESTBUY_LISTING_SESSION_ENABLED": "0",
                 "BESTBUY_LISTING_SESSION_BOOTSTRAP": "0",
@@ -489,10 +490,11 @@ def step_env(step, category, base, refresh_all_availability=False):
                 "BESTBUY_DETAIL_RETRY_ONLY": "0",
                 "BESTBUY_DETAIL_REBUILD_ONLY": "0",
                 "BESTBUY_DETAIL_MAX_ATTEMPTS": "5",
-                "BESTBUY_DETAIL_SKU_BATCH_SIZE": "5",
-                "BESTBUY_DETAIL_WORKERS": "3",
+                "BESTBUY_DETAIL_SKU_BATCH_SIZE": "1",
+                "BESTBUY_DETAIL_WORKERS": "1",
                 "BESTBUY_DETAIL_RETRY_STATUS_CODES": "408,409,422,425,429,500,502,503,504",
-                "BESTBUY_DETAIL_RETRY_SLEEP_SECONDS": "2",
+                "BESTBUY_DETAIL_RETRY_SLEEP_SECONDS": "1",
+                "BESTBUY_DETAIL_RETRY_SLEEP_SEQUENCE": "1,5,5,10",
             }
         )
         if compact(base.get("BESTBUY_DETAIL_SKUS")):
@@ -503,9 +505,11 @@ def step_env(step, category, base, refresh_all_availability=False):
                 "BESTBUY_DETAIL_RETRY_ONLY": "1",
                 "BESTBUY_DETAIL_REBUILD_ONLY": "0",
                 "BESTBUY_DETAIL_MAX_ATTEMPTS": "5",
-                "BESTBUY_DETAIL_WORKERS": "3",
+                "BESTBUY_DETAIL_SKU_BATCH_SIZE": "1",
+                "BESTBUY_DETAIL_WORKERS": "1",
                 "BESTBUY_DETAIL_RETRY_STATUS_CODES": "408,409,422,425,429,500,502,503,504",
-                "BESTBUY_DETAIL_RETRY_SLEEP_SECONDS": "2",
+                "BESTBUY_DETAIL_RETRY_SLEEP_SECONDS": "1",
+                "BESTBUY_DETAIL_RETRY_SLEEP_SEQUENCE": "1,5,5,10",
             }
         )
     if step.name == "availability_backfill":

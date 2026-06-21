@@ -32,6 +32,19 @@ from .step00_availability_policy import ALL_AVAILABILITY_FIELDS
 from .step00_detail_benchmarks import append_detail_benchmark, write_detail_benchmarks
 from .step00_parse_pdp import event_data, extract_apollo_payloads
 
+
+def parse_float_sequence(value):
+    result = []
+    for token in re.split(r"[,\s]+", str(value or "").strip()):
+        if not token.strip():
+            continue
+        try:
+            result.append(float(token))
+        except ValueError:
+            continue
+    return result
+
+
 RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
 CATEGORY = bestbuy_category()
 RUN_ROOT = Path(os.getenv("BESTBUY_RUN_ROOT", DEFAULT_BESTBUY_RUN_ROOT))
@@ -46,6 +59,7 @@ MAX_ATTEMPTS = int(os.getenv("BESTBUY_DETAIL_MAX_ATTEMPTS", "5"))
 MAX_REVIEW_TEXTS = max(1, int(os.getenv("BESTBUY_REVIEW_TEXT_LIMIT", "20")))
 AUTO_RETRY = os.getenv("BESTBUY_DETAIL_AUTO_RETRY", "1").lower() in {"1", "true", "yes", "y"}
 DETAIL_RETRY_SLEEP_SECONDS = float(os.getenv("BESTBUY_DETAIL_RETRY_SLEEP_SECONDS", "2"))
+DETAIL_RETRY_SLEEP_SEQUENCE = parse_float_sequence(os.getenv("BESTBUY_DETAIL_RETRY_SLEEP_SEQUENCE", ""))
 DETAIL_RETRY_STATUS_CODES = {
     int(value)
     for value in re.split(r"[,\s]+", os.getenv("BESTBUY_DETAIL_RETRY_STATUS_CODES", "408,409,422,425,429,500,502,503,504"))
@@ -124,6 +138,17 @@ DETAIL_SKU_BATCH_REFILL_SINGLE_FALLBACK = os.getenv(
 RAW_DETAIL_DIR = DETAIL_ROOT / "raw" / "detail_html"
 RAW_REVIEW_DIR = DETAIL_ROOT / "raw" / "review20"
 RAW_COMPARE_DIR = DETAIL_ROOT / "raw" / "compare"
+
+
+def detail_retry_sleep_seconds(attempt):
+    if DETAIL_RETRY_SLEEP_SEQUENCE:
+        index = max(0, int(attempt) - 1)
+        if index < len(DETAIL_RETRY_SLEEP_SEQUENCE):
+            return max(0.0, DETAIL_RETRY_SLEEP_SEQUENCE[index])
+        return max(0.0, DETAIL_RETRY_SLEEP_SEQUENCE[-1])
+    return max(0.0, DETAIL_RETRY_SLEEP_SECONDS)
+
+
 PARSED_DIR = DETAIL_ROOT / "parsed"
 BENCHMARKS_DIR = DETAIL_ROOT / "benchmarks"
 DETAIL_ROWS_CSV = PARSED_DIR / "detail_enriched_rows.csv"
@@ -3625,8 +3650,9 @@ def fetch_detail_sku_batch(client, targets, force_retry=False, max_batch_attempt
                 or not retryable_detail_batch_result(status_code, response_json, entries, error)
             ):
                 break
-            if DETAIL_RETRY_SLEEP_SECONDS > 0:
-                time.sleep(DETAIL_RETRY_SLEEP_SECONDS)
+            retry_sleep = detail_retry_sleep_seconds(batch_attempt)
+            if retry_sleep > 0:
+                time.sleep(retry_sleep)
 
         elapsed = round(time.perf_counter() - batch_started, 3)
         batch_cost = total_batch_cost
@@ -4169,6 +4195,9 @@ def fetch_with_retries(fetcher, success_key, client, target):
         total_cost += float(meta.get("x_request_cost") or 0)
         if meta.get(success_key) or not AUTO_RETRY or run_attempts >= MAX_ATTEMPTS:
             break
+        retry_sleep = detail_retry_sleep_seconds(run_attempts)
+        if retry_sleep > 0:
+            time.sleep(retry_sleep)
     meta["x_request_cost_total"] = total_cost
     meta["run_attempts"] = run_attempts
     return meta
@@ -4208,6 +4237,9 @@ def fetch_detail_with_retries(client, target):
             meta["similar_retry_reason"] = f"final_compare_name_count<{DETAIL_SIMILAR_MIN_NAMES}"
         if (meta.get("success") and not missing_similar) or not AUTO_RETRY or run_attempts >= MAX_ATTEMPTS:
             break
+        retry_sleep = detail_retry_sleep_seconds(run_attempts)
+        if retry_sleep > 0:
+            time.sleep(retry_sleep)
     meta["x_request_cost_total"] = total_cost
     meta["run_attempts"] = run_attempts
     if meta:
@@ -5899,6 +5931,8 @@ def main():
         "workers": WORKERS,
         "max_attempts": MAX_ATTEMPTS,
         "auto_retry": AUTO_RETRY,
+        "retry_sleep_seconds": DETAIL_RETRY_SLEEP_SECONDS,
+        "retry_sleep_sequence": DETAIL_RETRY_SLEEP_SEQUENCE,
         "target_skus": sorted(TARGET_SKUS),
         "detail_scroll": DETAIL_SCROLL,
         "detail_scroll_network_idle": DETAIL_SCROLL_NETWORK_IDLE,

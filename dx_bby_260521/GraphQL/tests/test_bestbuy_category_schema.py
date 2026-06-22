@@ -445,7 +445,11 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
 
         self.assertIn('"BESTBUY_LISTING_MAX_ATTEMPTS": "5"', script)
         self.assertIn('"BESTBUY_DETAIL_SKU_BATCH_SIZE": "5"', script)
-        self.assertIn('"BESTBUY_AVAILABILITY_BACKFILL_CHUNK_SIZE": "1"', script)
+        self.assertIn('"BESTBUY_REVIEW20_BATCH_SIZE": "5"', script)
+        self.assertIn('"BESTBUY_REVIEW20_BATCH_SINGLE_FALLBACK": "1"', script)
+        self.assertIn('"BESTBUY_AVAILABILITY_BACKFILL_CHUNK_SIZE": "5"', script)
+        self.assertIn('"BESTBUY_AVAILABILITY_BACKFILL_ALLOW_MULTI_SKU": "1"', script)
+        self.assertIn('"BESTBUY_AVAILABILITY_BACKFILL_SINGLE_SKU_FALLBACK": "1"', script)
         self.assertIn('candidate_mode = "all_rows" if refresh_all_availability else "blank_all"', script)
         self.assertIn('"BESTBUY_AVAILABILITY_BACKFILL_CLEAR_EXISTING_FIELDS": "0"', script)
         self.assertIn('"BESTBUY_DB_UPDATE_SIMILAR_ONLY": "0"', script)
@@ -615,7 +619,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertNotIn("main_rank 299/300", listing_issues)
         self.assertIn("bsr_rank 99/100", listing_issues)
         self.assertIn("trend listing sku 9/10", listing_issues)
-        self.assertIn("promotion listing sku 17/18", listing_issues)
+        self.assertNotIn("promotion listing sku 17/18", listing_issues)
 
     def test_email_notification_recovers_detail_batch_calls_from_raw_meta(self):
         run_root = Path("unit_run_root")

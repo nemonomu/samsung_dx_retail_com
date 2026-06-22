@@ -47,6 +47,12 @@ ALLOW_MULTI_SKU_FULFILLMENT = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_ALLOW_MUL
     "y",
 }
 CHUNK_SIZE = REQUESTED_CHUNK_SIZE if ALLOW_MULTI_SKU_FULFILLMENT else 1
+SINGLE_SKU_FALLBACK = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_SINGLE_SKU_FALLBACK", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
 REQUEST_TIMEOUT = int(os.getenv("BESTBUY_AVAILABILITY_BACKFILL_TIMEOUT", os.getenv("ZENROWS_TIMEOUT", "120")))
 DRY_RUN = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_DRY_RUN", "0").lower() in {"1", "true", "yes", "y"}
 SKIP = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_SKIP", "0").lower() in {"1", "true", "yes", "y"}
@@ -81,6 +87,14 @@ BROWSER_META = {}
 
 def now():
     return datetime.now().isoformat(timespec="seconds")
+
+
+def safe_part(value, default="na"):
+    text = compact_text(value)
+    if not text:
+        return default
+    cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in text)
+    return cleaned[:80] or default
 
 
 def read_csv(path):
@@ -400,6 +414,33 @@ def fetch_availability(skus, raw_dir):
     values_by_sku = {}
     calls = []
     chunks = [skus[index : index + CHUNK_SIZE] for index in range(0, len(skus), CHUNK_SIZE)]
+
+    def record_call(call_index, chunk, chunk_dir, status, elapsed, cost, error, returned, started_at, fallback_of=""):
+        calls.append(
+            {
+                "chunk": call_index,
+                "sku_count": len(chunk),
+                "returned_sku_count": len(returned),
+                "status_code": status,
+                "elapsed_seconds": elapsed,
+                "x_request_cost": cost,
+                "started_at": started_at,
+                "finished_at": now(),
+                "error": error,
+                "fallback_of": fallback_of,
+                "request_path": rel_path(chunk_dir / "request.json"),
+                "response_path": rel_path(chunk_dir / "response.json"),
+            }
+        )
+
+    def missing_availability_skus(chunk, returned):
+        missing = []
+        for sku in chunk:
+            values = returned.get(sku) or {}
+            if not any(values.get(field) for field in ACTIVE_AVAILABILITY_FIELDS):
+                missing.append(sku)
+        return missing
+
     for index, chunk in enumerate(chunks, 1):
         chunk_dir = raw_dir / f"chunk_{index:03d}"
         status = "ERR"
@@ -419,27 +460,68 @@ def fetch_availability(skus, raw_dir):
                 values_by_sku.setdefault(sku, {}).update(values)
         except RequestException as exc:
             error = str(exc)
-        calls.append(
-            {
-                "chunk": index,
-                "sku_count": len(chunk),
-                "returned_sku_count": len(returned),
-                "status_code": status,
-                "elapsed_seconds": elapsed,
-                "x_request_cost": cost,
-                "started_at": started_at,
-                "finished_at": now(),
-                "error": error,
-                "request_path": rel_path(chunk_dir / "request.json"),
-                "response_path": rel_path(chunk_dir / "response.json"),
-            }
-        )
+        except Exception as exc:
+            error = str(exc)
+        record_call(index, chunk, chunk_dir, status, elapsed, cost, error, returned, started_at)
         value_count = sum(1 for values in returned.values() for field in ACTIVE_AVAILABILITY_FIELDS if values.get(field))
         print(
             f"[availability_backfill:chunk] {index}/{len(chunks)} skus={len(chunk)} "
             f"status={status} returned={len(returned)} values={value_count} cost={cost}",
             flush=True,
         )
+        fallback_skus = missing_availability_skus(chunk, returned)
+        if SINGLE_SKU_FALLBACK and len(chunk) > 1 and fallback_skus:
+            print(
+                f"[availability_backfill:fallback] chunk={index} skus={len(fallback_skus)}",
+                flush=True,
+            )
+            for fallback_index, sku in enumerate(fallback_skus, 1):
+                fallback_chunk = [sku]
+                fallback_dir = chunk_dir / "fallback" / f"sku_{safe_part(sku)}"
+                fallback_status = "ERR"
+                fallback_cost = 0.0
+                fallback_elapsed = 0.0
+                fallback_error = ""
+                fallback_returned = {}
+                fallback_started_at = now()
+                try:
+                    result = fetch_chunk(client, fallback_chunk, fallback_dir)
+                    fallback_status = result["status_code"]
+                    fallback_cost = result["x_request_cost"]
+                    fallback_elapsed = result["elapsed_seconds"]
+                    fallback_error = result["error"]
+                    fallback_returned = result["values"]
+                    for returned_sku, values in fallback_returned.items():
+                        values_by_sku.setdefault(returned_sku, {}).update(values)
+                except RequestException as exc:
+                    fallback_error = str(exc)
+                except Exception as exc:
+                    fallback_error = str(exc)
+                call_index = f"{index}.{fallback_index}"
+                record_call(
+                    call_index,
+                    fallback_chunk,
+                    fallback_dir,
+                    fallback_status,
+                    fallback_elapsed,
+                    fallback_cost,
+                    fallback_error,
+                    fallback_returned,
+                    fallback_started_at,
+                    fallback_of=str(index),
+                )
+                fallback_value_count = sum(
+                    1
+                    for values in fallback_returned.values()
+                    for field in ACTIVE_AVAILABILITY_FIELDS
+                    if values.get(field)
+                )
+                print(
+                    f"[availability_backfill:fallback_chunk] {call_index} sku={sku} "
+                    f"status={fallback_status} returned={len(fallback_returned)} "
+                    f"values={fallback_value_count} cost={fallback_cost}",
+                    flush=True,
+                )
     return values_by_sku, calls
 
 
@@ -611,6 +693,8 @@ def main():
         "chunk_size": CHUNK_SIZE,
         "requested_chunk_size": REQUESTED_CHUNK_SIZE,
         "multi_sku_fulfillment_enabled": ALLOW_MULTI_SKU_FULFILLMENT,
+        "single_sku_fallback_enabled": SINGLE_SKU_FALLBACK,
+        "fallback_call_count": sum(1 for call in calls if call.get("fallback_of")),
         "call_count": len(calls) if calls else estimated_calls,
         "returned_sku_count": len(values_by_sku),
         "final_rows_updated": final_updated,

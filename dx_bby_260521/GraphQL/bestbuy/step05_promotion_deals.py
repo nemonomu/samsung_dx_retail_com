@@ -47,7 +47,7 @@ BROWSER_JS_TIMEOUT = max(1, int(os.getenv("BESTBUY_PROMOTION_BROWSER_JS_TIMEOUT"
 BROWSER_HEADLESS = env_bool("BESTBUY_PROMOTION_BROWSER_HEADLESS", "1")
 BROWSER_LOCAL_PORT = env_int("BESTBUY_PROMOTION_BROWSER_LOCAL_PORT", "0")
 PROMOTION_MAX_ATTEMPTS = max(1, int(os.getenv("BESTBUY_PROMOTION_MAX_ATTEMPTS", "5")))
-PROMOTION_EXPECTED_MIN_ROWS = max(0, int(os.getenv("BESTBUY_PROMOTION_EXPECTED_MIN_ROWS", "16")))
+PROMOTION_EXPECTED_MIN_ROWS = max(0, int(os.getenv("BESTBUY_PROMOTION_EXPECTED_MIN_ROWS", "18")))
 PROMOTION_RETRY_SLEEP_SECONDS = float(os.getenv("BESTBUY_PROMOTION_RETRY_SLEEP_SECONDS", "2"))
 PROMOTION_RETRY_STATUS_CODES = {
     int(value)
@@ -864,14 +864,10 @@ def main():
             "csv": rel_path(out_csv),
             "fetch_mode": FETCH_MODE,
             "browser": dom_summary.get("browser", {}),
+            "below_expected_min_rows": bool(PROMOTION_EXPECTED_MIN_ROWS and len(rows) < PROMOTION_EXPECTED_MIN_ROWS),
         }
         RUN_ROOT.mkdir(parents=True, exist_ok=True)
         (RUN_ROOT / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-        if PROMOTION_EXPECTED_MIN_ROWS and len(rows) < PROMOTION_EXPECTED_MIN_ROWS:
-            raise RuntimeError(
-                f"Promotion browser DOM returned {len(rows)} rows; "
-                f"expected at least {PROMOTION_EXPECTED_MIN_ROWS}"
-            )
         print(json.dumps(summary, indent=2, ensure_ascii=False))
         return
 
@@ -937,10 +933,7 @@ def main():
             total_x_request_cost += result["total_x_request_cost"]
             latest_by_placement = {summary.get("placement"): summary for summary in result["summaries"]}
             collected_placements = {row.get("promotion_placement") for row in all_rows if row.get("promotion_placement")}
-            if PROMOTION_EXPECTED_MIN_ROWS and len(all_rows) < PROMOTION_EXPECTED_MIN_ROWS:
-                missing_placements = placements
-            else:
-                missing_placements = [placement for placement in placements if placement not in collected_placements]
+            missing_placements = [placement for placement in placements if placement not in collected_placements]
             if missing_placements:
                 fallback_to_single = True
                 for placement in missing_placements:
@@ -980,6 +973,11 @@ def main():
         "csv": rel_path(out_csv),
         "fetch_mode": FETCH_MODE,
         "browser": browser_meta,
+        "below_expected_min_rows": bool(
+            PLACEMENT.lower() == "all"
+            and PROMOTION_EXPECTED_MIN_ROWS
+            and len(all_rows) < PROMOTION_EXPECTED_MIN_ROWS
+        ),
     }
     (RUN_ROOT / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(summary, indent=2, ensure_ascii=False))

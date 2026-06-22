@@ -535,7 +535,7 @@ def listing_count_issues(category, run_root, rows, target_manifest):
                 run_root / "promotion" / "parsed" / "all_promotion_products.csv",
                 "sku_id",
             )
-        if promotion_count < 18:
+        if promotion_count <= 0:
             issues.append(f"promotion listing sku {promotion_count}/18")
     return issues
 

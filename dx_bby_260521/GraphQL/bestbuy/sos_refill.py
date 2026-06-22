@@ -523,6 +523,8 @@ def step_env(step, category, base, refresh_all_availability=False):
                 "BESTBUY_DETAIL_BROWSER_GRAPHQL_WAIT_SECONDS": "8",
                 "BESTBUY_DETAIL_BROWSER_GRAPHQL_JS_TIMEOUT": "120",
                 "BESTBUY_DETAIL_BROWSER_GRAPHQL_HEADLESS": "0",
+                "BESTBUY_REVIEW20_BATCH_SIZE": "5",
+                "BESTBUY_REVIEW20_BATCH_SINGLE_FALLBACK": "1",
                 "BESTBUY_DETAIL_RETRY_STATUS_CODES": "408,409,422,425,429,500,502,503,504",
                 "BESTBUY_DETAIL_RETRY_SLEEP_SECONDS": "0",
             }
@@ -531,8 +533,9 @@ def step_env(step, category, base, refresh_all_availability=False):
         candidate_mode = "all_rows" if refresh_all_availability else "blank_all"
         env.update(
             {
-                "BESTBUY_AVAILABILITY_BACKFILL_CHUNK_SIZE": "1",
-                "BESTBUY_AVAILABILITY_BACKFILL_ALLOW_MULTI_SKU": "0",
+                "BESTBUY_AVAILABILITY_BACKFILL_CHUNK_SIZE": "5",
+                "BESTBUY_AVAILABILITY_BACKFILL_ALLOW_MULTI_SKU": "1",
+                "BESTBUY_AVAILABILITY_BACKFILL_SINGLE_SKU_FALLBACK": "1",
                 "BESTBUY_AVAILABILITY_BACKFILL_FETCH_MODE": "browser_graphql",
                 "BESTBUY_AVAILABILITY_BROWSER_GRAPHQL_WAIT_SECONDS": "5",
                 "BESTBUY_AVAILABILITY_BROWSER_GRAPHQL_JS_TIMEOUT": "120",

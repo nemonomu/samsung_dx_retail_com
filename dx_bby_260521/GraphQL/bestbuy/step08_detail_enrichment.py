@@ -150,6 +150,16 @@ DETAIL_SKU_BATCH_REFILL_SINGLE_FALLBACK = os.getenv(
     "BESTBUY_DETAIL_SKU_BATCH_REFILL_SINGLE_FALLBACK",
     "1",
 ).lower() in {"1", "true", "yes", "y"}
+REVIEW20_BATCH_SIZE = max(
+    1,
+    int(os.getenv("BESTBUY_REVIEW20_BATCH_SIZE", os.getenv("BESTBUY_DETAIL_SKU_BATCH_SIZE", "1"))),
+)
+REVIEW20_BATCH_SINGLE_FALLBACK = os.getenv("BESTBUY_REVIEW20_BATCH_SINGLE_FALLBACK", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
 
 RAW_DETAIL_DIR = DETAIL_ROOT / "raw" / "detail_html"
 RAW_REVIEW_DIR = DETAIL_ROOT / "raw" / "review20"
@@ -4061,15 +4071,17 @@ def detail_batch_chunks(targets, size):
         yield offset, targets[offset : offset + size]
 
 
-def fetch_review20(client, target):
+def fetch_review20(client, target, force_retry=False, retry_label=""):
     sku = str(target.get("sku_id") or "").strip()
     pdp_url = target_url(target, sku)
     current_paths = review_paths(sku)
-    if not FORCE_REFRESH and not review_needs_retry(target):
+    if not force_retry and not FORCE_REFRESH and not review_needs_retry(target):
         return read_json(current_paths["meta"])
     attempt = next_attempt(current_paths["meta"], pdp_url)
     meta = {"sku_id": sku, "stage": "review20", "url": pdp_url, "attempt": attempt, "started_at": now()}
-    if attempt_cap_blocks_retry(attempt):
+    if retry_label:
+        meta["retry_label"] = retry_label
+    if not force_retry and attempt_cap_blocks_retry(attempt):
         paths = review_paths_for_status(sku, target, False)
         meta.update({"success": False, "error": "max_attempts_exceeded"})
         paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -4119,6 +4131,7 @@ def fetch_review20(client, target):
                     "status_code": "ERR",
                     "transport": transport,
                     "fetch_mode": FETCH_MODE,
+                    "fetched_this_run": True,
                     "elapsed_seconds": round(time.perf_counter() - start, 3),
                     "x_request_cost": 0,
                     "finished_at": now(),
@@ -4135,6 +4148,7 @@ def fetch_review20(client, target):
                     "status_code": "ERR",
                     "transport": transport,
                     "fetch_mode": FETCH_MODE,
+                    "fetched_this_run": True,
                     "elapsed_seconds": round(time.perf_counter() - start, 3),
                     "x_request_cost": 0,
                     "finished_at": now(),
@@ -4180,6 +4194,7 @@ def fetch_review20(client, target):
                 "status_code": response_status,
                 "transport": transport,
                 "fetch_mode": FETCH_MODE,
+                "fetched_this_run": True,
                 "elapsed_seconds": elapsed,
                 "x_request_cost": request_cost(response_headers),
                 "bytes": len(text or ""),
@@ -4194,6 +4209,187 @@ def fetch_review20(client, target):
             break
     paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
     return meta
+
+
+def fetch_review20_batch(client, targets):
+    metas = {}
+    entries = []
+    request_payload = []
+    for target in targets:
+        sku = str(target.get("sku_id") or "").strip()
+        pdp_url = target_url(target, sku)
+        current_paths = review_paths(sku)
+        if not FORCE_REFRESH and not review_needs_retry(target):
+            metas[sku] = read_json(current_paths["meta"])
+            continue
+        attempt = next_attempt(current_paths["meta"], pdp_url)
+        meta = {
+            "sku_id": sku,
+            "stage": "review20",
+            "url": pdp_url,
+            "attempt": attempt,
+            "started_at": now(),
+            "review_batch_size": len(targets),
+        }
+        payload = review20_payload_for_sku(sku)
+        if not payload:
+            paths = review_paths_for_status(sku, target, False)
+            meta.update({"success": False, "error": "ProductSchema_init not found", "finished_at": now()})
+            paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+            metas[sku] = meta
+            continue
+        paths = review_paths_for_status(sku, target, False)
+        paths["request"].write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        entries.append(
+            {
+                "target": target,
+                "sku": sku,
+                "pdp_url": pdp_url,
+                "payload": payload,
+                "index": len(request_payload),
+                "attempt": attempt,
+                "meta": meta,
+            }
+        )
+        request_payload.append(payload)
+
+    if not entries:
+        return metas
+
+    headers = {}
+    response_json = {}
+    text = ""
+    status_code = "ERR"
+    elapsed = 0.0
+    batch_cost = 0.0
+    error = ""
+    transport_used = ""
+    for transport in fetch_transports():
+        if transport == "zenrows" and not client:
+            continue
+        transport_used = transport
+        start = time.perf_counter()
+        try:
+            referer_url = entries[0]["pdp_url"]
+            if transport == "browser_graphql":
+                status_code, text, response_json, headers, elapsed = browser_graphql_post(request_payload, referer_url)
+            else:
+                response = client.post(
+                    "https://www.bestbuy.com/gateway/graphql",
+                    params=graphql_params(),
+                    headers={
+                        "accept": "application/json, text/plain, */*",
+                        "content-type": "application/json",
+                        "origin": "https://www.bestbuy.com",
+                        "referer": referer_url,
+                    },
+                    data=json.dumps(request_payload),
+                    timeout=REQUEST_TIMEOUT,
+                )
+                text = response.text
+                headers = dict(response.headers)
+                status_code = response.status_code
+                elapsed = round(time.perf_counter() - start, 3)
+                try:
+                    response_json = response.json()
+                except ValueError as exc:
+                    response_json = {}
+                    error = str(exc)
+            batch_cost = request_cost(headers)
+        except (RequestException, RuntimeError) as exc:
+            elapsed = round(time.perf_counter() - start, 3)
+            error = str(exc)
+            response_json = {}
+            text = ""
+            headers = {}
+            status_code = "ERR"
+        if status_code != "ERR":
+            break
+
+    split_cost = batch_cost / len(entries) if entries else 0.0
+    fallback_targets = []
+    for batch_index, entry in enumerate(entries, 1):
+        target = entry["target"]
+        sku = entry["sku"]
+        payload = entry["payload"]
+        item_json = graphql_batch_response_item(response_json, entry["index"])
+        item_text = json.dumps(item_json, ensure_ascii=False) if item_json else text
+        review_count = 0
+        review_text_count = 0
+        expected_text_count = expected_review_text_count(target, sku)
+        item_error = error
+        if item_json:
+            count = review_result_count_from_json(item_json)
+            review_count = count if count is not None else 0
+            text_count = review_text_count_from_json(item_json)
+            review_text_count = text_count if text_count is not None else 0
+            if item_json.get("errors"):
+                item_error = json.dumps(item_json.get("errors"), ensure_ascii=False, separators=(",", ":"))
+        has_review_list = review_result_count_from_json(item_json) is not None
+        enough_review_text = review_text_count_is_sufficient(review_text_count, expected_text_count)
+        success = detail_status_code_int(status_code) == 200 and has_review_list and enough_review_text
+        if has_review_list and not enough_review_text:
+            item_error = f"review20_partial_{review_text_count}_of_{expected_text_count}"
+        elif not has_review_list and not item_error:
+            item_error = "review20_missing"
+        paths = review_paths_for_status(sku, target, success)
+        write_review_response_artifacts(paths, payload, item_json, item_text, headers)
+        meta = entry["meta"]
+        meta.update(
+            {
+                "success": success,
+                "status_code": status_code,
+                "transport": transport_used,
+                "fetch_mode": FETCH_MODE,
+                "detail_mode": "review20_sku_batch",
+                "fetched_this_run": True,
+                "batch_fetched_this_run": True,
+                "review_batch_size": len(entries),
+                "review_batch_index": batch_index,
+                "sku_batch_size": len(entries),
+                "sku_batch_index": batch_index,
+                "elapsed_seconds": elapsed,
+                "x_request_cost": split_cost,
+                "x_request_cost_total": split_cost,
+                "batch_x_request_cost": batch_cost,
+                "bytes": len(text or ""),
+                "review_count_returned": review_count,
+                "review_text_count_returned": review_text_count,
+                "review_text_count_expected": expected_text_count if expected_text_count is not None else "",
+                "finished_at": now(),
+                "error": item_error if not success else "",
+            }
+        )
+        paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+        metas[sku] = meta
+        if not success:
+            fallback_targets.append(target)
+
+    if REVIEW20_BATCH_SINGLE_FALLBACK and fallback_targets:
+        print(
+            format_log_line(
+                "review20:fallback",
+                batch_size=len(entries),
+                targets=len(fallback_targets),
+            ),
+            flush=True,
+        )
+        for target in fallback_targets:
+            sku = str(target.get("sku_id") or "").strip()
+            original_entry = next((entry for entry in entries if entry["sku"] == sku), {})
+            fallback_meta = fetch_review20(client, target, force_retry=True, retry_label="batch_single_fallback")
+            fallback_meta["single_fallback_fetched_this_run"] = bool(fallback_meta.get("fetched_this_run"))
+            fallback_meta["fallback_from_review_batch"] = True
+            fallback_meta["batch_fetched_this_run"] = True
+            fallback_meta["batch_x_request_cost"] = batch_cost
+            fallback_meta["sku_batch_size"] = len(entries)
+            fallback_meta["sku_batch_index"] = int(original_entry.get("index", 0)) + 1 if original_entry else ""
+            try:
+                review_paths(sku)["meta"].write_text(json.dumps(fallback_meta, indent=2, ensure_ascii=False), encoding="utf-8")
+            except OSError:
+                pass
+            metas[sku] = fallback_meta
+    return metas
 
 
 def compare_success(sku):
@@ -5731,6 +5927,12 @@ def main():
         and DETAIL_SKU_BATCH_SIZE > 1
         and STAGE in {"all", "detail"}
     )
+    use_review20_sku_batch = (
+        can_fetch_network
+        and DETAIL_DIRECT_GRAPHQL
+        and REVIEW20_BATCH_SIZE > 1
+        and STAGE == "review"
+    )
     print(
         format_log_line(
             "detail:plan",
@@ -5741,6 +5943,7 @@ def main():
             targets=f"{len(targets)}/{len(output_targets)}",
             workers=WORKERS,
             sku_batch=DETAIL_SKU_BATCH_SIZE if use_detail_sku_batch else "",
+            review_batch=REVIEW20_BATCH_SIZE if use_review20_sku_batch else "",
             force=FORCE_REFRESH,
             rebuild=REBUILD_ONLY,
         ),
@@ -5753,6 +5956,9 @@ def main():
             detail_call="gateway_graphql_sku_batch_post"
             if use_detail_sku_batch
             else ("gateway_graphql_post" if DETAIL_DIRECT_GRAPHQL else "pdp_render"),
+            review_call="gateway_graphql_review_sku_batch_post"
+            if use_review20_sku_batch
+            else ("gateway_graphql_post" if DETAIL_DIRECT_GRAPHQL else "off"),
             compare="batched" if direct_compare else ("pdp_js" if pdp_compare_js else "off"),
             fulfillment="dynamic_batched"
             if FETCH_FULFILLMENT_DYNAMIC
@@ -5826,6 +6032,20 @@ def main():
                 chunk_fetched = True
                 batch_cost = max(batch_cost, float(meta.get("batch_x_request_cost") or 0))
         return batch_cost, int(chunk_fetched)
+
+    def add_review_batch_accounting(batch_metas):
+        batch_cost = 0.0
+        batch_fetched = False
+        fallback_cost = 0.0
+        fallback_calls = 0
+        for meta in batch_metas.values():
+            if meta.get("batch_fetched_this_run"):
+                batch_fetched = True
+                batch_cost = max(batch_cost, float(meta.get("batch_x_request_cost") or 0))
+            if meta.get("single_fallback_fetched_this_run"):
+                fallback_calls += 1
+                fallback_cost += float(meta.get("x_request_cost_total", meta.get("x_request_cost") or 0) or 0)
+        return batch_cost + fallback_cost, int(batch_fetched) + fallback_calls
 
     if REBUILD_ONLY:
         print(format_log_line("detail:rebuild", output_targets=len(output_targets)), flush=True)
@@ -5920,6 +6140,39 @@ def main():
                         remaining=len(refill_targets),
                         calls=detail_refill_calls,
                         cost_usd=round(detail_refill_cost, 7),
+                    ),
+                    flush=True,
+                )
+    elif use_review20_sku_batch:
+        for offset, chunk in detail_batch_chunks(targets, REVIEW20_BATCH_SIZE):
+            batch_metas = fetch_review20_batch(client, chunk)
+            batch_cost, batch_calls = add_review_batch_accounting(batch_metas)
+            review_cost += batch_cost
+            review_calls += batch_calls
+            for local_index, target in enumerate(chunk, 1):
+                index = offset + local_index
+                sku = str(target.get("sku_id") or "").strip()
+                dmeta = read_json(detail_paths(sku)["meta"])
+                rmeta = batch_metas.get(sku) or read_json(review_paths(sku)["meta"])
+                cmeta = read_json(compare_paths(sku)["meta"])
+                fetched_review = bool(
+                    rmeta.get("fetched_this_run")
+                    or rmeta.get("batch_fetched_this_run")
+                    or rmeta.get("single_fallback_fetched_this_run")
+                )
+                with benchmark_lock:
+                    append_detail_benchmark(target, DETAIL_ROOT, DETAIL_BENCHMARKS_CSV)
+                print(
+                    process_log_line(
+                        index,
+                        len(targets),
+                        sku,
+                        dmeta,
+                        rmeta,
+                        cmeta,
+                        False,
+                        fetched_review,
+                        False,
                     ),
                     flush=True,
                 )

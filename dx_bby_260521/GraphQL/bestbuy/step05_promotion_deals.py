@@ -23,9 +23,9 @@ from .step00_config import (
     DEFAULT_BESTBUY_RUN_ROOT,
     PROMOTION_LABELS,
     bestbuy_category,
-    has_target_url,
     load_initial_urls,
     rel_path,
+    target_url,
 )
 from .step00_parse_search import (
     delivery_availability_text,
@@ -828,11 +828,17 @@ def write_rows(path, rows):
 
 def main():
     category = bestbuy_category()
-    if category == "HHP" or not has_target_url("promotion"):
+    promotion_url = target_url("promotion", category=category)
+    if category != "TV" or not promotion_url:
+        reason = (
+            "HHP promotion page is not collected"
+            if category == "HHP"
+            else (f"{category} promotion page is not collected" if category != "TV" else "no promotion URL for category")
+        )
         summary = {
             "started_at": now(),
             "skipped": True,
-            "reason": "HHP promotion page is not collected" if category == "HHP" else "no promotion URL for category",
+            "reason": reason,
             "placements": [],
             "call_count": 0,
             "row_count": 0,

@@ -7,7 +7,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, bestbuy_dated_run_root, has_target_url
+from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, bestbuy_dated_run_root, has_target_url, target_url
 
 
 PYTHON = sys.executable
@@ -426,9 +426,11 @@ def bsr_rank_complete():
 
 
 def promotion_complete():
-    if os.getenv("BESTBUY_CATEGORY", "").strip().upper() == "HHP":
-        return True, "HHP promotion page is not collected"
-    if not has_target_url("promotion"):
+    category = os.getenv("BESTBUY_CATEGORY", "").strip().upper()
+    if category != "TV":
+        reason = "HHP promotion page is not collected" if category == "HHP" else f"{category or 'category'} promotion page is not collected"
+        return True, reason
+    if not target_url("promotion", category=category):
         return True, "no promotion URL for category"
     path = run_root() / "promotion" / "parsed" / "all_promotion_products.csv"
     count = csv_unique_count(path, "sku_id")
@@ -563,10 +565,12 @@ def run_step(step, dry_run=False, resume=False):
         print(f"[skip] step {step.key} {step.name}: BESTBUY_LOCAL_CLEANUP_SKIP=1")
         return
     if step.name == "promotion_deals":
-        if os.getenv("BESTBUY_CATEGORY", "").strip().upper() == "HHP":
-            print(f"[skip] step {step.key} {step.name}: HHP promotion page is not collected")
+        category = os.getenv("BESTBUY_CATEGORY", "").strip().upper()
+        if category != "TV":
+            reason = "HHP promotion page is not collected" if category == "HHP" else f"{category or 'category'} promotion page is not collected"
+            print(f"[skip] step {step.key} {step.name}: {reason}")
             return
-        if not has_target_url("promotion"):
+        if not target_url("promotion", category=category):
             print(f"[skip] step {step.key} {step.name}: no promotion URL for category")
             return
     if step.name == "trending_deals" and not has_target_url("trend"):

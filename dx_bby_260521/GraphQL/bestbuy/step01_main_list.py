@@ -51,6 +51,10 @@ BROWSER_GRAPHQL_HEADLESS = os.getenv("BESTBUY_BROWSER_GRAPHQL_HEADLESS", "1").lo
     "y",
 }
 BROWSER_GRAPHQL_LOCAL_PORT = int(os.getenv("BESTBUY_BROWSER_GRAPHQL_LOCAL_PORT", "0") or "0")
+BROWSER_GRAPHQL_NAVIGATE_EACH_PAGE = os.getenv(
+    "BESTBUY_BROWSER_GRAPHQL_NAVIGATE_EACH_PAGE",
+    "0",
+).lower() in {"1", "true", "yes", "y"}
 LISTING_MAX_ATTEMPTS = max(1, int(os.getenv("BESTBUY_LISTING_MAX_ATTEMPTS", "5")))
 LISTING_RETRY_SLEEP_SECONDS = float(os.getenv("BESTBUY_LISTING_RETRY_SLEEP_SECONDS", "2"))
 LISTING_RETRY_MAX_SLEEP_SECONDS = max(
@@ -1766,6 +1770,15 @@ def close_browser_graphql_page(browser_page):
             return
 
 
+def initialize_browser_graphql_session(browser_page):
+    if not browser_page:
+        return
+    session_url = build_search_url(1)
+    browser_page.get(session_url)
+    if BROWSER_GRAPHQL_WAIT_SECONDS > 0:
+        time.sleep(BROWSER_GRAPHQL_WAIT_SECONDS)
+
+
 def status_code_ok(value):
     try:
         return int(value or 0) == 200
@@ -1797,8 +1810,8 @@ def browser_graphql_fetch_once(page, payload, browser_page):
     parse_error = ""
     raw = ""
     try:
-        browser_page.get(page_url)
-        if BROWSER_GRAPHQL_WAIT_SECONDS > 0:
+        if BROWSER_GRAPHQL_NAVIGATE_EACH_PAGE:
+            browser_page.get(page_url)
             time.sleep(BROWSER_GRAPHQL_WAIT_SECONDS)
         payload_json = json.dumps(payload, ensure_ascii=False)
         js = (
@@ -1859,6 +1872,8 @@ def browser_graphql_fetch_once(page, payload, browser_page):
         "browser_graphql_local_port": browser_graphql_local_port(),
         "browser_graphql_profile_dir": rel_path(browser_graphql_profile_dir()),
         "browser_graphql_cache_dir": rel_path(browser_graphql_cache_dir()),
+        "browser_graphql_navigate_each_page": int(BROWSER_GRAPHQL_NAVIGATE_EACH_PAGE),
+        "browser_graphql_context_url": getattr(browser_page, "url", "") or "",
     }
     meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
     return graph, meta, rows
@@ -2203,6 +2218,7 @@ def main():
     browser_page = create_browser_graphql_page() if LISTING_COLLECTION_MODE == "browser_graphql" else None
     if browser_page is not None:
         atexit.register(close_browser_graphql_page, browser_page)
+        initialize_browser_graphql_session(browser_page)
 
     rows_by_page = {}
     page_benchmarks = []

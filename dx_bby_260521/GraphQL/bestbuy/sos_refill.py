@@ -477,6 +477,7 @@ def step_env(step, category, base, refresh_all_availability=False):
                 "BESTBUY_BROWSER_GRAPHQL_WAIT_SECONDS": "8",
                 "BESTBUY_BROWSER_GRAPHQL_JS_TIMEOUT": "120",
                 "BESTBUY_BROWSER_GRAPHQL_HEADLESS": "0",
+                "BESTBUY_BROWSER_GRAPHQL_NAVIGATE_EACH_PAGE": "0",
                 "BESTBUY_GRAPHQL_MODE_AUTO": "0",
                 "BESTBUY_LISTING_SESSION_ENABLED": "0",
                 "BESTBUY_LISTING_SESSION_BOOTSTRAP": "0",

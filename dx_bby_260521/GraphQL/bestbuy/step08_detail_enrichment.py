@@ -1,4 +1,5 @@
 import csv
+import atexit
 import html
 import json
 import os
@@ -16,6 +17,14 @@ from lxml import html as lxml_html
 from requests import RequestException
 from zenrows import ZenRowsClient
 
+from .step00_browser_session import (
+    add_intl_nosplash,
+    browser_fetch_graphql,
+    close_browser_page,
+    create_browser_page,
+    env_bool,
+    env_int,
+)
 from .step00_config import (
     DEFAULT_BESTBUY_RUN_ROOT,
     KRW_PER_USD,
@@ -70,10 +79,17 @@ RETRY_MISSING_SIMILAR = os.getenv("BESTBUY_DETAIL_RETRY_MISSING_SIMILAR", "0").l
 REBUILD_ONLY = os.getenv("BESTBUY_DETAIL_REBUILD_ONLY", "0").lower() in {"1", "true", "yes", "y"}
 FORCE_REFRESH = os.getenv("BESTBUY_DETAIL_FORCE_REFRESH", "0").lower() in {"1", "true", "yes", "y"}
 REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "240"))
-FETCH_MODE = os.getenv("BESTBUY_FETCH_MODE", os.getenv("BESTBUY_DETAIL_FETCH_MODE", "zenrows")).strip().lower()
+FETCH_MODE = os.getenv("BESTBUY_DETAIL_FETCH_MODE", os.getenv("BESTBUY_FETCH_MODE", "zenrows")).strip().lower()
 DETAIL_DIRECT_GRAPHQL = os.getenv("BESTBUY_DETAIL_DIRECT_GRAPHQL", "1").lower() in {"1", "true", "yes", "y"}
 DETAIL_PDP_FALLBACK = os.getenv("BESTBUY_DETAIL_PDP_FALLBACK", "0").lower() in {"1", "true", "yes", "y"}
 WORKERS = int(os.getenv("BESTBUY_DETAIL_WORKERS", "3"))
+BROWSER_GRAPHQL_WAIT_SECONDS = max(
+    0.0,
+    float(os.getenv("BESTBUY_DETAIL_BROWSER_GRAPHQL_WAIT_SECONDS", "8")),
+)
+BROWSER_GRAPHQL_JS_TIMEOUT = max(1, int(os.getenv("BESTBUY_DETAIL_BROWSER_GRAPHQL_JS_TIMEOUT", "120")))
+BROWSER_GRAPHQL_HEADLESS = env_bool("BESTBUY_DETAIL_BROWSER_GRAPHQL_HEADLESS", "1")
+BROWSER_GRAPHQL_LOCAL_PORT = env_int("BESTBUY_DETAIL_BROWSER_GRAPHQL_LOCAL_PORT", "0")
 STAGE = os.getenv("BESTBUY_DETAIL_STAGE", "detail").lower()
 SAVE_HTML_MODE = os.getenv("BESTBUY_SAVE_HTML_MODE", "slim").lower()
 DETAIL_SCROLL = os.getenv("BESTBUY_DETAIL_SCROLL", "1").lower() in {"1", "true", "yes", "y"}
@@ -177,6 +193,9 @@ TARGET_SKUS = {
     for value in re.split(r"[\s,;]+", os.getenv("BESTBUY_DETAIL_SKUS", ""))
     if value.strip()
 }
+BROWSER_GRAPHQL_PAGE = None
+BROWSER_GRAPHQL_META = {}
+BROWSER_GRAPHQL_LOCK = Lock()
 
 
 def hhp_compare_v2_fallback_enabled():
@@ -1629,7 +1648,63 @@ def graphql_params():
 def fetch_transports():
     if FETCH_MODE in {"zenrows", "zr"}:
         return ["zenrows"]
-    raise RuntimeError("Best Buy detail collection is ZenRows GraphQL only. Set BESTBUY_FETCH_MODE=zenrows.")
+    if FETCH_MODE in {"browser_graphql", "browser"}:
+        return ["browser_graphql"]
+    raise RuntimeError(
+        "Best Buy detail collection supports BESTBUY_FETCH_MODE=zenrows or browser_graphql."
+    )
+
+
+def browser_graphql_enabled():
+    return FETCH_MODE in {"browser_graphql", "browser"}
+
+
+def open_detail_browser_page():
+    global BROWSER_GRAPHQL_PAGE, BROWSER_GRAPHQL_META
+    if BROWSER_GRAPHQL_PAGE is not None:
+        return BROWSER_GRAPHQL_PAGE
+    BROWSER_GRAPHQL_PAGE, BROWSER_GRAPHQL_META = create_browser_page(
+        run_root=DETAIL_ROOT,
+        name=f"detail_{STAGE}_browser_graphql",
+        headless=BROWSER_GRAPHQL_HEADLESS,
+        local_port=BROWSER_GRAPHQL_LOCAL_PORT,
+    )
+    return BROWSER_GRAPHQL_PAGE
+
+
+def close_detail_browser_page():
+    global BROWSER_GRAPHQL_PAGE
+    close_browser_page(BROWSER_GRAPHQL_PAGE)
+    BROWSER_GRAPHQL_PAGE = None
+
+
+def browser_graphql_post(payload, referer_url):
+    if BROWSER_GRAPHQL_PAGE is None:
+        raise RuntimeError("browser_graphql page is not initialized")
+    with BROWSER_GRAPHQL_LOCK:
+        browser_url = add_intl_nosplash(referer_url or "https://www.bestbuy.com/")
+        BROWSER_GRAPHQL_PAGE.get(browser_url)
+        if BROWSER_GRAPHQL_WAIT_SECONDS:
+            time.sleep(BROWSER_GRAPHQL_WAIT_SECONDS)
+        start = time.perf_counter()
+        envelope = browser_fetch_graphql(
+            BROWSER_GRAPHQL_PAGE,
+            payload,
+            timeout=BROWSER_GRAPHQL_JS_TIMEOUT,
+        )
+        elapsed = round(time.perf_counter() - start, 3)
+    status_code = int(envelope.get("status") or 0)
+    text = str(envelope.get("body") or "")
+    try:
+        response_json = json.loads(text)
+    except ValueError:
+        response_json = {}
+    headers = {
+        "content-type": envelope.get("contentType", ""),
+        "transport": "browser_graphql",
+        "browser_url": browser_url,
+    }
+    return status_code, text, response_json, headers, elapsed
 
 
 def load_csv(path):
@@ -3616,30 +3691,42 @@ def fetch_detail_sku_batch(client, targets, force_retry=False, max_batch_attempt
             headers = {}
             error = ""
             try:
-                response = client.post(
-                    "https://www.bestbuy.com/gateway/graphql",
-                    params=graphql_params(),
-                    headers={
-                        "accept": "application/json, text/plain, */*",
-                        "content-type": "application/json",
-                        "origin": "https://www.bestbuy.com",
-                        "referer": entries[0]["pdp_url"],
-                    },
-                    data=json.dumps(request_payload),
-                    timeout=REQUEST_TIMEOUT,
-                )
-                text = response.text
-                headers = dict(response.headers)
-                try:
-                    response_json = response.json()
-                except ValueError:
-                    response_json = {}
+                if transport == "browser_graphql":
+                    status_code, text, response_json, headers, browser_elapsed = browser_graphql_post(
+                        request_payload,
+                        entries[0]["pdp_url"],
+                    )
+                    response = None
+                    start = time.perf_counter() - browser_elapsed
+                else:
+                    response = client.post(
+                        "https://www.bestbuy.com/gateway/graphql",
+                        params=graphql_params(),
+                        headers={
+                            "accept": "application/json, text/plain, */*",
+                            "content-type": "application/json",
+                            "origin": "https://www.bestbuy.com",
+                            "referer": entries[0]["pdp_url"],
+                        },
+                        data=json.dumps(request_payload),
+                        timeout=REQUEST_TIMEOUT,
+                    )
+                    status_code = response.status_code
+                    text = response.text
+                    headers = dict(response.headers)
+                    try:
+                        response_json = response.json()
+                    except ValueError:
+                        response_json = {}
             except RequestException as exc:
                 error = str(exc)
+                status_code = "ERR"
+            except RuntimeError as exc:
+                error = str(exc)
+                status_code = "ERR"
 
-            attempt_cost = request_cost(response.headers) if response is not None else 0
+            attempt_cost = request_cost(headers)
             total_batch_cost += attempt_cost
-            status_code = response.status_code if response is not None else "ERR"
             attempt_status_codes.append(str(status_code))
             attempt_costs.append(str(attempt_cost))
             if error:
@@ -3657,7 +3744,7 @@ def fetch_detail_sku_batch(client, targets, force_retry=False, max_batch_attempt
         elapsed = round(time.perf_counter() - batch_started, 3)
         batch_cost = total_batch_cost
         split_cost = batch_cost / len(entries) if entries else 0
-        status_code = response.status_code if response is not None else "ERR"
+        status_code = attempt_status_codes[-1] if attempt_status_codes else "ERR"
         response_count = len(response_json) if isinstance(response_json, list) else (1 if isinstance(response_json, dict) else 0)
         for batch_index, entry in enumerate(entries, 1):
             target = entry["target"]
@@ -3686,7 +3773,7 @@ def fetch_detail_sku_batch(client, targets, force_retry=False, max_batch_attempt
                 else ""
             )
             product = ((detail_response_json.get("data") or {}).get("productBySkuId") or {}) if isinstance(detail_response_json, dict) else {}
-            success = response is not None and status_code == 200 and isinstance(product, dict) and str(product.get("skuId") or "") == str(sku)
+            success = detail_status_code_int(status_code) == 200 and isinstance(product, dict) and str(product.get("skuId") or "") == str(sku)
             paths = detail_paths_for_status(sku, target, success)
             entry_responses = [
                 graphql_batch_response_item(response_json, indices[stage])
@@ -3847,7 +3934,7 @@ def fetch_detail_sku_batch(client, targets, force_retry=False, max_batch_attempt
                     if isinstance(compare_v2_response_json, dict)
                     else []
                 )
-                compare_ok = response is not None and status_code == 200 and (
+                compare_ok = detail_status_code_int(status_code) == 200 and (
                     isinstance(recommendations, list) or isinstance(fallback_names, list)
                 )
                 compare_count = len(recommendations) if isinstance(recommendations, list) else 0
@@ -4002,18 +4089,28 @@ def fetch_review20(client, target):
             continue
         start = time.perf_counter()
         try:
-            response = client.post(
-                "https://www.bestbuy.com/gateway/graphql",
-                params=graphql_params(),
-                headers={
-                    "accept": "application/json, text/plain, */*",
-                    "content-type": "application/json",
-                    "origin": "https://www.bestbuy.com",
-                    "referer": pdp_url,
-                },
-                data=json.dumps(payload),
-                timeout=REQUEST_TIMEOUT,
-            )
+            if transport == "browser_graphql":
+                status_code, text, response_json, headers, elapsed = browser_graphql_post(payload, pdp_url)
+                response_headers = headers
+                response_status = status_code
+            else:
+                response = client.post(
+                    "https://www.bestbuy.com/gateway/graphql",
+                    params=graphql_params(),
+                    headers={
+                        "accept": "application/json, text/plain, */*",
+                        "content-type": "application/json",
+                        "origin": "https://www.bestbuy.com",
+                        "referer": pdp_url,
+                    },
+                    data=json.dumps(payload),
+                    timeout=REQUEST_TIMEOUT,
+                )
+                text = response.text
+                response_headers = dict(response.headers)
+                response_status = response.status_code
+                response_json = {}
+                elapsed = round(time.perf_counter() - start, 3)
         except RequestException as exc:
             paths = review_paths_for_status(sku, target, False)
             meta.update(
@@ -4030,25 +4127,41 @@ def fetch_review20(client, target):
             )
             paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
             continue
-        text = response.text
+        except RuntimeError as exc:
+            paths = review_paths_for_status(sku, target, False)
+            meta.update(
+                {
+                    "success": False,
+                    "status_code": "ERR",
+                    "transport": transport,
+                    "fetch_mode": FETCH_MODE,
+                    "elapsed_seconds": round(time.perf_counter() - start, 3),
+                    "x_request_cost": 0,
+                    "finished_at": now(),
+                    "error": str(exc),
+                }
+            )
+            paths["meta"].write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+            continue
         review_count = 0
         review_text_count = 0
         expected_text_count = expected_review_text_count(target, sku)
         error = ""
-        response_json = {}
-        try:
-            response_json = response.json()
+        if not response_json and transport != "browser_graphql":
+            try:
+                response_json = response.json()
+            except ValueError as exc:
+                error = str(exc)
+        if response_json:
             count = review_result_count_from_json(response_json)
             review_count = count if count is not None else 0
             text_count = review_text_count_from_json(response_json)
             review_text_count = text_count if text_count is not None else 0
             if response_json.get("errors"):
                 error = json.dumps(response_json.get("errors"), ensure_ascii=False, separators=(",", ":"))
-        except ValueError as exc:
-            error = str(exc)
         has_review_list = review_result_count_from_json(response_json) is not None
         enough_review_text = review_text_count_is_sufficient(review_text_count, expected_text_count)
-        success = response.status_code == 200 and has_review_list and enough_review_text
+        success = detail_status_code_int(response_status) == 200 and has_review_list and enough_review_text
         if has_review_list and not enough_review_text:
             error = f"review20_partial_{review_text_count}_of_{expected_text_count}"
         paths = review_paths_for_status(sku, target, success)
@@ -4058,17 +4171,17 @@ def fetch_review20(client, target):
             )
         paths["response_txt"].write_text(text, encoding="utf-8", errors="replace")
         paths["headers"].write_text(
-            json.dumps(dict(response.headers), indent=2, ensure_ascii=False), encoding="utf-8"
+            json.dumps(response_headers, indent=2, ensure_ascii=False), encoding="utf-8"
         )
         paths["request"].write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         meta.update(
             {
                 "success": success,
-                "status_code": response.status_code,
+                "status_code": response_status,
                 "transport": transport,
                 "fetch_mode": FETCH_MODE,
-                "elapsed_seconds": round(time.perf_counter() - start, 3),
-                "x_request_cost": request_cost(response.headers),
+                "elapsed_seconds": elapsed,
+                "x_request_cost": request_cost(response_headers),
                 "bytes": len(text or ""),
                 "review_count_returned": review_count,
                 "review_text_count_returned": review_text_count,
@@ -5578,7 +5691,12 @@ def main():
     api_key = "" if REBUILD_ONLY else os.getenv("ZENROWS_API_KEY")
     client = ZenRowsClient(api_key) if api_key else None
     transports = [] if REBUILD_ONLY else fetch_transports()
-    can_fetch_network = not REBUILD_ONLY and ("zenrows" in transports and client is not None)
+    if not REBUILD_ONLY and "browser_graphql" in transports:
+        open_detail_browser_page()
+        atexit.register(close_detail_browser_page)
+    can_fetch_network = not REBUILD_ONLY and (
+        ("zenrows" in transports and client is not None) or "browser_graphql" in transports
+    )
 
     RAW_DETAIL_DIR.mkdir(parents=True, exist_ok=True)
     RAW_REVIEW_DIR.mkdir(parents=True, exist_ok=True)
@@ -5599,7 +5717,14 @@ def main():
         or DETAIL_COMPARE_DOM_OBSERVER
         or DETAIL_COMPARE_FORCE_FETCH
     )
-    network_mode = "cache_only" if REBUILD_ONLY else ("zenrows" if can_fetch_network else "missing_api_key")
+    if REBUILD_ONLY:
+        network_mode = "cache_only"
+    elif "browser_graphql" in transports:
+        network_mode = "browser_graphql"
+    elif can_fetch_network:
+        network_mode = "zenrows"
+    else:
+        network_mode = "missing_api_key"
     use_detail_sku_batch = (
         can_fetch_network
         and DETAIL_DIRECT_GRAPHQL

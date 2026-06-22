@@ -1,4 +1,5 @@
 import csv
+import atexit
 import json
 import os
 import time
@@ -8,6 +9,7 @@ from pathlib import Path
 from requests import RequestException
 from zenrows import ZenRowsClient
 
+from .step00_browser_session import add_intl_nosplash, close_browser_page, create_browser_page, env_bool, env_int
 from .step00_availability_policy import ALL_AVAILABILITY_FIELDS, active_availability_fields, inactive_availability_fields
 from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, KRW_PER_USD, bestbuy_category, rel_path
 from .step00_fulfillment_graphql import (
@@ -62,6 +64,19 @@ CLEAR_EXISTING_FIELDS = os.getenv("BESTBUY_AVAILABILITY_BACKFILL_CLEAR_EXISTING_
     "yes",
     "y",
 }
+FETCH_MODE = os.getenv(
+    "BESTBUY_AVAILABILITY_BACKFILL_FETCH_MODE",
+    os.getenv("BESTBUY_FETCH_MODE", "zenrows"),
+).strip().lower()
+BROWSER_WAIT_SECONDS = max(
+    0.0,
+    float(os.getenv("BESTBUY_AVAILABILITY_BROWSER_GRAPHQL_WAIT_SECONDS", "5")),
+)
+BROWSER_JS_TIMEOUT = max(1, int(os.getenv("BESTBUY_AVAILABILITY_BROWSER_GRAPHQL_JS_TIMEOUT", "120")))
+BROWSER_HEADLESS = env_bool("BESTBUY_AVAILABILITY_BROWSER_GRAPHQL_HEADLESS", "1")
+BROWSER_LOCAL_PORT = env_int("BESTBUY_AVAILABILITY_BROWSER_GRAPHQL_LOCAL_PORT", "0")
+BROWSER_PAGE = None
+BROWSER_META = {}
 
 
 def now():
@@ -244,6 +259,73 @@ def fulfillment_headers():
     }
 
 
+def browser_graphql_enabled():
+    return FETCH_MODE in {"browser_graphql", "browser"}
+
+
+def open_availability_browser_page():
+    global BROWSER_PAGE, BROWSER_META
+    if BROWSER_PAGE is not None:
+        return BROWSER_PAGE
+    BROWSER_PAGE, BROWSER_META = create_browser_page(
+        run_root=BACKFILL_ROOT,
+        name="availability_browser_graphql",
+        headless=BROWSER_HEADLESS,
+        local_port=BROWSER_LOCAL_PORT,
+    )
+    BROWSER_PAGE.get(add_intl_nosplash("https://www.bestbuy.com/"))
+    if BROWSER_WAIT_SECONDS:
+        time.sleep(BROWSER_WAIT_SECONDS)
+    return BROWSER_PAGE
+
+
+def close_availability_browser_page():
+    global BROWSER_PAGE
+    close_browser_page(BROWSER_PAGE)
+    BROWSER_PAGE = None
+
+
+def browser_fetch_fulfillment(target_url):
+    if BROWSER_PAGE is None:
+        raise RuntimeError("availability browser_graphql page is not initialized")
+    js = (
+        "return fetch("
+        + json.dumps(target_url)
+        + ", {method:'GET', credentials:'include', headers:{"
+        "'accept':'application/json, text/plain, */*',"
+        "'x-client-id':'pdp-web',"
+        "'x-requested-for-operation-name':'AIV_FulfillmentBatchCall'"
+        "}}).then(async r=>{const t=await r.text();"
+        "return JSON.stringify({status:r.status, contentType:r.headers.get('content-type'), body:t});"
+        "}).catch(e=>JSON.stringify({error:String(e)}));"
+    )
+    started = time.perf_counter()
+    raw = BROWSER_PAGE.run_js(js, timeout=BROWSER_JS_TIMEOUT)
+    elapsed = round(time.perf_counter() - started, 3)
+    if raw is None:
+        raise RuntimeError("availability browser fetch returned empty result")
+    envelope = json.loads(raw)
+    if envelope.get("error"):
+        raise RuntimeError(envelope["error"])
+    text = str(envelope.get("body") or "")
+    response_json = {}
+    try:
+        response_json = json.loads(text)
+    except ValueError:
+        pass
+    return {
+        "status_code": int(envelope.get("status") or 0),
+        "text": text,
+        "headers": {
+            "content-type": envelope.get("contentType", ""),
+            "transport": "browser_graphql",
+            "x-request-cost": "0",
+        },
+        "response_json": response_json,
+        "elapsed_seconds": elapsed,
+    }
+
+
 def fetch_chunk(client, chunk, chunk_dir):
     chunk_dir.mkdir(parents=True, exist_ok=True)
     variables = fulfillment_variables(chunk, context="PLP")
@@ -262,24 +344,35 @@ def fetch_chunk(client, chunk, chunk_dir):
         ),
         encoding="utf-8",
     )
-    started = time.perf_counter()
-    response = client.get(
-        target_url,
-        params=zenrows_params(),
-        headers=fulfillment_headers(),
-        timeout=REQUEST_TIMEOUT,
-    )
-    elapsed = round(time.perf_counter() - started, 3)
-    (chunk_dir / "response.txt").write_text(response.text, encoding="utf-8", errors="replace")
+    if browser_graphql_enabled():
+        result = browser_fetch_fulfillment(target_url)
+        status_code = result["status_code"]
+        response_text = result["text"]
+        response_headers = result["headers"]
+        response_json = result["response_json"]
+        elapsed = result["elapsed_seconds"]
+    else:
+        started = time.perf_counter()
+        response = client.get(
+            target_url,
+            params=zenrows_params(),
+            headers=fulfillment_headers(),
+            timeout=REQUEST_TIMEOUT,
+        )
+        elapsed = round(time.perf_counter() - started, 3)
+        status_code = response.status_code
+        response_text = response.text
+        response_headers = dict(response.headers)
+        response_json = {}
+        try:
+            response_json = response.json()
+        except ValueError:
+            pass
+    (chunk_dir / "response.txt").write_text(response_text, encoding="utf-8", errors="replace")
     (chunk_dir / "headers.json").write_text(
-        json.dumps(dict(response.headers), indent=2, ensure_ascii=False),
+        json.dumps(response_headers, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    response_json = {}
-    try:
-        response_json = response.json()
-    except ValueError:
-        pass
     if response_json:
         (chunk_dir / "response.json").write_text(
             json.dumps(response_json, indent=2, ensure_ascii=False),
@@ -288,19 +381,22 @@ def fetch_chunk(client, chunk, chunk_dir):
     values = parse_fulfillment_response(response_json)
     errors = response_json.get("errors") if isinstance(response_json, dict) else None
     return {
-        "status_code": response.status_code,
+        "status_code": status_code,
         "elapsed_seconds": elapsed,
-        "x_request_cost": request_cost(response.headers),
+        "x_request_cost": request_cost(response_headers),
         "values": values,
         "error": json.dumps(errors, ensure_ascii=False)[:500] if errors else "",
     }
 
 
 def fetch_availability(skus, raw_dir):
-    api_key = os.getenv("ZENROWS_API_KEY")
-    if not api_key:
+    api_key = "" if browser_graphql_enabled() else os.getenv("ZENROWS_API_KEY")
+    if not api_key and not browser_graphql_enabled():
         raise RuntimeError("Set ZENROWS_API_KEY in .env")
-    client = ZenRowsClient(api_key)
+    client = ZenRowsClient(api_key) if api_key else None
+    if browser_graphql_enabled():
+        open_availability_browser_page()
+        atexit.register(close_availability_browser_page)
     values_by_sku = {}
     calls = []
     chunks = [skus[index : index + CHUNK_SIZE] for index in range(0, len(skus), CHUNK_SIZE)]

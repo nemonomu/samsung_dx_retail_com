@@ -1,3 +1,4 @@
+import atexit
 import csv
 import json
 import os
@@ -41,6 +42,15 @@ REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "120"))
 FETCH_MODE = os.getenv("BESTBUY_FETCH_MODE", os.getenv("BESTBUY_GRAPHQL_FETCH_MODE", "zenrows")).strip().lower()
 LISTING_COLLECTION_MODE = os.getenv("BESTBUY_LISTING_COLLECTION_MODE", "dom").strip().lower()
 LISTING_WAIT_MS = max(0, int(os.getenv("BESTBUY_LISTING_WAIT_MS", "15000")))
+BROWSER_GRAPHQL_WAIT_SECONDS = max(0.0, float(os.getenv("BESTBUY_BROWSER_GRAPHQL_WAIT_SECONDS", "8")))
+BROWSER_GRAPHQL_JS_TIMEOUT = max(1, int(os.getenv("BESTBUY_BROWSER_GRAPHQL_JS_TIMEOUT", "120")))
+BROWSER_GRAPHQL_HEADLESS = os.getenv("BESTBUY_BROWSER_GRAPHQL_HEADLESS", "1").lower() in {
+    "1",
+    "true",
+    "yes",
+    "y",
+}
+BROWSER_GRAPHQL_LOCAL_PORT = int(os.getenv("BESTBUY_BROWSER_GRAPHQL_LOCAL_PORT", "0") or "0")
 LISTING_MAX_ATTEMPTS = max(1, int(os.getenv("BESTBUY_LISTING_MAX_ATTEMPTS", "5")))
 LISTING_RETRY_SLEEP_SECONDS = float(os.getenv("BESTBUY_LISTING_RETRY_SLEEP_SECONDS", "2"))
 LISTING_RETRY_MAX_SLEEP_SECONDS = max(
@@ -213,6 +223,7 @@ def find_started_operation(html_text, target_name):
                     "operationName": target_name,
                     "query": query,
                     "variables": options.get("variables", {}),
+                    "extensions": options.get("extensions", {}),
                     "event_id": event.get("id", ""),
                 }
     raise RuntimeError(f"Could not find Apollo operation: {target_name}")
@@ -238,6 +249,7 @@ def load_product_list_operation(target_name="PlpView_ProductList_Init"):
             "operationName": payload["operationName"],
             "query": payload.get("query", ""),
             "variables": payload.get("variables", {}),
+            "extensions": payload.get("extensions", {}),
             "event_id": "",
             "source_path": rel_path(path),
             "source_type": "payload",
@@ -290,10 +302,17 @@ def prepare_product_list_payload(operation, page):
             strip_fulfillment=STRIP_PRODUCT_LIST_FULFILLMENT,
         )
 
+    extensions = operation.get("extensions") or {
+        "clientLibrary": {
+            "name": "@apollo/client",
+            "version": "4.1.6",
+        }
+    }
     return {
         "operationName": operation["operationName"],
         "variables": variables,
         "query": query,
+        "extensions": extensions,
     }
 
 
@@ -448,6 +467,8 @@ def fetch_transports():
 def manifest_fetch_transports():
     if LISTING_COLLECTION_MODE == "dom":
         return ["zenrows_html_dom"]
+    if LISTING_COLLECTION_MODE == "browser_graphql":
+        return ["browser_graphql"]
     return fetch_transports()
 
 
@@ -1676,14 +1697,228 @@ def collect_dom_listing_page(page, client):
     return {}, meta, rows
 
 
-def collect_listing_page(page, operation, client, listing_session, bootstrap_attempts):
+def create_browser_graphql_page():
+    try:
+        from DrissionPage import ChromiumOptions, ChromiumPage
+    except ImportError as exc:
+        raise RuntimeError(
+            "BESTBUY_LISTING_COLLECTION_MODE=browser_graphql requires DrissionPage. "
+            "Install requirements.txt on the runner."
+        ) from exc
+
+    options = ChromiumOptions()
+    profile_dir = browser_graphql_profile_dir()
+    cache_dir = browser_graphql_cache_dir()
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    local_port = browser_graphql_local_port()
+    options.set_paths(
+        local_port=local_port,
+        user_data_path=str(profile_dir),
+        cache_path=str(cache_dir),
+    )
+    if BROWSER_GRAPHQL_HEADLESS:
+        try:
+            options.headless(True)
+        except TypeError:
+            options.headless()
+    try:
+        return ChromiumPage(options)
+    except Exception as first_exc:
+        # Chrome may be alive before DrissionPage resolves its websocket endpoint.
+        time.sleep(2)
+        reconnect_options = ChromiumOptions()
+        reconnect_options.set_address(f"127.0.0.1:{local_port}")
+        try:
+            return ChromiumPage(reconnect_options)
+        except Exception as second_exc:
+            raise RuntimeError(
+                f"Could not open browser_graphql Chrome session on port {local_port}: "
+                f"initial={first_exc!r}; reconnect={second_exc!r}"
+            ) from second_exc
+
+
+def browser_graphql_local_port():
+    if BROWSER_GRAPHQL_LOCAL_PORT > 0:
+        return BROWSER_GRAPHQL_LOCAL_PORT
+    seed = f"{CATEGORY}:{RUN_ID}:{RUN_ROOT}"
+    return 19000 + (sum(ord(ch) for ch in seed) % 20000)
+
+
+def browser_graphql_profile_dir():
+    return RUN_ROOT / "raw" / "browser_graphql_profile"
+
+
+def browser_graphql_cache_dir():
+    return RUN_ROOT / "raw" / "browser_graphql_cache"
+
+
+def close_browser_graphql_page(browser_page):
+    if not browser_page:
+        return
+    for method_name in ("quit", "close"):
+        method = getattr(browser_page, method_name, None)
+        if callable(method):
+            try:
+                method()
+            except Exception:
+                pass
+            return
+
+
+def status_code_ok(value):
+    try:
+        return int(value or 0) == 200
+    except (TypeError, ValueError):
+        return False
+
+
+def browser_graphql_fetch_once(page, payload, browser_page):
+    started_at = now()
+    start = time.perf_counter()
+    page_url = build_search_url(page)
+    raw_dir = RUN_ROOT / "raw/browser_graphql"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    stem = page_stem(page)
+    request_path = raw_dir / f"{stem}_request.json"
+    response_path = raw_dir / f"{stem}_response.txt"
+    response_json_path = raw_dir / f"{stem}_response.json"
+    meta_path = raw_dir / f"{stem}_meta.json"
+    request_path.write_text(
+        json.dumps({"url": page_url, "payload": payload}, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    graph = {}
+    envelope = {}
+    status_code = "ERR"
+    content_type = ""
+    error = ""
+    parse_error = ""
+    raw = ""
+    try:
+        browser_page.get(page_url)
+        if BROWSER_GRAPHQL_WAIT_SECONDS > 0:
+            time.sleep(BROWSER_GRAPHQL_WAIT_SECONDS)
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        js = (
+            "return fetch('/gateway/graphql', {"
+            "method:'POST', credentials:'include', "
+            "headers:{'accept':'application/json, text/plain, */*','content-type':'application/json'}, "
+            f"body: JSON.stringify({payload_json})"
+            "}).then(async r=>{const t=await r.text(); "
+            "return JSON.stringify({status:r.status, contentType:r.headers.get('content-type'), body:t});"
+            "}).catch(e=>JSON.stringify({error:String(e)}));"
+        )
+        raw = browser_page.run_js(js, timeout=BROWSER_GRAPHQL_JS_TIMEOUT)
+        if not isinstance(raw, str):
+            raw = json.dumps(raw, ensure_ascii=False)
+        envelope = json.loads(raw)
+        if envelope.get("error"):
+            error = str(envelope.get("error"))
+        status_code = envelope.get("status", "ERR")
+        content_type = envelope.get("contentType") or ""
+        body = envelope.get("body") or ""
+        if body:
+            graph = json.loads(body)
+            response_json_path.write_text(json.dumps(graph, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception as exc:
+        error = str(exc)
+    if raw:
+        response_path.write_text(str(raw), encoding="utf-8", errors="replace")
+    elapsed = round(time.perf_counter() - start, 3)
+    rows = []
+    if status_code_ok(status_code) and graph:
+        try:
+            rows = parse_page_rows(page, graph)
+        except Exception as exc:
+            parse_error = repr(exc)
+    meta = {
+        "page": page,
+        "url": page_url,
+        "started_at": started_at,
+        "finished_at": now(),
+        "elapsed_seconds": elapsed,
+        "transport": "browser_graphql",
+        "fetch_mode": "browser",
+        "listing_request_profile": "browser_graphql",
+        "status_code": status_code,
+        "x_request_cost": "0",
+        "bytes": len(str(raw).encode("utf-8", errors="ignore")),
+        "parse_error": parse_error,
+        "error": error,
+        "content_type": content_type,
+        "zenrows_error_code": "",
+        "request_path": rel_path(request_path),
+        "response_path": rel_path(response_path) if response_path.exists() else "",
+        "response_json_path": rel_path(response_json_path) if response_json_path.exists() else "",
+        "headers_path": "",
+        "browser_graphql_wait_seconds": BROWSER_GRAPHQL_WAIT_SECONDS,
+        "browser_graphql_js_timeout": BROWSER_GRAPHQL_JS_TIMEOUT,
+        "browser_graphql_headless": int(BROWSER_GRAPHQL_HEADLESS),
+        "browser_graphql_local_port": browser_graphql_local_port(),
+        "browser_graphql_profile_dir": rel_path(browser_graphql_profile_dir()),
+        "browser_graphql_cache_dir": rel_path(browser_graphql_cache_dir()),
+    }
+    meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
+    return graph, meta, rows
+
+
+def collect_browser_graphql_page(page, payload, browser_page):
+    response_json = {}
+    rows = []
+    meta = {}
+    attempt_status_codes = []
+    attempt_costs = []
+    attempt_errors = []
+    attempt_retry_reasons = []
+    attempt_retry_delays = []
+    for attempt in range(1, LISTING_MAX_ATTEMPTS + 1):
+        print(f"page={page:03d} browser_graphql_attempt={attempt} request_start", flush=True)
+        response_json, meta, rows = browser_graphql_fetch_once(page, payload, browser_page)
+        attempt_status_codes.append(str(meta.get("status_code", "")))
+        attempt_costs.append(str(meta.get("x_request_cost", "")))
+        if meta.get("error"):
+            attempt_errors.append(str(meta.get("error")))
+        retry_reason = listing_retry_reason(rows, meta, response_json)
+        print(
+            f"page={page:03d} browser_graphql_attempt={attempt} status={meta.get('status_code')} "
+            f"elapsed={meta.get('elapsed_seconds')}s rows={len(rows)} retry_reason={retry_reason}",
+            flush=True,
+        )
+        if rows or not retry_reason or attempt >= LISTING_MAX_ATTEMPTS:
+            break
+        retry_delay = listing_retry_delay(attempt)
+        attempt_retry_reasons.append(retry_reason)
+        attempt_retry_delays.append(retry_delay)
+        if retry_delay > 0:
+            time.sleep(retry_delay)
+
+    meta["attempt_count"] = len(attempt_status_codes)
+    meta["attempt_status_codes"] = ",".join(attempt_status_codes)
+    meta["attempt_costs"] = ",".join(attempt_costs)
+    meta["attempt_profiles"] = ",".join(["browser_graphql"] * len(attempt_status_codes))
+    meta["attempt_retry_reasons"] = ",".join(attempt_retry_reasons)
+    meta["attempt_retry_delays"] = ",".join(f"{delay:g}" for delay in attempt_retry_delays)
+    meta["recovery_attempt_count"] = 0
+    meta["recovery_profiles"] = ""
+    meta["recovery_success"] = 0
+    if attempt_errors:
+        meta["attempt_errors"] = " | ".join(attempt_errors[-3:])
+    return response_json, meta, rows
+
+
+def collect_listing_page(page, operation, client, listing_session, bootstrap_attempts, browser_page=None):
     if LISTING_COLLECTION_MODE == "dom":
         return collect_dom_listing_page(page, client)
     if LISTING_COLLECTION_MODE == "graphql":
         payload = prepare_product_list_payload(operation, page)
         return collect_network_page(page, payload, client, listing_session, bootstrap_attempts)
+    if LISTING_COLLECTION_MODE == "browser_graphql":
+        payload = prepare_product_list_payload(operation, page)
+        return collect_browser_graphql_page(page, payload, browser_page)
     raise RuntimeError(
-        f"Unsupported BESTBUY_LISTING_COLLECTION_MODE={LISTING_COLLECTION_MODE!r}; use dom or graphql"
+        f"Unsupported BESTBUY_LISTING_COLLECTION_MODE={LISTING_COLLECTION_MODE!r}; use dom, graphql, or browser_graphql"
     )
 
 
@@ -1890,6 +2125,7 @@ def retry_failed_pages_with_delay(
     client,
     listing_session,
     bootstrap_attempts,
+    browser_page,
     rows_by_page,
     page_benchmarks,
     raw_search,
@@ -1920,6 +2156,7 @@ def retry_failed_pages_with_delay(
                 client,
                 listing_session,
                 bootstrap_attempts,
+                browser_page,
             )
             meta["delayed_retry_round"] = round_number
             meta["delayed_retry_previous_status_code"] = previous_status_code
@@ -1947,7 +2184,9 @@ def retry_failed_pages_with_delay(
 
 def main():
     api_key = os.getenv("ZENROWS_API_KEY")
-    needs_zenrows = LISTING_COLLECTION_MODE == "dom" or any(item == "zenrows" for item in fetch_transports())
+    needs_zenrows = LISTING_COLLECTION_MODE == "dom" or (
+        LISTING_COLLECTION_MODE == "graphql" and any(item == "zenrows" for item in fetch_transports())
+    )
     if needs_zenrows and not api_key:
         raise RuntimeError("Set ZENROWS_API_KEY in .env")
     make_dirs()
@@ -1956,11 +2195,14 @@ def main():
 
     operation = (
         load_product_list_operation("PlpView_ProductList_Init")
-        if LISTING_COLLECTION_MODE == "graphql"
+        if LISTING_COLLECTION_MODE in {"graphql", "browser_graphql"}
         else {"source_path": "", "source_type": "dom_html"}
     )
     client = ZenRowsClient(api_key) if api_key else None
     listing_session = ListingSessionState()
+    browser_page = create_browser_graphql_page() if LISTING_COLLECTION_MODE == "browser_graphql" else None
+    if browser_page is not None:
+        atexit.register(close_browser_graphql_page, browser_page)
 
     rows_by_page = {}
     page_benchmarks = []
@@ -1973,7 +2215,7 @@ def main():
     print(f"RUN_ROOT={RUN_ROOT}")
     print(
         f"SEARCH_TERM={SEARCH_TERM} pages={SEARCH_PAGES} mode={LISTING_COLLECTION_MODE} "
-        f"endpoint={GRAPHQL_ENDPOINT if LISTING_COLLECTION_MODE == 'graphql' else build_search_url(1)} "
+        f"endpoint={GRAPHQL_ENDPOINT if LISTING_COLLECTION_MODE in {'graphql', 'browser_graphql'} else build_search_url(1)} "
         f"template={operation.get('source_path', '')}"
     )
     print(f"benchmark_start={run_started_at}")
@@ -1993,6 +2235,7 @@ def main():
                 client,
                 listing_session,
                 bootstrap_attempts,
+                browser_page,
             )
             source = meta.get("transport") or "network"
         rows_by_page[page] = rows
@@ -2024,6 +2267,7 @@ def main():
         client,
         listing_session,
         bootstrap_attempts,
+        browser_page,
         rows_by_page,
         page_benchmarks,
         raw_search,
@@ -2065,7 +2309,7 @@ def main():
             except ValueError:
                 pass
     listing_request_calls = sum(int(summary.get("attempt_count") or 1) for summary in page_benchmarks)
-    graphql_post_calls = listing_request_calls if LISTING_COLLECTION_MODE == "graphql" else 0
+    graphql_post_calls = listing_request_calls if LISTING_COLLECTION_MODE in {"graphql", "browser_graphql"} else 0
     bootstrap_call_count = len(bootstrap_attempts)
     total_request_calls = listing_request_calls + bootstrap_call_count
     manifest = {
@@ -2087,7 +2331,7 @@ def main():
         "allow_html_template": ALLOW_HTML_TEMPLATE,
         "source_template": operation.get("source_path", ""),
         "source_template_type": operation.get("source_type", ""),
-        "expected_post_calls": SEARCH_PAGES if LISTING_COLLECTION_MODE == "graphql" else 0,
+        "expected_post_calls": SEARCH_PAGES if LISTING_COLLECTION_MODE in {"graphql", "browser_graphql"} else 0,
         "actual_post_calls": graphql_post_calls,
         "total_request_calls": total_request_calls,
         "listing_request_calls": listing_request_calls,

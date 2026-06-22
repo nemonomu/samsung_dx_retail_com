@@ -10,6 +10,16 @@ from pathlib import Path
 
 from zenrows import ZenRowsClient
 
+from .step00_apollo import iter_apollo_push_payloads
+from .step00_browser_session import (
+    add_intl_nosplash,
+    browser_fetch_graphql,
+    browser_outer_html,
+    close_browser_page,
+    create_browser_page,
+    env_bool,
+    env_int,
+)
 from .step00_config import DEFAULT_BESTBUY_RUN_ROOT, bestbuy_category, has_target_url, load_initial_urls, rel_path
 
 
@@ -21,6 +31,7 @@ GRAPHQL_ENDPOINT = os.getenv("BESTBUY_GRAPHQL_ENDPOINT", "https://www.bestbuy.co
 FETCH_MODE = os.getenv("BESTBUY_TRENDING_FETCH_MODE", "auto").strip().lower()
 PAGE_PAYLOAD_FETCH_MODES = {"html", "page", "live_html", "legacy_html", "page_payload", "rsc_payload", "doc_payload"}
 SOURCE_PAYLOAD_ENV = os.getenv("BESTBUY_TRENDING_SOURCE_PAYLOAD", "").strip()
+TRENDING_URL_ENV = os.getenv("BESTBUY_TRENDING_URL", "").strip()
 SOURCE_PAYLOAD_PATH = Path(
     SOURCE_PAYLOAD_ENV or f"references/bestbuy_trending_{CATEGORY.lower()}_request.json"
 )
@@ -37,10 +48,15 @@ ALLOW_RENDER_FALLBACK = os.getenv(
     "0",
 ).lower() in {"1", "true", "yes", "y"}
 REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "180"))
-TRENDING_URL = os.getenv("BESTBUY_TRENDING_URL", load_initial_urls().get("trending_tvs_projectors", ""))
+TRENDING_URL = TRENDING_URL_ENV or load_initial_urls().get("trending_tvs_projectors", "")
 LIMIT = int(os.getenv("BESTBUY_TRENDING_LIMIT", "10"))
 WAIT_MS = os.getenv("ZENROWS_WAIT_MS") or os.getenv("BESTBUY_TRENDING_WAIT_MS") or "8000"
 WAIT_MS_SEQUENCE = os.getenv("BESTBUY_TRENDING_WAIT_MS_SEQUENCE", "").strip()
+SKIP_IF_NO_SOURCE = os.getenv("BESTBUY_TRENDING_SKIP_IF_NO_SOURCE", "1").lower() in {"1", "true", "yes", "y"}
+BROWSER_WAIT_SECONDS = max(0, int(os.getenv("BESTBUY_TRENDING_BROWSER_WAIT_SECONDS", "8")))
+BROWSER_JS_TIMEOUT = max(1, int(os.getenv("BESTBUY_TRENDING_BROWSER_JS_TIMEOUT", "120")))
+BROWSER_HEADLESS = env_bool("BESTBUY_TRENDING_BROWSER_HEADLESS", "1")
+BROWSER_LOCAL_PORT = env_int("BESTBUY_TRENDING_BROWSER_LOCAL_PORT", "0")
 JSON_RESPONSE = os.getenv("BESTBUY_TRENDING_JSON_RESPONSE", "1").lower() in {"1", "true", "yes", "y"}
 REQUIRE_ROWS = os.getenv(
     "BESTBUY_TRENDING_REQUIRE_ROWS",
@@ -390,6 +406,18 @@ def existing_source_payload_path(path=SOURCE_PAYLOAD_PATH):
     return None
 
 
+def no_exposed_trending_source():
+    if not SKIP_IF_NO_SOURCE:
+        return False
+    if CATEGORY != "TV":
+        return False
+    if TRENDING_URL_ENV:
+        return False
+    if existing_source_payload_path() is not None:
+        return False
+    return True
+
+
 def load_graphql_payload(path=SOURCE_PAYLOAD_PATH):
     path = existing_source_payload_path(path)
     if not path:
@@ -479,6 +507,116 @@ def direct_graphql(payload):
         raise RuntimeError(f"Trending direct GraphQL fetch failed: status={response.status_code}")
     if not response_json:
         raise RuntimeError("Trending direct GraphQL fetch returned non-JSON response")
+    return response_json
+
+
+def operation_name_from_query(query):
+    query = str(query or "")
+    return query.split("{", 1)[0].replace("query", "", 1).strip().split("(", 1)[0]
+
+
+def find_trending_started_operation(html_text):
+    for payload in iter_apollo_push_payloads(html_text or ""):
+        for event in payload.get("events", []):
+            if event.get("type") != "started":
+                continue
+            options = event.get("options") or {}
+            query = options.get("query") or ""
+            if "SpotlightProductConnection" not in query and "SpotlightProduct" not in query:
+                continue
+            result = {
+                "operationName": options.get("operationName") or operation_name_from_query(query),
+                "variables": options.get("variables") or {},
+                "query": query,
+            }
+            extensions = options.get("extensions")
+            if isinstance(extensions, dict):
+                result["extensions"] = extensions
+            return result
+    return None
+
+
+def browser_graphql():
+    if not TRENDING_URL:
+        raise RuntimeError("Set BESTBUY_TRENDING_URL or target_urls.trend before browser trending collection")
+
+    raw_dir = RUN_ROOT / "raw" / "browser_graphql"
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    page = None
+    browser_meta = {}
+    try:
+        page, browser_meta = create_browser_page(
+            run_root=RUN_ROOT,
+            name="trending_browser",
+            headless=BROWSER_HEADLESS,
+            local_port=BROWSER_LOCAL_PORT,
+        )
+        browser_url = add_intl_nosplash(TRENDING_URL)
+        page.get(browser_url)
+        if BROWSER_WAIT_SECONDS:
+            time.sleep(BROWSER_WAIT_SECONDS)
+        html_text = browser_outer_html(page, timeout=BROWSER_JS_TIMEOUT)
+        html_path = raw_dir / "trending_browser_page.html"
+        html_path.write_text(html_text, encoding="utf-8", errors="replace")
+
+        payload = find_trending_started_operation(html_text)
+        payload_source = "browser_apollo_started"
+        if payload is None:
+            payload_path = existing_source_payload_path()
+            if payload_path:
+                payload = load_graphql_payload(payload_path)
+                payload_source = rel_path(payload_path)
+        if payload is None:
+            raise RuntimeError(
+                "Trending browser page did not expose a SpotlightProduct GraphQL payload. "
+                "Save a captured request JSON and set BESTBUY_TRENDING_SOURCE_PAYLOAD."
+            )
+
+        start = time.perf_counter()
+        envelope = browser_fetch_graphql(page, payload, timeout=BROWSER_JS_TIMEOUT)
+        elapsed = round(time.perf_counter() - start, 3)
+    finally:
+        close_browser_page(page)
+
+    status_code = int(envelope.get("status") or 0)
+    text = str(envelope.get("body") or "")
+    request_path = raw_dir / "trending_request.json"
+    response_path = raw_dir / "trending_response.txt"
+    json_path = raw_dir / "trending_response.json"
+    envelope_path = raw_dir / "trending_envelope.json"
+    request_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    response_path.write_text(text, encoding="utf-8", errors="replace")
+    envelope_path.write_text(json.dumps(envelope, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    response_json = parse_json_value(text)
+    if response_json:
+        json_path.write_text(json.dumps(response_json, indent=2, ensure_ascii=False), encoding="utf-8")
+    summary = {
+        "started_at": now(),
+        "live": True,
+        "fetch_mode": "browser_graphql",
+        "url": TRENDING_URL,
+        "browser_url": browser_url,
+        "endpoint": "/gateway/graphql",
+        "status_code": status_code,
+        "elapsed_seconds": elapsed,
+        "x_request_cost": "0",
+        "bytes": len(text or ""),
+        "payload_source": payload_source,
+        "request": rel_path(request_path),
+        "response": rel_path(json_path if response_json else response_path),
+        "envelope": rel_path(envelope_path),
+        "browser": browser_meta,
+        "success": status_code == 200 and bool(response_json),
+    }
+    (RUN_ROOT / "summary_browser_graphql.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    if status_code != 200:
+        raise RuntimeError(f"Trending browser GraphQL fetch failed: status={status_code}")
+    if not response_json:
+        raise RuntimeError("Trending browser GraphQL fetch returned non-JSON response")
     return response_json
 
 
@@ -647,10 +785,25 @@ def main():
         write_rows(OUTPUT_CSV, [])
         print(f"skipped trending: no trend URL for category -> {OUTPUT_CSV}")
         return
+    if no_exposed_trending_source():
+        write_rows(OUTPUT_CSV, [])
+        summary = write_skip_summary(
+            "TV trending source is not exposed/configured; skipping step06 without collection"
+        )
+        print(json.dumps(summary, indent=2, ensure_ascii=False))
+        return
     rows = []
     attempted_waits = []
     live_attempt_summaries = []
-    if use_direct_graphql():
+    if FETCH_MODE == "browser_graphql":
+        response_json = browser_graphql()
+        rows = parse_trending_products_from_graphql(response_json, LIMIT)
+        if REQUIRE_ROWS and not rows:
+            raise RuntimeError(
+                "Trending browser GraphQL returned 0 SpotlightProductConnection rows; "
+                "verify the captured browser payload contains product data"
+            )
+    elif use_direct_graphql():
         payload = load_graphql_payload()
         response_json = direct_graphql(payload)
         rows = parse_trending_products_from_graphql(response_json, LIMIT)

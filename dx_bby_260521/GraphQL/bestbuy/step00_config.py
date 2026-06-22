@@ -94,8 +94,8 @@ BESTBUY_URLS = {
     "main_search": "https://www.bestbuy.com/site/searchpage.jsp?id=pcat17071&st=tv",
     "bsr_search": "https://www.bestbuy.com/site/searchpage.jsp?id=pcat17071&sp=Best-Selling&st=tv",
     "promotion_tv_home_theater": (
-        "https://www.bestbuy.com/site/all-electronics-on-sale/all-tv-home-theater-on-sale/"
-        "pcmcat1690836748285.c?id=pcmcat1690836748285"
+        "https://www.bestbuy.com/site/all-tv-home-theater-on-sale/tvs-on-sale/"
+        "pcmcat1720647543741.c?id=pcmcat1720647543741"
     ),
     "trending_tvs_projectors": (
         "https://www.bestbuy.com/discover/trending-deals/"

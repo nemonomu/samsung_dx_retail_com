@@ -49,7 +49,10 @@ STEPS = [
             "BESTBUY_MAIN_PAGES": "16",
             "BESTBUY_MAIN_RUN_ID": "main",
             "BESTBUY_MAIN_ORGANIC_OFFSET": "18",
-            "BESTBUY_LISTING_COLLECTION_MODE": "dom",
+            "BESTBUY_LISTING_COLLECTION_MODE": "browser_graphql",
+            "BESTBUY_BROWSER_GRAPHQL_WAIT_SECONDS": "8",
+            "BESTBUY_BROWSER_GRAPHQL_JS_TIMEOUT": "120",
+            "BESTBUY_BROWSER_GRAPHQL_HEADLESS": "0",
             "BESTBUY_GRAPHQL_PREMIUM_PROXY": "1",
             "BESTBUY_GRAPHQL_JS_RENDER": "1",
             "BESTBUY_GRAPHQL_MODE_AUTO": "0",
@@ -87,7 +90,10 @@ STEPS = [
             "BESTBUY_MAIN_RUN_ID": "bsr",
             "BESTBUY_MAIN_ORGANIC_OFFSET": "18",
             "BESTBUY_SEARCH_SORT": "Best-Selling",
-            "BESTBUY_LISTING_COLLECTION_MODE": "dom",
+            "BESTBUY_LISTING_COLLECTION_MODE": "browser_graphql",
+            "BESTBUY_BROWSER_GRAPHQL_WAIT_SECONDS": "8",
+            "BESTBUY_BROWSER_GRAPHQL_JS_TIMEOUT": "120",
+            "BESTBUY_BROWSER_GRAPHQL_HEADLESS": "0",
             "BESTBUY_GRAPHQL_PREMIUM_PROXY": "1",
             "BESTBUY_GRAPHQL_JS_RENDER": "1",
             "BESTBUY_GRAPHQL_MODE_AUTO": "0",
@@ -109,7 +115,13 @@ STEPS = [
         5,
         "promotion_deals",
         "bestbuy.step05_promotion_deals",
-        {"BESTBUY_PROMOTION_PLACEMENT": "all", "ZENROWS_TIMEOUT": "180"},
+        {
+            "BESTBUY_PROMOTION_PLACEMENT": "all",
+            "BESTBUY_PROMOTION_FETCH_MODE": "browser_dom",
+            "BESTBUY_PROMOTION_EXPECTED_MIN_ROWS": "16",
+            "BESTBUY_PROMOTION_BROWSER_HEADLESS": "0",
+            "ZENROWS_TIMEOUT": "180",
+        },
     ),
     Step(
         6,
@@ -161,13 +173,17 @@ STEPS = [
             "BESTBUY_DETAIL_SKUS": "",
             "BESTBUY_DETAIL_FETCH_GET_IT_FAST": "0",
             "BESTBUY_DETAIL_FETCH_FULFILLMENT_DYNAMIC": "0",
+            "BESTBUY_DETAIL_FETCH_MODE": "browser_graphql",
+            "BESTBUY_DETAIL_BROWSER_GRAPHQL_WAIT_SECONDS": "8",
+            "BESTBUY_DETAIL_BROWSER_GRAPHQL_JS_TIMEOUT": "120",
+            "BESTBUY_DETAIL_BROWSER_GRAPHQL_HEADLESS": "0",
             "BESTBUY_DETAIL_AUTO_RETRY": "0",
             "BESTBUY_DETAIL_MAX_ATTEMPTS": "1",
             "BESTBUY_DETAIL_SKU_BATCH_SIZE": "5",
             "BESTBUY_DETAIL_SKU_BATCH_REFILL": "0",
             "BESTBUY_DETAIL_SKU_BATCH_REFILL_SINGLE_FALLBACK": "0",
             "BESTBUY_DETAIL_USE_DB_SELECTORS": "0",
-            "BESTBUY_DETAIL_WORKERS": "3",
+            "BESTBUY_DETAIL_WORKERS": "1",
             "BESTBUY_DETAIL_RETRY_SLEEP_SECONDS": "0",
             "ZENROWS_TIMEOUT": "240",
         },
@@ -191,13 +207,17 @@ STEPS = [
             "BESTBUY_DETAIL_SKUS": "",
             "BESTBUY_DETAIL_FETCH_GET_IT_FAST": "0",
             "BESTBUY_DETAIL_FETCH_FULFILLMENT_DYNAMIC": "0",
+            "BESTBUY_DETAIL_FETCH_MODE": "browser_graphql",
+            "BESTBUY_DETAIL_BROWSER_GRAPHQL_WAIT_SECONDS": "8",
+            "BESTBUY_DETAIL_BROWSER_GRAPHQL_JS_TIMEOUT": "120",
+            "BESTBUY_DETAIL_BROWSER_GRAPHQL_HEADLESS": "0",
             "BESTBUY_DETAIL_AUTO_RETRY": "0",
             "BESTBUY_DETAIL_MAX_ATTEMPTS": "1",
             "BESTBUY_DETAIL_SKU_BATCH_SIZE": "5",
             "BESTBUY_DETAIL_SKU_BATCH_REFILL": "0",
             "BESTBUY_DETAIL_SKU_BATCH_REFILL_SINGLE_FALLBACK": "0",
             "BESTBUY_DETAIL_USE_DB_SELECTORS": "0",
-            "BESTBUY_DETAIL_WORKERS": "3",
+            "BESTBUY_DETAIL_WORKERS": "1",
             "BESTBUY_DETAIL_RETRY_ONLY": "1",
             "BESTBUY_DETAIL_RETRY_SLEEP_SECONDS": "0",
             "ZENROWS_TIMEOUT": "240",
@@ -208,7 +228,11 @@ STEPS = [
         "review20",
         "bestbuy.step09_review20",
         {
-            "BESTBUY_DETAIL_WORKERS": "3",
+            "BESTBUY_DETAIL_WORKERS": "1",
+            "BESTBUY_DETAIL_FETCH_MODE": "browser_graphql",
+            "BESTBUY_DETAIL_BROWSER_GRAPHQL_WAIT_SECONDS": "8",
+            "BESTBUY_DETAIL_BROWSER_GRAPHQL_JS_TIMEOUT": "120",
+            "BESTBUY_DETAIL_BROWSER_GRAPHQL_HEADLESS": "0",
             "BESTBUY_DETAIL_AUTO_RETRY": "0",
             "BESTBUY_DETAIL_MAX_ATTEMPTS": "1",
             "BESTBUY_DETAIL_SKU_BATCH_REFILL": "0",
@@ -224,7 +248,11 @@ STEPS = [
         },
         {
             "BESTBUY_DETAIL_RETRY_ONLY": "1",
-            "BESTBUY_DETAIL_WORKERS": "3",
+            "BESTBUY_DETAIL_WORKERS": "1",
+            "BESTBUY_DETAIL_FETCH_MODE": "browser_graphql",
+            "BESTBUY_DETAIL_BROWSER_GRAPHQL_WAIT_SECONDS": "8",
+            "BESTBUY_DETAIL_BROWSER_GRAPHQL_JS_TIMEOUT": "120",
+            "BESTBUY_DETAIL_BROWSER_GRAPHQL_HEADLESS": "0",
             "BESTBUY_DETAIL_AUTO_RETRY": "0",
             "BESTBUY_DETAIL_MAX_ATTEMPTS": "1",
             "BESTBUY_DETAIL_SKU_BATCH_REFILL": "0",
@@ -246,6 +274,10 @@ STEPS = [
         {
             "BESTBUY_AVAILABILITY_BACKFILL_CHUNK_SIZE": "1",
             "BESTBUY_AVAILABILITY_BACKFILL_ALLOW_MULTI_SKU": "0",
+            "BESTBUY_AVAILABILITY_BACKFILL_FETCH_MODE": "browser_graphql",
+            "BESTBUY_AVAILABILITY_BROWSER_GRAPHQL_WAIT_SECONDS": "5",
+            "BESTBUY_AVAILABILITY_BROWSER_GRAPHQL_JS_TIMEOUT": "120",
+            "BESTBUY_AVAILABILITY_BROWSER_GRAPHQL_HEADLESS": "0",
             "BESTBUY_AVAILABILITY_BACKFILL_CANDIDATE_MODE": "all_rows",
             "BESTBUY_AVAILABILITY_BACKFILL_OVERWRITE": "1",
             "BESTBUY_AVAILABILITY_BACKFILL_CLEAR_EXISTING_FIELDS": "1",
@@ -398,9 +430,27 @@ def promotion_complete():
     return True, f"unique {count}"
 
 
+def tv_trending_source_configured():
+    if os.getenv("BESTBUY_CATEGORY", "").strip().upper() != "TV":
+        return True
+    if os.getenv("BESTBUY_TRENDING_URL", "").strip():
+        return True
+    if os.getenv("BESTBUY_TRENDING_SOURCE_PAYLOAD", "").strip():
+        return True
+    return any(
+        path.exists()
+        for path in (
+            Path("references/bestbuy_trending_tv_request.json"),
+            Path("references/bestbuy_trending_request.json"),
+        )
+    )
+
+
 def trending_complete():
     if not has_target_url("trend"):
         return True, "no trend URL for category"
+    if not tv_trending_source_configured():
+        return True, "TV trending source is not exposed/configured"
     path = run_root() / "trending" / "parsed" / "trending_products.csv"
     count = csv_unique_count(path, "sku_id")
     if count <= 0:

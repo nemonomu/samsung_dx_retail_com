@@ -205,6 +205,7 @@ TARGET_SKUS = {
 }
 BROWSER_GRAPHQL_PAGE = None
 BROWSER_GRAPHQL_META = {}
+BROWSER_GRAPHQL_CURRENT_URL = ""
 BROWSER_GRAPHQL_LOCK = Lock()
 
 
@@ -1683,18 +1684,24 @@ def open_detail_browser_page():
 
 
 def close_detail_browser_page():
-    global BROWSER_GRAPHQL_PAGE
+    global BROWSER_GRAPHQL_PAGE, BROWSER_GRAPHQL_CURRENT_URL
     close_browser_page(BROWSER_GRAPHQL_PAGE)
     BROWSER_GRAPHQL_PAGE = None
+    BROWSER_GRAPHQL_CURRENT_URL = ""
 
 
 def browser_graphql_post(payload, referer_url):
+    global BROWSER_GRAPHQL_CURRENT_URL
     if BROWSER_GRAPHQL_PAGE is None:
         raise RuntimeError("browser_graphql page is not initialized")
     with BROWSER_GRAPHQL_LOCK:
-        browser_url = add_intl_nosplash(referer_url or "https://www.bestbuy.com/")
-        BROWSER_GRAPHQL_PAGE.get(browser_url)
-        if BROWSER_GRAPHQL_WAIT_SECONDS:
+        browser_url = add_intl_nosplash(referer_url or BROWSER_GRAPHQL_CURRENT_URL or "https://www.bestbuy.com/")
+        navigated = False
+        if not BROWSER_GRAPHQL_CURRENT_URL:
+            BROWSER_GRAPHQL_PAGE.get(browser_url)
+            BROWSER_GRAPHQL_CURRENT_URL = browser_url
+            navigated = True
+        if navigated and BROWSER_GRAPHQL_WAIT_SECONDS:
             time.sleep(BROWSER_GRAPHQL_WAIT_SECONDS)
         start = time.perf_counter()
         envelope = browser_fetch_graphql(
@@ -1712,7 +1719,9 @@ def browser_graphql_post(payload, referer_url):
     headers = {
         "content-type": envelope.get("contentType", ""),
         "transport": "browser_graphql",
-        "browser_url": browser_url,
+        "browser_url": BROWSER_GRAPHQL_CURRENT_URL or browser_url,
+        "browser_referer_url": browser_url,
+        "browser_navigated": "1" if navigated else "0",
     }
     return status_code, text, response_json, headers, elapsed
 
@@ -5619,7 +5628,11 @@ def output_row(target):
     energy = spec_value(spec_products, "Estimated Annual Electricity Use")
     model_year = spec_value(spec_products, "Model Year")
     product_name = first_path(products, ["name", "short"]) or target.get("product_name", "")
-    product_url = first_path(products, ["url", "pdp"]) or target.get("product_url", "")
+    product_url = first_non_empty(
+        target.get("product_url"),
+        first_path(products, ["url", "skuSpecificUrl"]),
+        first_path(products, ["url", "pdp"]),
+    )
     bsin = first_value(products, "bsin") or target.get("bsin", "")
     hhp_attrs = hhp_attributes_from_product(products, product_name, sku) if CATEGORY == "HHP" else {}
     ldy_attrs = ldy_attributes_from_product(spec_products, product_name) if CATEGORY == "LDY" else {}

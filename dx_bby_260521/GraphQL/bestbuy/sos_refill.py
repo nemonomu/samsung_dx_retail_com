@@ -489,12 +489,14 @@ def step_env(step, category, base, refresh_all_availability=False):
             {
                 "BESTBUY_DETAIL_RETRY_ONLY": "0",
                 "BESTBUY_DETAIL_REBUILD_ONLY": "0",
-                "BESTBUY_DETAIL_MAX_ATTEMPTS": "5",
-                "BESTBUY_DETAIL_SKU_BATCH_SIZE": "1",
-                "BESTBUY_DETAIL_WORKERS": "1",
+                "BESTBUY_DETAIL_AUTO_RETRY": "0",
+                "BESTBUY_DETAIL_MAX_ATTEMPTS": "1",
+                "BESTBUY_DETAIL_SKU_BATCH_SIZE": "5",
+                "BESTBUY_DETAIL_SKU_BATCH_REFILL": "0",
+                "BESTBUY_DETAIL_SKU_BATCH_REFILL_SINGLE_FALLBACK": "0",
+                "BESTBUY_DETAIL_WORKERS": "3",
                 "BESTBUY_DETAIL_RETRY_STATUS_CODES": "408,409,422,425,429,500,502,503,504",
-                "BESTBUY_DETAIL_RETRY_SLEEP_SECONDS": "1",
-                "BESTBUY_DETAIL_RETRY_SLEEP_SEQUENCE": "1,5,5,10",
+                "BESTBUY_DETAIL_RETRY_SLEEP_SECONDS": "0",
             }
         )
         if compact(base.get("BESTBUY_DETAIL_SKUS")):
@@ -504,12 +506,13 @@ def step_env(step, category, base, refresh_all_availability=False):
             {
                 "BESTBUY_DETAIL_RETRY_ONLY": "1",
                 "BESTBUY_DETAIL_REBUILD_ONLY": "0",
-                "BESTBUY_DETAIL_MAX_ATTEMPTS": "5",
-                "BESTBUY_DETAIL_SKU_BATCH_SIZE": "1",
-                "BESTBUY_DETAIL_WORKERS": "1",
+                "BESTBUY_DETAIL_AUTO_RETRY": "0",
+                "BESTBUY_DETAIL_MAX_ATTEMPTS": "1",
+                "BESTBUY_DETAIL_SKU_BATCH_REFILL": "0",
+                "BESTBUY_DETAIL_SKU_BATCH_REFILL_SINGLE_FALLBACK": "0",
+                "BESTBUY_DETAIL_WORKERS": "3",
                 "BESTBUY_DETAIL_RETRY_STATUS_CODES": "408,409,422,425,429,500,502,503,504",
-                "BESTBUY_DETAIL_RETRY_SLEEP_SECONDS": "1",
-                "BESTBUY_DETAIL_RETRY_SLEEP_SEQUENCE": "1,5,5,10",
+                "BESTBUY_DETAIL_RETRY_SLEEP_SECONDS": "0",
             }
         )
     if step.name == "availability_backfill":

@@ -3,6 +3,7 @@ import json
 import os
 import re
 import smtplib
+import sys
 from datetime import datetime
 from email.message import EmailMessage
 from pathlib import Path
@@ -762,6 +763,13 @@ def write_manifest(payload):
     MANIFEST_PATH.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def print_json_safely(payload):
+    text = json.dumps(payload, indent=2, ensure_ascii=False)
+    encoding = sys.stdout.encoding or os.device_encoding(1) or "utf-8"
+    safe_text = text.encode(encoding, errors="backslashreplace").decode(encoding, errors="replace")
+    print(safe_text)
+
+
 def main():
     started_at = now()
     category = CATEGORY
@@ -820,7 +828,7 @@ def main():
         },
     }
     write_manifest(manifest)
-    print(json.dumps(manifest, indent=2, ensure_ascii=False))
+    print_json_safely(manifest)
 
 
 if __name__ == "__main__":

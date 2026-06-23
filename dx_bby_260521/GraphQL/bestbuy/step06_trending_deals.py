@@ -411,7 +411,7 @@ def no_exposed_trending_source():
         return False
     if CATEGORY != "TV":
         return False
-    if TRENDING_URL_ENV:
+    if TRENDING_URL:
         return False
     if existing_source_payload_path() is not None:
         return False

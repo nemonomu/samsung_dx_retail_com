@@ -391,7 +391,15 @@ def available_url_keys(path=INITIAL_URLS_CSV, category=None, retailer=DEFAULT_RE
 
 
 def has_target_url(page_type, category=None, retailer=DEFAULT_RETAILER):
-    return _target_url_key(page_type) in available_url_keys(category=category, retailer=retailer)
+    key = _target_url_key(page_type)
+    if key in available_url_keys(category=category, retailer=retailer):
+        return True
+    category_key = (category or bestbuy_category()).strip().upper()
+    if key == "trending_tvs_projectors":
+        return category_key == "TV" and bool(BESTBUY_URLS.get(key))
+    if key == "promotion_tv_home_theater":
+        return category_key == "TV" and bool(BESTBUY_URLS.get(key))
+    return key in BESTBUY_URLS
 
 
 def target_url(page_type, category=None, retailer=DEFAULT_RETAILER):

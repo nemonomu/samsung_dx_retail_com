@@ -515,6 +515,69 @@ def rank_collection_counts(rows):
     }
 
 
+def compact_ranges(values):
+    values = sorted(set(values or []))
+    if not values:
+        return ""
+    ranges = []
+    start = previous = values[0]
+    for value in values[1:]:
+        if value == previous + 1:
+            previous = value
+            continue
+        ranges.append(f"{start}" if start == previous else f"{start}-{previous}")
+        start = previous = value
+    ranges.append(f"{start}" if start == previous else f"{start}-{previous}")
+    return ", ".join(ranges)
+
+
+def page_number_values(value):
+    if isinstance(value, list):
+        return [as_int(item) for item in value if as_int(item) > 0]
+    if isinstance(value, str):
+        return [as_int(item) for item in re.findall(r"\d+", value) if as_int(item) > 0]
+    return []
+
+
+def listing_expected_pages(manifest):
+    return as_int(
+        manifest.get("pages_requested")
+        or manifest.get("search_pages")
+        or manifest.get("page_count")
+        or len(page_number_values(manifest.get("page_numbers")))
+    )
+
+
+def listing_fetch_issues_for_manifest(run_root, listing_id, label):
+    manifest = read_json(run_root / listing_id / "manifest.json")
+    if not manifest:
+        return []
+    issues = []
+    expected_pages = listing_expected_pages(manifest)
+    failed_page_source = (
+        manifest.get("listing_recovery_still_failed_pages")
+        if "listing_recovery_still_failed_pages" in manifest
+        else manifest.get("failed_pages")
+    )
+    failed_pages = page_number_values(failed_page_source)
+    if expected_pages:
+        failed_pages = [page for page in failed_pages if page <= expected_pages]
+    if failed_pages:
+        issues.append(f"{label} listing failed pages {compact_ranges(failed_pages)}")
+
+    page_count = as_int(manifest.get("page_count"))
+    if expected_pages and page_count and page_count < expected_pages:
+        issues.append(f"{label} listing pages {page_count}/{expected_pages}")
+    return issues
+
+
+def listing_fetch_issues(run_root):
+    issues = []
+    issues.extend(listing_fetch_issues_for_manifest(run_root, "main", "main"))
+    issues.extend(listing_fetch_issues_for_manifest(run_root, "bsr", "bsr"))
+    return issues
+
+
 def listing_count_issues(category, run_root, rows, target_manifest):
     issues = []
     bsr_rank = max_rank(rows, "bsr_rank")
@@ -684,6 +747,7 @@ def build_notification(category, run_root, status="success", failed_step="", fai
     if count_issue:
         issues.append(count_issue)
     issues.extend(collected_count_issues(category, collected_count))
+    issues.extend(listing_fetch_issues(run_root))
     issues.extend(listing_count_issues(category, run_root, rows, target_manifest))
 
     cost_usd, cost_sources = manifest_costs(run_root)

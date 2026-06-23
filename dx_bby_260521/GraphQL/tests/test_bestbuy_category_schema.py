@@ -621,6 +621,35 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn("trend listing sku 9/10", listing_issues)
         self.assertNotIn("promotion listing sku 17/18", listing_issues)
 
+    def test_email_notification_listing_fetch_issues_use_final_failed_pages_only(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_root = Path(tmpdir)
+            (run_root / "main").mkdir()
+            (run_root / "bsr").mkdir()
+            (run_root / "main" / "manifest.json").write_text(
+                """{
+                  "search_pages": 16,
+                  "page_count": 16,
+                  "failed_pages": [2],
+                  "listing_recovery_still_failed_pages": []
+                }""",
+                encoding="utf-8",
+            )
+            (run_root / "bsr" / "manifest.json").write_text(
+                """{
+                  "search_pages": 6,
+                  "page_count": 6,
+                  "failed_pages": [3],
+                  "listing_recovery_still_failed_pages": [3]
+                }""",
+                encoding="utf-8",
+            )
+
+            issues = email_notify_step.listing_fetch_issues(run_root)
+
+        self.assertNotIn("main listing failed pages 2", issues)
+        self.assertIn("bsr listing failed pages 3", issues)
+
     def test_email_notification_recovers_detail_batch_calls_from_raw_meta(self):
         run_root = Path("unit_run_root")
         fake_paths = [Path(f"sku{index}_meta.json") for index in range(1, 6)]

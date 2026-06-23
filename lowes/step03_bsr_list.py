@@ -38,11 +38,13 @@ RUN_ROOT = Path(os.getenv("LOWES_RUN_ROOT", str(DEFAULT_LOWES_RUN_ROOT))) / RUN_
 OUT_DIR = Path(os.getenv("LOWES_BSR_OUT_DIR", str(RUN_ROOT / "raw" / "main_pages")))
 CSV_PATH = Path(os.getenv("LOWES_BSR_CSV", str(RUN_ROOT / "parsed" / "main_occurrences.csv")))
 TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "180"))
-BSR_TRANSPORT = os.getenv("LOWES_BSR_TRANSPORT", "zenrows").strip().lower()
-BSR_FALLBACK_ZENROWS = os.getenv("LOWES_BSR_FALLBACK_ZENROWS", "1").strip().lower() not in {"0", "false", "no"}
+BSR_TRANSPORT = os.getenv("LOWES_BSR_TRANSPORT", "uc").strip().lower()
+BSR_FALLBACK_ZENROWS = os.getenv("LOWES_BSR_FALLBACK_ZENROWS", "0").strip().lower() not in {"0", "false", "no"}
 UC_HEADLESS = os.getenv("LOWES_UC_HEADLESS", "0").strip().lower() in {"1", "true", "yes"}
 UC_WAIT_SECONDS = float(os.getenv("LOWES_BSR_UC_WAIT_SECONDS", "5"))
 UC_PAGE_LOAD_TIMEOUT = int(os.getenv("LOWES_BSR_UC_PAGE_LOAD_TIMEOUT", "60"))
+UC_READY_TIMEOUT_SECONDS = float(os.getenv("LOWES_BSR_UC_READY_TIMEOUT_SECONDS", "60"))
+UC_READY_POLL_SECONDS = float(os.getenv("LOWES_BSR_UC_READY_POLL_SECONDS", "5"))
 BSR_RETRIES = max(0, int(os.getenv("LOWES_BSR_RETRIES", "2")))
 BSR_RETRY_SLEEP_SECONDS = max(0.0, float(os.getenv("LOWES_BSR_RETRY_SLEEP_SECONDS", "2")))
 
@@ -400,6 +402,100 @@ def fetch_bsr_zenrows_url(url, offset, attempt=1):
     return response
 
 
+def launch_bsr_driver():
+    import undetected_chromedriver as uc
+
+    options = uc.ChromeOptions()
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--start-maximized")
+    options.add_argument("--lang=en-US")
+    driver = launch_chrome(uc, options=options, headless=UC_HEADLESS)
+    driver.set_page_load_timeout(UC_PAGE_LOAD_TIMEOUT)
+    return driver
+
+
+def wait_for_bsr_ready(driver):
+    deadline = time.time() + UC_READY_TIMEOUT_SECONDS
+    last_state = {}
+    while time.time() < deadline:
+        try:
+            title = driver.title or ""
+            current_url = driver.current_url or ""
+            ready_state = driver.execute_script("return document.readyState") or ""
+        except Exception as exc:
+            last_state = {"error": str(exc)}
+            time.sleep(UC_READY_POLL_SECONDS)
+            continue
+        last_state = {"title": title, "url": current_url, "ready_state": ready_state}
+        title_ok = bool(title.strip()) and "Access Denied" not in title
+        ready_ok = ready_state in {"interactive", "complete"}
+        if title_ok and ready_ok:
+            return True, last_state
+        time.sleep(UC_READY_POLL_SECONDS)
+    return False, last_state
+
+
+def fetch_bsr_uc_url(driver, url, offset, attempt=1):
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"[Lowes BSR] {PRODUCT_GROUP} offset={offset} UC GET {url}")
+    started_at = now()
+    start = time.time()
+    error = ""
+    try:
+        driver.get(url)
+        if UC_WAIT_SECONDS:
+            time.sleep(UC_WAIT_SECONDS)
+        ready, ready_state = wait_for_bsr_ready(driver)
+        body = driver.page_source or ""
+        if not ready:
+            error = f"uc_ready_timeout last_state={ready_state}"
+    except Exception as exc:
+        body = ""
+        error = f"{type(exc).__name__}: {exc}"
+    elapsed = time.time() - start
+    rows, source = parse_bsr_at_offset(body, offset) if body else ([], "")
+    success = bool(rows)
+    status_code = 200 if success else ""
+    status_name = f"offset_{offset:03d}_attempt_{attempt:02d}_{'success' if success else 'fail'}"
+    unit_dir = OUT_DIR / status_name
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    (unit_dir / "body.html").write_text(redact_sensitive(body or error), encoding="utf-8", errors="replace")
+    (unit_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "url": url,
+                "offset": offset,
+                "attempt": attempt,
+                "status_code": status_code,
+                "success": success,
+                "transport": "uc",
+                "elapsed_seconds": round(elapsed, 3),
+                "x_request_cost": "0",
+                "bytes": len(body),
+                "parsed": len(rows),
+                "source": source,
+                "error": "" if success else (error or "uc_empty_or_unparseable_page"),
+                "started_at": started_at,
+                "finished_at": now(),
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    print(f"  status={status_code or 'ERR'} elapsed={elapsed:.1f}s bytes={len(body)} parsed={len(rows)}")
+    return {
+        "offset": offset,
+        "attempt": attempt,
+        "status": 200 if success else "ERR",
+        "rows": rows,
+        "parsed": len(rows),
+        "source": source,
+        "transport": "uc",
+        "error": "" if success else (error or "uc_empty_or_unparseable_page"),
+    }
+
+
 def parse_bsr_at_offset(page_html, offset):
     """Parse BSR page and assign absolute bsr_rank = offset + rank_in_page."""
     state = extract_preloaded_state(page_html)
@@ -433,21 +529,25 @@ def parse_bsr_at_offset(page_html, offset):
     return rows, "html_card"
 
 
-def _fetch_offset(offset, attempt=1):
-    """Wrapper for parallel execution. Returns parsed rows for one offset attempt."""
+def offset_error_result(offset, attempt, error, transport="uc"):
+    return {
+        "offset": offset,
+        "attempt": attempt,
+        "status": "ERR",
+        "rows": [],
+        "parsed": 0,
+        "source": "",
+        "transport": transport,
+        "error": str(error),
+    }
+
+
+def _fetch_offset_zenrows(offset, attempt=1):
     url = BSR_URL + (f"?offset={offset}" if offset > 0 else "")
     try:
         response = fetch_bsr_zenrows_url(url, offset, attempt=attempt)
-    except RequestException as exc:
-        return {
-            "offset": offset,
-            "attempt": attempt,
-            "status": "ERR",
-            "rows": [],
-            "parsed": 0,
-            "source": "",
-            "error": str(exc),
-        }
+    except Exception as exc:
+        return offset_error_result(offset, attempt, exc, transport="zenrows")
     if response.status_code != 200:
         return {
             "offset": offset,
@@ -456,6 +556,7 @@ def _fetch_offset(offset, attempt=1):
             "rows": [],
             "parsed": 0,
             "source": "",
+            "transport": "zenrows",
             "error": response.text[:500],
         }
     rows, source = parse_bsr_at_offset(response.text, offset)
@@ -466,20 +567,72 @@ def _fetch_offset(offset, attempt=1):
         "rows": rows,
         "parsed": len(rows),
         "source": source,
+        "transport": "zenrows",
         "error": "",
     }
 
 
-def fetch_offsets(offsets, attempt, workers):
+def _fetch_offset(offset, attempt=1, driver=None):
+    """Wrapper for parallel execution. Returns parsed rows for one offset attempt."""
+    url = BSR_URL + (f"?offset={offset}" if offset > 0 else "")
+    if BSR_TRANSPORT in {"uc", "browser", "uc_first"}:
+        if driver is not None:
+            result = fetch_bsr_uc_url(driver, url, offset, attempt=attempt)
+            if not result_needs_retry(result) or not BSR_FALLBACK_ZENROWS:
+                return result
+            print(f"[Lowes BSR] offset={offset} UC failed; falling back to ZenRows: {result.get('error', '')}")
+            return _fetch_offset_zenrows(offset, attempt=attempt)
+        local_driver = None
+        try:
+            local_driver = launch_bsr_driver()
+            return fetch_bsr_uc_url(local_driver, url, offset, attempt=attempt)
+        except Exception as exc:
+            if not BSR_FALLBACK_ZENROWS:
+                return offset_error_result(offset, attempt, f"{type(exc).__name__}: {exc}", transport="uc")
+            print(f"[Lowes BSR] offset={offset} UC failed; falling back to ZenRows: {type(exc).__name__}: {exc}")
+        finally:
+            try:
+                if local_driver is not None:
+                    local_driver.quit()
+            except Exception:
+                pass
+    return _fetch_offset_zenrows(offset, attempt=attempt)
+
+
+def fetch_offsets_zenrows(offsets, attempt, workers):
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     results = {}
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futures = {ex.submit(_fetch_offset, offset, attempt): offset for offset in offsets}
+        futures = {ex.submit(_fetch_offset_zenrows, offset, attempt): offset for offset in offsets}
         for fut in as_completed(futures):
             result = fut.result()
             results[result["offset"]] = result
     return results
+
+
+def fetch_offsets(offsets, attempt, workers):
+    if BSR_TRANSPORT in {"uc", "browser", "uc_first"}:
+        results = {}
+        try:
+            driver = launch_bsr_driver()
+        except Exception as exc:
+            if BSR_FALLBACK_ZENROWS:
+                print(f"[Lowes BSR] UC launch failed; falling back to ZenRows: {type(exc).__name__}: {exc}")
+                return fetch_offsets_zenrows(offsets, attempt=attempt, workers=workers)
+            error = f"UC launch failed: {type(exc).__name__}: {exc}"
+            return {offset: offset_error_result(offset, attempt, error, transport="uc") for offset in offsets}
+        try:
+            for offset in offsets:
+                results[offset] = _fetch_offset(offset, attempt=attempt, driver=driver)
+        finally:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+        return results
+
+    return fetch_offsets_zenrows(offsets, attempt=attempt, workers=workers)
 
 
 def result_needs_retry(result):
@@ -645,6 +798,8 @@ def main():
         "target_unique_rows": BSR_TARGET_UNIQUE,
         "max_offset": BSR_MAX_OFFSET,
         "rank_mode": "dedupe_then_reassign_1_to_n",
+        "transport": BSR_TRANSPORT,
+        "fallback_zenrows": BSR_FALLBACK_ZENROWS,
         "retries": BSR_RETRIES,
         "failed_offsets": failed_offsets,
         "per_page": per_page,

@@ -26,8 +26,11 @@ class Step:
         return f"{self.number:02d}"
 
 
+MAIN_LIST_MODULE = os.getenv("LOWES_MAIN_LIST_MODULE", "lowes.lowes_main_list_uc_api").strip() or "lowes.lowes_main_list_uc_api"
+
+
 STEPS = [
-    Step(1, "main_list", "lowes.step01_main_list", env={"LOWES_MAIN_RUN_ID": "main"}),
+    Step(1, "main_list", MAIN_LIST_MODULE, env={"LOWES_MAIN_RUN_ID": "main"}),
     Step(2, "main_targets", "lowes.step02_main_targets", env={"LOWES_MAIN_RUN_ID": "main"}),
     Step(3, "bsr_list", "lowes.step03_bsr_list", env={"LOWES_BSR_RUN_ID": "bsr"}),
     Step(4, "bsr_rank", "lowes.step04_bsr_rank", env={"LOWES_BSR_RUN_ID": "bsr"}),

@@ -263,6 +263,122 @@ def compact_ranges(values):
     return ", ".join(ranges)
 
 
+def page_number_values(value):
+    if isinstance(value, list):
+        return [as_int(item) for item in value if as_int(item) > 0]
+    if isinstance(value, int):
+        return list(range(1, value + 1)) if value > 0 else []
+    if isinstance(value, str):
+        return [as_int(item) for item in re.findall(r"\d+", value) if as_int(item) > 0]
+    return []
+
+
+def offset_values(value):
+    if isinstance(value, list):
+        return [as_int(item) for item in value if as_int(item) >= 0]
+    if isinstance(value, int):
+        return [value] if value >= 0 else []
+    if isinstance(value, str):
+        return [as_int(item) for item in re.findall(r"\d+", value)]
+    return []
+
+
+def listing_effective_expected_pages(manifest):
+    requested = as_int(
+        manifest.get("pages_requested")
+        or manifest.get("search_pages")
+        or len(page_number_values(manifest.get("page_numbers")))
+    )
+    page_counts = []
+    for result in manifest.get("page_results") or []:
+        if isinstance(result, dict):
+            page_count = as_int(result.get("pagination_page_count"))
+            if page_count:
+                page_counts.append(page_count)
+    actual_available = max(page_counts) if page_counts else 0
+    if requested and actual_available:
+        return min(requested, actual_available)
+    return requested or actual_available
+
+
+def listing_fetch_issues_for_manifest(run_root, listing_id, label):
+    manifest = read_json(run_root / listing_id / "manifest.json")
+    if not manifest:
+        return []
+    issues = []
+    failed_offsets = offset_values(manifest.get("failed_offsets"))
+    if failed_offsets:
+        issues.append(f"{label} listing failed offsets {compact_ranges(failed_offsets)}")
+
+    if listing_id == "bsr":
+        per_page = manifest.get("per_page") if isinstance(manifest.get("per_page"), list) else []
+        failed_from_page = []
+        for entry in per_page:
+            if not isinstance(entry, dict):
+                continue
+            status = entry.get("status")
+            parsed = as_int(entry.get("parsed"))
+            if status != 200 or parsed <= 0:
+                failed_from_page.append(as_int(entry.get("offset")))
+        failed_from_page = sorted({offset for offset in failed_from_page if offset >= 0})
+        if failed_from_page and failed_from_page != failed_offsets:
+            issues.append(f"{label} listing failed offsets {compact_ranges(failed_from_page)}")
+        return issues
+
+    expected_pages = listing_effective_expected_pages(manifest)
+    failed_pages_raw = manifest.get("failed_pages")
+    failed_pages = []
+    if isinstance(failed_pages_raw, list):
+        failed_pages = page_number_values(failed_pages_raw)
+    elif as_int(failed_pages_raw) > 0:
+        for result in manifest.get("page_results") or []:
+            if not isinstance(result, dict):
+                continue
+            page = as_int(result.get("page"))
+            status_code = as_int(result.get("status_code"))
+            if page and status_code != 200:
+                failed_pages.append(page)
+        if not failed_pages:
+            failed_pages = list(range(1, as_int(failed_pages_raw) + 1))
+    if expected_pages:
+        failed_pages = [page for page in failed_pages if page <= expected_pages]
+    failed_pages = sorted(set(failed_pages))
+    if failed_pages:
+        issues.append(f"{label} listing failed pages {compact_ranges(failed_pages)}")
+
+    successful_pages = as_int(manifest.get("successful_http_pages"))
+    valid_pages = as_int(manifest.get("valid_item_pages"))
+    if expected_pages and successful_pages and successful_pages < expected_pages:
+        issues.append(f"{label} listing http_ok {successful_pages}/{expected_pages}")
+    if expected_pages and valid_pages and valid_pages < expected_pages:
+        issues.append(f"{label} listing valid_pages {valid_pages}/{expected_pages}")
+
+    challenge_pages = []
+    for result in manifest.get("page_results") or []:
+        if not isinstance(result, dict):
+            continue
+        page = as_int(result.get("page"))
+        if expected_pages and page > expected_pages:
+            continue
+        attempts = result.get("attempts") if isinstance(result.get("attempts"), list) else []
+        challenge = result.get("challenge_detected") is True or any(
+            isinstance(attempt, dict) and attempt.get("challenge_detected") is True
+            for attempt in attempts
+        )
+        if challenge and page:
+            challenge_pages.append(page)
+    if challenge_pages:
+        issues.append(f"{label} listing challenge pages {compact_ranges(sorted(set(challenge_pages)))}")
+    return issues
+
+
+def listing_fetch_issues(run_root):
+    issues = []
+    issues.extend(listing_fetch_issues_for_manifest(run_root, "main", "main"))
+    issues.extend(listing_fetch_issues_for_manifest(run_root, "bsr", "bsr"))
+    return issues
+
+
 def listing_count_issues(run_root, rows):
     issues = []
     bsr_ranks = rank_values(rows, "bsr_rank")
@@ -361,6 +477,7 @@ def build_notification(product_type, run_root, status="success", failed_step="",
     issues.extend(step_failure_issues(status, failed_step, failed_step_name))
     if not rows:
         issues.append("final_output.csv rows 0 또는 파일 없음")
+    issues.extend(listing_fetch_issues(run_root))
     issues.extend(critical_null_issues(rows))
     issues.extend(all_null_column_issues(rows))
     issues.extend(listing_count_issues(run_root, rows))

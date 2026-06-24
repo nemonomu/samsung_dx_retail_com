@@ -1,4 +1,5 @@
 import csv
+import json
 import sys
 import tempfile
 import unittest
@@ -620,6 +621,71 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn("bsr_rank 99/100", listing_issues)
         self.assertIn("trend listing sku 9/10", listing_issues)
         self.assertNotIn("promotion listing sku 17/18", listing_issues)
+
+    def test_email_review_count_diff_is_note_not_warning(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_root = Path(tmpdir)
+            raw_root = run_root / "detail" / "raw" / "review20" / "001_123456_success"
+            raw_root.mkdir(parents=True)
+            response = {
+                "data": {
+                    "productBySkuId": {
+                        "reviewInfo": {"reviewCount": 4},
+                        "reviews": {
+                            "results": [
+                                {"text": "a"},
+                                {"text": "b"},
+                                {"text": "c"},
+                                {"text": "d"},
+                            ]
+                        },
+                    }
+                }
+            }
+            (raw_root / "123456_response.json").write_text(json.dumps(response), encoding="utf-8")
+            rows = [
+                {
+                    "item": "ITEM1",
+                    "count_of_reviews": "3",
+                    "detailed_review_content": " ||| ".join(f"review{i} - text" for i in range(1, 5)),
+                    "product_url": "https://www.bestbuy.com/site/-/123456.p?skuId=123456&intl=nosplash",
+                }
+            ]
+
+            issues, notes = email_notify_step.review_completeness_issues(rows, run_root)
+
+            self.assertEqual(issues, [])
+            self.assertEqual(len(notes), 1)
+            self.assertIn("listing=3 review_page=4 content=4 review_rows=4", notes[0])
+
+    def test_email_review_page_short_content_remains_warning(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_root = Path(tmpdir)
+            raw_root = run_root / "detail" / "raw" / "review20" / "001_123456_fail"
+            raw_root.mkdir(parents=True)
+            response = {
+                "data": {
+                    "productBySkuId": {
+                        "reviewInfo": {"reviewCount": 7},
+                        "reviews": {"results": [{"text": str(i)} for i in range(6)]},
+                    }
+                }
+            }
+            (raw_root / "123456_response.json").write_text(json.dumps(response), encoding="utf-8")
+            rows = [
+                {
+                    "item": "ITEM1",
+                    "count_of_reviews": "7",
+                    "detailed_review_content": " ||| ".join(f"review{i} - text" for i in range(1, 7)),
+                    "product_url": "https://www.bestbuy.com/site/-/123456.p?skuId=123456&intl=nosplash",
+                }
+            ]
+
+            issues, notes = email_notify_step.review_completeness_issues(rows, run_root)
+
+            self.assertEqual(notes, [])
+            self.assertEqual(len(issues), 1)
+            self.assertIn("ITEM1 6/7", issues[0])
 
     def test_email_notification_lists_optional_source_collection_failures(self):
         with tempfile.TemporaryDirectory() as tmpdir:

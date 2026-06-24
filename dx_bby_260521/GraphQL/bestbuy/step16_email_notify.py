@@ -414,28 +414,90 @@ def review_text_count(value):
     return len(re.findall(r"(?i)(?:^|\s)review\d+\s*-", str(value or "")))
 
 
-def review_completeness_issues(rows):
+def sku_id_from_row(row):
+    text = " ".join([
+        str(row.get("sku_id") or ""),
+        str(row.get("sku") or ""),
+        row_url(row),
+    ])
+    match = re.search(r"(?:skuId=|/sku/|/)(\d{5,})(?:[^\d]|$)", text)
+    return match.group(1) if match else ""
+
+
+def review_metrics_from_response(data):
+    product = ((data.get("data") or {}).get("productBySkuId") or {}) if isinstance(data, dict) else {}
+    review_info = product.get("reviewInfo") if isinstance(product, dict) else {}
+    reviews = ((product.get("reviews") or {}).get("results") or []) if isinstance(product, dict) else []
+    reviews = reviews if isinstance(reviews, list) else []
+    return {
+        "review_page_count": as_int((review_info or {}).get("reviewCount")),
+        "review_rows": len(reviews),
+        "review_text_count": sum(1 for review in reviews[:20] if str((review or {}).get("text") or "").strip()),
+    }
+
+
+def review_metrics_by_sku(run_root):
+    raw_root = Path(run_root) / "detail" / "raw" / "review20"
+    if not raw_root.exists():
+        return {}
+    metrics = {}
+    for path in raw_root.rglob("*_response.json"):
+        sku = path.name[: -len("_response.json")]
+        current = review_metrics_from_response(read_json(path))
+        if not sku or not current.get("review_page_count"):
+            continue
+        previous = metrics.get(sku)
+        if not previous or current.get("review_text_count", 0) >= previous.get("review_text_count", 0):
+            metrics[sku] = current
+    return metrics
+
+
+def review_completeness_issues(rows, run_root=None):
+    metrics_by_sku = review_metrics_by_sku(run_root) if run_root else {}
     bad = []
+    diffs = []
     for row in rows:
-        expected = min(as_int(row.get("count_of_reviews")), 20)
+        sku_id = sku_id_from_row(row)
+        metrics = metrics_by_sku.get(sku_id) or {}
+        listing_count = as_int(row.get("count_of_reviews"))
+        review_page_count = as_int(metrics.get("review_page_count")) or listing_count
+        expected = min(review_page_count, 20)
         if expected <= 0:
             continue
         actual = review_text_count(row.get("detailed_review_content") or row.get("detailed_review_contents"))
         if actual < expected:
             bad.append((row, actual, expected))
-    if not bad:
-        return []
-    examples = []
-    for row, actual, expected in bad:
-        url = row_url(row)
-        item = str(row.get("item") or row.get("sku_id") or "").strip()
-        label = f"{item} {actual}/{expected}".strip()
-        if url:
-            examples.append(f"{label} {url}".strip())
-        else:
-            examples.append(label)
-    suffix = f", product_url: {' | '.join(examples)}" if examples else ""
-    return [f"detailed_review_content {len(bad)} rows partial{suffix}"]
+        elif listing_count and review_page_count and listing_count != review_page_count:
+            diffs.append((row, listing_count, review_page_count, actual, as_int(metrics.get("review_rows"))))
+    issues = []
+    notes = []
+    if bad:
+        examples = []
+        for row, actual, expected in bad:
+            url = row_url(row)
+            item = str(row.get("item") or row.get("sku_id") or "").strip()
+            label = f"{item} {actual}/{expected}".strip()
+            if url:
+                examples.append(f"{label} {url}".strip())
+            else:
+                examples.append(label)
+        suffix = f", product_url: {' | '.join(examples)}" if examples else ""
+        issues.append(f"detailed_review_content {len(bad)} rows partial{suffix}")
+    if diffs:
+        examples = []
+        for row, listing_count, review_page_count, actual, review_rows in diffs:
+            url = row_url(row)
+            item = str(row.get("item") or row.get("sku_id") or "").strip()
+            label = (
+                f"{item} listing={listing_count} review_page={review_page_count} "
+                f"content={actual} review_rows={review_rows}"
+            ).strip()
+            if url:
+                examples.append(f"{label} {url}".strip())
+            else:
+                examples.append(label)
+        notes.append(f"review count diff listing vs review page {len(diffs)} rows, product_url: {' | '.join(examples)}")
+    return issues, notes
 
 
 def first_present_column(rows, columns, candidates):
@@ -655,7 +717,7 @@ def build_subject(category, issues):
     return f"[SEA] BBY {product} crawled"
 
 
-def build_body(collected_count, cost_krw, call_counts, issues, rank_counts=None):
+def build_body(collected_count, cost_krw, call_counts, issues, rank_counts=None, notes=None):
     total_calls = as_int((call_counts or {}).get("total"))
     per_call_krw = int(round(cost_krw / total_calls)) if total_calls else 0
     detail_by_stage = {
@@ -689,6 +751,10 @@ def build_body(collected_count, cost_krw, call_counts, issues, rank_counts=None)
             f"  bsr_rank - {as_int(rank_counts.get('bsr_rank')):,}/100",
             "",
         ])
+    if notes:
+        lines.append("참고사항")
+        lines.extend(f"- {note}" for note in notes)
+        lines.append("")
     if issues:
         lines.append("특이사항")
         lines.extend(f"- {issue}" for issue in issues)
@@ -756,12 +822,15 @@ def build_notification(category, run_root, status="success", failed_step="", fai
         collected_count = len(rows)
 
     issues = []
+    notes = []
     issues.extend(step_failure_issues(status, failed_step, failed_step_name, log_path))
     if not rows:
         issues.append("final_output.csv rows 0 또는 파일 없음")
     issues.extend(all_null_column_issues(category, rows, columns))
     issues.extend(critical_null_issues(rows, columns))
-    issues.extend(review_completeness_issues(rows))
+    review_issues, review_notes = review_completeness_issues(rows, run_root)
+    issues.extend(review_issues)
+    notes.extend(review_notes)
     count_issue = db_count_issue(db_data, len(rows))
     if count_issue:
         issues.append(count_issue)
@@ -774,11 +843,12 @@ def build_notification(category, run_root, status="success", failed_step="", fai
     call_counts = manifest_call_counts(run_root)
     rank_counts = rank_collection_counts(rows)
     subject = build_subject(category, issues)
-    body = build_body(collected_count, cost_krw, call_counts, issues, rank_counts=rank_counts)
+    body = build_body(collected_count, cost_krw, call_counts, issues, rank_counts=rank_counts, notes=notes)
     return {
         "subject": subject,
         "body": body,
         "issues": issues,
+        "notes": notes,
         "metrics": {
             "collected_count": collected_count,
             "cost_usd": cost_usd,
@@ -898,6 +968,7 @@ def main():
         "subject": notification["subject"],
         "body": notification["body"],
         "issues": notification["issues"],
+        "notes": notification.get("notes", []),
         "metrics": notification["metrics"],
         "email": {
             "enabled": enabled,

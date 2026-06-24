@@ -621,6 +621,35 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertIn("trend listing sku 9/10", listing_issues)
         self.assertNotIn("promotion listing sku 17/18", listing_issues)
 
+    def test_email_notification_lists_optional_source_collection_failures(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_root = Path(tmpdir)
+            (run_root / "trending").mkdir()
+            (run_root / "promotion").mkdir()
+            (run_root / "trending" / "summary_skip.json").write_text(
+                """{
+                  "collection_failed": true,
+                  "error_type": "RuntimeError",
+                  "error": "Trending browser page did not expose product rows"
+                }""",
+                encoding="utf-8",
+            )
+            (run_root / "promotion" / "summary.json").write_text(
+                """{
+                  "collection_failed": true,
+                  "error_type": "TimeoutError",
+                  "error": "promotion carousel not rendered"
+                }""",
+                encoding="utf-8",
+            )
+
+            issues = email_notify_step.listing_count_issues("TV", run_root, [], {})
+
+        self.assertTrue(any(issue.startswith("trending collection skipped: RuntimeError") for issue in issues))
+        self.assertTrue(any(issue.startswith("promotion collection skipped: TimeoutError") for issue in issues))
+        self.assertIn("trend listing sku 0/10", issues)
+        self.assertIn("promotion listing sku 0/18", issues)
+
     def test_email_notification_listing_fetch_issues_use_final_failed_pages_only(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_root = Path(tmpdir)
@@ -729,8 +758,8 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
                 '{"listing_request_calls": 6, "total_x_request_cost": 0.015}',
                 encoding="utf-8",
             )
-            (run_root / "trending" / "summary_live_fetch.json").write_text(
-                '{"call_count": 3, "total_x_request_cost": 0.021}',
+            (run_root / "trending" / "summary_browser_graphql.json").write_text(
+                '{"call_count": 1, "total_x_request_cost": 0, "row_count": 10}',
                 encoding="utf-8",
             )
             (run_root / "availability_backfill" / "availability_3type" / "manifest.json").write_text(
@@ -741,35 +770,33 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
             call_counts = email_notify_step.manifest_call_counts(run_root)
             total_cost, sources = email_notify_step.manifest_costs(run_root)
 
-        self.assertEqual(call_counts["listing"], 25)
-        self.assertIn({"source": "trending", "calls": 3}, call_counts["listing_breakdown"])
+        self.assertEqual(call_counts["listing"], 23)
+        self.assertIn({"source": "trending", "calls": 1}, call_counts["listing_breakdown"])
         self.assertEqual(call_counts["availability"], 10)
-        self.assertAlmostEqual(total_cost, 0.1009992)
+        self.assertAlmostEqual(total_cost, 0.0799992)
         self.assertTrue(any(source["key"] == "total_x_request_cost" for source in sources))
 
-    def test_trending_live_summary_rewrites_cumulative_attempt_cost(self):
+    def test_trending_browser_summary_records_row_count_without_cost(self):
         with tempfile.TemporaryDirectory() as tmp:
             run_root = Path(tmp)
             original_run_root = trending_step.RUN_ROOT
             try:
                 trending_step.RUN_ROOT = run_root
-                trending_step.rewrite_live_fetch_summary(
-                    [
-                        {"attempt": 1, "x_request_cost": "0.006999", "status_code": 200},
-                        {"attempt": 2, "x_request_cost": "0.006999", "status_code": 200},
-                    ],
-                    10,
-                    ["15000", "30000"],
+                (run_root / "summary_browser_graphql.json").write_text(
+                    '{"fetch_mode": "browser_graphql", "success": true, '
+                    '"call_count": 1, "total_x_request_cost": 0}',
+                    encoding="utf-8",
                 )
+                trending_step.update_browser_summary(10)
             finally:
                 trending_step.RUN_ROOT = original_run_root
 
-            summary = email_notify_step.read_json(run_root / "summary_live_fetch.json")
+            summary = email_notify_step.read_json(run_root / "summary_browser_graphql.json")
 
-        self.assertEqual(summary["call_count"], 2)
+        self.assertEqual(summary["call_count"], 1)
         self.assertEqual(summary["row_count"], 10)
-        self.assertEqual(summary["attempted_waits"], ["15000", "30000"])
-        self.assertAlmostEqual(summary["total_x_request_cost"], 0.013998)
+        self.assertEqual(summary["total_x_request_cost"], 0)
+        self.assertTrue(summary["success"])
 
     def test_orchestrator_bsr_dom_defaults_collect_enough_candidates(self):
         bsr_step = next(step for step in orchestrator_step.STEPS if step.name == "bsr_list")
@@ -1228,7 +1255,7 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertEqual(rows[0]["retailer_sku_name"], "Example TV")
         self.assertEqual(rows[0]["source"], "json_response_spotlight_product_connection")
 
-    def test_trending_parser_reads_direct_graphql_spotlight_connection(self):
+    def test_trending_parser_reads_browser_graphql_spotlight_connection(self):
         rows = trending_step.parse_trending_products_from_graphql(
             {
                 "data": {
@@ -1259,17 +1286,19 @@ class BestBuyCategorySchemaTests(unittest.TestCase):
         self.assertEqual(rows[0]["bsin"], "BSIN1234")
         self.assertEqual(rows[0]["retailer_sku_name"], "Example Phone")
         self.assertEqual(rows[0]["product_url"], "https://www.bestbuy.com/site/example-phone/7654321.p")
-        self.assertEqual(rows[0]["source"], "direct_graphql_spotlight_product_connection")
+        self.assertEqual(rows[0]["source"], "browser_graphql_spotlight_product_connection")
 
-    def test_trending_step_uses_page_payload_by_default(self):
+    def test_trending_step_uses_browser_graphql_by_default(self):
         orchestrator = (ROOT / "bestbuy" / "bestbuy_orchestrator.py").read_text(encoding="utf-8")
 
-        self.assertIn('"BESTBUY_TRENDING_FETCH_MODE": "page_payload"', orchestrator)
-        self.assertIn('"BESTBUY_TRENDING_ALLOW_RENDER_FALLBACK": "1"', orchestrator)
-        self.assertIn('"BESTBUY_TRENDING_WAIT_MS_SEQUENCE": "30000"', orchestrator)
-        self.assertEqual(HHP_TRENDING_PAGE_PAYLOAD_ENV["BESTBUY_TRENDING_FETCH_MODE"], "page_payload")
+        self.assertIn('"BESTBUY_TRENDING_FETCH_MODE": "browser_graphql"', orchestrator)
+        self.assertIn('"BESTBUY_TRENDING_BROWSER_HEADLESS": "0"', orchestrator)
+        self.assertNotIn('"BESTBUY_TRENDING_ALLOW_RENDER_FALLBACK"', orchestrator)
+        self.assertNotIn('"BESTBUY_TRENDING_WAIT_MS_SEQUENCE"', orchestrator)
+        self.assertEqual(HHP_TRENDING_PAGE_PAYLOAD_ENV["BESTBUY_TRENDING_FETCH_MODE"], "browser_graphql")
+        self.assertEqual(HHP_TRENDING_PAGE_PAYLOAD_ENV["BESTBUY_TRENDING_BROWSER_HEADLESS"], "0")
         self.assertEqual(HHP_TRENDING_PAGE_PAYLOAD_ENV["BESTBUY_TRENDING_ALLOW_NETWORK_SKUS"], "0")
-        self.assertEqual(HHP_TRENDING_PAGE_PAYLOAD_ENV["BESTBUY_TRENDING_WAIT_MS_SEQUENCE"], "30000")
+        self.assertEqual(HHP_TRENDING_PAGE_PAYLOAD_ENV["BESTBUY_TRENDING_REQUIRE_ROWS"], "1")
 
     def test_listing_step_requires_saved_graphql_payload_by_default(self):
         step01 = (ROOT / "bestbuy" / "step01_main_list.py").read_text(encoding="utf-8")

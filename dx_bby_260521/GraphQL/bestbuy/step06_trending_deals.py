@@ -8,8 +8,6 @@ from urllib.parse import unquote
 from datetime import datetime
 from pathlib import Path
 
-from zenrows import ZenRowsClient
-
 from .step00_apollo import iter_apollo_push_payloads
 from .step00_browser_session import (
     add_intl_nosplash,
@@ -27,9 +25,7 @@ RUN_DATE = os.getenv("BESTBUY_RUN_DATE", datetime.now().strftime("%Y%m%d"))
 CATEGORY = bestbuy_category()
 INPUT_HTML = Path(os.getenv("BESTBUY_TRENDING_HTML", "references/bestbuy_tv_trending_page_sample.html"))
 RUN_ROOT = Path(os.getenv("BESTBUY_TRENDING_RUN_ROOT", DEFAULT_BESTBUY_RUN_ROOT / "trending"))
-GRAPHQL_ENDPOINT = os.getenv("BESTBUY_GRAPHQL_ENDPOINT", "https://www.bestbuy.com/gateway/graphql")
-FETCH_MODE = os.getenv("BESTBUY_TRENDING_FETCH_MODE", "auto").strip().lower()
-PAGE_PAYLOAD_FETCH_MODES = {"html", "page", "live_html", "legacy_html", "page_payload", "rsc_payload", "doc_payload"}
+FETCH_MODE = os.getenv("BESTBUY_TRENDING_FETCH_MODE", "browser_graphql").strip().lower()
 SOURCE_PAYLOAD_ENV = os.getenv("BESTBUY_TRENDING_SOURCE_PAYLOAD", "").strip()
 TRENDING_URL_ENV = os.getenv("BESTBUY_TRENDING_URL", "").strip()
 SOURCE_PAYLOAD_PATH = Path(
@@ -42,22 +38,13 @@ OUTPUT_CSV = Path(
         DEFAULT_BESTBUY_RUN_ROOT / "trending" / "parsed" / "trending_products.csv",
     )
 )
-LIVE_FETCH = os.getenv("BESTBUY_TRENDING_LIVE", "1").lower() in {"1", "true", "yes", "y"}
-ALLOW_RENDER_FALLBACK = os.getenv(
-    "BESTBUY_TRENDING_ALLOW_RENDER_FALLBACK",
-    "0",
-).lower() in {"1", "true", "yes", "y"}
-REQUEST_TIMEOUT = int(os.getenv("ZENROWS_TIMEOUT", "180"))
 TRENDING_URL = TRENDING_URL_ENV or load_initial_urls().get("trending_tvs_projectors", "")
 LIMIT = int(os.getenv("BESTBUY_TRENDING_LIMIT", "10"))
-WAIT_MS = os.getenv("ZENROWS_WAIT_MS") or os.getenv("BESTBUY_TRENDING_WAIT_MS") or "8000"
-WAIT_MS_SEQUENCE = os.getenv("BESTBUY_TRENDING_WAIT_MS_SEQUENCE", "").strip()
 SKIP_IF_NO_SOURCE = os.getenv("BESTBUY_TRENDING_SKIP_IF_NO_SOURCE", "1").lower() in {"1", "true", "yes", "y"}
 BROWSER_WAIT_SECONDS = max(0, int(os.getenv("BESTBUY_TRENDING_BROWSER_WAIT_SECONDS", "8")))
 BROWSER_JS_TIMEOUT = max(1, int(os.getenv("BESTBUY_TRENDING_BROWSER_JS_TIMEOUT", "120")))
-BROWSER_HEADLESS = env_bool("BESTBUY_TRENDING_BROWSER_HEADLESS", "1")
+BROWSER_HEADLESS = env_bool("BESTBUY_TRENDING_BROWSER_HEADLESS", "0")
 BROWSER_LOCAL_PORT = env_int("BESTBUY_TRENDING_BROWSER_LOCAL_PORT", "0")
-JSON_RESPONSE = os.getenv("BESTBUY_TRENDING_JSON_RESPONSE", "1").lower() in {"1", "true", "yes", "y"}
 REQUIRE_ROWS = os.getenv(
     "BESTBUY_TRENDING_REQUIRE_ROWS",
     "1",
@@ -65,10 +52,6 @@ REQUIRE_ROWS = os.getenv(
 ALLOW_NETWORK_SKU_FALLBACK = os.getenv(
     "BESTBUY_TRENDING_ALLOW_NETWORK_SKUS",
     "1",
-).lower() in {"1", "true", "yes", "y"}
-GRAPHQL_JS_RENDER = os.getenv(
-    "BESTBUY_TRENDING_GRAPHQL_JS_RENDER",
-    os.getenv("BESTBUY_GRAPHQL_JS_RENDER", "1"),
 ).lower() in {"1", "true", "yes", "y"}
 DEFAULT_TREND_SECTION = (
     "Trending Deals in Cell Phones & Accessories"
@@ -82,13 +65,6 @@ BESTBUY_BASE_URL = "https://www.bestbuy.com"
 
 def now():
     return datetime.now().isoformat(timespec="seconds")
-
-
-def cost_float(value):
-    try:
-        return float(value or 0)
-    except (TypeError, ValueError):
-        return 0.0
 
 
 def decode_capture_text(text):
@@ -384,7 +360,7 @@ def parse_trending_products_from_graphql(response_json, limit=10):
                     "retailer_sku_name": product_name(product),
                     "product_url": product_url(product),
                     "source_card_id": "",
-                    "source": "direct_graphql_spotlight_product_connection",
+                    "source": "browser_graphql_spotlight_product_connection",
                 }
             )
             if limit and len(rows) >= limit:
@@ -438,78 +414,6 @@ def load_graphql_payload(path=SOURCE_PAYLOAD_PATH):
     return payload
 
 
-def graphql_params():
-    params = {
-        "custom_headers": "true",
-        "premium_proxy": "true",
-        "proxy_country": "us",
-    }
-    if GRAPHQL_JS_RENDER:
-        params["js_render"] = "true"
-    return params
-
-
-def direct_graphql(payload):
-    api_key = os.getenv("ZENROWS_API_KEY")
-    if not api_key:
-        raise RuntimeError("Set ZENROWS_API_KEY in .env")
-    if not TRENDING_URL:
-        raise RuntimeError("Set BESTBUY_TRENDING_URL or target_urls.trend before direct trending collection")
-
-    raw_dir = RUN_ROOT / "raw" / "graphql"
-    raw_dir.mkdir(parents=True, exist_ok=True)
-    client = ZenRowsClient(api_key)
-    start = time.perf_counter()
-    response = client.post(
-        GRAPHQL_ENDPOINT,
-        params=graphql_params(),
-        headers={
-            "accept": "application/json, text/plain, */*",
-            "content-type": "application/json",
-            "origin": "https://www.bestbuy.com",
-            "referer": TRENDING_URL,
-        },
-        data=json.dumps(payload),
-        timeout=REQUEST_TIMEOUT,
-    )
-    elapsed = round(time.perf_counter() - start, 3)
-    text = response.text
-    request_path = raw_dir / "trending_request.json"
-    response_path = raw_dir / "trending_response.txt"
-    json_path = raw_dir / "trending_response.json"
-    headers_path = raw_dir / "trending_headers.json"
-    request_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    response_path.write_text(text, encoding="utf-8", errors="replace")
-    headers_path.write_text(json.dumps(dict(response.headers), indent=2, ensure_ascii=False), encoding="utf-8")
-    response_json = parse_json_value(text)
-    if response_json:
-        json_path.write_text(json.dumps(response_json, indent=2, ensure_ascii=False), encoding="utf-8")
-    summary = {
-        "started_at": now(),
-        "live": True,
-        "fetch_mode": "direct_graphql",
-        "url": TRENDING_URL,
-        "endpoint": GRAPHQL_ENDPOINT,
-        "status_code": response.status_code,
-        "elapsed_seconds": elapsed,
-        "x_request_cost": response.headers.get("x-request-cost", ""),
-        "js_render": GRAPHQL_JS_RENDER,
-        "bytes": len(text or ""),
-        "request": rel_path(request_path),
-        "response": rel_path(json_path if response_json else response_path),
-        "headers": rel_path(headers_path),
-        "success": response.status_code == 200 and bool(response_json),
-    }
-    (RUN_ROOT / "summary_direct_graphql.json").write_text(
-        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    if response.status_code != 200:
-        raise RuntimeError(f"Trending direct GraphQL fetch failed: status={response.status_code}")
-    if not response_json:
-        raise RuntimeError("Trending direct GraphQL fetch returned non-JSON response")
-    return response_json
-
-
 def operation_name_from_query(query):
     query = str(query or "")
     return query.split("{", 1)[0].replace("query", "", 1).strip().split("(", 1)[0]
@@ -559,6 +463,35 @@ def browser_graphql():
         html_path = raw_dir / "trending_browser_page.html"
         html_path.write_text(html_text, encoding="utf-8", errors="replace")
 
+        html_rows = parse_trending_products_from_capture(html_text, {}, LIMIT)
+        if html_rows:
+            for row in html_rows:
+                row["source"] = f"browser_html_{row.get('source') or 'payload'}"
+            summary = {
+                "started_at": now(),
+                "live": True,
+                "fetch_mode": "browser_page_payload",
+                "url": TRENDING_URL,
+                "browser_url": browser_url,
+                "endpoint": "",
+                "status_code": 200,
+                "elapsed_seconds": 0,
+                "x_request_cost": "0",
+                "total_x_request_cost": 0,
+                "call_count": 1,
+                "bytes": len(html_text or ""),
+                "payload_source": "browser_apollo_rehydrate_html",
+                "html": rel_path(html_path),
+                "browser": browser_meta,
+                "row_count": len(html_rows),
+                "success": True,
+            }
+            (RUN_ROOT / "summary_browser_graphql.json").write_text(
+                json.dumps(summary, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            return {"__trending_rows": html_rows}
+
         payload = find_trending_started_operation(html_text)
         payload_source = "browser_apollo_started"
         if payload is None:
@@ -601,6 +534,8 @@ def browser_graphql():
         "status_code": status_code,
         "elapsed_seconds": elapsed,
         "x_request_cost": "0",
+        "total_x_request_cost": 0,
+        "call_count": 1,
         "bytes": len(text or ""),
         "payload_source": payload_source,
         "request": rel_path(request_path),
@@ -620,41 +555,33 @@ def browser_graphql():
     return response_json
 
 
-def use_direct_graphql():
-    if FETCH_MODE in {"graphql", "direct_graphql"}:
-        return True
-    if FETCH_MODE == "auto":
-        return existing_source_payload_path() is not None
-    if FETCH_MODE in PAGE_PAYLOAD_FETCH_MODES:
-        return False
-    raise ValueError(
-        "BESTBUY_TRENDING_FETCH_MODE must be one of: auto, graphql, direct_graphql, "
-        "html, page_payload"
-    )
-
-
-def use_render_fallback():
-    if FETCH_MODE in PAGE_PAYLOAD_FETCH_MODES:
-        return True
-    return FETCH_MODE == "auto" and ALLOW_RENDER_FALLBACK
-
-
 def write_skip_summary(reason):
     RUN_ROOT.mkdir(parents=True, exist_ok=True)
     summary = {
         "started_at": now(),
-        "live": LIVE_FETCH,
+        "live": True,
         "fetch_mode": FETCH_MODE,
         "skipped": True,
         "reason": reason,
         "source_payload": rel_path(SOURCE_PAYLOAD_PATH),
         "source_payload_searched": [rel_path(path) for path in source_payload_candidates()],
-        "render_fallback_allowed": ALLOW_RENDER_FALLBACK,
         "row_count": 0,
         "total_x_request_cost": 0,
     }
     (RUN_ROOT / "summary_skip.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     return summary
+
+
+def update_browser_summary(row_count):
+    path = RUN_ROOT / "summary_browser_graphql.json"
+    if not path.exists():
+        return
+    summary = parse_json_value(path.read_text(encoding="utf-8", errors="ignore"))
+    if not isinstance(summary, dict):
+        return
+    summary["row_count"] = row_count
+    summary["success"] = bool(summary.get("success")) and row_count > 0
+    path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def write_rows(path, rows):
@@ -677,107 +604,28 @@ def write_rows(path, rows):
         writer.writerows(rows)
 
 
-def trending_wait_sequence():
-    raw_values = WAIT_MS_SEQUENCE or ",".join([WAIT_MS, "20000", "35000"])
-    values = []
-    seen = set()
-    for raw in raw_values.split(","):
-        value = str(raw or "").strip()
-        if not value or value in seen:
-            continue
-        seen.add(value)
-        values.append(value)
-    return values or [WAIT_MS]
-
-
-def live_html(wait_ms=None, attempt=1):
-    api_key = os.getenv("ZENROWS_API_KEY")
-    if not api_key:
-        raise RuntimeError("Set ZENROWS_API_KEY in .env")
-    if not TRENDING_URL:
-        raise RuntimeError("Set BESTBUY_TRENDING_URL or target_urls.trend before live trending collection")
-
-    raw_dir = RUN_ROOT / "raw" / "live_page"
-    raw_dir.mkdir(parents=True, exist_ok=True)
-    client = ZenRowsClient(api_key)
-    wait_ms = str(wait_ms or WAIT_MS or "8000")
-    start = time.perf_counter()
-    params = {
-        "js_render": "true",
-        "premium_proxy": "true",
-        "proxy_country": "us",
-        **({"wait": wait_ms} if wait_ms else {}),
-    }
-    if JSON_RESPONSE:
-        params["json_response"] = "true"
-    response = client.get(TRENDING_URL, params=params, timeout=REQUEST_TIMEOUT)
-    elapsed = round(time.perf_counter() - start, 3)
-    text = response.text
-    json_data = parse_json_value(text) if JSON_RESPONSE else {}
-    html_text = text
-    if isinstance(json_data, dict):
-        html_text = str(json_data.get("html") or json_data.get("content") or "")
-    html_path = raw_dir / "trending_page.html"
-    attempt_html_path = raw_dir / f"trending_page_attempt{attempt}.html"
-    json_path = raw_dir / "trending_page_json_response.json"
-    attempt_json_path = raw_dir / f"trending_page_attempt{attempt}_json_response.json"
-    headers_path = raw_dir / "trending_page_headers.json"
-    attempt_headers_path = raw_dir / f"trending_page_attempt{attempt}_headers.json"
-    html_path.write_text(html_text, encoding="utf-8", errors="replace")
-    attempt_html_path.write_text(html_text, encoding="utf-8", errors="replace")
-    if JSON_RESPONSE:
-        json_path.write_text(text, encoding="utf-8", errors="replace")
-        attempt_json_path.write_text(text, encoding="utf-8", errors="replace")
-    headers_path.write_text(json.dumps(dict(response.headers), indent=2, ensure_ascii=False), encoding="utf-8")
-    attempt_headers_path.write_text(
-        json.dumps(dict(response.headers), indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    xhr_items = json_response_xhr_items(json_data)
+def write_failure_skip_summary(exc):
+    RUN_ROOT.mkdir(parents=True, exist_ok=True)
+    write_rows(OUTPUT_CSV, [])
     summary = {
         "started_at": now(),
         "live": True,
-        "attempt": attempt,
-        "url": TRENDING_URL,
-        "status_code": response.status_code,
-        "elapsed_seconds": elapsed,
-        "x_request_cost": response.headers.get("x-request-cost", ""),
-        "wait_ms": wait_ms,
-        "json_response": JSON_RESPONSE,
-        "bytes": len(text or ""),
-        "html_bytes": len(html_text or ""),
-        "json_xhr_count": len(xhr_items),
-        "html": rel_path(html_path),
-        "attempt_html": rel_path(attempt_html_path),
-        "json": rel_path(json_path) if JSON_RESPONSE else "",
-        "attempt_json": rel_path(attempt_json_path) if JSON_RESPONSE else "",
-        "headers": rel_path(headers_path),
-        "attempt_headers": rel_path(attempt_headers_path),
-        "success": response.status_code == 200,
+        "fetch_mode": FETCH_MODE,
+        "skipped": True,
+        "collection_failed": True,
+        "reason": "trending collection failed; continuing pipeline with empty trending rows",
+        "error_type": type(exc).__name__,
+        "error": str(exc),
+        "source_payload": rel_path(SOURCE_PAYLOAD_PATH),
+        "source_payload_searched": [rel_path(path) for path in source_payload_candidates()],
+        "row_count": 0,
+        "total_x_request_cost": 0,
+        "call_count": 0,
+        "csv": rel_path(OUTPUT_CSV),
     }
-    (RUN_ROOT / "summary_live_fetch.json").write_text(
-        json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    if response.status_code != 200:
-        raise RuntimeError(f"Trending live fetch failed: status={response.status_code}")
-    return html_text, json_data, summary
-
-
-def rewrite_live_fetch_summary(attempt_summaries, row_count, attempted_waits):
-    if not attempt_summaries:
-        return
-    final_summary = dict(attempt_summaries[-1])
-    final_summary["call_count"] = len(attempt_summaries)
-    final_summary["total_x_request_cost"] = round(
-        sum(cost_float(summary.get("x_request_cost")) for summary in attempt_summaries),
-        7,
-    )
-    final_summary["attempts"] = attempt_summaries
-    final_summary["attempted_waits"] = attempted_waits
-    final_summary["row_count"] = row_count
-    (RUN_ROOT / "summary_live_fetch.json").write_text(
-        json.dumps(final_summary, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    (RUN_ROOT / "summary_skip.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+    return summary
 
 
 def main():
@@ -793,65 +641,31 @@ def main():
         print(json.dumps(summary, indent=2, ensure_ascii=False))
         return
     rows = []
-    attempted_waits = []
-    live_attempt_summaries = []
-    if FETCH_MODE == "browser_graphql":
+    if FETCH_MODE in {"auto", "browser", "browser_graphql"}:
         response_json = browser_graphql()
-        rows = parse_trending_products_from_graphql(response_json, LIMIT)
+        if isinstance(response_json, dict) and isinstance(response_json.get("__trending_rows"), list):
+            rows = response_json["__trending_rows"]
+        else:
+            rows = parse_trending_products_from_graphql(response_json, LIMIT)
         if REQUIRE_ROWS and not rows:
             raise RuntimeError(
                 "Trending browser GraphQL returned 0 SpotlightProductConnection rows; "
                 "verify the captured browser payload contains product data"
             )
-    elif use_direct_graphql():
-        payload = load_graphql_payload()
-        response_json = direct_graphql(payload)
-        rows = parse_trending_products_from_graphql(response_json, LIMIT)
-        if REQUIRE_ROWS and not rows:
-            raise RuntimeError(
-                "Trending direct GraphQL returned 0 SpotlightProductConnection rows; "
-                "verify BESTBUY_TRENDING_SOURCE_PAYLOAD captures the product data request"
-            )
-    elif LIVE_FETCH and use_render_fallback():
-        for attempt, wait_ms in enumerate(trending_wait_sequence(), 1):
-            attempted_waits.append(wait_ms)
-            html_text, json_data, summary = live_html(wait_ms=wait_ms, attempt=attempt)
-            live_attempt_summaries.append(summary)
-            rows = parse_trending_products_from_capture(html_text, json_data, LIMIT)
-            if rows:
-                break
-            print(
-                f"[trending:retry] attempt={attempt} wait_ms={wait_ms} rows=0 "
-                "reason=no SpotlightProduct/network SKU rows in html/json_response",
-                flush=True,
-            )
-    elif LIVE_FETCH:
-        summary = write_skip_summary(
-            "direct GraphQL payload is not configured and HTML render fallback is disabled"
-        )
-        write_rows(OUTPUT_CSV, [])
-        print(json.dumps(summary, indent=2, ensure_ascii=False))
-        if REQUIRE_ROWS:
-            raise RuntimeError(
-                "Trending direct GraphQL payload is required. "
-                f"Set BESTBUY_TRENDING_SOURCE_PAYLOAD to a saved /gateway/graphql request body: {SOURCE_PAYLOAD_PATH}"
-            )
-        return
     else:
-        html_text = INPUT_HTML.read_text(encoding="utf-8", errors="ignore")
-        rows = parse_trending_products_from_capture(html_text, {}, LIMIT)
-    if LIVE_FETCH and REQUIRE_ROWS and not rows:
-        raise RuntimeError(
-            "Trending live fetch returned 0 SpotlightProduct rows after waits="
-            + ",".join(attempted_waits)
-            + "; retry with a larger BESTBUY_TRENDING_WAIT_MS_SEQUENCE"
+        raise ValueError(
+            "BESTBUY_TRENDING_FETCH_MODE must be browser_graphql. "
+            "ZenRows page/direct GraphQL fallback is disabled for trending collection."
         )
     write_rows(OUTPUT_CSV, rows)
-    rewrite_live_fetch_summary(live_attempt_summaries, len(rows), attempted_waits)
+    update_browser_summary(len(rows))
     print(f"wrote {len(rows)} rows -> {OUTPUT_CSV}")
     for row in rows:
         print(f"{row['trend_rank']}. {row['sku_id']} {row['retailer_sku_name']}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        write_failure_skip_summary(exc)

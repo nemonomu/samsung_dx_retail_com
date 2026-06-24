@@ -826,6 +826,33 @@ def write_rows(path, rows):
         writer.writerows(rows)
 
 
+def write_failure_skip_summary(exc):
+    RUN_ROOT.mkdir(parents=True, exist_ok=True)
+    out_csv = RUN_ROOT / "parsed" / "all_promotion_products.csv"
+    write_rows(out_csv, [])
+    summary = {
+        "started_at": now(),
+        "skipped": True,
+        "collection_failed": True,
+        "reason": "promotion collection failed; continuing pipeline with empty promotion rows",
+        "error_type": type(exc).__name__,
+        "error": str(exc),
+        "placements": [],
+        "excluded_placements": [],
+        "call_count": 0,
+        "row_count": 0,
+        "total_x_request_cost": 0,
+        "summaries": [],
+        "csv": rel_path(out_csv),
+        "fetch_mode": FETCH_MODE,
+        "expected_min_rows": PROMOTION_EXPECTED_MIN_ROWS,
+        "below_expected_min_rows": bool(PROMOTION_EXPECTED_MIN_ROWS),
+    }
+    (RUN_ROOT / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(json.dumps(summary, indent=2, ensure_ascii=False))
+    return summary
+
+
 def main():
     category = bestbuy_category()
     promotion_url = target_url("promotion", category=category)
@@ -990,4 +1017,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        write_failure_skip_summary(exc)

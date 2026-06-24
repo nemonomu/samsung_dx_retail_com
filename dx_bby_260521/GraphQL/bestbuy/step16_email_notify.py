@@ -578,6 +578,17 @@ def listing_fetch_issues(run_root):
     return issues
 
 
+def collection_failed_issue(label, summary):
+    if not summary or not truthy(summary.get("collection_failed")):
+        return ""
+    error_type = str(summary.get("error_type") or "").strip()
+    error = " ".join(str(summary.get("error") or "").split())
+    if len(error) > 180:
+        error = error[:177].rstrip() + "..."
+    detail = " ".join(part for part in [error_type, error] if part).strip()
+    return f"{label} collection skipped" + (f": {detail}" if detail else "")
+
+
 def listing_count_issues(category, run_root, rows, target_manifest):
     issues = []
     bsr_rank = max_rank(rows, "bsr_rank")
@@ -586,6 +597,11 @@ def listing_count_issues(category, run_root, rows, target_manifest):
 
     category = category.upper()
     if category in {"TV", "HHP"}:
+        for path in sorted((run_root / "trending").glob("summary*.json")):
+            issue = collection_failed_issue("trending", read_json(path))
+            if issue:
+                issues.append(issue)
+                break
         trend_count = as_int(target_manifest.get("trending_unique_count"))
         if not trend_count:
             trend_count = unique_csv_count(run_root / "trending" / "parsed" / "trending_products.csv", "sku_id")
@@ -593,6 +609,9 @@ def listing_count_issues(category, run_root, rows, target_manifest):
             issues.append(f"trend listing sku {trend_count}/10")
 
     if category == "TV":
+        issue = collection_failed_issue("promotion", read_json(run_root / "promotion" / "summary.json"))
+        if issue:
+            issues.append(issue)
         promotion_count = as_int(target_manifest.get("promotion_unique_count"))
         if not promotion_count:
             promotion_count = unique_csv_count(

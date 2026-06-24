@@ -18,11 +18,10 @@ CATEGORY_SEARCH_TERMS = {
     "LDY": "washing machine",
 }
 HHP_TRENDING_PAGE_PAYLOAD_ENV = {
-    "BESTBUY_TRENDING_FETCH_MODE": "page_payload",
-    "BESTBUY_TRENDING_ALLOW_RENDER_FALLBACK": "1",
+    "BESTBUY_TRENDING_FETCH_MODE": "browser_graphql",
+    "BESTBUY_TRENDING_BROWSER_HEADLESS": "0",
     "BESTBUY_TRENDING_ALLOW_NETWORK_SKUS": "0",
     "BESTBUY_TRENDING_REQUIRE_ROWS": "1",
-    "BESTBUY_TRENDING_WAIT_MS_SEQUENCE": "30000",
 }
 
 
@@ -130,11 +129,10 @@ STEPS = [
         "trending_deals",
         "bestbuy.step06_trending_deals",
         {
-            "BESTBUY_TRENDING_FETCH_MODE": "page_payload",
-            "BESTBUY_TRENDING_ALLOW_RENDER_FALLBACK": "1",
+            "BESTBUY_TRENDING_FETCH_MODE": "browser_graphql",
+            "BESTBUY_TRENDING_BROWSER_HEADLESS": "0",
             "BESTBUY_TRENDING_ALLOW_NETWORK_SKUS": "0",
             "BESTBUY_TRENDING_REQUIRE_ROWS": "1",
-            "BESTBUY_TRENDING_WAIT_MS_SEQUENCE": "30000",
             "ZENROWS_TIMEOUT": "240",
         },
     ),
@@ -613,6 +611,9 @@ def run_step(step, dry_run=False, resume=False):
         subprocess.run(command, check=True, env=env)
     except subprocess.CalledProcessError as exc:
         print(f"[fail] step {step.key} {step.name}: exit_code={exc.returncode}")
+        if step.name in {"promotion_deals", "trending_deals"}:
+            print(f"[skip] step {step.key} {step.name}: optional listing enrichment failed; continuing pipeline")
+            return
         raise
 
 

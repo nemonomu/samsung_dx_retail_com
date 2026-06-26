@@ -59,6 +59,8 @@ PROMOTION_RETRY_STATUS_CODES = {
     if value.strip().isdigit()
 }
 PROMOTION_DOM_TYPE = os.getenv("BESTBUY_PROMOTION_DOM_TYPE", "DON'T-MISS DEALS ON TVs")
+PROMOTION_DOM_HEADLINE = os.getenv("BESTBUY_PROMOTION_DOM_HEADLINE", "Don't-miss deals on TVs")
+PROMOTION_DOM_SUBHEADLINE = os.getenv("BESTBUY_PROMOTION_DOM_SUBHEADLINE", "Big savings for a limited time")
 PROMOTION_DOM_SELECTOR = os.getenv("BESTBUY_PROMOTION_DOM_SELECTOR", ".pl-flex-carousel")
 ENDPOINT = os.getenv("BESTBUY_GRAPHQL_ENDPOINT", "https://www.bestbuy.com/gateway/graphql")
 PLACEMENT = os.getenv("BESTBUY_PROMOTION_PLACEMENT", "all")
@@ -631,32 +633,69 @@ def parse_dom_items(raw_items):
 def extract_browser_dom_items(page):
     js = r"""
 const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
+const norm = value => clean(value).replace(/[\u2018\u2019\u0060]/g, "'").toLowerCase();
 const absolute = href => {
   try { return new URL(href || '', location.href).href.split('#')[0]; }
   catch (e) { return href || ''; }
 };
-const selectors = new Set([
+const productLinkSelector = 'a[href*="/product/"][href*="/sku/"]';
+const targetHeadline = norm('%PROMOTION_DOM_HEADLINE%');
+const targetSubheadline = norm('%PROMOTION_DOM_SUBHEADLINE%');
+const carouselSelectors = new Set([
   '%PROMOTION_DOM_SELECTOR%',
   '.pl-flex-carousel',
   '.pl-flex-carousel-slider',
   '.pl-flex-carousel-container'
 ]);
-const containers = Array.from(selectors).flatMap(selector => Array.from(document.querySelectorAll(selector)));
-const uniqueContainers = Array.from(new Set(containers));
-const scored = uniqueContainers.map(el => {
+
+const carouselContainers = Array.from(carouselSelectors)
+  .flatMap(selector => Array.from(document.querySelectorAll(selector)));
+const uniqueContainers = Array.from(new Set(carouselContainers));
+const scoreContainer = el => {
   const text = clean(el.innerText);
-  const links = Array.from(el.querySelectorAll('a[href*="/product/"][href*="/sku/"]'));
+  const links = Array.from(el.querySelectorAll(productLinkSelector));
   const className = String(el.className || '');
   const dealHits = (text.match(/Tech Fest Deal/g) || []).length;
   let score = links.length + dealHits * 10;
   if (className.includes('pl-flex-carousel-slider')) score += 30;
   if (className.includes('pl-flex-carousel')) score += 20;
   return {el, text, links, score};
-}).filter(item => item.links.length >= 4 && (item.text.includes('Tech Fest Deal') || item.links.length >= 8))
-  .sort((a, b) => b.score - a.score || b.links.length - a.links.length);
-const chosen = scored[0];
+};
+
+const allElements = Array.from(document.querySelectorAll('body *'));
+const headingMatches = allElements
+  .map((el, index) => ({el, index, text: norm(el.innerText)}))
+  .filter(item =>
+    item.text.includes(targetHeadline)
+    && item.text.includes(targetSubheadline)
+    && item.text.length <= 300
+    && item.el.querySelectorAll(productLinkSelector).length === 0
+  );
+
+const sectionCandidates = [];
+for (const heading of headingMatches) {
+  for (const item of uniqueContainers.map(scoreContainer)) {
+    const index = allElements.indexOf(item.el);
+    if (index > heading.index && item.links.length >= 4) {
+      sectionCandidates.push({...item, headingIndex: heading.index, containerIndex: index});
+    }
+  }
+}
+const chosen = sectionCandidates
+  .sort((a, b) => a.headingIndex - b.headingIndex || a.containerIndex - b.containerIndex || b.links.length - a.links.length)[0];
+
+// Legacy behavior scored every carousel on the page and picked the strongest one.
+// It is intentionally disabled because the current TV deals page has multiple
+// carousel-like sections; promotion rows must come from the target headline block.
 if (!chosen) {
-  return JSON.stringify({containerFound:false, items:[], containerText:''});
+  return JSON.stringify({
+    containerFound: false,
+    items: [],
+    containerText: '',
+    targetHeadline: '%PROMOTION_DOM_HEADLINE%',
+    targetSubheadline: '%PROMOTION_DOM_SUBHEADLINE%',
+    headingMatches: headingMatches.length
+  });
 }
 const items = [];
 for (const link of chosen.links) {
@@ -664,7 +703,7 @@ for (const link of chosen.links) {
   for (let i = 0; i < 8 && card && card.parentElement; i++) {
     const parent = card.parentElement;
     const parentText = clean(parent.innerText);
-    const parentLinks = parent.querySelectorAll('a[href*="/product/"][href*="/sku/"]').length;
+    const parentLinks = parent.querySelectorAll(productLinkSelector).length;
     if (parentText && (parentText.includes('Tech Fest Deal') || parentText.includes('$')) && parentLinks <= 4) {
       card = parent;
       break;
@@ -684,10 +723,18 @@ return JSON.stringify({
   containerClass: String(chosen.el.className || ''),
   linkCount: chosen.links.length,
   itemCount: items.length,
+  headingMatches: headingMatches.length,
+  headingIndex: chosen.headingIndex,
+  containerIndex: chosen.containerIndex,
   containerText: chosen.text.slice(0, 2000),
   items
 });
-""".replace("%PROMOTION_DOM_SELECTOR%", PROMOTION_DOM_SELECTOR.replace("\\", "\\\\").replace("'", "\\'"))
+"""
+    js = (
+        js.replace("%PROMOTION_DOM_SELECTOR%", PROMOTION_DOM_SELECTOR.replace("\\", "\\\\").replace("'", "\\'"))
+        .replace("%PROMOTION_DOM_HEADLINE%", PROMOTION_DOM_HEADLINE.replace("\\", "\\\\").replace("'", "\\'"))
+        .replace("%PROMOTION_DOM_SUBHEADLINE%", PROMOTION_DOM_SUBHEADLINE.replace("\\", "\\\\").replace("'", "\\'"))
+    )
     raw = page.run_js(js, timeout=BROWSER_JS_TIMEOUT)
     if raw is None:
         return {"containerFound": False, "items": []}
